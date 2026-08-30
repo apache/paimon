@@ -157,17 +157,23 @@ public class BlobFileFormat extends FileFormat {
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
-            SeekableInputStream in = fileIO.newInputStream(filePath);
+            SeekableInputStream in = null;
             BlobFileMeta fileMeta;
             try {
                 Map<Path, Object> metadataCache = context.metadataCache();
                 BlobFileMeta baseMeta =
                         metadataCache == null ? null : (BlobFileMeta) metadataCache.get(filePath);
                 if (baseMeta == null) {
+                    in = fileIO.newInputStream(filePath);
                     baseMeta = new BlobFileMeta(in, context.fileSize(), null);
                     if (metadataCache != null) {
                         metadataCache.put(filePath, baseMeta);
                     }
+                }
+                if (in == null
+                        && BlobElementSerializerFactory.create(blobFieldType)
+                                .requiresReadInputStream(blobAsDescriptor)) {
+                    in = fileIO.newInputStream(filePath);
                 }
                 fileMeta = baseMeta.select(context.selection());
             } catch (Exception e) {

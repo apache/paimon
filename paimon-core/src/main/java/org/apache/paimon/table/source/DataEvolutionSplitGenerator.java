@@ -110,13 +110,19 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         long currentWeight = 0;
 
         for (List<DataFileMeta> range : ranges) {
-            long weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
+            long weight = incrementalRangeWeight(range, seenSidecars, Collections.emptySet());
+            if (current.isEmpty() && weight > targetSplitSize) {
+                weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
+            }
             if (!current.isEmpty() && currentWeight + weight > targetSplitSize) {
                 packed.add(current);
                 current = new ArrayList<>();
                 seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
                 currentWeight = 0;
-                weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
+                weight = incrementalRangeWeight(range, seenSidecars, Collections.emptySet());
+                if (weight > targetSplitSize) {
+                    weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
+                }
             }
             current.add(range);
             currentWeight += weight;
@@ -134,14 +140,14 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
     private long incrementalRangeWeight(
             List<DataFileMeta> files,
             Set<DataFileMeta> seenSidecars,
-            Set<DataFileMeta> sharedSidecars) {
+            Set<DataFileMeta> ignoredSidecars) {
         Set<DataFileMeta> seenInRange = Collections.newSetFromMap(new IdentityHashMap<>());
         long size =
                 files.stream()
                         .filter(
                                 file ->
                                         !isSidecar(file)
-                                                || (!sharedSidecars.contains(file)
+                                                || (!ignoredSidecars.contains(file)
                                                         && !seenSidecars.contains(file)
                                                         && seenInRange.add(file)))
                         .mapToLong(this::fileWeight)

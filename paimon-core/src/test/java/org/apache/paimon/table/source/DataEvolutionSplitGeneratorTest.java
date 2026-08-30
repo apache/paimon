@@ -137,6 +137,35 @@ public class DataEvolutionSplitGeneratorTest {
     }
 
     @Test
+    public void testDistinctSpanningBlobsRemainInPackingWeight() {
+        long videoSize = 64L * 1024 * 1024;
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            long firstRowId = i * 2L;
+            files.add(newFile("normal-" + firstRowId + ".parquet", firstRowId, 1L, 1L));
+            files.add(newFile("normal-" + (firstRowId + 1) + ".parquet", firstRowId + 1, 1L, 1L));
+            files.add(newFile("camera-" + i + ".video", firstRowId, 2L, videoSize));
+        }
+
+        DataEvolutionSplitGenerator generator =
+                new DataEvolutionSplitGenerator(130L * 1024 * 1024, 1L, true);
+        List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
+
+        assertThat(splits).hasSize(5);
+        assertThat(splits)
+                .allSatisfy(
+                        split ->
+                                assertThat(
+                                                split.files.stream()
+                                                        .filter(
+                                                                file ->
+                                                                        file.fileName()
+                                                                                .endsWith(
+                                                                                        ".video")))
+                                        .hasSize(2));
+    }
+
+    @Test
     public void testOverlappingNormalRangesRemainGrouped() {
         DataFileMeta update = newFile("update.parquet", 0L, 5L, 10L);
         DataFileMeta base = newFile("base.parquet", 0L, 1000L, 100L);

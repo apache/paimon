@@ -96,11 +96,9 @@ class FormatBlobReader(RecordBatchReader):
             elif self._is_video:
                 self._video_meta = copy(cached_index)
             else:
-                self._input_stream = file_io.new_input_stream(file_path)
                 self.blob_lengths, self.blob_offsets = cached_index
             self._apply_row_indices(row_indices)
 
-            # Set up fields and schema before deciding whether the stream can be dropped.
             if len(read_fields) > 1:
                 raise RuntimeError("Blob reader only supports one field.")
             self._fields = read_fields
@@ -116,20 +114,24 @@ class FormatBlobReader(RecordBatchReader):
                 )
             self._is_array_blob = is_array_blob_type(self._data_field.type)
             self._is_map_blob = is_map_blob_type(self._data_field.type)
-            self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
-
-            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
-            # that each open their own stream (one stream isn't thread-safe).
-            # Nested Blob formats need the stream to read their keys and indexes.
-            if (
-                not self._is_array_blob
-                and not self._is_map_blob
+            self._schema = PyarrowFieldParser.from_paimon_schema(
+                projected_data_fields
+            )
+            requires_input_stream = (
+                not self._is_video
                 and (
-                    self._is_video
-                    or self._blob_as_descriptor
-                    or self._blob_parallelism > 1
+                    self._is_array_blob
+                    or self._is_map_blob
+                    or (
+                        not self._blob_as_descriptor
+                        and self._blob_parallelism <= 1
+                    )
                 )
-            ):
+            )
+
+            if requires_input_stream and self._input_stream is None:
+                self._input_stream = file_io.new_input_stream(file_path)
+            elif not requires_input_stream:
                 if self._input_stream is not None:
                     self._input_stream.close()
                     self._input_stream = None

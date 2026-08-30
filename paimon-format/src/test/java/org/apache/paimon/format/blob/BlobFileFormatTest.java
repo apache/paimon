@@ -878,8 +878,7 @@ public class BlobFileFormatTest {
 
     @Test
     public void testReadersShareCachedMetadata() throws IOException {
-        BlobFileFormat format =
-                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        BlobFileFormat format = new BlobFileFormat(true, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
         RowType rowType = RowType.of(DataTypes.BLOB());
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
@@ -888,15 +887,16 @@ public class BlobFileFormatTest {
             writer.close();
         }
 
+        TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         Map<Path, Object> metadataCache = new HashMap<>();
         RoaringBitmap32 firstSelection = new RoaringBitmap32();
         firstSelection.add(0);
         FormatReaderContext firstContext =
                 new FormatReaderContext(
-                        fileIO,
+                        trackingFileIO,
                         file,
-                        fileIO.getFileSize(file),
+                        trackingFileIO.getFileSize(file),
                         firstSelection,
                         null,
                         metadataCache);
@@ -906,15 +906,15 @@ public class BlobFileFormatTest {
         }
         Object cachedMetadata = metadataCache.get(file);
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getBlob(0).toData()).isEqualTo("first".getBytes());
+        assertThat(rows.get(0).getBlob(0)).isInstanceOf(BlobRef.class);
 
         RoaringBitmap32 secondSelection = new RoaringBitmap32();
         secondSelection.add(1);
         FormatReaderContext secondContext =
                 new FormatReaderContext(
-                        fileIO,
+                        trackingFileIO,
                         file,
-                        fileIO.getFileSize(file),
+                        trackingFileIO.getFileSize(file),
                         secondSelection,
                         null,
                         metadataCache);
@@ -924,7 +924,8 @@ public class BlobFileFormatTest {
         }
         assertThat(metadataCache.get(file)).isSameAs(cachedMetadata);
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getBlob(0).toData()).isEqualTo("second".getBytes());
+        assertThat(rows.get(0).getBlob(0)).isInstanceOf(BlobRef.class);
+        assertThat(trackingFileIO.inputStreamCount).isEqualTo(1);
     }
 
     private void assertMalformedArrayPayload(
@@ -1223,9 +1224,11 @@ public class BlobFileFormatTest {
     private static class TrackingLocalFileIO extends LocalFileIO {
 
         private TrackingSeekableInputStream lastInputStream;
+        private int inputStreamCount;
 
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
+            inputStreamCount++;
             this.lastInputStream = new TrackingSeekableInputStream(super.newInputStream(path));
             return lastInputStream;
         }

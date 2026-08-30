@@ -300,6 +300,36 @@ class SplitOrderTest(unittest.TestCase):
                 130 * 1024 * 1024,
             )
 
+    def test_distinct_spanning_sidecars_remain_in_packing_weight(self):
+        video_size = 64 * 1024 * 1024
+        entries = []
+        sequence_number = 0
+        for video in range(10):
+            first_row = video * 2
+            for row in (first_row, first_row + 1):
+                entries.append(self._entry(
+                    f'normal-{row}.parquet', sequence_number,
+                    first_row_id=row, row_count=1, file_size=1,
+                ))
+                sequence_number += 1
+            entries.append(self._entry(
+                f'camera-{video}.video', sequence_number,
+                first_row_id=first_row, row_count=2,
+                file_size=video_size,
+            ))
+            sequence_number += 1
+
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=130 * 1024 * 1024,
+            open_file_cost=0,
+        ).create_splits(entries)
+
+        self.assertEqual(5, len(splits))
+        for split in splits:
+            self.assertEqual(2, sum(
+                file.file_name.endswith('.video') for file in split.files
+            ))
+
     def test_spanning_sidecar_preserves_deletion_aware_row_count(self):
         entries = [
             self._entry(

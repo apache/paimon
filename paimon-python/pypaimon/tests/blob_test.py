@@ -1603,26 +1603,38 @@ class BlobEndToEndTest(unittest.TestCase):
 
         cache = {}
         readers = []
-        with patch.object(
+        input_stream_patch = patch.object(
+            file_io, "new_input_stream", wraps=file_io.new_input_stream
+        )
+        decompress_patch = patch.object(
             DeltaVarintCompressor,
             "decompress",
             wraps=DeltaVarintCompressor.decompress,
-        ) as decompress:
-            for row_indices in ([0, 2], [1]):
+        )
+        with input_stream_patch as new_input_stream, decompress_patch as decompress:
+            for row_indices, blob_as_descriptor, parallelism in (
+                ([0, 2], True, 1),
+                ([1], True, 1),
+                ([0], False, 2),
+            ):
                 readers.append(FormatBlobReader(
                     file_io=file_io,
                     file_path=_to_url(path),
                     read_fields=[field.name],
                     full_fields=[field],
                     push_down_predicate=None,
-                    blob_as_descriptor=True,
+                    blob_as_descriptor=blob_as_descriptor,
                     row_indices=row_indices,
+                    blob_parallelism=parallelism,
                     blob_index_cache=cache,
                 ))
             self.assertEqual(1, decompress.call_count)
+            self.assertEqual(1, new_input_stream.call_count)
 
         try:
-            self.assertEqual([2, 1], [reader.record_count for reader in readers])
+            self.assertEqual(
+                [2, 1, 1], [reader.record_count for reader in readers]
+            )
         finally:
             for reader in readers:
                 reader.close()
