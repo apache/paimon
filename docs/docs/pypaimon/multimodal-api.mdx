@@ -320,10 +320,9 @@ source drift. Calling it again with the same input appends the rows again.
 
 ## Load LeRobot Dataset v3
 
-`load_from_lerobot` converts a LeRobot Dataset v3 from a local directory,
-FileIO URI, or Hugging Face repository to a normal Paimon table once. It
-derives the schema from `meta/info.json`, keeps one row per frame, preserves
-Episode/frame indices and task text, and commits all batches in one Snapshot.
+`load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
+repository. It derives the schema from `meta/info.json`, writes one row per
+frame, and commits once.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -337,10 +336,7 @@ result = conn.load_from_lerobot(
 print(result.episode_count, result.row_count, result.snapshot_id)
 ```
 
-An existing local directory is always used directly. FileIO-supported directory
-URIs such as `oss://bucket/lerobot_dataset` use credentials from the explicit
-`source_options` argument, never from the target Catalog. Another non-path
-string is passed to the official LeRobot API as a Hugging Face `repo_id`.
+For FileIO URIs, pass credentials through `source_options`:
 
 ```python
 result = conn.load_from_lerobot(
@@ -354,22 +350,15 @@ result = conn.load_from_lerobot(
 )
 ```
 
-URI metadata and Parquet files are read directly through Paimon FileIO. The
-LeRobot 0.4 video decoder requires a local path, so only the active MP4 chunk
-for each video feature is cached temporarily and removed after import. Local
-space is bounded by the active video chunks, not the complete dataset.
+Missing tables are created from metadata; existing tables use strict schema
+validation and append semantics. Scalars map to scalar types, vectors to
+`VECTOR`, higher-rank tensors to nested `ARRAY`, and media to `BLOB`. Images
+keep their compressed bytes; video frames are stored as PNG BLOBs while only
+active MP4 chunks are cached locally during import.
 
-If the target is absent, it is created from metadata. Existing targets use the
-same strict schema validation and append semantics as `load_from_hdf5`.
-One-dimensional numbers map to `VECTOR`; higher-rank values map to nested
-`ARRAY`; `image` and `video` map to `BLOB`. Images retain their compressed
-bytes. Videos are decoded once and stored as per-frame PNG BLOBs, so the shared
-MP4 is not repeated in every row.
-
-Use `feature_mapping={"observation.state": "state"}` for explicit renames. An
-optional `transform` receives each Arrow table and must preserve its row count
-and Episode/frame/index order. Version 2.x, `uint64`, language event
-structures, and depth-video semantics are not supported in this first version.
+`feature_mapping` renames columns; `transform` maps Arrow batches without
+changing frame order. Only v3 is supported; `uint64`, depth video, and language
+event structures are rejected.
 
 ## Overwrite
 

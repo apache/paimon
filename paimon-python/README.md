@@ -31,11 +31,10 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
-# LeRobot Dataset v3 to multimodal tables
+# Load LeRobot Dataset v3
 
-Install the optional dependency, then import a local, FileIO URI, or Hugging
-Face v3 dataset once. The target table is created from `meta/info.json` when
-absent; later calls append.
+Install the optional dependency, then import a local directory, FileIO URI, or
+Hugging Face repository:
 
 ```commandline
 pip install 'pypaimon[lerobot]'
@@ -52,10 +51,8 @@ result = connection.load_from_lerobot(
 print(result.row_count, result.snapshot_id)
 ```
 
-Each LeRobot frame becomes one Paimon row. Numeric vectors remain vectors,
-images use their existing compressed bytes, and video frames are decoded once
-and stored as per-frame PNG BLOBs; the source MP4 is never copied into every
-row.
+The schema comes from `meta/info.json`. Each frame becomes one row; media uses
+BLOB columns. Missing tables are created and later calls append.
 
 # HDF5 to multimodal tables
 
