@@ -40,6 +40,7 @@ import java.util.function.Consumer
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.util.control.NonFatal
 
 case class SparkOrphanFilesClean(
     specifiedTable: FileStoreTable,
@@ -51,7 +52,19 @@ case class SparkOrphanFilesClean(
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean(): (Dataset[(Long, Long)], Dataset[BranchAndManifestFile]) = {
+  def doOrphanClean(): (Dataset[(Long, Long)], Seq[Dataset[_]]) = {
+    val cachedDatasets = new ArrayBuffer[Dataset[_]]()
+    try {
+      doOrphanClean(cachedDatasets)
+    } catch {
+      case NonFatal(t) =>
+        cachedDatasets.foreach(_.unpersist())
+        throw t
+    }
+  }
+
+  private def doOrphanClean(
+      cachedDatasets: ArrayBuffer[Dataset[_]]): (Dataset[(Long, Long)], Seq[Dataset[_]]) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -105,13 +118,14 @@ case class SparkOrphanFilesClean(
       }
       .toDS()
       .cache()
+    cachedDatasets += usedManifestFiles
 
     if (!usedManifestFiles.filter(_.isMissing).isEmpty) {
       logWarning("Detected missing manifest during used-files collection, aborting clean.")
       return (
         spark.createDataset(
           Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
-        usedManifestFiles)
+        cachedDatasets.toSeq)
     }
 
     val dataFilesWithFlag = usedManifestFiles
@@ -150,13 +164,14 @@ case class SparkOrphanFilesClean(
           }
       }
       .cache()
+    cachedDatasets += dataFilesWithFlag
 
     if (!dataFilesWithFlag.filter(_._2).isEmpty) {
       logWarning("Detected missing manifest while collecting data files, aborting clean.")
       return (
         spark.createDataset(
           Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
-        usedManifestFiles)
+        cachedDatasets.toSeq)
     }
 
     val dataFiles = dataFilesWithFlag.filter(!_._2).map(_._1)
@@ -231,7 +246,7 @@ case class SparkOrphanFilesClean(
         deleted
       }
 
-    (finalDeletedDataset, usedManifestFiles)
+    (finalDeletedDataset, cachedDatasets.toSeq)
   }
 }
 
@@ -282,17 +297,22 @@ object SparkOrphanFilesClean extends SQLConfHelper {
     if (tables.isEmpty) {
       return new CleanOrphanFilesResult(0, 0)
     }
-    val (deleted, waitToRelease) = tables.map {
-      table =>
-        new SparkOrphanFilesClean(
-          table,
-          olderThanMillis,
-          parallelism,
-          dryRun,
-          spark
-        ).doOrphanClean()
-    }.unzip
+    val deleted = new ArrayBuffer[Dataset[(Long, Long)]]()
+    val waitToRelease = new ArrayBuffer[Dataset[_]]()
     try {
+      tables.foreach {
+        table =>
+          val (deletedDataset, cachedDatasets) = new SparkOrphanFilesClean(
+            table,
+            olderThanMillis,
+            parallelism,
+            dryRun,
+            spark
+          ).doOrphanClean()
+          deleted += deletedDataset
+          waitToRelease ++= cachedDatasets
+      }
+
       val result = deleted
         .reduce((l, r) => l.union(r))
         .toDF("deletedFilesCount", "deletedFilesLenInBytes")

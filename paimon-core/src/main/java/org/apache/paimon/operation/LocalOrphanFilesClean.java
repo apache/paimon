@@ -118,12 +118,6 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .flatMap(branch -> getUsedFiles(branch, missingManifest).stream())
                         .collect(Collectors.toSet());
 
-        if (usedFiles.isEmpty()) {
-            LOG.warn("Collected used files is empty, aborting orphan files clean.");
-            return new CleanOrphanFilesResult(
-                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
-        }
-
         if (missingManifest.get()) {
             LOG.warn("Detected missing manifest during used-files collection, aborting clean.");
             return new CleanOrphanFilesResult(
