@@ -291,6 +291,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         DataTableStreamScan scan =
                 new DataTableStreamScan(
                         tableSchema,
+                        schemaManager(),
                         coreOptions(),
                         newSnapshotReader(),
                         snapshotManager(),

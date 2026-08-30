@@ -823,6 +823,35 @@ class SchemaValidationTest {
                         "Primary-key managed BLOB tables do not support 'pk-clustering-override'.");
     }
 
+    @Test
+    public void testQueryAuthOnlyOnFileStoreTables() {
+        for (String type : Arrays.asList("format-table", "object-table")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
+            options.put(CoreOptions.TYPE.key(), type);
+            assertThatThrownBy(() -> validateTableSchema(queryAuthSchema(options)))
+                    .hasMessageContaining(CoreOptions.QUERY_AUTH_ENABLED.key());
+        }
+
+        for (String type : Arrays.asList("table", "materialized-table")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
+            options.put(CoreOptions.TYPE.key(), type);
+            validateTableSchema(queryAuthSchema(options));
+        }
+    }
+
+    private TableSchema queryAuthSchema(Map<String, String> options) {
+        return new TableSchema(
+                1,
+                singletonList(new DataField(0, "id", DataTypes.INT())),
+                10,
+                emptyList(),
+                emptyList(),
+                options,
+                "");
+    }
+
     private TableSchema primaryKeyBlobSchema(
             Map<String, String> options, List<String> primaryKeys, List<String> partitionKeys) {
         return new TableSchema(

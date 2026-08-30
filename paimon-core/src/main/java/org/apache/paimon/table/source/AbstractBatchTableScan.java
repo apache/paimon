@@ -58,7 +58,6 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
     private Integer pushDownLimit;
     private TopN topN;
 
-    private final SchemaManager schemaManager;
     @Nullable private String readProtectionTagName;
 
     protected AbstractBatchTableScan(
@@ -67,10 +66,9 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             TableQueryAuth queryAuth) {
-        super(schema, options, snapshotReader, queryAuth);
+        super(schema, schemaManager, options, snapshotReader, queryAuth);
 
         this.hasNext = true;
-        this.schemaManager = schemaManager;
         if (!schema.primaryKeys().isEmpty() && options.batchScanSkipLevel0()) {
             // Incremental scans read the delta or changelog files of historical snapshots, which
             // are always recorded at level 0. Skipping level 0 would drop all of their input.
@@ -153,6 +151,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        // partition listing bypasses plan(), so apply the rules here too: without the row filter
+        // it would report partitions the caller cannot read, and pushing a filter on a masked
+        // column against raw partition values would drop partitions the query matches
+        applyAuthRules();
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -224,6 +226,10 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         }
 
         SortValue order = orders.get(0);
+        if (authMaskedFields.contains(order.field().name())) {
+            // the pruning below reads raw statistics; a mask may alter the ordering column
+            return Optional.empty();
+        }
         DataType type = order.field().type();
         if (!minmaxAvailable(type)) {
             return Optional.empty();
