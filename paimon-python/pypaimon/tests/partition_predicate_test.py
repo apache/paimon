@@ -55,6 +55,7 @@ def _mock_table():
     table.partition_keys = ['dt', 'region']
     table.partition_keys_fields = PARTITION_FIELDS
     table.options.options.get = Mock(return_value="__DEFAULT_PARTITION__")
+    table.options.row_tracking_enabled.return_value = False
     return table
 
 

@@ -64,6 +64,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
     def setUp(self):
         self.mock_table = Mock()
         self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.partition_keys_fields = []
+        self.mock_table.total_buckets = 1
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
@@ -94,7 +96,7 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         )
 
     @staticmethod
-    def _data_file(name, row_count):
+    def _data_file(name, row_count, write_cols=None):
         return DataFileMeta.create(
             file_name=name,
             file_size=10,
@@ -109,16 +111,60 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
             level=0,
             extra_files=[],
             file_source=0,
+            write_cols=write_cols,
         )
 
     @classmethod
-    def _append_entry(cls, partition, name, row_count):
+    def _append_entry(cls, partition, name, row_count, write_cols=None):
         return ManifestEntry(
             kind=0,
-            partition=GenericRow(list(partition), None),
+            partition=GenericRow(list(partition), []),
             bucket=0,
             total_buckets=1,
-            file=cls._data_file(name, row_count),
+            file=cls._data_file(name, row_count, write_cols),
+        )
+
+    def test_assigns_independently_rolling_blob_fields_after_normal_files(self):
+        file_store_commit = self._create_file_store_commit()
+        entries = [
+            self._append_entry((), 'normal-0.parquet', 2),
+            self._append_entry((), 'normal-1.parquet', 2),
+            self._append_entry((), 'normal-2.parquet', 2),
+            self._append_entry((), 'camera-a-0.video', 4, ['camera_a']),
+            self._append_entry((), 'camera-a-1.video', 2, ['camera_a']),
+            self._append_entry((), 'camera-b-0.video', 2, ['camera_b']),
+            self._append_entry((), 'camera-b-1.video', 4, ['camera_b']),
+        ]
+
+        assigned, next_row_id = file_store_commit._assign_row_tracking_meta(
+            10, entries)
+
+        self.assertEqual(16, next_row_id)
+        self.assertEqual(
+            [10, 12, 14, 10, 14, 10, 12],
+            [entry.file.first_row_id for entry in assigned],
+        )
+
+    def test_assigns_blob_from_its_commit_message_range(self):
+        file_store_commit = self._create_file_store_commit()
+        normal_only = self._data_file('normal-0.parquet', 1)
+        normal_with_blob = self._data_file('normal-1.parquet', 1)
+        blob = self._data_file('camera-0.video', 1, ['camera'])
+        entries, groups = file_store_commit._collect_manifest_entries_with_groups([
+            CommitMessage(partition=(), bucket=0, new_files=[normal_only]),
+            CommitMessage(
+                partition=(), bucket=0,
+                new_files=[normal_with_blob, blob],
+            ),
+        ])
+
+        assigned, next_row_id = file_store_commit._assign_row_tracking_meta(
+            10, entries, groups)
+
+        self.assertEqual(12, next_row_id)
+        self.assertEqual(
+            [10, 11, 11],
+            [entry.file.first_row_id for entry in assigned],
         )
 
     def test_groups_files_by_partition_before_assigning_row_ids(self):

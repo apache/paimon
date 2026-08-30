@@ -141,6 +141,19 @@ class BlobBunchTest(unittest.TestCase):
         self.assertEqual(10, bunch.row_count())
         self.assertEqual(Range(100, 109), bunch.logical_range())
 
+    def test_finish_uses_normal_range_for_spanning_blob(self):
+        bunch = BlobBunch(
+            expected_row_count=2,
+            expected_row_range=Range(0, 1),
+        )
+        bunch.add(_BlobFile("spanning.blob", 0, 4))
+
+        bunch.finish()
+
+        self.assertEqual(2, bunch.row_count())
+        self.assertEqual(Range(0, 1), bunch.logical_range())
+        self.assertFalse(bunch.sequential_read_optimize())
+
     def test_finish_rejects_range_outside_normal_file(self):
         bunch = BlobBunch(
             expected_row_count=10,

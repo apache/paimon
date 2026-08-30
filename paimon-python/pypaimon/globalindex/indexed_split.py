@@ -24,6 +24,9 @@ from typing import List, Optional
 from pypaimon.read.split import Split
 
 
+_UNSET = object()
+
+
 class IndexedSplit(Split):
 
     def __init__(
@@ -31,12 +34,16 @@ class IndexedSplit(Split):
         data_split: 'Split',
         row_ranges: List['Range'],
         scores: Optional[List[float]] = None,
-        exact_merged_row_count: Optional[int] = None,
+        exact_merged_row_count=_UNSET,
     ):
         self._data_split = data_split
         self._row_ranges = row_ranges
         self._scores = scores
-        self._exact_merged_row_count = exact_merged_row_count
+        self._merged_row_count_set = exact_merged_row_count is not _UNSET
+        self._exact_merged_row_count = (
+            None if exact_merged_row_count is _UNSET
+            else exact_merged_row_count
+        )
 
     def data_split(self) -> 'Split':
         """Return the underlying data split."""
@@ -78,7 +85,7 @@ class IndexedSplit(Split):
         return sum(r.count() for r in self._row_ranges)
 
     def merged_row_count(self):
-        if self._exact_merged_row_count is not None:
+        if self._merged_row_count_set:
             return self._exact_merged_row_count
         return self.row_count
 
@@ -142,6 +149,7 @@ class IndexedSplit(Split):
             and self._row_ranges == other._row_ranges
             and self._scores == other._scores
             and self._exact_merged_row_count == other._exact_merged_row_count
+            and self._merged_row_count_set == other._merged_row_count_set
         )
 
     def __hash__(self):
@@ -151,9 +159,11 @@ class IndexedSplit(Split):
             tuple(self._row_ranges),
             scores_hash,
             self._exact_merged_row_count,
+            self._merged_row_count_set,
         ))
 
     def __repr__(self):
         return (f"IndexedSplit(data_split={self._data_split}, "
                 f"row_ranges={self._row_ranges}, scores={self._scores}, "
-                f"exact_merged_row_count={self._exact_merged_row_count})")
+                f"exact_merged_row_count={self._exact_merged_row_count}, "
+                f"merged_row_count_set={self._merged_row_count_set})")

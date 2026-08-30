@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -136,13 +137,21 @@ public class VideoFileFormat extends FileFormat {
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
-            SeekableInputStream in = fileIO.newInputStream(filePath);
-            VideoFileMeta fileMeta;
-            try {
-                fileMeta = new VideoFileMeta(in, context.fileSize(), context.selection());
-            } finally {
-                IOUtils.closeQuietly(in);
+            Map<Path, Object> metadataCache = context.metadataCache();
+            VideoFileMeta baseMeta =
+                    metadataCache == null ? null : (VideoFileMeta) metadataCache.get(filePath);
+            if (baseMeta == null) {
+                SeekableInputStream in = fileIO.newInputStream(filePath);
+                try {
+                    baseMeta = new VideoFileMeta(in, context.fileSize(), null);
+                    if (metadataCache != null) {
+                        metadataCache.put(filePath, baseMeta);
+                    }
+                } finally {
+                    IOUtils.closeQuietly(in);
+                }
             }
+            VideoFileMeta fileMeta = baseMeta.select(context.selection());
             return new VideoFormatReader(fileIO, filePath, fileMeta, fieldCount, blobIndex);
         }
 

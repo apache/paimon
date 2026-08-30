@@ -29,6 +29,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Map;
 
 /** A factory to create {@link RecordReader} for file. */
 public interface FormatReaderFactory {
@@ -58,6 +59,12 @@ public interface FormatReaderFactory {
         /** Sizer shared by readers that support dynamic read batch sizing. */
         @Nullable
         default ReadBatchSizer readBatchSizer() {
+            return null;
+        }
+
+        /** Metadata shared by readers of the same physical file within one split. */
+        @Nullable
+        default Map<Path, Object> metadataCache() {
             return null;
         }
     }

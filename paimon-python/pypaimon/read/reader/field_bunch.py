@@ -171,10 +171,20 @@ class BlobBunch(_SpecialFieldBunch):
         physical_row_count = sum(row_range.count() for row_range in merged)
         if self.expected_row_range is not None:
             for row_range in merged:
-                if (row_range.from_ < self.expected_row_range.from_
-                        or row_range.to > self.expected_row_range.to):
+                nested = (
+                    row_range.contains(self.expected_row_range.from_)
+                    and row_range.contains(self.expected_row_range.to)
+                ) or (
+                    self.expected_row_range.contains(row_range.from_)
+                    and self.expected_row_range.contains(row_range.to)
+                )
+                valid = (
+                    row_range.overlaps(self.expected_row_range)
+                    if self.row_id_push_down else nested
+                )
+                if not valid:
                     raise ValueError(
-                        f"Blob file range {row_range} should be within normal "
+                        f"Blob file range {row_range} should contain or be within normal "
                         f"file range {self.expected_row_range}."
                     )
             self._row_count = self.expected_row_range.count()

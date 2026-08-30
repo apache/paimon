@@ -114,7 +114,7 @@ Flink, Spark, and Python.
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>-</td>
       <td>String</td>
-      <td>Names one scalar BLOB field whose logical values are frames in complete encoded videos packed into <code>.video</code> files. This first version supports append-only tables and exact <code>VideoFrameDescriptor</code>-backed input only.</td>
+      <td>Names scalar BLOB fields whose logical values are frames in complete encoded videos packed into <code>.video</code> files. Multiple fields are comma-separated. This first version supports append-only tables and exact <code>VideoFrameDescriptor</code>-backed input only.</td>
     </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
@@ -306,10 +306,10 @@ entry per row. NULL and data-evolution placeholders use negative run references.
 
 Physical reuse uses exact payload descriptor identity (URI, offset, and length), not a content
 hash. It is local to each `.video` file: every pack is self-contained and never points at payloads
-owned by another Paimon data file. A pack can contain multiple MP4 payloads. After a size or row
-target is reached, rolling waits for the current physical video group to end, making the target
-soft for large videos. A later commit or an earlier roll can store another physical copy of the
-same source video.
+owned by another Paimon data file. Each configured field rolls independently. A pack can contain
+multiple MP4 payloads. After a size or row target is reached, rolling waits for the current physical
+video group to end, making the target soft for large videos. A later commit or an earlier roll can
+store another physical copy of the same source video.
 
 Compaction byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
 and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
@@ -319,7 +319,6 @@ frame mapping in the `.video` descriptor/index path.
 Current restrictions:
 
 - Append-only tables only; primary-key tables continue to use managed BLOB storage.
-- At most one `video-frame-field` per table.
 - The field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use `.blob`.
 - Non-null writes must be exact descriptor-backed `BlobRef` values containing a
   `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.

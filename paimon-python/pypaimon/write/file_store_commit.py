@@ -266,7 +266,9 @@ class FileStoreCommit:
             self.table.identifier,
             len(commit_messages),
         )
-        commit_entries = self._collect_manifest_entries(commit_messages)
+        commit_entries, row_tracking_groups = (
+            self._collect_manifest_entries_with_groups(commit_messages)
+        )
         changelog_entries = self._collect_changelog_entries(commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
@@ -331,7 +333,8 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot)
+                         hash_index_base_snapshot=hash_index_base_snapshot,
+                         row_tracking_groups=row_tracking_groups)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -365,6 +368,9 @@ class FileStoreCommit:
         )
 
         if not skip_overwrite:
+            _, row_tracking_groups = (
+                self._collect_manifest_entries_with_groups(commit_messages)
+            )
             index_deletes = self._overwrite_hash_index_deletes(
                 partition_filter, index_deletes
             )
@@ -379,6 +385,7 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
+                row_tracking_groups=row_tracking_groups,
             )
 
     @staticmethod
@@ -484,7 +491,7 @@ class FileStoreCommit:
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
-                    hash_index_base_snapshot=None):
+                    hash_index_base_snapshot=None, row_tracking_groups=None):
 
         retry_count = 0
         retry_result = None
@@ -518,6 +525,7 @@ class FileStoreCommit:
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
+                row_tracking_groups=row_tracking_groups,
             )
 
             if isinstance(result, RewriteResult):
@@ -596,7 +604,8 @@ class FileStoreCommit:
                          index_deletes=None,
                          index_adds=None,
                          hash_index_base_snapshot=None,
-                         commit_result_may_be_uncertain: bool = False) -> CommitResult:
+                         commit_result_may_be_uncertain: bool = False,
+                         row_tracking_groups=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
                 retry_result, latest_snapshot, commit_identifier, commit_kind):
@@ -697,7 +706,7 @@ class FileStoreCommit:
                     commit_entries)
             first_row_id_start = self._get_next_row_id_start(latest_snapshot)
             commit_entries, next_row_id = self._assign_row_tracking_meta(
-                first_row_id_start, commit_entries)
+                first_row_id_start, commit_entries, row_tracking_groups)
 
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
@@ -1039,8 +1048,14 @@ class FileStoreCommit:
         return changelog_entries
 
     def _collect_manifest_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        return self._collect_manifest_entries_with_groups(commit_messages)[0]
+
+    def _collect_manifest_entries_with_groups(
+            self, commit_messages: List[CommitMessage]):
         commit_entries = []
-        for msg in commit_messages:
+        entry_groups = {}
+        collect_groups = self.table.options.row_tracking_enabled()
+        for group, msg in enumerate(commit_messages):
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             total_buckets = (
                 msg.total_buckets
@@ -1048,13 +1063,16 @@ class FileStoreCommit:
                 else self.table.total_buckets
             )
             for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
+                entry = ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
                     total_buckets=total_buckets,
                     file=file,
-                ))
+                )
+                commit_entries.append(entry)
+                if collect_groups:
+                    entry_groups[entry.identifier()] = group
             for file in msg.deleted_files:
                 commit_entries.append(ManifestEntry(
                     kind=1,
@@ -1063,7 +1081,7 @@ class FileStoreCommit:
                     total_buckets=total_buckets,
                     file=file,
                 ))
-        return commit_entries
+        return commit_entries, entry_groups
 
     def _clean_up_reuse_tmp_manifests(
             self,
@@ -1236,7 +1254,9 @@ class FileStoreCommit:
             for entry in entries
         ]
 
-    def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
+    def _assign_row_tracking_meta(
+            self, first_row_id_start: int,
+            commit_entries: List[ManifestEntry], entry_groups=None):
         """Assign row tracking metadata (first_row_id) to new files.
 
         Aligned with Java RowTrackingCommitUtils.assignRowTrackingMeta.
@@ -1244,9 +1264,45 @@ class FileStoreCommit:
         if not commit_entries:
             return commit_entries, first_row_id_start
 
-        row_id_assigned = []
+        entry_groups = entry_groups or {}
+        grouped_entries = {}
+        default_group = object()
+        for entry in commit_entries:
+            if not entry_groups:
+                group = default_group
+            elif entry.identifier() in entry_groups:
+                group = ('message', entry_groups[entry.identifier()])
+            else:
+                group = ('entry', id(entry))
+            grouped_entries.setdefault(group, []).append(entry)
+
+        assigned_by_entry = {}
         start = first_row_id_start
-        blob_start_default = first_row_id_start
+        for entries in grouped_entries.values():
+            start = self._assign_row_tracking_group(
+                start, entries, assigned_by_entry)
+
+        return [assigned_by_entry[id(entry)] for entry in commit_entries], start
+
+    @staticmethod
+    def _assign_row_tracking_group(
+            first_row_id_start, commit_entries, assigned_by_entry):
+        start = first_row_id_start
+        normal_starts = {}
+        for entry in commit_entries:
+            write_cols = entry.file.write_cols
+            contains_row_id = (
+                write_cols is not None
+                and SpecialFields.ROW_ID.name in write_cols
+            )
+            if (entry.file.file_source == 0
+                    and entry.file.first_row_id is None
+                    and not contains_row_id
+                    and not DataFileMeta.is_blob_file(entry.file.file_name)
+                    and not DataFileMeta.is_vector_file(entry.file.file_name)):
+                normal_starts[id(entry)] = start
+                start += entry.file.row_count
+
         blob_starts = {}
         vector_store_start = first_row_id_start
 
@@ -1267,13 +1323,14 @@ class FileStoreCommit:
 
                 if DataFileMeta.is_blob_file(entry.file.file_name):
                     blob_field_name = entry.file.write_cols[0]
-                    blob_start = blob_starts.get(blob_field_name, blob_start_default)
+                    blob_start = blob_starts.get(blob_field_name, first_row_id_start)
                     if blob_start >= start:
                         raise RuntimeError(
                             f"This is a bug, blobStart {blob_start} should be less than "
                             f"start {start} when assigning a blob entry file."
                         )
-                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
+                    assigned_by_entry[id(entry)] = entry.assign_first_row_id(
+                        blob_start)
                     blob_starts[blob_field_name] = blob_start + row_count
 
                 elif DataFileMeta.is_vector_file(entry.file.file_name):
@@ -1282,15 +1339,14 @@ class FileStoreCommit:
                             f"This is a bug, vectorStoreStart {vector_store_start} should be "
                             f"less than start {start} when assigning a vector-store entry file."
                         )
-                    row_id_assigned.append(entry.assign_first_row_id(vector_store_start))
+                    assigned_by_entry[id(entry)] = entry.assign_first_row_id(
+                        vector_store_start)
                     vector_store_start += row_count
 
                 else:
-                    row_id_assigned.append(entry.assign_first_row_id(start))
-                    blob_start_default = start
-                    blob_starts.clear()
-                    start += row_count
+                    assigned_by_entry[id(entry)] = entry.assign_first_row_id(
+                        normal_starts[id(entry)])
             else:
-                row_id_assigned.append(entry)
+                assigned_by_entry[id(entry)] = entry
 
-        return row_id_assigned, start
+        return start

@@ -48,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Queue;
@@ -61,6 +62,7 @@ import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
+import static org.apache.paimon.utils.DataEvolutionUtils.groupByNormalFileRange;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.InternalRowUtils.compare;
 import static org.apache.paimon.utils.InternalRowUtils.get;
@@ -189,16 +191,21 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         if (inputFilter != null || readType != null) {
-            // group by row id range
-            RangeHelper<ManifestEntry> rangeHelper =
-                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
-            List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
-
-            return splitByRowId.stream()
-                    .filter(group -> inputFilter == null || filterByStats(group))
-                    .flatMap(group -> pruneByReadType(group).stream())
-                    .map(entry -> dropStats ? dropStats(entry) : entry)
-                    .collect(Collectors.toList());
+            List<List<ManifestEntry>> splitByRowId =
+                    groupByNormalFileRange(entries, ManifestEntry::file);
+            Set<ManifestEntry> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            List<ManifestEntry> result = new ArrayList<>();
+            for (List<ManifestEntry> group : splitByRowId) {
+                if (inputFilter != null && !filterByStats(group)) {
+                    continue;
+                }
+                for (ManifestEntry entry : pruneByReadType(group)) {
+                    if (seen.add(entry)) {
+                        result.add(dropStats ? dropStats(entry) : entry);
+                    }
+                }
+            }
+            return result;
         } else if (dropStats) {
             return entries.stream().map(this::dropStats).collect(Collectors.toList());
         } else {
@@ -230,8 +237,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (readType == null || group.size() <= 1) {
             return group;
         }
+        boolean hasNormalFile =
+                group.stream()
+                        .map(ManifestEntry::file)
+                        .anyMatch(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()));
         ManifestEntry anchor =
-                deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
+                hasNormalFile ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
@@ -246,12 +260,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 }
             }
         }
-        if (anchor != null && !kept.contains(anchor)) {
+        if (deletionVectorsEnabled && anchor != null && !kept.contains(anchor)) {
             kept.add(anchor);
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows.
-        return kept.isEmpty() ? Collections.singletonList(group.get(0)) : kept;
+        return kept.isEmpty()
+                ? Collections.singletonList(anchor == null ? group.get(0) : anchor)
+                : kept;
     }
 
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
@@ -266,15 +282,23 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas,
             EvolutionStatsCache evolutionStatsCache) {
-        long groupStart =
+        List<ManifestEntry> rangeMetas =
                 metas.stream()
+                        .filter(entry -> !isBlobFile(entry.file().fileName()))
+                        .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
+                        .collect(Collectors.toList());
+        if (rangeMetas.isEmpty()) {
+            rangeMetas = metas;
+        }
+        long groupStart =
+                rangeMetas.stream()
                         .map(ManifestEntry::file)
                         .map(DataFileMeta::nonNullRowIdRange)
                         .mapToLong(range -> range.from)
                         .min()
                         .orElseThrow(() -> new IllegalArgumentException("Empty evolution group."));
         long groupEnd =
-                metas.stream()
+                rangeMetas.stream()
                         .map(ManifestEntry::file)
                         .map(DataFileMeta::nonNullRowIdRange)
                         .mapToLong(range -> range.to)

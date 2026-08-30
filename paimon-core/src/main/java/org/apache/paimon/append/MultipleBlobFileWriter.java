@@ -61,12 +61,13 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             long targetFileSize,
+            long targetFileRowNum,
             BlobFileContext context) {
         RowType blobRowType =
                 new RowType(fieldsInBlobFile(writeSchema, context.blobInlineFields()));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            boolean video = blobFieldName.equals(context.videoFrameField());
+            boolean video = context.videoFrameFields().contains(blobFieldName);
             FileFormat blobFileFormat;
             if (video) {
                 if (context.blobConsumer() != null) {
@@ -114,9 +115,10 @@ public class MultipleBlobFileWriter implements Closeable {
                                     null);
             RollingFileWriterImpl<InternalRow, DataFileMeta> rollingWriter =
                     video
-                            ? new VideoRollingFileWriter<>(writerFactory, targetFileSize)
+                            ? new VideoRollingFileWriter<>(
+                                    writerFactory, targetFileSize, targetFileRowNum)
                             : new RollingFileWriterImpl<>(
-                                    writerFactory, targetFileSize, Long.MAX_VALUE);
+                                    writerFactory, targetFileSize, targetFileRowNum);
             blobWriters.add(
                     new BlobProjectedFileWriter(
                             rollingWriter,
