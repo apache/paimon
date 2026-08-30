@@ -33,6 +33,11 @@ from pypaimon.filesystem.local_file_io import _file_uri_path
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
+from pypaimon.multimodal.source_utils import (
+    _source_path_text,
+    _validated_source_options,
+    _validate_source_kerberos,
+)
 from pypaimon.multimodal.table import _target_schema
 from pypaimon.write.commit_callback import CommitCallback
 
@@ -113,6 +118,9 @@ class _Hdf5SourceFileIO:
     def new_input_stream(self, path):
         file_io, native_path = self._resolve(path)
         return file_io.new_input_stream(native_path)
+
+    def to_filesystem_path(self, path):
+        return self._resolve(path)[1]
 
     def close(self):
         self._resolver.close()
@@ -359,17 +367,6 @@ def _raise_legacy_directory_listing_error(path, error):
         % path) from error
 
 
-def _source_path_text(value):
-    try:
-        path = os.fspath(value)
-    except TypeError as error:
-        raise ValueError(
-            "paths must contain only filesystem paths or URIs.") from error
-    if isinstance(path, bytes):
-        raise ValueError("paths must contain only filesystem paths or URIs.")
-    return path
-
-
 def _normalize_source_path(value):
     path = _source_path_text(value)
     parsed = urlparse(path)
@@ -440,40 +437,6 @@ def _path_values(paths):
     except TypeError as error:
         raise ValueError(
             "paths must be a path or an iterable of paths.") from error
-
-
-def _validated_source_options(source_options):
-    if source_options is None:
-        return {}
-    if not isinstance(source_options, Mapping):
-        raise ValueError("source_options must be a mapping.")
-    return dict(source_options)
-
-
-def _validate_source_kerberos(paths, source_options):
-    source_principal = (
-        source_options.get("security.kerberos.login.principal")
-        or source_options.get("security.principal")
-    )
-    source_keytab = (
-        source_options.get("security.kerberos.login.keytab")
-        or source_options.get("security.keytab")
-    )
-    if not source_principal and not source_keytab:
-        return
-    if bool(source_principal) != bool(source_keytab):
-        raise ValueError(
-            "Source Kerberos principal and keytab must be both set or both "
-            "unset.")
-    if not any(
-            urlparse(_source_path_text(path)).scheme.lower()
-            in ("hdfs", "viewfs") for path in paths):
-        return
-    raise ValueError(
-        "HDF5 sources cannot use an explicit Kerberos keytab in a shared "
-        "process because kinit overwrites process-global credentials. "
-        "Run the load in a process-isolated worker with a pre-acquired "
-        "ticket cache and omit the source principal and keytab options.")
 
 
 def _require_seekable(stream, source):

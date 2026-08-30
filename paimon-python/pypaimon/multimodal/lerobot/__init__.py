@@ -25,7 +25,6 @@ from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     TableNotExistException,
 )
-from pypaimon.multimodal.hdf5 import _validated_source_options
 from pypaimon.multimodal.lerobot.loader import (
     _strict_lerobot_table,
     _write_dataset,
@@ -41,6 +40,10 @@ from pypaimon.multimodal.lerobot.source import (
     _open_resolved_dataset,
     _resolved_source,
     _validate_info_paths,
+)
+from pypaimon.multimodal.source_utils import (
+    _validated_source_options,
+    _validate_source_kerberos,
 )
 from pypaimon.multimodal.table import _target_schema
 
@@ -74,6 +77,8 @@ def load_from_lerobot(
         raise ValueError("batch_size must be a positive integer.")
 
     validated_source_options = _validated_source_options(source_options)
+    _validate_source_kerberos(
+        [source], validated_source_options, "LeRobot")
     with _resolved_source(source, validated_source_options) as (
             resolved_source, local_info):
         if local_info is None:

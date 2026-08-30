@@ -239,8 +239,10 @@ setup(
         ],
         'lerobot': [
             # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
-            # supports PyArrow <20. LeRobot 0.4.x uses the v3 dataset format.
+            # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
+            # by LeRobot's media dependencies.
             'datasets>=4,<4.1; python_version>="3.10"',
+            'pandas>=2.2.2,<3; python_version>="3.10"',
             'lerobot>=0.4.4,<0.5; python_version>="3.10"',
         ],
         'ray': [

@@ -21,13 +21,16 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
+from pypaimon.common.options import Options
+from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
+from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _task_name,
@@ -85,7 +88,10 @@ class LeRobotValidationTest(unittest.TestCase):
             _validate_info_paths({
                 "data_path": "data/chunk-{chunk_index:03d}/file.parquet",
             })
-            for path in ("../secret.parquet", "%2e%2e/secret.parquet"):
+            for path in (
+                    "../secret.parquet",
+                    "%2e%2e/secret.parquet",
+                    "%252e%252e/secret.parquet"):
                 with self.assertRaisesRegex(ValueError, "info.data_path"):
                     _validate_info_paths({"data_path": path})
         finally:
@@ -108,10 +114,54 @@ class LeRobotValidationTest(unittest.TestCase):
         for path in (
                 "../private",
                 "%2e%2e/private",
+                "%252e%252e/private",
                 "oss://other/private",
                 "oss://bucket/datasets/robot/../../private"):
             with self.assertRaisesRegex(ValueError, "within the source"):
                 _remote_source_path(root, path, "image path")
+
+    def test_double_encoded_file_uri_cannot_escape_source(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_uri_"))
+        source_file_io = _Hdf5SourceFileIO(Options({}))
+        try:
+            root = temp_dir / "source"
+            root.mkdir()
+            (root / "frame one").write_bytes(b"frame")
+            (temp_dir / "secret").write_bytes(b"secret")
+            source_path = _remote_source_path(
+                root.as_uri(),
+                "frame%20one",
+                "image path",
+                source_file_io,
+            )
+            with source_file_io.new_input_stream(source_path) as stream:
+                self.assertEqual(b"frame", stream.read())
+            with self.assertRaisesRegex(ValueError, "within the source"):
+                _remote_source_path(
+                    root.as_uri(),
+                    "%252e%252e/secret",
+                    "image path",
+                    source_file_io,
+                )
+        finally:
+            source_file_io.close()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hdfs_source_rejects_explicit_keytab_before_resolution(self):
+        with patch(
+                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO"
+        ) as source_file_io:
+            with self.assertRaisesRegex(ValueError, "process-isolated"):
+                load_from_lerobot(
+                    Mock(),
+                    "frames",
+                    "hdfs://source-ns/robot",
+                    source_options={
+                        "security.kerberos.login.principal": "source@REALM",
+                        "security.kerberos.login.keytab": "/source.keytab",
+                    },
+                )
+        source_file_io.assert_not_called()
 
     def test_negative_task_index_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "task_index -1"):

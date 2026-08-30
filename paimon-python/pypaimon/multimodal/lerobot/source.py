@@ -208,6 +208,7 @@ class _RemoteLeRobotDataset:
             self.source.path,
             relative_path,
             "info.data_path",
+            self._file_io,
         )
         if source_path != self._cached_data_path:
             table = _read_remote_parquet(self._file_io, source_path)
@@ -237,6 +238,7 @@ class _RemoteLeRobotDataset:
                     self.source.path,
                     image_path,
                     "image path",
+                    self._file_io,
                 )
                 return _read_remote_bytes(self._file_io, source_path)
         return _encode_media_frame(value)
@@ -322,6 +324,7 @@ def _remote_path(root, relative_path):
 def _relative_dataset_path(path, name):
     if not isinstance(path, str) or not path:
         raise ValueError("LeRobot %s must be a relative path." % name)
+    path = _fully_unquote(path)
     if "\\" in path or urlparse(path).scheme or path.startswith(("/", "~")):
         raise ValueError(
             "LeRobot %s must stay within the source directory: %s"
@@ -334,12 +337,12 @@ def _relative_dataset_path(path, name):
     return normalized
 
 
-def _remote_source_path(root, path, name):
+def _remote_source_path(root, path, name, source_file_io=None):
     if not isinstance(path, str) or not path:
         _relative_dataset_path(path, name)
     root_uri = urlparse(root)
     path_uri = urlparse(path)
-    root_path = posixpath.normpath(unquote(root_uri.path) or "/")
+    root_path = posixpath.normpath(_fully_unquote(root_uri.path) or "/")
     if path_uri.scheme:
         if path_uri.query or path_uri.fragment \
                 or path_uri.scheme.lower() != root_uri.scheme.lower() \
@@ -347,9 +350,10 @@ def _remote_source_path(root, path, name):
             raise ValueError(
                 "LeRobot %s must stay within the source directory: %s"
                 % (name, path))
-        source_path = posixpath.normpath(unquote(path_uri.path) or "/")
+        source_path = posixpath.normpath(
+            _fully_unquote(path_uri.path) or "/")
     else:
-        relative_path = _relative_dataset_path(unquote(path), name)
+        relative_path = _relative_dataset_path(path, name)
         source_path = posixpath.normpath(posixpath.join(
             root_path,
             relative_path,
@@ -358,22 +362,60 @@ def _remote_source_path(root, path, name):
         raise ValueError(
             "LeRobot %s must stay within the source directory: %s"
             % (name, path))
-    return urlunparse((
+    source_uri = urlunparse((
         root_uri.scheme,
         root_uri.netloc,
-        quote(source_path, safe="/:%"),
+        quote(source_path, safe="/:"),
         "",
         "",
         "",
     ))
+    _validate_filesystem_containment(
+        source_file_io, root, source_uri, name, path)
+    return source_uri
+
+
+def _fully_unquote(path):
+    decoded = unquote(path)
+    while decoded != path:
+        path = decoded
+        decoded = unquote(path)
+    return decoded
+
+
+def _validate_filesystem_containment(
+        source_file_io, root, source, name, original_path):
+    to_filesystem_path = getattr(
+        source_file_io, "to_filesystem_path", None)
+    if not callable(to_filesystem_path):
+        return
+    root_path = _fully_unquote(to_filesystem_path(root))
+    source_path = _fully_unquote(to_filesystem_path(source))
+    if urlparse(root).scheme.lower() == "file":
+        root_path = Path(root_path).resolve()
+        source_path = Path(source_path).resolve()
+        try:
+            source_path.relative_to(root_path)
+        except ValueError as error:
+            raise ValueError(
+                "LeRobot %s must stay within the source directory: %s"
+                % (name, original_path)) from error
+        return
+    else:
+        root_path = posixpath.normpath(root_path)
+        source_path = posixpath.normpath(source_path)
+    relative_path = posixpath.relpath(source_path, root_path)
+    if relative_path == ".." or relative_path.startswith("../"):
+        raise ValueError(
+            "LeRobot %s must stay within the source directory: %s"
+            % (name, original_path))
 
 
 def _validate_info_paths(info):
     for name in ("data_path", "video_path"):
         path = info.get(name)
         if path is not None:
-            decoded = unquote(path) if isinstance(path, str) else path
-            _relative_dataset_path(decoded, "info.%s" % name)
+            _relative_dataset_path(path, "info.%s" % name)
 
 
 def _read_remote_bytes(source_file_io, path):
