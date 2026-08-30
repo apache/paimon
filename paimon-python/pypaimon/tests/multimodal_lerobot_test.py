@@ -28,14 +28,16 @@ import pyarrow as pa
 import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
-from pypaimon.multimodal.lerobot import (
-    _LeRobotSource,
+from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
+    _task_name,
+)
+from pypaimon.multimodal.lerobot.schema import _schema_from_info
+from pypaimon.multimodal.lerobot.source import (
+    _LeRobotSource,
     _import_lerobot_dataset,
     _open_dataset,
     _remote_source_path,
-    _schema_from_info,
-    _task_name,
     _validate_info_paths,
 )
 
@@ -403,7 +405,7 @@ class LeRobotImportTest(unittest.TestCase):
         source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
 
         with patch(
-                "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
+                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
                 return_value=source_file_io):
             snapshot_id = self.connection.load_from_lerobot(
                 "oss_images",
