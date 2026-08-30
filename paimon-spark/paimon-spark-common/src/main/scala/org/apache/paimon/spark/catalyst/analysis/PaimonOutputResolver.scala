@@ -502,16 +502,14 @@ object PaimonOutputResolver extends SQLConfHelper {
   }
 
   private def renameFieldsInStruct(input: StructType, expected: StructType): StructType = {
-    if (input.length == expected.length) {
-      StructType(input.zip(expected).map {
-        case (inputField, expectedField) =>
-          inputField.copy(
-            name = expectedField.name,
-            dataType = renameFieldsInType(inputField.dataType, expectedField.dataType))
-      })
-    } else {
-      input
-    }
+    StructType(input.zipWithIndex.map {
+      case (inputField, index) if index < expected.length =>
+        val expectedField = expected(index)
+        inputField.copy(
+          name = expectedField.name,
+          dataType = renameFieldsInType(inputField.dataType, expectedField.dataType))
+      case (inputField, _) => inputField
+    })
   }
 
   private def renameFieldsInType(input: DataType, expected: DataType): DataType = {

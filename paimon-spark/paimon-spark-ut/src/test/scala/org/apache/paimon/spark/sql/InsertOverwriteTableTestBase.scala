@@ -919,6 +919,19 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Insert: column list resolves unequal nested structs positionally") {
+    withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+      withTable("t") {
+        sql("CREATE TABLE t (arr ARRAY<STRUCT<x: INT, y: INT, z: INT>>)")
+        sql("""
+              |INSERT INTO t (arr)
+              |SELECT array(named_struct('y', 20, 'x', 10))
+              |""".stripMargin)
+        checkAnswer(sql("SELECT * FROM t"), Row(Seq(Row(20, 10, null))))
+      }
+    }
+  }
+
   test("Paimon Insert: by name resolves nested structs by name") {
     if (gteqSpark3_5) {
       withTable("t") {
