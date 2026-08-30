@@ -591,7 +591,9 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self.written = []
             first_blob = next(iter(blob_writers.values()), None)
             self.total_record_count = first_blob._row_count if first_blob else 0
-            self._blob_writers_closed = False
+            self._blob_prepared_record_counts = {
+                column: 0 for column in self.blob_file_column_names
+            }
 
         def _write_normal_data_to_file(self, data: pa.Table):
             self.written.append(data)
