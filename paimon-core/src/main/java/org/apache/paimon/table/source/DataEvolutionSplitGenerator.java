@@ -107,22 +107,42 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         List<List<List<DataFileMeta>>> packed = new ArrayList<>();
         List<List<DataFileMeta>> current = new ArrayList<>();
         Set<DataFileMeta> seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<DataFileMeta> fixedComponent = Collections.newSetFromMap(new IdentityHashMap<>());
         long currentWeight = 0;
 
         for (List<DataFileMeta> range : ranges) {
-            long weight = incrementalRangeWeight(range, seenSidecars, Collections.emptySet());
-            if (current.isEmpty() && weight > targetSplitSize) {
-                weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
+            Set<DataFileMeta> rangeSharedSidecars =
+                    range.stream()
+                            .filter(sharedSidecars::contains)
+                            .collect(
+                                    Collectors.toCollection(
+                                            () ->
+                                                    Collections.newSetFromMap(
+                                                            new IdentityHashMap<>())));
+            if (!current.isEmpty()
+                    && !fixedComponent.isEmpty()
+                    && Collections.disjoint(fixedComponent, rangeSharedSidecars)) {
+                packed.add(current);
+                current = new ArrayList<>();
+                seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+                fixedComponent = Collections.newSetFromMap(new IdentityHashMap<>());
+                currentWeight = 0;
             }
+
+            long weight =
+                    current.isEmpty()
+                            ? initialRangeWeight(
+                                    range, seenSidecars, sharedSidecars, fixedComponent)
+                            : incrementalRangeWeight(range, seenSidecars, Collections.emptySet());
             if (!current.isEmpty() && currentWeight + weight > targetSplitSize) {
                 packed.add(current);
                 current = new ArrayList<>();
                 seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+                fixedComponent = Collections.newSetFromMap(new IdentityHashMap<>());
                 currentWeight = 0;
-                weight = incrementalRangeWeight(range, seenSidecars, Collections.emptySet());
-                if (weight > targetSplitSize) {
-                    weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
-                }
+                weight = initialRangeWeight(range, seenSidecars, sharedSidecars, fixedComponent);
+            } else if (!fixedComponent.isEmpty()) {
+                fixedComponent.addAll(rangeSharedSidecars);
             }
             current.add(range);
             currentWeight += weight;
@@ -135,6 +155,24 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
             packed.add(current);
         }
         return packed;
+    }
+
+    private long initialRangeWeight(
+            List<DataFileMeta> files,
+            Set<DataFileMeta> seenSidecars,
+            Set<DataFileMeta> sharedSidecars,
+            Set<DataFileMeta> fixedComponent) {
+        long weight = incrementalRangeWeight(files, seenSidecars, Collections.emptySet());
+        if (weight <= targetSplitSize) {
+            return weight;
+        }
+
+        long marginalWeight = incrementalRangeWeight(files, seenSidecars, sharedSidecars);
+        if (marginalWeight <= targetSplitSize) {
+            files.stream().filter(sharedSidecars::contains).forEach(fixedComponent::add);
+            return marginalWeight;
+        }
+        return weight;
     }
 
     private long incrementalRangeWeight(

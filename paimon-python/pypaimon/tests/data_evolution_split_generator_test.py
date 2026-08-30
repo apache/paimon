@@ -330,6 +330,38 @@ class SplitOrderTest(unittest.TestCase):
                 file.file_name.endswith('.video') for file in split.files
             ))
 
+    def test_oversized_spanning_sidecar_ends_at_coverage_boundary(self):
+        mb = 1024 * 1024
+        entries = [
+            self._entry(
+                f'normal-{row}.parquet', row,
+                first_row_id=row, row_count=1, file_size=1,
+            )
+            for row in range(4)
+        ]
+        entries.extend([
+            self._entry(
+                'camera-0.video', 4, first_row_id=0, row_count=2,
+                file_size=200 * mb,
+            ),
+            self._entry(
+                'camera-1.video', 5, first_row_id=2, row_count=2,
+                file_size=100 * mb,
+            ),
+        ])
+
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=128 * mb, open_file_cost=0,
+        ).create_splits(entries)
+
+        self.assertEqual(2, len(splits))
+        self.assertEqual(
+            [['camera-0.video'], ['camera-1.video']],
+            [[file.file_name for file in split.files
+              if file.file_name.endswith('.video')]
+             for split in splits],
+        )
+
     def test_spanning_sidecar_preserves_deletion_aware_row_count(self):
         entries = [
             self._entry(

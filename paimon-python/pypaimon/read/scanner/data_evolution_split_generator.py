@@ -146,27 +146,40 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         current = []
         current_weight = 0
         seen_sidecars = set()
+        fixed_component = set()
 
         for group in groups:
-            weight = self._incremental_group_weight(
-                group, seen_sidecars, set()
-            )
-            if not current and weight > self.target_split_size:
-                weight = self._incremental_group_weight(
-                    group, seen_sidecars, shared_sidecars
+            group_shared_sidecars = {
+                id(file) for file in group if id(file) in shared_sidecars
+            }
+            if (current and fixed_component
+                    and fixed_component.isdisjoint(group_shared_sidecars)):
+                packed.append(current)
+                current = []
+                current_weight = 0
+                seen_sidecars = set()
+                fixed_component = set()
+
+            weight = (
+                self._initial_group_weight(
+                    group, seen_sidecars, shared_sidecars, fixed_component
                 )
+                if not current
+                else self._incremental_group_weight(
+                    group, seen_sidecars, set()
+                )
+            )
             if current and current_weight + weight > self.target_split_size:
                 packed.append(current)
                 current = []
                 current_weight = 0
                 seen_sidecars = set()
-                weight = self._incremental_group_weight(
-                    group, seen_sidecars, set()
+                fixed_component = set()
+                weight = self._initial_group_weight(
+                    group, seen_sidecars, shared_sidecars, fixed_component
                 )
-                if weight > self.target_split_size:
-                    weight = self._incremental_group_weight(
-                        group, seen_sidecars, shared_sidecars
-                    )
+            elif fixed_component:
+                fixed_component.update(group_shared_sidecars)
 
             current.append(group)
             current_weight += weight
@@ -177,6 +190,24 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         if current:
             packed.append(current)
         return packed
+
+    def _initial_group_weight(
+            self, group: List[DataFileMeta], seen_sidecars: set,
+            shared_sidecars: set, fixed_component: set,
+    ) -> int:
+        weight = self._incremental_group_weight(group, seen_sidecars, set())
+        if weight <= self.target_split_size:
+            return weight
+
+        marginal_weight = self._incremental_group_weight(
+            group, seen_sidecars, shared_sidecars
+        )
+        if marginal_weight <= self.target_split_size:
+            fixed_component.update(
+                id(file) for file in group if id(file) in shared_sidecars
+            )
+            return marginal_weight
+        return weight
 
     def _incremental_group_weight(
             self, group: List[DataFileMeta], seen_sidecars: set,

@@ -166,6 +166,25 @@ public class DataEvolutionSplitGeneratorTest {
     }
 
     @Test
+    public void testOversizedSpanningBlobEndsAtCoverageBoundary() {
+        long mb = 1024L * 1024;
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int row = 0; row < 4; row++) {
+            files.add(newFile("normal-" + row + ".parquet", row, 1L, 1L));
+        }
+        files.add(newFile("camera-0.video", 0L, 2L, 200L * mb));
+        files.add(newFile("camera-1.video", 2L, 2L, 100L * mb));
+
+        DataEvolutionSplitGenerator generator =
+                new DataEvolutionSplitGenerator(128L * mb, 1L, true);
+        List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
+
+        assertThat(splits).hasSize(2);
+        assertThat(splits.get(0).files).contains(files.get(4)).doesNotContain(files.get(5));
+        assertThat(splits.get(1).files).contains(files.get(5)).doesNotContain(files.get(4));
+    }
+
+    @Test
     public void testOverlappingNormalRangesRemainGrouped() {
         DataFileMeta update = newFile("update.parquet", 0L, 5L, 10L);
         DataFileMeta base = newFile("base.parquet", 0L, 1000L, 100L);
