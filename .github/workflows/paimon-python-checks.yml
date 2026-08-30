@@ -140,7 +140,10 @@ jobs:
             python -m pip install 'h5py>=3,<4'
             python -c "import h5py; print('h5py', h5py.__version__)"
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
-              python -m pip install './paimon-python[lerobot]'
+              # LeRobot's media dependencies select NumPy 2.x. Upgrade the
+              # preinstalled Pandas 2.0 wheel in the same resolution to avoid
+              # a NumPy ABI mismatch in datasets.
+              python -m pip install 'pandas>=2.2,<3' './paimon-python[lerobot]'
               python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"
             fi
 
