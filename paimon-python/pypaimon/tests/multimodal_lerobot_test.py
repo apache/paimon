@@ -82,13 +82,12 @@ class LeRobotValidationTest(unittest.TestCase):
             _schema_from_info(info, include_task=False)
 
         info["features"] = {
-            "depth": {
+            "camera": {
                 "dtype": "video",
-                "shape": [8, 10, 1],
-                "info": {"is_depth_map": True},
+                "shape": [8, 10, 3],
             }
         }
-        with self.assertRaisesRegex(ValueError, "depth-video"):
+        with self.assertRaisesRegex(ValueError, "video feature camera.*not supported"):
             _schema_from_info(info, include_task=False)
 
     def test_local_v2_is_rejected_before_opening(self):
@@ -104,6 +103,26 @@ class LeRobotValidationTest(unittest.TestCase):
                 "warehouse": str(temp_dir / "warehouse"),
             })
             with self.assertRaisesRegex(ValueError, "supports LeRobot Dataset v3 only"):
+                connection.load_from_lerobot("frames", temp_dir)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_local_video_is_rejected_before_opening(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_video_"))
+        try:
+            info_dir = temp_dir / "meta"
+            info_dir.mkdir()
+            (info_dir / "info.json").write_text(json.dumps({
+                "codebase_version": "v3.0",
+                "features": {
+                    "camera": {"dtype": "video", "shape": [8, 10, 3]},
+                },
+            }))
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            with self.assertRaisesRegex(
+                    ValueError, "video feature camera.*not supported"):
                 connection.load_from_lerobot("frames", temp_dir)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -163,9 +182,7 @@ class LeRobotImportTest(unittest.TestCase):
     def setUpClass(cls):
         cls.source_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_source_"))
         cls.image_source = cls.source_dir / "images"
-        cls.video_source = cls.source_dir / "videos"
         cls._create_image_dataset(cls.image_source)
-        cls._create_video_dataset(cls.video_source)
 
     @classmethod
     def tearDownClass(cls):
@@ -240,41 +257,6 @@ class LeRobotImportTest(unittest.TestCase):
             dataset.save_episode()
         dataset.finalize()
 
-    @staticmethod
-    def _create_video_dataset(root):
-        dataset = LeRobotDataset.create(
-            repo_id="pypaimon/local-video-test",
-            root=root,
-            fps=5,
-            use_videos=True,
-            video_backend="pyav",
-            vcodec="h264",
-            image_writer_processes=0,
-            image_writer_threads=0,
-            features={
-                "observation.video": {
-                    "dtype": "video",
-                    "shape": (8, 10, 3),
-                    "names": ["height", "width", "channels"],
-                },
-                "action": {
-                    "dtype": "float32",
-                    "shape": (2,),
-                    "names": None,
-                },
-            },
-        )
-        for frame_index in range(3):
-            dataset.add_frame({
-                "observation.video": np.full(
-                    (8, 10, 3), frame_index * 80, dtype=np.uint8),
-                "action": np.array(
-                    [frame_index, -frame_index], dtype=np.float32),
-                "task": "move",
-            })
-        dataset.save_episode()
-        dataset.finalize()
-
     def test_import_infers_schema_preserves_episodes_and_appends(self):
         snapshot_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
@@ -329,7 +311,6 @@ class LeRobotImportTest(unittest.TestCase):
         source = LeRobotDataset(
             repo_id="pypaimon/local-image-test",
             root=self.image_source,
-            video_backend="pyav",
         ).hf_dataset.with_format("arrow")[:]
         expected = source.column("observation.image").to_pylist()
         self.assertEqual(
@@ -341,22 +322,6 @@ class LeRobotImportTest(unittest.TestCase):
             "robot_data", self.image_source, batch_size=4)
         self.assertEqual(2, appended_snapshot_id)
         self.assertEqual(10, table.scan().to_arrow().num_rows)
-
-    def test_video_frames_are_independent_blob_payloads(self):
-        snapshot_id = self.connection.load_from_lerobot(
-            "video_data", self.video_source, batch_size=2)
-        self.assertEqual(1, snapshot_id)
-
-        table = self.connection.get_table("video_data")
-        scalar, blobs = table.scan().select([
-            "index", "observation.video"]
-        ).read_blobs()
-        self.assertEqual(3, scalar.num_rows)
-        bodies = blobs["observation.video"]
-        self.assertTrue(all(body.startswith(b"\x89PNG\r\n\x1a\n")
-                            for body in bodies))
-        mp4 = next(self.video_source.rglob("*.mp4")).read_bytes()
-        self.assertTrue(all(body != mp4 for body in bodies))
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"
@@ -394,52 +359,6 @@ class LeRobotImportTest(unittest.TestCase):
             path for path in source_file_io.opened_paths
             if "/data/" in path and path.endswith(".parquet")
         ]))
-
-    def test_oss_video_uses_explicit_options_and_one_file_cache(self):
-        source = "oss://source-bucket/robot-video"
-        source_file_io = _RemoteLeRobotFileIO(self.video_source, source)
-        source_options = {
-            "fs.oss.endpoint": "oss-cn-test.example.com",
-            "fs.oss.accessKeyId": "source-key",
-            "fs.oss.accessKeySecret": "source-secret",
-        }
-
-        with patch(
-                "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
-                return_value=source_file_io) as source_file_io_class:
-            snapshot_id = self.connection.load_from_lerobot(
-                "oss_video",
-                source,
-                source_options=source_options,
-            )
-
-        self.assertEqual(1, snapshot_id)
-        self.assertEqual(1, source_file_io.close_count)
-        self.assertEqual(
-            source_options,
-            source_file_io_class.call_args.args[0].to_map(),
-        )
-        self.assertEqual(
-            1,
-            len([path for path in source_file_io.opened_paths
-                 if path.endswith(".mp4")]),
-        )
-        self.assertEqual(
-            len(source_file_io.opened_paths),
-            len(set(source_file_io.opened_paths)),
-        )
-        self.assertFalse(any(
-            path.endswith("meta/stats.json")
-            for path in source_file_io.opened_paths
-        ))
-        table = self.connection.get_table("oss_video")
-        unused_scalar, blobs = table.scan().select([
-            "index", "observation.video"
-        ]).read_blobs()
-        self.assertTrue(all(
-            body.startswith(b"\x89PNG\r\n\x1a\n")
-            for body in blobs["observation.video"]
-        ))
 
     def test_existing_incompatible_schema_fails_without_snapshot(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())

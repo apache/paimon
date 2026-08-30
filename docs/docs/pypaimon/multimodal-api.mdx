@@ -354,12 +354,11 @@ snapshot_id = conn.load_from_lerobot(
 
 Missing tables are created from metadata; existing tables use strict schema
 validation and append semantics. Scalars map to scalar types, vectors to
-`VECTOR`, higher-rank tensors to nested `ARRAY`, and media to `BLOB`. Images
-keep their compressed bytes; video frames are stored as PNG BLOBs while only
-active MP4 chunks are cached locally during import.
+`VECTOR`, higher-rank tensors to nested `ARRAY`, and images to `BLOB`. Images
+keep their compressed bytes.
 
-Only v3 is supported; `uint64`, depth video, and language event structures are
-rejected.
+Only v3 is supported. Video features, `uint64`, and language event structures
+are rejected.
 
 ## Overwrite
 

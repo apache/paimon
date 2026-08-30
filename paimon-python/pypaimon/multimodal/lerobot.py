@@ -18,9 +18,7 @@
 
 import io
 import json
-import shutil
 import sys
-import tempfile
 from bisect import bisect_right
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -48,10 +46,6 @@ from pypaimon.multimodal.hdf5 import (
 from pypaimon.multimodal.table import _target_schema
 
 
-_DEFAULT_TABLE_OPTIONS = {
-    "file.format": "parquet",
-    "vector.file.format": "parquet",
-}
 _SCALAR_DTYPES = {
     "bool": pa.bool_(),
     "boolean": pa.bool_(),
@@ -67,7 +61,6 @@ _SCALAR_DTYPES = {
     "float64": pa.float64(),
     "string": pa.string(),
 }
-_MEDIA_DTYPES = ("image", "video")
 
 
 @dataclass(frozen=True)
@@ -113,6 +106,7 @@ def load_from_lerobot(
             resolved_source, local_info):
         if local_info is not None:
             _require_v3(local_info, resolved_source.path)
+            _schema_from_info(local_info, include_task=False)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -259,9 +253,8 @@ def _open_dataset(LeRobotDataset, source):
             return LeRobotDataset(
                 repo_id=source.repo_id,
                 root=source.root,
-                video_backend="pyav",
             )
-        return LeRobotDataset(repo_id=source.repo_id, video_backend="pyav")
+        return LeRobotDataset(repo_id=source.repo_id)
     except Exception as error:
         raise ValueError(
             "Cannot open LeRobot Dataset v3 source %s: %s"
@@ -287,25 +280,15 @@ class _RemoteLeRobotDataset:
             int(episode["dataset_from_index"])
             for episode in self._episodes
         ]
-        self._episodes_by_index = {
-            int(episode["episode_index"]): episode
-            for episode in self._episodes
-        }
         self._data_ranges = self._build_data_ranges(info)
         self._cached_data_path = None
         self._cached_data_table = None
-        self._video_cache = {}
-        self._video_temp_dir = None
 
     def __len__(self):
         return int(self.meta.info.get("total_frames", 0))
 
     def close(self):
         self._cached_data_table = None
-        self._video_cache.clear()
-        if self._video_temp_dir is not None:
-            self._video_temp_dir.cleanup()
-            self._video_temp_dir = None
 
     def read_batch(self, begin, end):
         episode = self._episode_for_range(begin, end)
@@ -339,49 +322,6 @@ class _RemoteLeRobotDataset:
                     _remote_path(self.source.path, image_path)
                 return _read_remote_bytes(self._file_io, source_path)
         return _encode_media_frame(value)
-
-    def read_video_values(self, name, raw):
-        episode_indices = raw.column("episode_index").to_pylist()
-        if not episode_indices or len(set(episode_indices)) != 1:
-            raise ValueError(
-                "LeRobot video batches must contain exactly one Episode.")
-        episode_index = int(_python_scalar(episode_indices[0]))
-        episode = self._episodes_by_index.get(episode_index)
-        if episode is None:
-            raise ValueError(
-                "LeRobot metadata is missing Episode %d." % episode_index)
-        info = self.meta.info
-        relative_path = info["video_path"].format(
-            video_key=name,
-            chunk_index=int(episode[
-                "videos/%s/chunk_index" % name]),
-            file_index=int(episode[
-                "videos/%s/file_index" % name]),
-        )
-        source_path = _remote_path(self.source.path, relative_path)
-        local_path = self._cached_video_path(name, source_path)
-        start = float(episode["videos/%s/from_timestamp" % name])
-        timestamps = [
-            start + float(_python_scalar(value))
-            for value in raw.column("timestamp").to_pylist()
-        ]
-        try:
-            from lerobot.datasets.video_utils import decode_video_frames
-        except ImportError as error:
-            raise ImportError(
-                "LeRobot video import requires the video dependencies from "
-                "'pypaimon[lerobot]'.") from error
-        frames = decode_video_frames(
-            local_path,
-            timestamps,
-            1e-4,
-            "pyav",
-        )
-        if len(frames) != len(timestamps):
-            raise ValueError(
-                "LeRobot video %s returned %d frames; expected %d."
-                % (source_path, len(frames), len(timestamps)))
-        return [_encode_media_frame(frame) for frame in frames]
 
     def _load_episodes(self, info):
         episode_count = int(info.get("total_episodes", 0))
@@ -454,33 +394,6 @@ class _RemoteLeRobotDataset:
             chunk_index=int(episode["data/chunk_index"]),
             file_index=int(episode["data/file_index"]),
         )
-
-    def _cached_video_path(self, name, source_path):
-        cached = self._video_cache.get(name)
-        if cached is not None and cached[0] == source_path:
-            return cached[1]
-        if cached is not None:
-            try:
-                cached[1].unlink()
-            except FileNotFoundError:
-                pass
-        if self._video_temp_dir is None:
-            self._video_temp_dir = tempfile.TemporaryDirectory(
-                prefix="pypaimon_lerobot_video_")
-        output = tempfile.NamedTemporaryFile(
-            dir=self._video_temp_dir.name,
-            suffix=".mp4",
-            delete=False,
-        )
-        try:
-            stream = self._file_io.new_input_stream(source_path)
-            with closing(stream) as source_stream:
-                shutil.copyfileobj(source_stream, output)
-        finally:
-            output.close()
-        local_path = Path(output.name)
-        self._video_cache[name] = source_path, local_path
-        return local_path
 
 
 def _remote_path(root, relative_path):
@@ -559,12 +472,11 @@ def _feature_field(name, feature):
             "LeRobot feature %s metadata must be an object." % name)
     dtype = str(feature.get("dtype", ""))
     shape = _feature_shape(feature, name)
-    if dtype in _MEDIA_DTYPES:
-        if dtype == "video" and _is_depth_video(feature):
-            raise ValueError(
-                "LeRobot depth-video feature %s is not supported; its "
-                "decoded values cannot be losslessly stored as PNG frames."
-                % name)
+    if dtype == "video":
+        raise ValueError(
+            "LeRobot video feature %s is not supported yet; use an "
+            "image-based dataset." % name)
+    if dtype == "image":
         arrow_type = pa.large_binary()
     else:
         scalar_type = _SCALAR_DTYPES.get(dtype)
@@ -585,12 +497,6 @@ def _feature_field(name, feature):
         nullable=False,
         metadata={b"description": description.encode("utf-8")},
     )
-
-
-def _is_depth_video(feature):
-    info = feature.get("info") or feature.get("video_info") or {}
-    return bool(info.get("is_depth_map")
-                or info.get("video.is_depth_map"))
 
 
 def _feature_shape(feature, name):
@@ -624,14 +530,10 @@ def _get_or_create_table(connection, table_name, schema, options):
     try:
         return connection.get_table(table_name)
     except (DatabaseNotExistException, TableNotExistException):
-        table_options = dict(_DEFAULT_TABLE_OPTIONS)
-        if options:
-            table_options.update({str(key): str(value)
-                                  for key, value in options.items()})
         return connection.create_table(
             table_name,
             schema=schema,
-            options=table_options,
+            options=options,
         )
 
 
@@ -732,45 +634,26 @@ def _read_batch(dataset, info, begin, end, schema):
     elif not isinstance(raw, pa.Table):
         raw = pa.Table.from_pydict(raw)
     features = info["features"]
-    video_names = [name for name, feature in features.items()
-                   if feature["dtype"] == "video"]
-    remote_video_reader = getattr(dataset, "read_video_values", None)
-    if callable(remote_video_reader):
-        video_values = {
-            name: remote_video_reader(name, raw)
-            for name in video_names
-        }
-    else:
-        video_values = {name: [] for name in video_names}
-        if video_names:
-            for index in range(begin, end):
-                item = dataset[index]
-                for name in video_names:
-                    video_values[name].append(
-                        _encode_media_frame(item[name]))
 
     arrays = []
     fields = []
     for name, feature in features.items():
         field = schema.field(name)
         dtype = feature["dtype"]
-        if dtype == "video":
-            values = video_values[name]
-        else:
-            if name not in raw.column_names:
-                raise ValueError(
-                    "LeRobot data is missing metadata feature %s." % name)
-            values = raw.column(name).to_pylist()
-            if dtype == "image":
-                image_reader = getattr(dataset, "image_bytes", None)
-                if callable(image_reader):
-                    values = [image_reader(value) for value in values]
-                else:
-                    values = [_image_bytes(value, dataset.root)
-                              for value in values]
+        if name not in raw.column_names:
+            raise ValueError(
+                "LeRobot data is missing metadata feature %s." % name)
+        values = raw.column(name).to_pylist()
+        if dtype == "image":
+            image_reader = getattr(dataset, "image_bytes", None)
+            if callable(image_reader):
+                values = [image_reader(value) for value in values]
             else:
-                values = [_normalize_value(value, feature, name)
+                values = [_image_bytes(value, dataset.root)
                           for value in values]
+        else:
+            values = [_normalize_value(value, feature, name)
+                      for value in values]
         arrays.append(pa.array(values, type=field.type))
         fields.append(field)
 
