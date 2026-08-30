@@ -18,12 +18,14 @@
 
 import io
 import json
+import posixpath
 import sys
 from bisect import bisect_right
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import pyarrow as pa
 import pyarrow.fs as pafs
@@ -104,9 +106,11 @@ def load_from_lerobot(
     validated_source_options = _validated_source_options(source_options)
     with _resolved_source(source, validated_source_options) as (
             resolved_source, local_info):
-        if local_info is not None:
-            _require_v3(local_info, resolved_source.path)
-            _schema_from_info(local_info, include_task=False)
+        if local_info is None:
+            local_info = _load_hub_info(resolved_source)
+        _require_v3(local_info, resolved_source.path)
+        _validate_info_paths(local_info)
+        _schema_from_info(local_info, include_task=False)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -247,14 +251,33 @@ def _import_lerobot_dataset():
     return LeRobotDataset
 
 
+def _load_hub_info(source):
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+    except ImportError as error:
+        raise ImportError(
+            "load_from_lerobot requires LeRobot; install "
+            "'pypaimon[lerobot]'.") from error
+    try:
+        return dict(LeRobotDatasetMetadata(repo_id=source.repo_id).info)
+    except Exception as error:
+        raise ValueError(
+            "Cannot open LeRobot Dataset v3 metadata %s: %s"
+            % (source.path, error)) from error
+
+
 def _open_dataset(LeRobotDataset, source):
     try:
         if source.root is not None:
             return LeRobotDataset(
                 repo_id=source.repo_id,
                 root=source.root,
+                download_videos=False,
             )
-        return LeRobotDataset(repo_id=source.repo_id)
+        return LeRobotDataset(
+            repo_id=source.repo_id,
+            download_videos=False,
+        )
     except Exception as error:
         raise ValueError(
             "Cannot open LeRobot Dataset v3 source %s: %s"
@@ -293,7 +316,11 @@ class _RemoteLeRobotDataset:
     def read_batch(self, begin, end):
         episode = self._episode_for_range(begin, end)
         relative_path = self._data_path(episode, self.meta.info)
-        source_path = _remote_path(self.source.path, relative_path)
+        source_path = _remote_source_path(
+            self.source.path,
+            relative_path,
+            "info.data_path",
+        )
         if source_path != self._cached_data_path:
             table = _read_remote_parquet(self._file_io, source_path)
             expected_begin, expected_end = self._data_ranges[relative_path]
@@ -318,8 +345,11 @@ class _RemoteLeRobotDataset:
                 return bytes(body)
             image_path = value.get("path")
             if image_path:
-                source_path = image_path if "://" in image_path else \
-                    _remote_path(self.source.path, image_path)
+                source_path = _remote_source_path(
+                    self.source.path,
+                    image_path,
+                    "image path",
+                )
                 return _read_remote_bytes(self._file_io, source_path)
         return _encode_media_frame(value)
 
@@ -390,14 +420,72 @@ class _RemoteLeRobotDataset:
 
     @staticmethod
     def _data_path(episode, info):
-        return info["data_path"].format(
+        path = info["data_path"].format(
             chunk_index=int(episode["data/chunk_index"]),
             file_index=int(episode["data/file_index"]),
         )
+        return _relative_dataset_path(path, "info.data_path")
 
 
 def _remote_path(root, relative_path):
     return "%s/%s" % (root.rstrip("/"), relative_path.lstrip("/"))
+
+
+def _relative_dataset_path(path, name):
+    if not isinstance(path, str) or not path:
+        raise ValueError("LeRobot %s must be a relative path." % name)
+    if "\\" in path or urlparse(path).scheme or path.startswith(("/", "~")):
+        raise ValueError(
+            "LeRobot %s must stay within the source directory: %s"
+            % (name, path))
+    normalized = posixpath.normpath(path)
+    if normalized in (".", "..") or normalized.startswith("../"):
+        raise ValueError(
+            "LeRobot %s must stay within the source directory: %s"
+            % (name, path))
+    return normalized
+
+
+def _remote_source_path(root, path, name):
+    if not isinstance(path, str) or not path:
+        _relative_dataset_path(path, name)
+    root_uri = urlparse(root)
+    path_uri = urlparse(path)
+    root_path = posixpath.normpath(unquote(root_uri.path) or "/")
+    if path_uri.scheme:
+        if path_uri.query or path_uri.fragment \
+                or path_uri.scheme.lower() != root_uri.scheme.lower() \
+                or path_uri.netloc != root_uri.netloc:
+            raise ValueError(
+                "LeRobot %s must stay within the source directory: %s"
+                % (name, path))
+        source_path = posixpath.normpath(unquote(path_uri.path) or "/")
+    else:
+        relative_path = _relative_dataset_path(unquote(path), name)
+        source_path = posixpath.normpath(posixpath.join(
+            root_path,
+            relative_path,
+        ))
+    if posixpath.commonpath([root_path, source_path]) != root_path:
+        raise ValueError(
+            "LeRobot %s must stay within the source directory: %s"
+            % (name, path))
+    return urlunparse((
+        root_uri.scheme,
+        root_uri.netloc,
+        quote(source_path, safe="/:%"),
+        "",
+        "",
+        "",
+    ))
+
+
+def _validate_info_paths(info):
+    for name in ("data_path", "video_path"):
+        path = info.get(name)
+        if path is not None:
+            decoded = unquote(path) if isinstance(path, str) else path
+            _relative_dataset_path(decoded, "info.%s" % name)
 
 
 def _read_remote_bytes(source_file_io, path):
@@ -716,9 +804,17 @@ def _image_bytes(value, root):
             return bytes(body)
         image_path = value.get("path")
         if image_path:
+            root = Path(root).resolve()
             path = Path(image_path)
             if not path.is_absolute():
-                path = Path(root) / path
+                path = root / path
+            path = path.resolve()
+            try:
+                path.relative_to(root)
+            except ValueError as error:
+                raise ValueError(
+                    "LeRobot image path must stay within the source "
+                    "directory: %s" % image_path) from error
             return path.read_bytes()
     return _encode_media_frame(value)
 
@@ -758,6 +854,10 @@ def _encode_media_frame(value):
 
 def _task_name(tasks, task_index):
     index = int(_python_scalar(task_index))
+    if index < 0 or index >= len(tasks):
+        raise ValueError(
+            "LeRobot task_index %d is outside [0, %d)."
+            % (index, len(tasks)))
     if hasattr(tasks, "iloc"):
         return str(tasks.iloc[index].name)
     task = tasks[index]

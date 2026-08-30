@@ -29,8 +29,14 @@ import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal.lerobot import (
+    _LeRobotSource,
+    _image_bytes,
     _import_lerobot_dataset,
+    _open_dataset,
+    _remote_source_path,
     _schema_from_info,
+    _task_name,
+    _validate_info_paths,
 )
 
 try:
@@ -40,6 +46,75 @@ except ImportError:
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_dataset_open_never_downloads_videos(self):
+        calls = []
+
+        class Dataset:
+
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+        _open_dataset(Dataset, _LeRobotSource(
+            path="lerobot/example",
+            root=None,
+            repo_id="lerobot/example",
+        ))
+        self.assertFalse(calls[0]["download_videos"])
+
+    def test_dataset_paths_cannot_escape_source(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_paths_"))
+        try:
+            root = temp_dir / "source"
+            root.mkdir()
+            inside = root / "frame.png"
+            inside.write_bytes(b"frame")
+            outside = temp_dir / "secret"
+            outside.write_bytes(b"secret")
+
+            self.assertEqual(
+                b"frame",
+                _image_bytes({"path": str(inside)}, root),
+            )
+            for path in ("../secret", str(outside)):
+                with self.assertRaisesRegex(ValueError, "within the source"):
+                    _image_bytes({"path": path}, root)
+
+            _validate_info_paths({
+                "data_path": "data/chunk-{chunk_index:03d}/file.parquet",
+            })
+            for path in ("../secret.parquet", "%2e%2e/secret.parquet"):
+                with self.assertRaisesRegex(ValueError, "info.data_path"):
+                    _validate_info_paths({"data_path": path})
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_remote_image_paths_cannot_escape_source(self):
+        root = "oss://bucket/datasets/robot"
+        self.assertEqual(
+            root + "/images/frame.png",
+            _remote_source_path(root, "images/frame.png", "image path"),
+        )
+        self.assertEqual(
+            root + "/images/frame.png",
+            _remote_source_path(
+                root,
+                root + "/images/frame.png",
+                "image path",
+            ),
+        )
+        for path in (
+                "../private",
+                "%2e%2e/private",
+                "oss://other/private",
+                "oss://bucket/datasets/robot/../../private"):
+            with self.assertRaisesRegex(ValueError, "within the source"):
+                _remote_source_path(root, path, "image path")
+
+    def test_negative_task_index_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "task_index -1"):
+            _task_name(["pick", "place"], -1)
+        self.assertEqual("place", _task_name(["pick", "place"], 1))
 
     def test_optional_dependency_error_is_actionable(self):
         original_import = builtins.__import__
