@@ -27,9 +27,10 @@ from pypaimon.utils.range import Range
 
 
 class _F:
-    def __init__(self, tag: int, from_: int = None, to: int = None):
+    def __init__(self, tag: int, from_: int = None, to: int = None,
+                 file_name: str = None):
         self.tag = tag
-        self.file_name = f"f{tag}"
+        self.file_name = file_name or f"f{tag}"
         self._range = Range(from_, to) if from_ is not None else None
 
     def row_id_range(self):
@@ -91,6 +92,20 @@ class SplitByRowIdEquivalenceTest(unittest.TestCase):
         files = [_F(0, 10, 14), _F(1, 0, 4), _F(2, 5, 9)]  # unsorted input
         self.assertEqual(_shape(DataEvolutionSplitGenerator._split_by_row_id(files)),
                          [[1], [2], [0]])  # groups come out ordered by range start
+
+    def test_sidecar_attaches_only_to_intersecting_normal_ranges(self):
+        files = [
+            _F(0, 0, 9),
+            _F(1, 20, 29),
+            _F(2, 40, 49),
+            _F(3, 25, 44, "spanning.video"),
+            _F(4, 60, 69, "unanchored.video"),
+        ]
+
+        self.assertEqual(
+            _shape(DataEvolutionSplitGenerator._split_by_row_id(files)),
+            [[0], [1, 3], [2, 3], [4]],
+        )
 
     def test_matches_reference_grouping_on_random_inputs(self):
         rng = random.Random(1234)

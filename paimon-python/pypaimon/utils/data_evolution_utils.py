@@ -17,6 +17,7 @@
 
 """Utilities for data-evolution tables."""
 
+from bisect import bisect_left
 from typing import Callable, Iterable, List, TypeVar
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -75,6 +76,7 @@ def group_by_normal_file_range(
         )
         for group in groups
     ]
+    group_ends = [group_range.to for group_range in group_ranges]
 
     unanchored = []
     for sidecar in files:
@@ -82,10 +84,12 @@ def group_by_normal_file_range(
             continue
         sidecar_range = range_func(sidecar)
         attached = False
-        for index, group_range in enumerate(group_ranges):
-            if group_range.overlaps(sidecar_range):
-                groups[index].append(sidecar)
-                attached = True
+        index = bisect_left(group_ends, sidecar_range.from_)
+        while (index < len(group_ranges)
+               and group_ranges[index].from_ <= sidecar_range.to):
+            groups[index].append(sidecar)
+            attached = True
+            index += 1
         if not attached:
             unanchored.append(sidecar)
 
