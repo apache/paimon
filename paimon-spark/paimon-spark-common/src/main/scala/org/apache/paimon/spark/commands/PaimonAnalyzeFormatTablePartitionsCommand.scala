@@ -105,8 +105,9 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
       sparkSession: SparkSession,
       partitions: List[JMap[String, String]],
       parallelism: Int): JList[PartitionStatistics] = {
-    val tasks = math.min(parallelism, partitions.size)
-    val perTask = math.max(1, parallelism / tasks)
+    val effectiveParallelism = math.max(1, parallelism)
+    val tasks = math.min(effectiveParallelism, partitions.size)
+    val perTask = math.max(1, effectiveParallelism / tasks)
     // The table, not this command: a Spark table cannot be shipped to an executor.
     val table = v2Table.table
     val measured = sparkSession.sparkContext
