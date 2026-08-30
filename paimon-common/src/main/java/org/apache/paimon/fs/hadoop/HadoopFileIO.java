@@ -30,6 +30,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
 
@@ -39,12 +40,16 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,7 +64,9 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     private org.apache.paimon.options.Options options;
 
-    protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
+    protected transient volatile Map<Pair<String, String>, Pair<FileSystem, Boolean>> fsMap;
+
+    private transient volatile boolean closed;
 
     private final Path path;
 
@@ -69,7 +76,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     @VisibleForTesting
     public void setFileSystem(FileSystem fs) throws IOException {
-        getFileSystem(path(path), p -> fs);
+        getFileSystem(path(path), p -> fs, false);
     }
 
     @Override
@@ -190,13 +197,18 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     @VisibleForTesting
     FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        return getFileSystem(path, this::createFileSystem);
+        return getFileSystem(path, this::createFileSystem, true);
     }
 
     private FileSystem getFileSystem(
             org.apache.hadoop.fs.Path path,
-            FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator)
+            FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator,
+            boolean mayOwn)
             throws IOException {
+        if (closed) {
+            throw new IOException("This FileIO is closed.");
+        }
+
         if (fsMap == null) {
             synchronized (this) {
                 if (fsMap == null) {
@@ -205,25 +217,99 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
             }
         }
 
-        Map<Pair<String, String>, FileSystem> map = fsMap;
+        Map<Pair<String, String>, Pair<FileSystem, Boolean>> map = fsMap;
 
         URI uri = path.toUri();
         String scheme = uri.getScheme();
         String authority = uri.getAuthority();
         Pair<String, String> key = Pair.of(scheme, authority);
-        FileSystem fs = map.get(key);
-        if (fs == null) {
-            fs = creator.apply(path);
-            map.put(key, fs);
+        Pair<FileSystem, Boolean> entry = map.get(key);
+        if (entry == null) {
+            Pair<FileSystem, Boolean> created =
+                    Pair.of(creator.apply(path), mayOwn && isOwnedScheme(scheme));
+            entry = created;
+            boolean rejected = false;
+            synchronized (this) {
+                if (closed) {
+                    rejected = true;
+                } else {
+                    Pair<FileSystem, Boolean> previous = map.putIfAbsent(key, created);
+                    if (previous != null) {
+                        entry = previous;
+                    }
+                }
+            }
+            if (rejected || entry.getLeft() != created.getLeft()) {
+                closeIfOwned(created);
+            }
+            if (rejected) {
+                throw new IOException("This FileIO is closed.");
+            }
         }
-        return fs;
+        return entry.getLeft();
+    }
+
+    private static void closeIfOwned(Pair<FileSystem, Boolean> entry) {
+        if (entry.getRight()) {
+            IOUtils.closeQuietly(entry.getLeft());
+        }
     }
 
     protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         Configuration conf = hadoopConf.get();
         FileSystem fileSystem = path.getFileSystem(conf);
-        fileSystem = HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
-        return fileSystem;
+        boolean handedOver = false;
+        try {
+            FileSystem secured =
+                    HadoopSecuredFileSystem.trySecureFileSystem(fileSystem, options, conf);
+            handedOver = true;
+            return secured;
+        } finally {
+            if (!handedOver && isOwnedScheme(path.toUri().getScheme())) {
+                IOUtils.closeQuietly(fileSystem);
+            }
+        }
+    }
+
+    /** Only an uncached file system is ours to close: nobody else can reach it. */
+    @VisibleForTesting
+    boolean isOwnedScheme(@Nullable String scheme) {
+        if (hadoopConf == null) {
+            return false;
+        }
+        Configuration conf = hadoopConf.get();
+        if (scheme == null) {
+            try {
+                scheme = FileSystem.getDefaultUri(conf).getScheme();
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
+        }
+        return conf.getBoolean(String.format("fs.%s.impl.disable.cache", scheme), false);
+    }
+
+    @Override
+    public void close() throws IOException {
+        List<FileSystem> owned = new ArrayList<>();
+        synchronized (this) {
+            closed = true;
+            Map<Pair<String, String>, Pair<FileSystem, Boolean>> map = fsMap;
+            if (map == null) {
+                return;
+            }
+            for (Pair<FileSystem, Boolean> entry : map.values()) {
+                if (entry.getRight()) {
+                    owned.add(entry.getLeft());
+                }
+            }
+            map.clear();
+        }
+
+        try {
+            IOUtils.closeAll(owned);
+        } catch (Exception e) {
+            throw new IOException("Failed to close the file systems owned by this FileIO", e);
+        }
     }
 
     private static class HadoopSeekableInputStream extends SeekableInputStream {

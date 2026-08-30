@@ -21,6 +21,7 @@ package org.apache.paimon.fs.hadoop;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.security.HadoopModule;
 import org.apache.paimon.security.SecurityConfiguration;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
@@ -168,6 +169,25 @@ public class HadoopSecuredFileSystem extends FileSystem {
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         return runSecuredWithIOException(() -> fileSystem.getFileStatus(path));
+    }
+
+    @Override
+    public void close() throws IOException {
+        try {
+            IOUtils.closeAll(super::close, this::closeWrapped);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to close the secured file system.", e);
+        }
+    }
+
+    private void closeWrapped() throws IOException {
+        runSecuredWithIOException(
+                () -> {
+                    fileSystem.close();
+                    return null;
+                });
     }
 
     private void runSecured(final Runnable securedRunnable) {
