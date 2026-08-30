@@ -86,7 +86,8 @@ case class MergeRowsExec(
   override def supportCodegen: Boolean = {
     OptionUtils.mergeCodegenEnabled() &&
     conf.wholeStageEnabled &&
-    CodeGenerator.isValidParamLength(CodeGenerator.calculateParamLength(child.output))
+    CodeGenerator.isValidParamLength(
+      CodeGenerator.calculateParamLength(child.output.filter(usedInputs.contains)))
   }
 
   override protected def doProduce(ctx: CodegenContext): String = {
@@ -267,23 +268,26 @@ case class MergeRowsExec(
       variables: Seq[ExprCode]): (Seq[String], Seq[String], Seq[ExprCode]) = {
     val arguments = mutable.ArrayBuffer[String]()
     val parameters = mutable.ArrayBuffer[String]()
-    val paramVars = mutable.ArrayBuffer[ExprCode]()
+    val paramVars = mutable.ArrayBuffer(variables: _*)
 
     variables.zipWithIndex.foreach {
       case (evaluatedVariable, index) =>
-        val paramName = ctx.freshName(s"expr_$index")
-        val paramType = CodeGenerator.javaType(attributes(index).dataType)
-        arguments += evaluatedVariable.value.toString
-        parameters += s"$paramType $paramName"
-        val paramIsNull = if (!attributes(index).nullable) {
-          FalseLiteral
-        } else {
-          val isNull = ctx.freshName(s"exprIsNull_$index")
-          arguments += evaluatedVariable.isNull.toString
-          parameters += s"boolean $isNull"
-          JavaCode.isNullVariable(isNull)
+        if (usedInputs.contains(attributes(index))) {
+          val paramName = ctx.freshName(s"expr_$index")
+          val paramType = CodeGenerator.javaType(attributes(index).dataType)
+          arguments += evaluatedVariable.value.toString
+          parameters += s"$paramType $paramName"
+          val paramIsNull = if (!attributes(index).nullable) {
+            FalseLiteral
+          } else {
+            val isNull = ctx.freshName(s"exprIsNull_$index")
+            arguments += evaluatedVariable.isNull.toString
+            parameters += s"boolean $isNull"
+            JavaCode.isNullVariable(isNull)
+          }
+          paramVars(index) =
+            ExprCode(paramIsNull, JavaCode.variable(paramName, attributes(index).dataType))
         }
-        paramVars += ExprCode(paramIsNull, JavaCode.variable(paramName, attributes(index).dataType))
     }
 
     (arguments.toSeq, parameters.toSeq, paramVars.toSeq)
