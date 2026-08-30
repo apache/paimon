@@ -589,6 +589,7 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._committed_files_to_delete_on_abort = []
             self.file_io = _RecordingFileIO()
             self.written = []
+            self._video_group_policy = None
 
         def _write_normal_data_to_file(self, data: pa.Table):
             self.written.append(data)
