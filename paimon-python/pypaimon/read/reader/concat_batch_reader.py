@@ -23,10 +23,6 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.reader.format_blob_reader import (
-    BlobRecordIterator,
-    VideoFrameRecordIterator,
-)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -590,46 +586,18 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             return {}
 
-        try:
-            if getattr(reader, "_is_video", False):
-                iterator = VideoFrameRecordIterator(
-                    reader._file_io,
-                    reader.file_path,
-                    reader._video_meta,
-                    self._data_field,
-                )
-                blobs = []
-                for position, _ in positions_and_row_ids:
-                    iterator.current_position = position
-                    blobs.append(next(iterator).values[0])
-            else:
-                blob_lengths = [
-                    reader.blob_lengths[pos]
-                    for pos, _ in positions_and_row_ids
-                ]
-                blob_offsets = [
-                    reader.blob_offsets[pos]
-                    for pos, _ in positions_and_row_ids
-                ]
-                iterator = BlobRecordIterator(
-                    reader._file_io,
-                    reader.file_path,
-                    blob_lengths,
-                    blob_offsets,
-                    self._data_field,
-                    reader._input_stream,
-                    blob_as_descriptor=(
-                        self._blob_as_descriptor
-                        or self._blob_parallelism > 1
-                    ),
-                )
-                blobs = [row.values[0] for row in iterator]
-            return {
-                row_id: blob
-                for (_, row_id), blob in zip(positions_and_row_ids, blobs)
-            }
-        except AttributeError as e:
-            raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
+        read_values_at = getattr(reader, "read_values_at", None)
+        if not callable(read_values_at):
+            raise TypeError(
+                "Blob fallback reader expects readers with read_values_at()."
+            )
+        blobs = read_values_at(
+            [position for position, _ in positions_and_row_ids]
+        )
+        return {
+            row_id: blob
+            for (_, row_id), blob in zip(positions_and_row_ids, blobs)
+        }
 
     @staticmethod
     def _selected_positions_and_row_ids(

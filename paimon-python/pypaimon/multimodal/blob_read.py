@@ -28,9 +28,8 @@ def fetch_blob_bodies(
     row and MAP entry order and are grouped per column.
     """
     from pypaimon.table.row.blob import (
-        BlobDescriptor,
+        BlobDescriptorSerde,
         BlobViewStruct,
-        VideoFrameDescriptor,
     )
 
     ranges = []
@@ -50,11 +49,8 @@ def fetch_blob_bodies(
                 raise ValueError(
                     "read_blobs does not support unresolved blob-view columns; "
                     "read such a column on its own, or enable blob-view resolution.")
-            if (
-                VideoFrameDescriptor.is_video_frame_descriptor(raw)
-                or BlobDescriptor.is_blob_descriptor(raw)
-            ):
-                descriptor = BlobDescriptor.deserialize(raw)
+            if BlobDescriptorSerde.is_descriptor(raw):
+                descriptor = BlobDescriptorSerde.deserialize(raw)
                 ranges.append(
                     (descriptor.uri, descriptor.offset, descriptor.length)
                 )

@@ -22,7 +22,6 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobPlaceholder;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.format.FileAwareFormatWriter;
@@ -116,13 +115,11 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             append(PLACEHOLDER_REFERENCE, 0);
             return;
         }
+        VideoFrameDescriptor frame = VideoFrameDescriptor.fromBlob(blob);
         checkArgument(
-                blob != null
-                        && blob.getClass() == BlobRef.class
-                        && blob.toDescriptor() instanceof VideoFrameDescriptor,
+                frame != null,
                 "Video fields require an exact BlobRef containing a VideoFrameDescriptor.");
 
-        VideoFrameDescriptor frame = (VideoFrameDescriptor) blob.toDescriptor();
         BlobDescriptor payload = frame.payloadDescriptor();
         Integer ordinal = physicalVideos.get(payload);
         if (ordinal == null) {

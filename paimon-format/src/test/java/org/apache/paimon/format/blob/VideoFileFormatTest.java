@@ -40,6 +40,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -116,6 +118,40 @@ public class VideoFileFormatTest {
         assertThat(frame3.payloadDescriptor()).isEqualTo(frame0.payloadDescriptor());
         assertThat(rows.get(4).isNullAt(0)).isTrue();
         assertThat(rows.get(5).getBlob(0)).isSameAs(BlobPlaceholder.INSTANCE);
+    }
+
+    @Test
+    public void testCrossLanguageV1Fixture() throws IOException {
+        byte[] fixture =
+                fromHex(
+                        new String(
+                                        IOUtils.readFully(
+                                                VideoFileFormatTest.class
+                                                        .getClassLoader()
+                                                        .getResourceAsStream(
+                                                                "org/apache/paimon/format/blob/video-v1.hex"),
+                                                true),
+                                        StandardCharsets.UTF_8)
+                                .trim());
+
+        Blob a2 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 2);
+        Blob a3 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 3);
+        Blob b7 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 7);
+        Blob b8 = sourceFrame("b.mp4", "WXYZ".getBytes(StandardCharsets.UTF_8), 8);
+        Blob a10 = sourceFrame("a.mp4", "abc".getBytes(StandardCharsets.UTF_8), 10);
+        write(a2, a3, null, BlobPlaceholder.INSTANCE, b7, b8, a10);
+
+        assertThat(Files.readAllBytes(java.nio.file.Paths.get(file.toUri()))).isEqualTo(fixture);
+        try (SeekableInputStream in = fileIO.newInputStream(file)) {
+            VideoFileMeta meta = new VideoFileMeta(in, fixture.length, null);
+            assertThat(meta.recordNumber()).isEqualTo(7);
+            assertThat(meta.physicalVideoNumber()).isEqualTo(2);
+            assertThat(meta.frameIndex(0)).isEqualTo(2);
+            assertThat(meta.frameIndex(1)).isEqualTo(3);
+            assertThat(meta.frameIndex(4)).isEqualTo(7);
+            assertThat(meta.frameIndex(5)).isEqualTo(8);
+            assertThat(meta.frameIndex(6)).isEqualTo(10);
+        }
     }
 
     @Test
@@ -268,5 +304,18 @@ public class VideoFileFormatTest {
 
     private static int putInt(byte[] target, int position, int value) {
         return put(target, position, intToLittleEndian(value));
+    }
+
+    private static byte[] fromHex(String hex) {
+        hex = hex.replaceAll("(?m)^#.*$", "").replaceAll("\\s", "");
+        byte[] bytes = new byte[hex.length() / 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int offset = i * 2;
+            bytes[i] =
+                    (byte)
+                            ((Character.digit(hex.charAt(offset), 16) << 4)
+                                    + Character.digit(hex.charAt(offset + 1), 16));
+        }
+        return bytes;
     }
 }

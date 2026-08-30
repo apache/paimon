@@ -18,9 +18,7 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -214,13 +212,7 @@ public class DedicatedFormatRollingFileWriter
                                     asyncFileWrite,
                                     statsDenseStore,
                                     blobTargetFileSize,
-                                    context.blobConsumer(),
-                                    context.blobInlineFields(),
-                                    context.videoFrameFields(),
-                                    context.writeNullOnMissingFile(),
-                                    context.writeNullOnFetchFailure(),
-                                    context.blobFetchMetricReporter(),
-                                    context.copyBufferSize());
+                                    context);
         } else {
             this.blobWriterFactory = null;
         }
@@ -503,10 +495,10 @@ public class DedicatedFormatRollingFileWriter
 
     private static int videoFrameFieldIndex(
             RowType writeSchema, @Nullable BlobFileContext context) {
-        if (context == null || context.videoFrameFields().isEmpty()) {
+        if (context == null || context.videoFrameField() == null) {
             return -1;
         }
-        String field = context.videoFrameFields().iterator().next();
+        String field = context.videoFrameField();
         return writeSchema.containsField(field) ? writeSchema.getFieldIndex(field) : -1;
     }
 
@@ -514,14 +506,7 @@ public class DedicatedFormatRollingFileWriter
         if (videoFrameFieldIndex < 0 || row.isNullAt(videoFrameFieldIndex)) {
             return null;
         }
-        Blob blob = row.getBlob(videoFrameFieldIndex);
-        if (blob == null || blob.getClass() != BlobRef.class) {
-            return null;
-        }
-        BlobDescriptor descriptor = blob.toDescriptor();
-        return descriptor instanceof VideoFrameDescriptor
-                ? ((VideoFrameDescriptor) descriptor).payloadDescriptor()
-                : null;
+        return VideoFrameDescriptor.payloadDescriptor(row.getBlob(videoFrameFieldIndex));
     }
 
     /** Closes the main writer and returns its metadata. */

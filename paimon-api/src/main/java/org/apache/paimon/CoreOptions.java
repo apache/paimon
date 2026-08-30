@@ -3599,8 +3599,14 @@ public class CoreOptions implements Serializable {
     }
 
     /** Resolve the scalar BLOB field stored as frame runs in video pack files. */
-    public Set<String> videoFrameField() {
-        return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+    public Optional<String> videoFrameField() {
+        Set<String> fields = parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+        checkArgument(
+                fields.size() <= 1,
+                "'%s' currently supports exactly one field, but found %s.",
+                VIDEO_FRAME_FIELD.key(),
+                fields);
+        return fields.stream().findFirst();
     }
 
     /**

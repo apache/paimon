@@ -20,6 +20,8 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
 
+import javax.annotation.Nullable;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -53,6 +55,23 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     /** Returns the physical video identity without the logical frame locator. */
     public BlobDescriptor payloadDescriptor() {
         return new BlobDescriptor(uri(), offset(), length());
+    }
+
+    /** Returns the video frame carried by an exact lazy blob reference, or {@code null}. */
+    public static @Nullable VideoFrameDescriptor fromBlob(@Nullable Blob blob) {
+        if (blob == null || blob.getClass() != BlobRef.class) {
+            return null;
+        }
+        BlobDescriptor descriptor = blob.toDescriptor();
+        return descriptor instanceof VideoFrameDescriptor
+                ? (VideoFrameDescriptor) descriptor
+                : null;
+    }
+
+    /** Returns the physical video identity carried by a frame blob, or {@code null}. */
+    public static @Nullable BlobDescriptor payloadDescriptor(@Nullable Blob blob) {
+        VideoFrameDescriptor frame = fromBlob(blob);
+        return frame == null ? null : frame.payloadDescriptor();
     }
 
     @Override

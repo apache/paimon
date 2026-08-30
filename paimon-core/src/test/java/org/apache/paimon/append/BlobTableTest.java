@@ -1557,6 +1557,60 @@ public class BlobTableTest extends TableTestBase {
         assertVideoRows(table, firstBytes, secondBytes);
     }
 
+    @Test
+    public void testVideoRollingByBlobTargetSize() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("video", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "1000");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        byte[] firstBytes = "first-video".getBytes();
+        byte[] secondBytes = "second-video".getBytes();
+        java.nio.file.Path firstSource = tempPath.resolve("size-first-source.mp4");
+        java.nio.file.Path secondSource = tempPath.resolve("size-second-source.mp4");
+        java.nio.file.Files.write(firstSource, firstBytes);
+        java.nio.file.Files.write(secondSource, secondBytes);
+        UriReader sourceReader = UriReader.fromFile(LocalFileIO.create());
+        String firstUri = new Path(firstSource.toUri()).toString();
+        String secondUri = new Path(secondSource.toUri()).toString();
+
+        List<InternalRow> rows = new ArrayList<>();
+        for (int frame = 0; frame < 3; frame++) {
+            rows.add(
+                    GenericRow.of(
+                            frame,
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(
+                                            firstUri, 0, firstBytes.length, frame))));
+        }
+        for (int frame = 0; frame < 2; frame++) {
+            rows.add(
+                    GenericRow.of(
+                            frame + 3,
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(
+                                            secondUri, 0, secondBytes.length, frame))));
+        }
+        writeRows(getTableDefault(), rows);
+
+        List<DataFileMeta> videoFiles = liveVideoFiles(getTableDefault());
+        assertThat(videoFiles.size()).isEqualTo(2);
+        assertThat(
+                        videoFiles.stream()
+                                .map(DataFileMeta::rowCount)
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .isEqualTo(Arrays.asList(2L, 3L));
+    }
+
     private List<DataFileMeta> liveVideoFiles(FileStoreTable table) {
         return table.store().newScan().plan().files().stream()
                 .map(ManifestEntry::file)

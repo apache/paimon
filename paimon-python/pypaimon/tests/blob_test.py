@@ -84,6 +84,24 @@ def _to_url(path):
     return str(path) if path else path
 
 
+def _fake_blob_values(reader, positions):
+    values = []
+    for position in positions:
+        length = reader.blob_lengths[position]
+        if length == -1:
+            values.append(None)
+        elif length == -2:
+            values.append(Blob.PLACE_HOLDER)
+        else:
+            values.append(Blob.from_file(
+                reader._file_io,
+                reader.file_path,
+                reader.blob_offsets[position] + 4,
+                length - 16,
+            ))
+    return values
+
+
 class RowUtilsTest(unittest.TestCase):
 
     def test_blob_validation_only_scans_blob_fields(self):
@@ -347,6 +365,9 @@ class BlobTest(unittest.TestCase):
                 self._input_stream = None
                 self.closed = False
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 self.closed = True
 
@@ -412,6 +433,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
                 self.closed = False
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 self.closed = True
@@ -496,6 +520,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = [offset]
                 self._input_stream = None
                 self.closed = False
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 self.closed = True
@@ -590,6 +617,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = [0]
                 self._input_stream = None
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 pass
 
@@ -647,6 +677,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_lengths = blob_lengths
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 pass
