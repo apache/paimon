@@ -150,6 +150,27 @@ class TorchDistributedShardingTest(unittest.TestCase):
 
         self.assertEqual(context, (1, 3))
 
+    def test_explicit_context_ignores_global_process_group(self):
+        with patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ), patch.object(
+            torch.distributed, "get_rank", return_value=3
+        ), patch.object(
+            torch.distributed, "get_world_size", return_value=4
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(8)),
+                sharding_rank=1,
+                sharding_world_size=2,
+            )
+            assigned = dataset._worker_splits(None)
+
+        self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
+        self.assertEqual(assigned, [4, 5, 6, 7])
+
     def test_context_is_resolved_after_dataset_construction(self):
         dataset = TorchIterDataset(
             self._table_read(), list(range(8)), auto_detect_rank=True
@@ -300,6 +321,18 @@ class TorchDistributedShardingTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "auto_detect_rank"):
             TorchIterDataset(
                 self._table_read(), [], auto_detect_rank="auto"
+            )
+        with self.assertRaisesRegex(ValueError, "must be set together"):
+            TorchIterDataset(
+                self._table_read(), [], sharding_rank=0
+            )
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            TorchIterDataset(
+                self._table_read(),
+                [],
+                auto_detect_rank=True,
+                sharding_rank=0,
+                sharding_world_size=1,
             )
 
         with patch.dict(os.environ, {"RANK": "one"}, clear=True), patch.object(
@@ -800,6 +833,12 @@ class TorchReadTest(unittest.TestCase):
             table_read.to_torch(splits, batch_format='pyarrow')
         with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
             table_read.to_torch(splits, auto_detect_rank=True)
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(
+                splits,
+                sharding_rank=0,
+                sharding_world_size=1,
+            )
         with self.assertRaisesRegex(ValueError, 'batch_size must be'):
             table_read.to_torch(
                 splits,
@@ -874,6 +913,18 @@ class TorchReadTest(unittest.TestCase):
             dataset = table_read.to_torch(pre_sharded, streaming=True)
             self.assertFalse(dataset.auto_detect_rank)
             self.assertEqual(dataset._worker_splits(None), pre_sharded)
+
+        dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            sharding_rank=1,
+            sharding_world_size=2,
+        )
+        self.assertFalse(dataset.auto_detect_rank)
+        self.assertEqual(
+            dataset._worker_splits(None),
+            splits[(len(splits) + 1) // 2:],
+        )
         self.assertIsNotNone(table_read.to_torch(splits))
 
     def test_blob_torch_read(self):
