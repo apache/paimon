@@ -25,8 +25,11 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LowerTransform;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.UpperTransform;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -246,5 +249,43 @@ public class TableQueryAuthResultTest {
                         new FieldTransform(new FieldRef(1, "extra", DataTypes.STRING())),
                         Equal.INSTANCE,
                         Collections.singletonList(BinaryString.fromString("y"))));
+    }
+
+    private static RowType infoRowType(String... nestedFields) {
+        DataType[] types = new DataType[nestedFields.length];
+        for (int i = 0; i < types.length; i++) {
+            types[i] = DataTypes.STRING();
+        }
+        return RowType.of(
+                new DataType[] {DataTypes.INT(), RowType.of(types, nestedFields)},
+                new String[] {"pk", "info"});
+    }
+
+    private static Predicate rowFilterOnInfoSecret(RowType rowType) {
+        RowType info = (RowType) rowType.getTypeAt(1);
+        return new PredicateBuilder(rowType)
+                .equal(
+                        new NestedFieldTransform(
+                                new FieldRef(1, "info", info), Collections.singletonList("secret")),
+                        BinaryString.fromString("x"));
+    }
+
+    @Test
+    void testNestedRowFilterDoesNotDriftWhenTheLeafIsPruned() {
+        Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));
+
+        RowType pruned = infoRowType("region");
+        assertThatThrownBy(() -> TableQueryAuthResult.remapPredicate(filter, pruned))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("secret");
+    }
+
+    @Test
+    void testNestedRowFilterFollowsTheFieldWhenPositionsShift() {
+        Predicate filter = rowFilterOnInfoSecret(infoRowType("secret", "region"));
+
+        Predicate remapped =
+                TableQueryAuthResult.remapPredicate(filter, infoRowType("region", "secret"));
+        assertThat(remapped.toString()).contains("info.secret");
     }
 }
