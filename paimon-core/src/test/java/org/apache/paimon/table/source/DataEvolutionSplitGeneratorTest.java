@@ -65,6 +65,18 @@ public class DataEvolutionSplitGeneratorTest {
         assertThat(splits).allSatisfy(split -> assertThat(split.files).contains(video));
     }
 
+    @Test
+    public void testOverlappingNormalRangesRemainGrouped() {
+        DataFileMeta update = newFile("update.parquet", 0L, 5L, 10L);
+        DataFileMeta base = newFile("base.parquet", 0L, 1000L, 100L);
+
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(1L, 1L, false);
+        List<SplitGenerator.SplitGroup> splits =
+                generator.splitForBatch(Arrays.asList(update, base));
+
+        assertThat(splits).singleElement().satisfies(split -> assertThat(split.files).hasSize(2));
+    }
+
     private static DataFileMeta newFile(
             String name, long firstRowId, long rowCount, long fileSize) {
         return DataFileMeta.create(

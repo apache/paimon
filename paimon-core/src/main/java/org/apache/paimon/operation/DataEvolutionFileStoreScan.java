@@ -249,21 +249,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (anchor != null && !kept.contains(anchor)) {
             kept.add(anchor);
         }
-        if (kept.stream()
-                .map(ManifestEntry::file)
-                .anyMatch(
-                        file ->
-                                isBlobFile(file.fileName())
-                                        || isVectorStoreFile(file.fileName()))) {
-            for (ManifestEntry entry : group) {
-                DataFileMeta file = entry.file();
-                if (!isBlobFile(file.fileName())
-                        && !isVectorStoreFile(file.fileName())
-                        && !kept.contains(entry)) {
-                    kept.add(entry);
-                }
-            }
-        }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows.
         return kept.isEmpty() ? Collections.singletonList(group.get(0)) : kept;

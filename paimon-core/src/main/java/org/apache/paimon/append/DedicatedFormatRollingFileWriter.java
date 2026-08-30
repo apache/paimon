@@ -453,10 +453,18 @@ public class DedicatedFormatRollingFileWriter
             return;
         }
 
-        closeNormalAndVectorWriters();
+        DataFileMeta mainDataFileMeta = currentWriter == null ? null : closeMainWriter();
         List<DataFileMeta> blobMetas = closeBlobWriter();
+        List<DataFileMeta> vectorStoreMetas = closeVectorStoreWriter();
+        if (mainDataFileMeta != null) {
+            validateFileConsistency(mainDataFileMeta, Collections.emptyList(), vectorStoreMetas);
+            results.add(mainDataFileMeta);
+        }
         validateBlobConsistency(blobMetas);
         results.addAll(blobMetas);
+        results.addAll(vectorStoreMetas);
+        currentWriter = null;
+        currentFileRecordCount = 0;
     }
 
     private void closeNormalAndVectorWriters() throws IOException {

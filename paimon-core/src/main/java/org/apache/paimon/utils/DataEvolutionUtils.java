@@ -231,28 +231,26 @@ public class DataEvolutionUtils {
                     .mergeOverlappingRanges(entries);
         }
 
-        normal.sort(
-                Comparator.<T>comparingLong(entry -> fileMetaFunc.apply(entry).nonNullFirstRowId())
-                        .thenComparingLong(
-                                entry -> fileMetaFunc.apply(entry).nonNullRowIdRange().to));
-        List<List<T>> groups = new ArrayList<>();
-        List<Range> groupRanges = new ArrayList<>();
-        for (T entry : normal) {
-            Range range = fileMetaFunc.apply(entry).nonNullRowIdRange();
-            if (groups.isEmpty() || !range.equals(groupRanges.get(groupRanges.size() - 1))) {
-                if (!groupRanges.isEmpty()) {
-                    Range previous = groupRanges.get(groupRanges.size() - 1);
-                    checkArgument(
-                            !previous.hasIntersection(range),
-                            "Normal data files have overlapping but different row ranges: %s and %s.",
-                            previous,
-                            range);
-                }
-                groups.add(new ArrayList<>());
-                groupRanges.add(range);
-            }
-            groups.get(groups.size() - 1).add(entry);
-        }
+        List<List<T>> groups =
+                new RangeHelper<T>(entry -> fileMetaFunc.apply(entry).nonNullRowIdRange())
+                        .mergeOverlappingRanges(normal);
+        List<Range> groupRanges =
+                groups.stream()
+                        .map(
+                                group ->
+                                        new Range(
+                                                group.stream()
+                                                        .map(fileMetaFunc)
+                                                        .mapToLong(DataFileMeta::nonNullFirstRowId)
+                                                        .min()
+                                                        .orElseThrow(IllegalStateException::new),
+                                                group.stream()
+                                                        .map(fileMetaFunc)
+                                                        .map(DataFileMeta::nonNullRowIdRange)
+                                                        .mapToLong(range -> range.to)
+                                                        .max()
+                                                        .orElseThrow(IllegalStateException::new)))
+                        .collect(Collectors.toList());
 
         List<T> unanchored = new ArrayList<>();
         for (T sidecar : sidecars) {
