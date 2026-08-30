@@ -302,6 +302,23 @@ class DataEvolutionGroupStatsFilterTest(unittest.TestCase):
             builder.equal('payload', b'not-present'), {0: fields}, 0
         ).may_match([base, vector]))
 
+    def test_spanning_special_file_does_not_expand_normal_group_range(self):
+        fields = [
+            DataField(0, 'id', AtomicType('INT')),
+            DataField(1, 'payload', AtomicType('BYTES')),
+        ]
+        base = _file(
+            'base.parquet', 0, 10, fields, [0], [9],
+            write_cols=['id'])
+        video = _file(
+            'payload.video', 0, 20, fields, [b'a'], [b'z'],
+            write_cols=['payload'])
+
+        stats_filter = self._filter(
+            PredicateBuilder(fields).equal('id', 50), {0: fields}, 0)
+
+        self.assertFalse(stats_filter.may_match([base, video]))
+
     def test_partial_newer_file_fails_open(self):
         fields = [DataField(0, 'value', AtomicType('INT'))]
         base = _file('base.parquet', 0, 10, fields, [0], [9])
