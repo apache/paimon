@@ -478,7 +478,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([2, 4], video_rows)
         self.assertEqual(list(range(6)), self._read_ids(table))
 
-    def test_video_columns_roll_independently_at_episode_boundaries(self):
+    def test_video_columns_roll_together_at_episode_boundaries(self):
         paths = [
             os.path.join(self.tempdir, name)
             for name in ('small-camera.mp4', 'large-camera.mp4')
@@ -526,12 +526,12 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             if file.file_name.endswith('.video'):
                 files_by_column.setdefault(file.write_cols[0], []).append(
                     file.row_count)
-        self.assertEqual([4], files_by_column['camera_a'])
+        self.assertEqual([2, 2], files_by_column['camera_a'])
         self.assertEqual([2, 2], files_by_column['camera_b'])
-        self.assertEqual([4], [
+        self.assertEqual([2, 2], sorted(
             file.row_count for file in files
             if not file.file_name.endswith('.video')
-        ])
+        ))
         result = table.new_read_builder().new_read().to_arrow(
             table.new_read_builder().new_scan().plan().splits()
         ).sort_by('id')

@@ -153,15 +153,16 @@ class BlobWriter(AppendOnlyDataWriter):
             or self.current_writer.reach_target_size(self.blob_target_file_size)
         )
 
-    def begin_video_episode(self, row_count: int):
-        if self._video_group_policy is None or self.current_writer is None:
-            return
-        if (
-            self._video_group_policy.pending_roll
-            or self.current_writer.row_count + row_count
-            > self.target_file_row_num
-        ):
-            self.close_current_writer()
+    def should_roll_before_video_episode(self, row_count: int) -> bool:
+        return (
+            self._video_group_policy is not None
+            and self.current_writer is not None
+            and (
+                self._video_group_policy.pending_roll
+                or self.current_writer.row_count + row_count
+                > self.target_file_row_num
+            )
+        )
 
     def close_current_writer(self):
         """Close current writer and create metadata."""

@@ -509,17 +509,18 @@ class DedicatedFormatWriter(DataWriter):
             return
 
         normal_rows = self._normal_buffer.num_rows
-        should_roll_normal = normal_rows > 0 and (
+        should_roll = normal_rows > 0 and (
             self._video_group_policy.pending_roll
             or normal_rows + row_count > self.target_file_row_num
             or self._normal_buffer.nbytes > self.target_file_size
         )
-        if should_roll_normal:
+        should_roll = should_roll or any(
+            self.blob_writers[column].should_roll_before_video_episode(
+                row_count)
+            for column in self.video_frame_columns
+        )
+        if should_roll:
             self._close_current_writers()
-            return
-
-        for column in self.video_frame_columns:
-            self.blob_writers[column].begin_video_episode(row_count)
 
     def _roll_or_defer_for_video_group(self):
         if self._video_group_policy is not None and self._video_group_policy.defer_roll():
