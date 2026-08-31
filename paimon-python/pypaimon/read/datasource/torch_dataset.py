@@ -18,6 +18,8 @@
 """
 Module to read a Paimon table into PyTorch Dataset.
 """
+import bisect
+import operator
 import os
 import queue
 import random
@@ -26,13 +28,18 @@ import warnings
 from typing import Any, Callable, Iterator, List, Optional
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
+from pypaimon.globalindex.indexed_split import IndexedSplit
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.concat_batch_reader import (
     _MAX_ARROW_OFFSET, _batch_offset_usage)
-from pypaimon.read.split import Split
+from pypaimon.read.split import DataSplit, Split
 from pypaimon.read.table_read import TableRead
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
 
 
 def _share_epoch_with_torch_workers(value):
@@ -111,12 +118,75 @@ def _balanced_slice(values: List[Any], shard_id: int, shard_count: int):
     return values[start:start + size]
 
 
+class _RowIdRangeIndex:
+
+    def __init__(self, ranges, limit=None):
+        self.ranges = []
+        self.ends = []
+        remaining = limit
+        size = 0
+        for row_range in ranges:
+            count = row_range.count()
+            if remaining is not None:
+                if remaining <= 0:
+                    break
+                count = min(count, remaining)
+                remaining -= count
+            if count == 0:
+                continue
+            self.ranges.append(Range(
+                row_range.from_, row_range.from_ + count - 1))
+            size += count
+            self.ends.append(size)
+
+    def __len__(self):
+        return self.ends[-1] if self.ends else 0
+
+    def take(self, indices):
+        row_ids = []
+        for index in indices:
+            range_index = bisect.bisect_right(self.ends, index)
+            previous_end = self.ends[range_index - 1] if range_index else 0
+            row_ids.append(
+                self.ranges[range_index].from_ + index - previous_end)
+        return row_ids
+
+
+class _SplitRangeIndex:
+
+    def __init__(self, ranges_by_split):
+        self.intervals = sorted(
+            (row_range.from_, row_range.to, split_index)
+            for split_index, ranges in enumerate(ranges_by_split)
+            for row_range in ranges
+        )
+        self.starts = [interval[0] for interval in self.intervals]
+        self.max_ends = []
+        max_end = -1
+        for _, end, _ in self.intervals:
+            max_end = max(max_end, end)
+            self.max_ends.append(max_end)
+
+    def find(self, ranges):
+        split_indices = set()
+        for row_range in ranges:
+            right = bisect.bisect_right(self.starts, row_range.to)
+            left = bisect.bisect_left(
+                self.max_ends, row_range.from_, 0, right)
+            for position in range(left, right):
+                _, end, split_index = self.intervals[position]
+                if end >= row_range.from_:
+                    split_indices.add(split_index)
+        return sorted(split_indices)
+
+
 class TorchDataset(Dataset):
     """
-    PyTorch Dataset implementation for reading Paimon table data.
+    Map-style PyTorch Dataset for Paimon table data.
 
-    This class enables Paimon table data to be used directly with PyTorch's
-    training pipeline, allowing for efficient data loading and batching.
+    Eligible data-evolution reads are fetched lazily by DataLoader batch.
+    Other reads retain their Arrow representation instead of expanding all
+    rows into Python objects.
     """
 
     def __init__(self, table_read: TableRead, splits: List[Split]):
@@ -127,11 +197,104 @@ class TorchDataset(Dataset):
             table_read: TableRead instance for reading data
             splits: List of splits to read
         """
-        arrow_table = table_read.to_arrow(splits)
-        if arrow_table is None or arrow_table.num_rows == 0:
-            self._data = []
+        self.table_read = table_read
+        self.splits = splits
+        self._data = None
+        self._row_ids = None
+        self._split_ranges = None
+        self._split_range_index = None
+        if self._supports_lazy_row_id_read():
+            self._split_ranges = [
+                self._row_ranges_for_split(split) for split in splits
+            ]
+            self._split_range_index = _SplitRangeIndex(self._split_ranges)
+            self._row_ids = self._compact_row_id_index()
+            if self._row_ids is None:
+                row_id_read = TableRead(
+                    table_read.table,
+                    table_read.predicate,
+                    [SpecialFields.ROW_ID],
+                    limit=table_read.limit,
+                )
+                row_id_table = row_id_read.to_arrow(splits)
+                self._row_ids = row_id_table.column(
+                    SpecialFields.ROW_ID.name).combine_chunks()
+                if pc.count_distinct(self._row_ids).as_py() != len(
+                        self._row_ids):
+                    self._materialize()
         else:
-            self._data = arrow_table.to_pylist()
+            self._materialize()
+
+    def _supports_lazy_row_id_read(self) -> bool:
+        if not self.table_read.table.options.row_tracking_enabled():
+            return False
+        if not self.table_read.table.options.data_evolution_enabled():
+            return False
+        if self.table_read.include_row_kind:
+            return False
+        if self.table_read.nested_name_paths:
+            return False
+        if any(self._row_id_is_masked(split) for split in self.splits):
+            return False
+        return all(self._supports_indexed_split(split) for split in self.splits)
+
+    @staticmethod
+    def _row_id_is_masked(split) -> bool:
+        if not isinstance(split, QueryAuthSplit):
+            return False
+        masking = getattr(split.auth_result, "column_masking", None)
+        return bool(masking and SpecialFields.ROW_ID.name in masking)
+
+    @staticmethod
+    def _supports_indexed_split(split) -> bool:
+        if isinstance(split, QueryAuthSplit):
+            split = split.split
+        if isinstance(split, IndexedSplit):
+            return split.scores() is None
+        return isinstance(split, DataSplit)
+
+    def _compact_row_id_index(self):
+        if self.table_read.predicate is not None:
+            return None
+        ranges = []
+        for original, split_ranges in zip(
+                self.splits, self._split_ranges):
+            split = original
+            if isinstance(split, QueryAuthSplit):
+                if getattr(split.auth_result, "filter", None):
+                    return None
+                split = split.split
+            deletion_files = split.data_deletion_files or []
+            if any(deletion is not None for deletion in deletion_files):
+                return None
+            ranges.extend(split_ranges)
+        merged = Range.sort_and_merge_overlap(ranges, True)
+        if sum(r.count() for r in ranges) != sum(
+                r.count() for r in merged):
+            return None
+        return _RowIdRangeIndex(ranges, self.table_read.limit)
+
+    @staticmethod
+    def _row_ranges_for_split(split):
+        if isinstance(split, QueryAuthSplit):
+            split = split.split
+        if isinstance(split, IndexedSplit):
+            ranges = split.row_ranges()
+        else:
+            ranges = [
+                data_file.row_id_range()
+                for data_file in split.files
+                if data_file.first_row_id is not None
+            ]
+        return Range.sort_and_merge_overlap(ranges, True)
+
+    def _materialize(self):
+        self._row_ids = None
+        self._data = self.table_read.to_arrow(self.splits)
+        self.table_read = None
+        self.splits = None
+        self._split_ranges = None
+        self._split_range_index = None
 
     def __len__(self) -> int:
         """
@@ -140,7 +303,9 @@ class TorchDataset(Dataset):
         Returns:
             Total number of rows across all splits
         """
-        return len(self._data)
+        if self._row_ids is not None:
+            return len(self._row_ids)
+        return 0 if self._data is None else self._data.num_rows
 
     def __getitem__(self, index: int):
         """
@@ -152,10 +317,93 @@ class TorchDataset(Dataset):
         Returns:
             Dictionary containing the row data
         """
-        if not self._data:
+        if len(self) == 0:
             return None
+        if isinstance(index, slice):
+            return self.__getitems__(range(*index.indices(len(self))))
+        return self.__getitems__([index])[0]
 
-        return self._data[index]
+    def __getitems__(self, indices) -> List[dict]:
+        normalized = [self._normalize_index(index) for index in indices]
+        if not normalized:
+            return []
+        if self._row_ids is None:
+            return self._data.take(pa.array(
+                normalized, type=pa.int64())).to_pylist()
+
+        if isinstance(self._row_ids, _RowIdRangeIndex):
+            row_ids = self._row_ids.take(normalized)
+        else:
+            row_ids = self._row_ids.take(pa.array(
+                normalized, type=pa.int64())).to_pylist()
+        ranges = Range.sort_and_merge_overlap(
+            [Range(row_id, row_id) for row_id in set(row_ids)], True)
+        splits = self._select_splits(ranges)
+
+        output_has_row_id = any(
+            field.name == SpecialFields.ROW_ID.name
+            for field in self.table_read.read_type
+        )
+        read_type = list(self.table_read.read_type)
+        if not output_has_row_id:
+            read_type.append(SpecialFields.ROW_ID)
+        batch_read = TableRead(
+            self.table_read.table,
+            self.table_read.predicate,
+            read_type,
+            include_row_kind=self.table_read.include_row_kind,
+        )
+        rows = batch_read.to_arrow(splits).to_pylist()
+        by_row_id = {}
+        for row in rows:
+            row_id = row[SpecialFields.ROW_ID.name]
+            if not output_has_row_id:
+                del row[SpecialFields.ROW_ID.name]
+            by_row_id[row_id] = row
+        missing = set(row_ids) - set(by_row_id)
+        if missing:
+            raise RuntimeError(
+                "Paimon rows disappeared while reading TorchDataset: %s"
+                % sorted(missing)
+            )
+        return [by_row_id[row_id] for row_id in row_ids]
+
+    def _normalize_index(self, index) -> int:
+        index = operator.index(index)
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError("TorchDataset index out of range")
+        return index
+
+    def _select_splits(self, ranges) -> List[Split]:
+        selected = []
+        split_indices = self._split_range_index.find(ranges)
+        for split_index in split_indices:
+            original = self.splits[split_index]
+            auth_result = None
+            split = original
+            if isinstance(split, QueryAuthSplit):
+                auth_result = split.auth_result
+                split = split.split
+
+            if isinstance(split, IndexedSplit):
+                split = split.data_split()
+            allowed = Range.and_(
+                ranges, self._split_ranges[split_index])
+            if not allowed:
+                continue
+
+            indexed = IndexedSplit(
+                split,
+                allowed,
+                exact_merged_row_count=sum(r.count() for r in allowed),
+            )
+            selected.append(
+                QueryAuthSplit(indexed, auth_result)
+                if auth_result is not None else indexed
+            )
+        return selected
 
 
 class _BaseTorchIterDataset(IterableDataset):
