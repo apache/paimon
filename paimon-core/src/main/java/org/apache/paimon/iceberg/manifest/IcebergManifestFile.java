@@ -48,12 +48,16 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 
+import org.apache.paimon.format.avro.AvroFileFormat;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.iceberg.manifest.IcebergConversions.toByteBuffer;
@@ -66,7 +70,24 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
 
     private static final long UNASSIGNED_SEQ = -1L;
 
+    private static final String ROW_NAME_MAPPING =
+            "org.apache.paimon.avro.generated.record:manifest_entry,"
+                    + "iceberg:true,"
+                    + "manifest_entry_data_file:r2,"
+                    + "r2_partition:r102,"
+                    + "kv_name_r2_null_value_counts:k121_v122,"
+                    + "k_id_k121_v122:121,"
+                    + "v_id_k121_v122:122,"
+                    + "kv_name_r2_lower_bounds:k126_v127,"
+                    + "k_id_k126_v127:126,"
+                    + "v_id_k126_v127:127,"
+                    + "kv_name_r2_upper_bounds:k129_v130,"
+                    + "k_id_k129_v130:129,"
+                    + "v_id_k129_v130:130";
+
+    private final Map<Content, FormatWriterFactory> writerFactories;
     private final RowType partitionType;
+    // Default (DATA) writer factory, kept for the base ObjectsFile.
     private final FormatWriterFactory writerFactory;
     private final MemorySize targetFileSize;
 
@@ -75,7 +96,31 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             RowType partitionType,
             boolean withFirstRowId,
             FormatReaderFactory readerFactory,
-            FormatWriterFactory writerFactory,
+            Map<Content, FormatWriterFactory> writerFactories,
+            String compression,
+            PathFactory pathFactory,
+            MemorySize targetFileSize) {
+        // Java forbids `this.` assignments before super(); route the DATA factory through
+        // the parameter list instead.
+        this(
+                fileIO,
+                partitionType,
+                withFirstRowId,
+                readerFactory,
+                writerFactories,
+                writerFactories.get(Content.DATA),
+                compression,
+                pathFactory,
+                targetFileSize);
+    }
+
+    private IcebergManifestFile(
+            FileIO fileIO,
+            RowType partitionType,
+            boolean withFirstRowId,
+            FormatReaderFactory readerFactory,
+            Map<Content, FormatWriterFactory> writerFactories,
+            FormatWriterFactory defaultWriterFactory,
             String compression,
             PathFactory pathFactory,
             MemorySize targetFileSize) {
@@ -84,12 +129,13 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                 new IcebergManifestEntrySerializer(partitionType, withFirstRowId),
                 IcebergManifestEntry.schema(partitionType, withFirstRowId),
                 readerFactory,
-                writerFactory,
+                defaultWriterFactory,
                 compression,
                 pathFactory,
                 null);
         this.partitionType = partitionType;
-        this.writerFactory = writerFactory;
+        this.writerFactories = writerFactories;
+        this.writerFactory = defaultWriterFactory;
         this.targetFileSize = targetFileSize;
     }
 
@@ -99,34 +145,41 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     }
 
     public static IcebergManifestFile create(FileStoreTable table, IcebergPathFactory pathFactory) {
+        return create(table, pathFactory, new HashMap<>());
+    }
+
+    public static IcebergManifestFile create(
+            FileStoreTable table, IcebergPathFactory pathFactory, Map<String, String> avroMetadata) {
         RowType partitionType = table.schema().logicalPartitionType();
         Options avroOptions = Options.fromMap(table.options());
         boolean withFirstRowId =
                 avroOptions.get(IcebergOptions.FORMAT_VERSION) >= IcebergMetadata.FORMAT_VERSION_V3;
         RowType entryType = IcebergManifestEntry.schema(partitionType, withFirstRowId);
         // https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/ManifestReader.java
-        avroOptions.set(
-                "avro.row-name-mapping",
-                "org.apache.paimon.avro.generated.record:manifest_entry,"
-                        + "iceberg:true,"
-                        + "manifest_entry_data_file:r2,"
-                        + "r2_partition:r102,"
-                        + "kv_name_r2_null_value_counts:k121_v122,"
-                        + "k_id_k121_v122:121,"
-                        + "v_id_k121_v122:122,"
-                        + "kv_name_r2_lower_bounds:k126_v127,"
-                        + "k_id_k126_v127:126,"
-                        + "v_id_k126_v127:127,"
-                        + "kv_name_r2_upper_bounds:k129_v130,"
-                        + "k_id_k129_v130:129,"
-                        + "v_id_k129_v130:130");
-        FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", avroOptions);
+        avroOptions.set("avro.row-name-mapping", ROW_NAME_MAPPING);
+        // The "content" Avro header differs per manifest (data vs deletes), so build one
+        // writer factory per content. See PR #9497 review.
+        Map<Content, FormatWriterFactory> writerFactories = new HashMap<>();
+        FormatReaderFactory readerFactory = null;
+        for (Content content : Content.values()) {
+            Options contentOptions = Options.fromMap(table.options());
+            contentOptions.set("avro.row-name-mapping", ROW_NAME_MAPPING);
+            Map<String, String> contentMetadata = new HashMap<>(avroMetadata);
+            contentMetadata.put("content", content == Content.DATA ? "data" : "deletes");
+            AvroFileFormat.setAvroMetadata(contentOptions, contentMetadata);
+            FileFormat contentAvro = FileFormat.fromIdentifier("avro", contentOptions);
+            writerFactories.put(content, contentAvro.createWriterFactory(entryType));
+            if (content == Content.DATA) {
+                readerFactory =
+                        contentAvro.createReaderFactory(entryType, entryType, new ArrayList<>());
+            }
+        }
         return new IcebergManifestFile(
                 table.fileIO(),
                 partitionType,
                 withFirstRowId,
-                manifestFileAvro.createReaderFactory(entryType, entryType, new ArrayList<>()),
-                manifestFileAvro.createWriterFactory(entryType),
+                readerFactory,
+                writerFactories,
                 avroOptions.get(IcebergOptions.MANIFEST_COMPRESSION),
                 pathFactory.manifestFileFactory(),
                 table.coreOptions().manifestTargetSize());
@@ -195,7 +248,11 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     public SingleFileWriter<IcebergManifestEntry, IcebergManifestFileMeta> createWriter(
             long sequenceNumber, Content content) {
         return new IcebergManifestEntryWriter(
-                writerFactory, pathFactory.newPath(), compression, sequenceNumber, content);
+                writerFactories.get(content),
+                pathFactory.newPath(),
+                compression,
+                sequenceNumber,
+                content);
     }
 
     private class IcebergManifestEntryWriter
