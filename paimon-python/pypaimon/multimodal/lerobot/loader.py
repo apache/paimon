@@ -36,6 +36,19 @@ _DECLARED_NUMERIC_RANGES = {
     "float16": (-65504.0, 65504.0),
     "float32": (-3.4028234663852886e38, 3.4028234663852886e38),
 }
+_NUMERIC_DTYPES = {
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "float16",
+    "float32",
+    "float64",
+}
+_BOOLEAN_DTYPES = {"bool", "boolean"}
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
@@ -189,37 +202,62 @@ def _safe_array(values, field, name, dtype):
 
 
 def _validate_declared_range(values, target_type, name, dtype):
-    value_range = _DECLARED_NUMERIC_RANGES.get(dtype)
-    if not (pa.types.is_list(target_type)
+    if (pa.types.is_list(target_type)
             or pa.types.is_large_list(target_type)
             or pa.types.is_fixed_size_list(target_type)):
-        if value_range is None:
-            return
-        minimum, maximum = value_range
         for value in values:
-            if value is None:
-                continue
-            if dtype.startswith("float") and not isinstance(
-                    value, numbers.Integral):
-                try:
-                    if not math.isfinite(value):
-                        continue
-                except (TypeError, ValueError, OverflowError):
-                    continue
-            try:
-                out_of_range = value < minimum or value > maximum
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if out_of_range:
-                raise ValueError(
-                    "LeRobot feature %s contains a value outside the %s "
-                    "range [%s, %s]: %r"
-                    % (name, dtype, minimum, maximum, value))
+            if value is not None:
+                _validate_declared_range(
+                    value, target_type.value_type, name, dtype)
         return
+
+    value_range = _DECLARED_NUMERIC_RANGES.get(dtype)
     for value in values:
-        if value is not None:
-            _validate_declared_range(
-                value, target_type.value_type, name, dtype)
+        if value is None:
+            continue
+        _validate_value_domain(value, name, dtype)
+        if value_range is None:
+            continue
+        minimum, maximum = value_range
+        if dtype.startswith("float") and not isinstance(
+                value, numbers.Integral):
+            try:
+                if not math.isfinite(value):
+                    continue
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(
+                    "LeRobot feature %s contains a value incompatible with "
+                    "dtype %s: %r" % (name, dtype, value)) from error
+        try:
+            out_of_range = value < minimum or value > maximum
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(
+                "LeRobot feature %s contains a value incompatible with "
+                "dtype %s: %r" % (name, dtype, value)) from error
+        if out_of_range:
+            raise ValueError(
+                "LeRobot feature %s contains a value outside the %s "
+                "range [%s, %s]: %r"
+                % (name, dtype, minimum, maximum, value))
+
+
+def _validate_value_domain(value, name, dtype):
+    if dtype in _NUMERIC_DTYPES:
+        valid = isinstance(value, numbers.Real) \
+            and not isinstance(value, bool)
+        expected = "numeric"
+    elif dtype in _BOOLEAN_DTYPES:
+        valid = isinstance(value, bool)
+        expected = "boolean"
+    elif dtype == "string":
+        valid = isinstance(value, str)
+        expected = "string"
+    else:
+        return
+    if not valid:
+        raise ValueError(
+            "LeRobot feature %s declares dtype %s but contains a non-%s "
+            "value: %r" % (name, dtype, expected, value))
 
 
 def _normalize_value(value, feature, name):

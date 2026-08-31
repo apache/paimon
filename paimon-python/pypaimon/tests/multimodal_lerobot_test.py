@@ -420,6 +420,10 @@ class LeRobotValidationTest(unittest.TestCase):
             ({"dtype": "uint16", "shape": [1]}, 65536, "uint16 range"),
             ({"dtype": "uint32", "shape": [1]}, -1, "uint32 range"),
             ({"dtype": "float16", "shape": [1]}, 70000, "float16 range"),
+            ({"dtype": "uint8", "shape": [1]}, "256", "non-numeric"),
+            ({"dtype": "float32", "shape": [1]}, "1e100", "non-numeric"),
+            ({"dtype": "bool", "shape": [1]}, 2, "non-boolean"),
+            ({"dtype": "string", "shape": [1]}, 123, "non-string"),
         ]
         for feature, value, message in cases:
             with self.subTest(feature=feature, value=value):
@@ -433,6 +437,8 @@ class LeRobotValidationTest(unittest.TestCase):
             ({"dtype": "uint16", "shape": [1]}, 65535),
             ({"dtype": "uint32", "shape": [1]}, 4294967295),
             ({"dtype": "float16", "shape": [1]}, 65504),
+            ({"dtype": "bool", "shape": [1]}, True),
+            ({"dtype": "string", "shape": [1]}, "pick"),
         ]
         for feature, value in boundary_cases:
             with self.subTest(feature=feature, value=value):
