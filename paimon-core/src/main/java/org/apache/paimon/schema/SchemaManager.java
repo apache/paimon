@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -227,7 +228,27 @@ public class SchemaManager implements Serializable {
         if (!CoreOptions.fromMap(schema.options()).fieldIdOneBased()) {
             return schema;
         }
+        if (!ShiftFieldId.containsFieldId(schema.rowType(), 0)) {
+            // Already conformant: no field carries id 0. A persisted schema passed back into
+            // creation (e.g. the copy_files procedure copies a table's fields together with
+            // this option) must keep its ids, which the copied data files embed.
+            return schema;
+        }
         return schema.copy((RowType) ShiftFieldId.shift(schema.rowType(), 1));
+    }
+
+    /**
+     * The effective value of {@link CoreOptions#FIELD_ID_ONE_BASED} for a raw option string, parsed
+     * strictly: an invalid value is rejected here instead of being persisted as an accidental
+     * {@code false} that the immutability check would then freeze forever.
+     */
+    private static boolean fieldIdOneBasedValue(@Nullable String value) {
+        if (value == null) {
+            return CoreOptions.FIELD_ID_ONE_BASED.defaultValue();
+        }
+        Options options = new Options();
+        options.setString(CoreOptions.FIELD_ID_ONE_BASED.key(), value);
+        return options.get(CoreOptions.FIELD_ID_ONE_BASED);
     }
 
     private void checkSchemaForExternalTable(Schema existsSchema, Schema newSchema) {
@@ -354,7 +375,7 @@ public class SchemaManager implements Serializable {
                 // so changing the value later only makes the option lie about the schema
                 // (restating the effective value, e.g. an explicit default, stays allowed)
                 if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(setOption.key())
-                        && Boolean.parseBoolean(oldValue) != Boolean.parseBoolean(newValue)) {
+                        && fieldIdOneBasedValue(oldValue) != fieldIdOneBasedValue(newValue)) {
                     throw new UnsupportedOperationException(
                             "Change '"
                                     + CoreOptions.FIELD_ID_ONE_BASED.key()
@@ -372,7 +393,7 @@ public class SchemaManager implements Serializable {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
                 if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(removeOption.key())
-                        && Boolean.parseBoolean(oldOptions.get(removeOption.key()))) {
+                        && fieldIdOneBasedValue(oldOptions.get(removeOption.key()))) {
                     // removing the option while it is true changes the effective value
                     throw new UnsupportedOperationException(
                             "Change '"
