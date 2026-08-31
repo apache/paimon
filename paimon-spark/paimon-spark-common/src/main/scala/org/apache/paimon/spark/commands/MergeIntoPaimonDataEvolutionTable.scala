@@ -29,7 +29,6 @@ import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -45,6 +44,7 @@ import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
+import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
@@ -153,13 +153,38 @@ case class MergeIntoPaimonDataEvolutionTable(
    */
   private case class SelfMergeSpec(residualCondition: Option[Expression])
 
-  private lazy val sameSourceAndTargetTable: Boolean = {
-    if (!isPaimonTable(sourceTable)) {
-      false
-    } else {
-      originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
+  private def passthroughSourceRelation(plan: LogicalPlan): Option[DataSourceV2Relation] = {
+    EliminateSubqueryAliases(plan) match {
+      case relation: DataSourceV2Relation if relation.table.isInstanceOf[SparkTable] =>
+        Some(relation)
+      case Project(projectList, child) if isPassthroughProject(projectList, child) =>
+        passthroughSourceRelation(child)
+      case _ =>
+        None
     }
   }
+
+  private def isPassthroughProject(projectList: Seq[Expression], child: LogicalPlan): Boolean = {
+    val childAttributes = child.output ++ child.metadataOutput
+
+    def isChildAttribute(attr: AttributeReference): Boolean =
+      childAttributes.exists(_.exprId == attr.exprId)
+
+    projectList.forall {
+      case attr: AttributeReference => isChildAttribute(attr)
+      case alias: Alias =>
+        alias.child match {
+          case attr: AttributeReference =>
+            resolver(alias.name, attr.name) && isChildAttribute(attr)
+          case _ => false
+        }
+      case _ => false
+    }
+  }
+
+  private lazy val sameSourceAndTargetTable: Boolean =
+    passthroughSourceRelation(sourceTable)
+      .exists(sourceRelation => originalTargetRelation.name.equals(sourceRelation.name))
 
   private def isTargetRowId(attr: AttributeReference): Boolean = {
     attr.name == ROW_ID_NAME && (originalTargetRelation.output ++

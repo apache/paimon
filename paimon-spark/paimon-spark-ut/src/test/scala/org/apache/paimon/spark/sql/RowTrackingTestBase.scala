@@ -1193,6 +1193,38 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: self-merge falls back for computed source projection") {
+    withTable("target") {
+      sql("""
+            |CREATE TABLE target (id INT, b INT, dt STRING)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |PARTITIONED BY (dt)
+            |""".stripMargin)
+      sql("INSERT INTO target VALUES (1, 10, 'p1'), (2, 20, 'p2')")
+
+      val (mergeRowsPlans, _) =
+        executeMergeIntoAndCollectPlans("""
+                                          |MERGE INTO target
+                                          |USING (
+                                          |  SELECT _ROW_ID, b + 1 AS b FROM target
+                                          |) source
+                                          |ON target._ROW_ID = source._ROW_ID
+                                          |  AND target.dt = 'p1'
+                                          |WHEN MATCHED THEN UPDATE SET target.b = source.b
+                                          |""".stripMargin)
+
+      assert(
+        mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+        s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+      )
+      checkAnswer(
+        sql("SELECT id, b, dt FROM target ORDER BY id"),
+        Seq(Row(1, 11, "p1"), Row(2, 20, "p2")))
+    }
+  }
+
   test("Data Evolution: self-merge falls back for non-partition residual condition") {
     withTable("target") {
       sql(
