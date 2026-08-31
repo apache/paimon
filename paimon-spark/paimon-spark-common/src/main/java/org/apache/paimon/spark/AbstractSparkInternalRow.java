@@ -47,6 +47,7 @@ import org.apache.spark.sql.types.NullType;
 import org.apache.spark.sql.types.ShortType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 import org.apache.spark.sql.types.UserDefinedType;
 import org.apache.spark.sql.types.VarcharType;
@@ -236,7 +237,7 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
         if (dataType instanceof DateType) {
             return getInt(ordinal);
         }
-        if (dataType instanceof TimestampType) {
+        if (dataType instanceof TimestampType || dataType instanceof TimestampNTZType) {
             return getLong(ordinal);
         }
         if (dataType instanceof CalendarIntervalType) {
@@ -256,6 +257,9 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
         }
         if (dataType instanceof UserDefinedType) {
             return get(ordinal, ((UserDefinedType<?>) dataType).sqlType());
+        }
+        if (SparkShimLoader.shim().isSparkVariantType(dataType)) {
+            return SparkShimLoader.shim().toSparkVariant(row.getVariant(ordinal));
         }
         if (SparkShimLoader.shim().isSparkGeometryType(dataType)) {
             org.apache.paimon.types.GeometryType geometryType =
