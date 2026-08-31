@@ -62,7 +62,7 @@ class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
       val sourceIndexes = loadTable("t").store.newIndexFileHandler.scanEntries.asScala
         .map(_.indexFile)
         .filter(meta => meta.globalIndexMeta != null && meta.globalIndexMeta.sourceMeta != null)
-      assert(sourceIndexes.map(_.indexType).toSet == Set("fmindex"))
+      assert(sourceIndexes.map(_.indexType).toSet == Set("fm"))
       assert(sourceIndexes.size == 1)
 
       val predicateBuilder = new PredicateBuilder(loadTable("t").rowType())

@@ -88,7 +88,7 @@ class PkSequentialIndexBuilderTest {
                         },
                         capturingFile,
                         field(),
-                        "fmindex",
+                        "fm",
                         new Options())
                 .build(Arrays.asList(sourceB, sourceA));
 
@@ -116,7 +116,7 @@ class PkSequentialIndexBuilderTest {
                         ignored -> reader,
                         new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                         field(),
-                        "fmindex",
+                        "fm",
                         new Options());
 
         assertThatThrownBy(() -> builder.build(Collections.singletonList(dataFile("data-file", 2))))
@@ -134,7 +134,7 @@ class PkSequentialIndexBuilderTest {
                                 },
                         new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                         field(),
-                        "fmindex",
+                        "fm",
                         new Options());
 
         assertThatThrownBy(() -> builder.build(Collections.singletonList(dataFile("data-file", 1))))

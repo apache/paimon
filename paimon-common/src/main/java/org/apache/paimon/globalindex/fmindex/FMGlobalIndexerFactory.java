@@ -29,7 +29,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Factory for the exact partitioned FM contains index. */
 public class FMGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "fmindex";
+    public static final String IDENTIFIER = "fm";
 
     @Override
     public String identifier() {
