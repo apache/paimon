@@ -1226,6 +1226,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   }
 
   test("Data Evolution: self-merge falls back for time-travel source") {
+    assume(gteqSpark3_3)
+
     withTable("target") {
       sql("""
             |CREATE TABLE target (id INT, b INT, dt STRING)
