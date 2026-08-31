@@ -520,6 +520,48 @@ HDF5 core itself has no Ray dependency.
 provenance columns, maintain a source ledger, skip prior inputs, or detect
 source drift. Calling it again with the same input appends the rows again.
 
+## Load LeRobot Dataset v3
+
+`load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
+repository. It derives the schema from `meta/info.json`, writes one row per
+frame, and commits once.
+
+```shell
+pip install 'pypaimon[lerobot]'
+```
+
+```python
+snapshot_id = conn.load_from_lerobot(
+    "robot_data",
+    "/data/lerobot_dataset",
+)
+print(snapshot_id)
+```
+
+The return value is `None` when the source has no frames.
+
+For FileIO URIs, pass credentials through `source_options`:
+
+```python
+snapshot_id = conn.load_from_lerobot(
+    "robot_data",
+    "oss://source-bucket/lerobot_dataset",
+    source_options={
+        "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+        "fs.oss.accessKeyId": "SOURCE_ACCESS_KEY_ID",
+        "fs.oss.accessKeySecret": "SOURCE_ACCESS_KEY_SECRET",
+    },
+)
+```
+
+Missing tables are created from metadata; existing tables use strict schema
+validation and append semantics. Scalars map to scalar types, vectors to
+`VECTOR`, higher-rank tensors to nested `ARRAY`, and images to `BLOB`. Images
+keep their compressed bytes.
+
+Only v3 is supported. Video features, `uint64`, and language event structures
+are rejected.
+
 ## Overwrite
 
 `overwrite` accepts the same input formats as `add` and replaces existing data

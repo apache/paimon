@@ -26,13 +26,18 @@ from typing import Callable, Mapping, Optional
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import _file_uri_path
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+from pypaimon.multimodal.arrow_utils import strict_arrow_table
+from pypaimon.multimodal.source_utils import (
+    _source_path_text,
+    _validated_source_options,
+    _validate_source_kerberos,
+)
 from pypaimon.multimodal.table import _target_schema
 from pypaimon.write.commit_callback import CommitCallback
 
@@ -117,6 +122,9 @@ class _Hdf5SourceFileIO:
     def new_input_stream(self, path):
         file_io, native_path = self._resolve(path)
         return file_io.new_input_stream(native_path)
+
+    def to_filesystem_path(self, path):
+        return self._resolve(path)[1]
 
     def close(self):
         self._resolver.close()
@@ -376,17 +384,6 @@ def _raise_legacy_directory_listing_error(path, error):
         % path) from error
 
 
-def _source_path_text(value):
-    try:
-        path = os.fspath(value)
-    except TypeError as error:
-        raise ValueError(
-            "paths must contain only filesystem paths or URIs.") from error
-    if isinstance(path, bytes):
-        raise ValueError("paths must contain only filesystem paths or URIs.")
-    return path
-
-
 def _normalize_source_path(value):
     path = _source_path_text(value)
     parsed = urlparse(path)
@@ -459,40 +456,6 @@ def _path_values(paths):
             "paths must be a path or an iterable of paths.") from error
 
 
-def _validated_source_options(source_options):
-    if source_options is None:
-        return {}
-    if not isinstance(source_options, Mapping):
-        raise ValueError("source_options must be a mapping.")
-    return dict(source_options)
-
-
-def _validate_source_kerberos(paths, source_options):
-    source_principal = (
-        source_options.get("security.kerberos.login.principal")
-        or source_options.get("security.principal")
-    )
-    source_keytab = (
-        source_options.get("security.kerberos.login.keytab")
-        or source_options.get("security.keytab")
-    )
-    if not source_principal and not source_keytab:
-        return
-    if bool(source_principal) != bool(source_keytab):
-        raise ValueError(
-            "Source Kerberos principal and keytab must be both set or both "
-            "unset.")
-    if not any(
-            urlparse(_source_path_text(path)).scheme.lower()
-            in ("hdfs", "viewfs") for path in paths):
-        return
-    raise ValueError(
-        "HDF5 sources cannot use an explicit Kerberos keytab in a shared "
-        "process because kinit overwrites process-global credentials. "
-        "Run the load in a process-isolated worker with a pre-acquired "
-        "ticket cache and omit the source principal and keytab options.")
-
-
 def _require_seekable(stream, source):
     required = ("read", "seek", "tell")
     if any(not callable(getattr(stream, method, None)) for method in required):
@@ -511,116 +474,13 @@ def _require_seekable(stream, source):
 
 
 def _strict_arrow_table(data, target_schema, source, batch_index):
-    if isinstance(data, pa.RecordBatch):
-        table = pa.Table.from_batches([data])
-    elif isinstance(data, pa.Table):
-        table = data
-    else:
-        raise ValueError(
-            "HDF5 transform must return Arrow data or an iterable of Arrow data.")
-
-    missing = [
-        name for name in target_schema.names if name not in table.column_names
-    ]
-    if missing:
-        raise ValueError(
-            "HDF5 batch %d from %s is missing columns: %s"
-            % (batch_index, source.path, missing))
-    extra = [
-        name for name in table.column_names if name not in target_schema.names
-    ]
-    if extra:
-        raise ValueError(
-            "HDF5 batch %d from %s has unexpected columns: %s"
-            % (batch_index, source.path, extra))
-    if table.column_names != target_schema.names:
-        raise ValueError(
-            "HDF5 batch %d from %s has columns in the wrong order: %s; "
-            "expected %s."
-            % (batch_index, source.path, table.column_names,
-               target_schema.names))
-    try:
-        _validate_nested_nullability(table, target_schema)
-        if table.schema.equals(target_schema, check_metadata=False):
-            return table
-        casted = table.cast(target_schema, safe=True)
-        _validate_nested_nullability(casted, target_schema)
-        return casted
-    except (ValueError, TypeError, NotImplementedError) as error:
-        raise ValueError(
-            "HDF5 batch %d from %s cannot be converted to the table schema: %s"
-            % (batch_index, source.path, error)) from error
-
-
-def _validate_nested_nullability(table, schema):
-    for field, column in zip(schema, table.columns):
-        for chunk in column.chunks:
-            _validate_array_nullability(chunk, field, field.name)
-
-
-def _validate_array_nullability(array, field, path):
-    if not field.nullable and array.null_count:
-        raise ValueError(
-            "non-nullable field %s contains %d null value(s)"
-            % (path, array.null_count))
-
-    target_type = field.type
-    source_type = array.type
-    if (pa.types.is_list(target_type)
-            or pa.types.is_large_list(target_type)
-            or pa.types.is_fixed_size_list(target_type)):
-        if not (pa.types.is_list(source_type)
-                or pa.types.is_large_list(source_type)
-                or pa.types.is_fixed_size_list(source_type)):
-            return
-        _validate_array_nullability(
-            pc.list_flatten(array),
-            target_type.value_field,
-            "%s.%s" % (path, target_type.value_field.name),
-        )
-        return
-
-    if pa.types.is_map(target_type):
-        if not pa.types.is_map(source_type):
-            return
-        start = array.offsets[0].as_py()
-        stop = array.offsets[-1].as_py()
-        length = stop - start
-        offsets = pc.subtract(
-            array.offsets,
-            pa.scalar(start, type=array.offsets.type),
-        )
-        entries = pa.StructArray.from_arrays(
-            [array.keys.slice(start, length),
-             array.items.slice(start, length)],
-            fields=[source_type.key_field, source_type.item_field],
-        )
-        logical_entries = pc.list_flatten(pa.ListArray.from_arrays(
-            offsets,
-            entries,
-            mask=pc.is_null(array),
-        ))
-        _validate_array_nullability(
-            logical_entries.field(0), target_type.key_field,
-            "%s.%s" % (path, target_type.key_field.name))
-        _validate_array_nullability(
-            logical_entries.field(1), target_type.item_field,
-            "%s.%s" % (path, target_type.item_field.name))
-        return
-
-    if pa.types.is_struct(target_type):
-        if not pa.types.is_struct(source_type):
-            return
-        parent_valid = pc.is_valid(array) if array.null_count else None
-        for index, child_field in enumerate(target_type):
-            child = array.field(index)
-            if parent_valid is not None:
-                child = pc.filter(child, parent_valid)
-            _validate_array_nullability(
-                child,
-                child_field,
-                "%s.%s" % (path, child_field.name),
-            )
+    return strict_arrow_table(
+        data,
+        target_schema,
+        source.path,
+        batch_index,
+        "HDF5",
+    )
 
 
 def _arrow_batches(transformed):

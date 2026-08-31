@@ -31,6 +31,29 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Load LeRobot Dataset v3
+
+Install the optional dependency, then import a local directory, FileIO URI, or
+Hugging Face repository:
+
+```commandline
+pip install 'pypaimon[lerobot]'
+```
+
+```python
+import pypaimon.multimodal as pmm
+
+connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
+snapshot_id = connection.load_from_lerobot(
+    "robot_data",
+    "/data/lerobot_dataset",
+)
+print(snapshot_id)
+```
+
+The schema comes from `meta/info.json`. Each frame becomes one row; media uses
+BLOB columns. Missing tables are created and later calls append.
+
 # HDF5 to multimodal tables
 
 HDF5 loading requires Python 3.8 or newer. Install the optional dependency and
