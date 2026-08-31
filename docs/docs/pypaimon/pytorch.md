@@ -55,8 +55,8 @@ for batch_idx, batch_data in enumerate(dataloader):
 ```
 
 When the `streaming` parameter is true, it will iteratively read. When it is
-false, row-tracking tables fetch each DataLoader batch lazily by row ID; other
-tables retain an Arrow table in memory for map-style access.
+false, eligible data-evolution reads fetch each DataLoader batch lazily by row
+ID; other reads retain an Arrow table in memory for map-style access.
 
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.

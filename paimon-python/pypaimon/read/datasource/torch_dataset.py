@@ -152,13 +152,41 @@ class _RowIdRangeIndex:
         return row_ids
 
 
+class _SplitRangeIndex:
+
+    def __init__(self, ranges_by_split):
+        self.intervals = sorted(
+            (row_range.from_, row_range.to, split_index)
+            for split_index, ranges in enumerate(ranges_by_split)
+            for row_range in ranges
+        )
+        self.starts = [interval[0] for interval in self.intervals]
+        self.max_ends = []
+        max_end = -1
+        for _, end, _ in self.intervals:
+            max_end = max(max_end, end)
+            self.max_ends.append(max_end)
+
+    def find(self, ranges):
+        split_indices = set()
+        for row_range in ranges:
+            right = bisect.bisect_right(self.starts, row_range.to)
+            left = bisect.bisect_left(
+                self.max_ends, row_range.from_, 0, right)
+            for position in range(left, right):
+                _, end, split_index = self.intervals[position]
+                if end >= row_range.from_:
+                    split_indices.add(split_index)
+        return sorted(split_indices)
+
+
 class TorchDataset(Dataset):
     """
     Map-style PyTorch Dataset for Paimon table data.
 
-    Row-tracking tables are fetched lazily by DataLoader batch. Other tables
-    retain their Arrow representation instead of expanding all rows into
-    Python objects.
+    Eligible data-evolution reads are fetched lazily by DataLoader batch.
+    Other reads retain their Arrow representation instead of expanding all
+    rows into Python objects.
     """
 
     def __init__(self, table_read: TableRead, splits: List[Split]):
@@ -173,7 +201,13 @@ class TorchDataset(Dataset):
         self.splits = splits
         self._data = None
         self._row_ids = None
+        self._split_ranges = None
+        self._split_range_index = None
         if self._supports_lazy_row_id_read():
+            self._split_ranges = [
+                self._row_ranges_for_split(split) for split in splits
+            ]
+            self._split_range_index = _SplitRangeIndex(self._split_ranges)
             self._row_ids = self._compact_row_id_index()
             if self._row_ids is None:
                 row_id_read = TableRead(
@@ -187,19 +221,29 @@ class TorchDataset(Dataset):
                     SpecialFields.ROW_ID.name).combine_chunks()
                 if pc.count_distinct(self._row_ids).as_py() != len(
                         self._row_ids):
-                    self._row_ids = None
-                    self._data = table_read.to_arrow(splits)
+                    self._materialize()
         else:
-            self._data = table_read.to_arrow(splits)
+            self._materialize()
 
     def _supports_lazy_row_id_read(self) -> bool:
         if not self.table_read.table.options.row_tracking_enabled():
+            return False
+        if not self.table_read.table.options.data_evolution_enabled():
             return False
         if self.table_read.include_row_kind:
             return False
         if self.table_read.nested_name_paths:
             return False
+        if any(self._row_id_is_masked(split) for split in self.splits):
+            return False
         return all(self._supports_indexed_split(split) for split in self.splits)
+
+    @staticmethod
+    def _row_id_is_masked(split) -> bool:
+        if not isinstance(split, QueryAuthSplit):
+            return False
+        masking = getattr(split.auth_result, "column_masking", None)
+        return bool(masking and SpecialFields.ROW_ID.name in masking)
 
     @staticmethod
     def _supports_indexed_split(split) -> bool:
@@ -213,28 +257,44 @@ class TorchDataset(Dataset):
         if self.table_read.predicate is not None:
             return None
         ranges = []
-        for original in self.splits:
+        for original, split_ranges in zip(
+                self.splits, self._split_ranges):
             split = original
             if isinstance(split, QueryAuthSplit):
-                if split.auth_result.filter:
+                if getattr(split.auth_result, "filter", None):
                     return None
                 split = split.split
             deletion_files = split.data_deletion_files or []
             if any(deletion is not None for deletion in deletion_files):
                 return None
-            if isinstance(split, IndexedSplit):
-                ranges.extend(split.row_ranges())
-            else:
-                ranges.extend(Range.sort_and_merge_overlap([
-                    data_file.row_id_range()
-                    for data_file in split.files
-                    if data_file.first_row_id is not None
-                ], True))
+            ranges.extend(split_ranges)
         merged = Range.sort_and_merge_overlap(ranges, True)
         if sum(r.count() for r in ranges) != sum(
                 r.count() for r in merged):
             return None
         return _RowIdRangeIndex(ranges, self.table_read.limit)
+
+    @staticmethod
+    def _row_ranges_for_split(split):
+        if isinstance(split, QueryAuthSplit):
+            split = split.split
+        if isinstance(split, IndexedSplit):
+            ranges = split.row_ranges()
+        else:
+            ranges = [
+                data_file.row_id_range()
+                for data_file in split.files
+                if data_file.first_row_id is not None
+            ]
+        return Range.sort_and_merge_overlap(ranges, True)
+
+    def _materialize(self):
+        self._row_ids = None
+        self._data = self.table_read.to_arrow(self.splits)
+        self.table_read = None
+        self.splits = None
+        self._split_ranges = None
+        self._split_range_index = None
 
     def __len__(self) -> int:
         """
@@ -318,7 +378,9 @@ class TorchDataset(Dataset):
 
     def _select_splits(self, ranges) -> List[Split]:
         selected = []
-        for original in self.splits:
+        split_indices = self._split_range_index.find(ranges)
+        for split_index in split_indices:
+            original = self.splits[split_index]
             auth_result = None
             split = original
             if isinstance(split, QueryAuthSplit):
@@ -326,15 +388,9 @@ class TorchDataset(Dataset):
                 split = split.split
 
             if isinstance(split, IndexedSplit):
-                allowed = Range.and_(ranges, split.row_ranges())
                 split = split.data_split()
-            else:
-                file_ranges = Range.sort_and_merge_overlap([
-                    data_file.row_id_range()
-                    for data_file in split.files
-                    if data_file.first_row_id is not None
-                ], True)
-                allowed = Range.and_(ranges, file_ranges)
+            allowed = Range.and_(
+                ranges, self._split_ranges[split_index])
             if not allowed:
                 continue
 

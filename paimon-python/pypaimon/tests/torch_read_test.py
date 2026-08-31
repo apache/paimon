@@ -33,15 +33,18 @@ import torch
 from torch.utils.data import DataLoader
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal.table import MultimodalTable
 
 from pypaimon.read.datasource.torch_dataset import (
+    _SplitRangeIndex,
     TorchIterDataset,
     TorchShuffledIterDataset,
     _resolve_distributed_context,
 )
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.utils.range import Range
 
 
 def _collect_spawned_worker_splits(dataset, output):
@@ -567,6 +570,110 @@ class TorchReadTest(unittest.TestCase):
             sorted(row['user_id'] for row in expected),
             sorted(actual_ids),
         )
+
+    def test_non_streaming_row_tracking_without_data_evolution_materializes(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={'row-tracking.enabled': 'true'},
+        )
+        identifier = 'default.test_torch_row_tracking_without_data_evolution'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        expected = table_read.to_arrow(
+            splits, parallelism=1).to_pylist()
+        with patch.object(
+                table_read, 'to_arrow', wraps=table_read.to_arrow) as read:
+            dataset = table_read.to_torch(splits, streaming=False)
+            read.assert_called_once_with(splits)
+
+        self.assertIsInstance(dataset._data, pa.Table)
+        self.assertIsNone(dataset.table_read)
+        self.assertIsNone(dataset.splits)
+        with patch.object(
+                TableRead, 'to_arrow', side_effect=AssertionError(
+                    'materialized dataset must not read another batch')):
+            self.assertEqual(expected, dataset[:])
+
+    def test_non_streaming_row_id_masking_materializes(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            },
+        )
+        identifier = 'default.test_torch_masked_row_id'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={
+                '_ROW_ID': json.dumps({'name': 'NULL'}),
+            },
+        )
+        table.catalog_environment.table_query_auth = (
+            lambda options, table_identifier: lambda select: auth
+        )
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        expected = table_read.to_arrow(
+            splits, parallelism=1).to_pylist()
+        dataset = table_read.to_torch(splits, streaming=False)
+
+        self.assertIsInstance(dataset._data, pa.Table)
+        self.assertEqual(expected, dataset[:])
+
+    def test_non_streaming_dataset_with_cache_is_pickleable(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            catalog = CatalogFactory.create({
+                'warehouse': os.path.join(tempdir, 'warehouse'),
+                'local-cache.enabled': 'true',
+                'local-cache.whitelist': 'meta,global-index,data',
+            })
+            catalog.create_database('default', True)
+            for suffix, options, lazy in [
+                ('arrow', {}, False),
+                ('lazy', {
+                    'data-evolution.enabled': 'true',
+                    'row-tracking.enabled': 'true',
+                }, True),
+            ]:
+                with self.subTest(suffix=suffix):
+                    identifier = 'default.test_torch_cache_' + suffix
+                    schema = Schema.from_pyarrow_schema(
+                        self.pa_schema, options=options)
+                    catalog.create_table(identifier, schema, False)
+                    table = catalog.get_table(identifier)
+                    self._write_test_table(table)
+                    read_builder = table.new_read_builder().with_projection(
+                        ['user_id', 'behavior'])
+                    splits = read_builder.new_scan().plan().splits()
+                    dataset = read_builder.new_read().to_torch(
+                        splits, streaming=False)
+                    self.assertEqual(lazy, dataset._data is None)
+
+                    restored = pickle.loads(pickle.dumps(dataset))
+                    self.assertEqual(dataset[0], restored[0])
+
+    def test_split_range_index(self):
+        index = _SplitRangeIndex([
+            [Range(split * 10, split * 10 + 9)]
+            for split in range(10000)
+        ])
+
+        self.assertEqual([5000], index.find([Range(50003, 50005)]))
+        self.assertEqual(
+            [0, 9999], index.find([Range(0, 0), Range(99999, 99999)]))
 
     def test_non_streaming_row_tracking_preserves_filter_and_limit(self):
         schema = Schema.from_pyarrow_schema(
