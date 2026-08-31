@@ -1238,6 +1238,14 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
+        # Do not treat blob.stored-descriptor-fields as a layout switch.
+        # Python master ignored that key and wrote dedicated .blob payloads;
+        # a global fallback would mis-parse those files during a rolling
+        # upgrade. The cost is that Java tables which only set the fallback
+        # key store inline descriptors, and Python returns those bytes
+        # instead of fetching payload. Migrate explicitly to
+        # blob-descriptor-field (column directives already copy the legacy
+        # key onto the canonical option).
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
