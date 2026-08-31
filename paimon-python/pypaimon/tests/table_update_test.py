@@ -53,6 +53,8 @@ def test_batch_row_id_update_batches_reuse_file_index():
         updater.commit_messages = []
 
         def update_columns(batch, columns):
+            updater._last_updated_first_row_ids = {
+                batch['_ROW_ID'][0].as_py()}
             updater.commit_messages.append((batch, columns))
             return updater.commit_messages
 
@@ -1606,6 +1608,28 @@ class _StreamModeMixin(StreamModeMixin):
 class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
     """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
 
+    def test_update_batches_reject_same_file_and_abort_staged_files(self):
+        table = self._create_seeded_table()
+        before_files = self._list_table_files(table)
+        update = (
+            self._make_write_builder(table)
+            .new_update()
+            .with_update_type(['age'])
+        )
+
+        with self.assertRaisesRegex(
+                ValueError, "overlapping first_row_ids.*0"):
+            update.update_by_arrow_batches_with_row_id(iter([
+                pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+                pa.Table.from_pydict({'_ROW_ID': [1], 'age': [31]}),
+            ]))
+
+        self.assertEqual(before_files, self._list_table_files(table))
+        self.assertEqual(
+            [25, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
     def test_callable_output_preserves_large_offset_chunks(self):
         from pypaimon.write.table_update import TableUpdate
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -1635,7 +1659,10 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
         )
         with mock.patch.object(
                 updater, '_calculate_first_row_id',
-                side_effect=lambda data: data) as calculate:
+                side_effect=lambda data: data.append_column(
+                    TableUpdateByRowId.FIRST_ROW_ID_COLUMN,
+                    pa.array([0, 0], type=pa.int64()),
+                )) as calculate:
             with mock.patch.object(updater, '_write_by_first_row_id'):
                 updater.update_columns(updates, ['payload'])
 
