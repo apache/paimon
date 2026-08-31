@@ -16,6 +16,8 @@
 
 """LeRobot metadata validation and Arrow schema conversion."""
 
+import json
+
 import pyarrow as pa
 
 
@@ -120,7 +122,16 @@ def _feature_field(name, feature):
             raise ValueError(
                 "LeRobot string feature %s must be scalar." % name)
         arrow_type = _tensor_type(scalar_type, shape)
-    description = "LeRobot dtype=%s, shape=%s" % (dtype, list(shape))
+    description = "LeRobot dtype=%s, shape=%s, names=%s" % (
+        dtype,
+        json.dumps(list(shape), separators=(",", ":")),
+        json.dumps(
+            feature.get("names"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
     return pa.field(
         name,
         arrow_type,

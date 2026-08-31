@@ -180,6 +180,14 @@ def _open_resolved_dataset(LeRobotDataset, source, info):
 
 class _RemoteLeRobotDataset:
 
+    _EPISODE_COLUMNS = [
+        "episode_index",
+        "dataset_from_index",
+        "dataset_to_index",
+        "data/chunk_index",
+        "data/file_index",
+    ]
+
     def __init__(self, source, info):
         self.source = source
         self.root = source.path
@@ -252,7 +260,10 @@ class _RemoteLeRobotDataset:
         rows = []
         for path in paths:
             rows.extend(_read_remote_parquet(
-                self._file_io, path).to_pylist())
+                self._file_io,
+                path,
+                columns=self._EPISODE_COLUMNS,
+            ).to_pylist())
         rows.sort(key=lambda row: int(row["episode_index"]))
         if len(rows) != episode_count:
             raise ValueError(
@@ -433,11 +444,11 @@ def _read_remote_json(source_file_io, path):
             "Cannot read LeRobot metadata %s: %s" % (path, error)) from error
 
 
-def _read_remote_parquet(source_file_io, path):
+def _read_remote_parquet(source_file_io, path, columns=None):
     stream = source_file_io.new_input_stream(path)
     with closing(stream) as source_stream:
         try:
-            return pq.read_table(source_stream)
+            return pq.read_table(source_stream, columns=columns)
         except (OSError, ValueError, pa.ArrowException) as error:
             raise ValueError(
                 "Cannot read LeRobot Parquet file %s: %s"

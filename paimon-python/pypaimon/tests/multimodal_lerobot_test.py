@@ -33,6 +33,7 @@ from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
+    _read_batch,
     _task_name,
 )
 from pypaimon.multimodal.lerobot.schema import (
@@ -41,6 +42,7 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.lerobot.source import (
     _LeRobotSource,
+    _RemoteLeRobotDataset,
     _import_lerobot_dataset,
     _open_dataset,
     _remote_source_path,
@@ -51,6 +53,15 @@ try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 except ImportError:
     LeRobotDataset = None
+
+
+def _replaced_contract(field, old, new):
+    description = field.metadata[b"description"].decode("utf-8")
+    if old not in description:
+        raise AssertionError("%r is missing from %r" % (old, description))
+    return {
+        b"description": description.replace(old, new).encode("utf-8"),
+    }
 
 
 class LeRobotValidationTest(unittest.TestCase):
@@ -224,7 +235,11 @@ class LeRobotValidationTest(unittest.TestCase):
         source = _schema_from_info({
             "features": {
                 "scalar": {"dtype": "float32", "shape": [1]},
-                "vector": {"dtype": "float32", "shape": [3]},
+                "vector": {
+                    "dtype": "float32",
+                    "shape": [3],
+                    "names": ["x", "y", "z"],
+                },
                 "tensor": {"dtype": "float32", "shape": [2, 3]},
                 "image": {"dtype": "image", "shape": [8, 10, 3]},
             }
@@ -235,17 +250,28 @@ class LeRobotValidationTest(unittest.TestCase):
                 "tensor",
                 source.field("tensor").type,
                 nullable=False,
-                metadata={
-                    b"description": b"LeRobot dtype=float32, shape=[5, 3]",
-                },
+                metadata=_replaced_contract(
+                    source.field("tensor"), "shape=[2,3]", "shape=[5,3]"),
             ),
             "dtype": pa.field(
                 "scalar",
                 pa.float64(),
                 nullable=False,
-                metadata={
-                    b"description": b"LeRobot dtype=float64, shape=[1]",
-                },
+                metadata=_replaced_contract(
+                    source.field("scalar"),
+                    "dtype=float32",
+                    "dtype=float64",
+                ),
+            ),
+            "names": pa.field(
+                "vector",
+                source.field("vector").type,
+                nullable=False,
+                metadata=_replaced_contract(
+                    source.field("vector"),
+                    'names=["x","y","z"]',
+                    'names=["z","y","x"]',
+                ),
             ),
             "array": pa.field(
                 "vector",
@@ -269,6 +295,90 @@ class LeRobotValidationTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "cannot be converted"):
                     _validate_lerobot_schema(source, target, "dataset")
+
+    def test_remote_episode_metadata_projects_stats_columns(self):
+        source = _LeRobotSource(
+            path="oss://bucket/robot",
+            root=None,
+            repo_id="",
+            file_io=Mock(),
+        )
+        info = {
+            "total_frames": 1,
+            "total_episodes": 1,
+            "total_tasks": 0,
+            "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+        }
+        episode_table = pa.table({
+            "episode_index": [0],
+            "dataset_from_index": [0],
+            "dataset_to_index": [1],
+            "data/chunk_index": [0],
+            "data/file_index": [0],
+        })
+        with patch(
+                "pypaimon.multimodal.lerobot.source._remote_parquet_files",
+                return_value=["oss://bucket/robot/meta/episodes/file.parquet"]):
+            with patch(
+                "pypaimon.multimodal.lerobot.source._read_remote_parquet",
+                return_value=episode_table,
+            ) as read_parquet:
+                _RemoteLeRobotDataset(source, info)
+
+        read_parquet.assert_called_once_with(
+            source.file_io,
+            "oss://bucket/robot/meta/episodes/file.parquet",
+            columns=_RemoteLeRobotDataset._EPISODE_COLUMNS,
+        )
+
+    def test_empty_local_dataset_returns_before_opening_lerobot(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_empty_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            (source / "meta" / "info.json").write_text(json.dumps({
+                "codebase_version": "v3.0",
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                },
+            }))
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            with patch(
+                    "pypaimon.multimodal.lerobot.api._import_lerobot_dataset"
+            ) as import_lerobot:
+                self.assertIsNone(connection.load_from_lerobot(
+                    "empty_frames", source))
+            import_lerobot.assert_not_called()
+            table = connection.get_table("empty_frames")
+            self.assertIsNone(
+                table.raw_table.snapshot_manager().get_latest_snapshot())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_source_values_are_safely_converted(self):
+        class Dataset:
+
+            def __init__(self, value):
+                self.value = value
+
+            def read_batch(self, unused_begin, unused_end):
+                return pa.table({"value": [self.value]})
+
+        cases = [
+            ({"dtype": "int32", "shape": [1]}, 1.5, "safely converted"),
+            ({"dtype": "float32", "shape": [1]}, 1e100, "float32 range"),
+        ]
+        for feature, value, message in cases:
+            with self.subTest(feature=feature, value=value):
+                info = {"features": {"value": feature}}
+                schema = _schema_from_info(info, include_task=False)
+                with self.assertRaisesRegex(ValueError, message):
+                    _read_batch(Dataset(value), info, 0, 1, schema)
 
     def test_local_v2_is_rejected_before_opening(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_v2_"))
@@ -548,17 +658,31 @@ class LeRobotImportTest(unittest.TestCase):
                 "observation.matrix",
                 schema.field("observation.matrix").type,
                 nullable=False,
-                metadata={
-                    b"description": b"LeRobot dtype=float32, shape=[5, 2]",
-                },
+                metadata=_replaced_contract(
+                    schema.field("observation.matrix"),
+                    "shape=[2,2]",
+                    "shape=[5,2]",
+                ),
             ),
             "dtype": pa.field(
                 "action",
                 pa.list_(pa.float64(), 2),
                 nullable=False,
-                metadata={
-                    b"description": b"LeRobot dtype=float64, shape=[2]",
-                },
+                metadata=_replaced_contract(
+                    schema.field("action"),
+                    "dtype=float32",
+                    "dtype=float64",
+                ),
+            ),
+            "names": pa.field(
+                "action",
+                schema.field("action").type,
+                nullable=False,
+                metadata=_replaced_contract(
+                    schema.field("action"),
+                    'names=["x","y"]',
+                    'names=["y","x"]',
+                ),
             ),
             "array": pa.field(
                 "action",

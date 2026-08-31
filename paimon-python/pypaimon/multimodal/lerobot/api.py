@@ -82,6 +82,19 @@ def load_from_lerobot(
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
         _schema_from_info(local_info, include_task=False)
+        if int(local_info.get("total_frames", 0)) == 0:
+            source_schema = _schema_from_info(
+                local_info,
+                include_task=int(local_info.get("total_tasks", 0)) > 0,
+            )
+            _validated_table(
+                connection,
+                table_name,
+                source_schema,
+                options,
+                resolved_source,
+            )
+            return None
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -91,16 +104,12 @@ def load_from_lerobot(
 
             source_schema = _schema_from_info(
                 info, include_task=_has_tasks(dataset, info))
-            table = _get_or_create_table(
-                connection, table_name, source_schema, options)
-            target_schema = _target_schema(table.raw_table)
-            _validate_lerobot_schema(
-                source_schema, target_schema, resolved_source.path)
-            _strict_lerobot_table(
-                pa.Table.from_batches([], schema=source_schema),
-                target_schema,
+            table = _validated_table(
+                connection,
+                table_name,
+                source_schema,
+                options,
                 resolved_source,
-                0,
             )
 
             row_count = int(info.get("total_frames", len(dataset)))
@@ -118,6 +127,22 @@ def load_from_lerobot(
             close = getattr(dataset, "close", None)
             if callable(close):
                 close()
+
+
+def _validated_table(
+        connection, table_name, source_schema, options, source):
+    table = _get_or_create_table(
+        connection, table_name, source_schema, options)
+    target_schema = _target_schema(table.raw_table)
+    _validate_lerobot_schema(
+        source_schema, target_schema, source.path)
+    _strict_lerobot_table(
+        pa.Table.from_batches([], schema=source_schema),
+        target_schema,
+        source,
+        0,
+    )
+    return table
 
 
 def _get_or_create_table(connection, table_name, schema, options):

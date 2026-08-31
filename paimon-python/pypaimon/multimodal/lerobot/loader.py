@@ -17,6 +17,8 @@
 """LeRobot frame conversion and batch writing."""
 
 import io
+import math
+import numbers
 from pathlib import Path
 
 import pyarrow as pa
@@ -154,7 +156,7 @@ def _read_batch(dataset, info, begin, end, schema):
         else:
             values = [_normalize_value(value, feature, name)
                       for value in values]
-        arrays.append(pa.array(values, type=field.type))
+        arrays.append(_safe_array(values, field, name))
         fields.append(field)
 
     if "task" in schema.names:
@@ -165,6 +167,40 @@ def _read_batch(dataset, info, begin, end, schema):
         ))
         fields.append(schema.field("task"))
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
+
+def _safe_array(values, field, name):
+    _validate_float32_range(values, field.type, name)
+    try:
+        return pa.array(values).cast(field.type, safe=True)
+    except (pa.ArrowException, TypeError, ValueError, OverflowError) as error:
+        raise ValueError(
+            "LeRobot feature %s cannot be safely converted to %s: %s"
+            % (name, field.type, error)) from error
+
+
+def _validate_float32_range(values, target_type, name):
+    if pa.types.is_float32(target_type):
+        maximum = 3.4028234663852886e38
+        for value in values:
+            if isinstance(value, numbers.Integral):
+                out_of_range = abs(value) > maximum
+            else:
+                out_of_range = isinstance(value, numbers.Real) \
+                    and math.isfinite(value) \
+                    and abs(value) > maximum
+            if out_of_range:
+                raise ValueError(
+                    "LeRobot feature %s contains a value outside the "
+                    "float32 range: %r" % (name, value))
+        return
+    if pa.types.is_list(target_type) \
+            or pa.types.is_large_list(target_type) \
+            or pa.types.is_fixed_size_list(target_type):
+        for value in values:
+            if value is not None:
+                _validate_float32_range(
+                    value, target_type.value_type, name)
 
 
 def _normalize_value(value, feature, name):
