@@ -492,12 +492,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * Schemas, tags and (for format version 3) the row-id space therefore accumulate consistently
      * across the whole replayed history.
      *
-     * <p>Each replay step persists its metadata file, so an interrupted rebuild resumes from the
-     * newest already-written metadata on the next commit. Intermediate steps skip the version hint
-     * and the external catalog commit; only the final step publishes, so an external catalog sees a
-     * single transition. Replayed snapshots keep their original Paimon commit timestamps and are
-     * subject to the same retention policy ({@link CoreOptions#SNAPSHOT_NUM_RETAINED_MIN}, {@link
-     * CoreOptions#SNAPSHOT_TIME_RETAINED}, ...) that live commits apply.
+     * <p>Every replay step writes to a uniquely named staging path; the published chain, the
+     * version hint and the external catalog stay untouched until the final staged metadata is
+     * durable, and only then is the staged chain promoted into place. A rebuild that fails at any
+     * point therefore leaves the previously published metadata fully readable, and its staged
+     * leftovers are removed by the next rebuild. Replayed snapshots keep their original Paimon
+     * commit timestamps and are subject to the same retention policy ({@link
+     * CoreOptions#SNAPSHOT_NUM_RETAINED_MIN}, {@link CoreOptions#SNAPSHOT_TIME_RETAINED}, ...) that
+     * live commits apply.
      */
     private void rebuildFullHistory(
             long currentSnapshotId,
@@ -509,6 +511,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         Long earliest = snapshotManager.earliestSnapshotId();
         long startId = earliest == null ? currentSnapshotId : Math.min(earliest, currentSnapshotId);
 
+        deleteStagedLeftovers();
+
         // Resume from the newest existing metadata below the current snapshot, if it is usable.
         // Anything older than the newest existing file is stale by definition: live commits only
         // ever read the immediately preceding metadata.
@@ -519,10 +523,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 try {
                     IcebergMetadata metadata =
                             IcebergMetadata.fromPath(table.fileIO(), metadataPath);
-                    if (isSameFormatVersion(metadata.formatVersion())
-                            && (formatVersion < IcebergMetadata.FORMAT_VERSION_V3
-                                    || metadata.nextRowId() != null)
-                            && coversRetainedPrefix(metadata, id, startId)) {
+                    if (isUsableReplayBase(metadata, id, startId)) {
                         baseId = id;
                     }
                 } catch (Exception e) {
@@ -535,58 +536,201 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
         }
 
-        long firstWithBase;
+        String rebuildUuid = UUID.randomUUID().toString();
+        long firstStagedId;
         boolean freshRebuild = baseId == -1;
         StaleBuild staleBuild = null;
         if (freshRebuild) {
-            // No usable base: the whole old build is stale. Nothing of it is deleted yet, so
-            // an external catalog that still points at the old metadata keeps a fully readable
-            // table during the entire replay; the old files are cleaned only after the final
-            // step has published. Their references are collected up front, tolerating
-            // unreadable files (that is what triggered some rebuilds in the first place).
+            // No usable base: the whole old build is stale. Nothing of it is touched during the
+            // replay, so an external catalog that still points at the old metadata keeps a fully
+            // readable table; the old files are replaced and cleaned only by the promotion. Their
+            // references are collected up front, tolerating unreadable files (that is what
+            // triggered some rebuilds in the first place).
             staleBuild = collectStaleBuild(currentSnapshotId);
-            // a leftover file in the replay range must not survive as a replay step's output:
-            // it may match the step's commit identity (a regenerated build of the same Paimon
-            // snapshot does) while carrying another format or content, so each target is
-            // removed just before its replacement is written
-            table.fileIO().deleteQuietly(pathFactory.toMetadataPath(startId));
+            firstStagedId = startId;
             createMetadataWithoutBase(
                     startId,
                     inheritUuid,
                     lastColumnIdFloor,
                     nextRowIdFloor,
-                    startId != currentSnapshotId);
-            firstWithBase = startId + 1;
+                    stagedMetadataPath(rebuildUuid, startId));
         } else {
-            firstWithBase = baseId + 1;
+            firstStagedId = baseId + 1;
         }
 
-        for (long id = firstWithBase; id <= currentSnapshotId; id++) {
+        for (long id = firstStagedId == startId ? startId + 1 : firstStagedId;
+                id <= currentSnapshotId;
+                id++) {
             long snapshotId = id;
             Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-            if (freshRebuild && snapshotId != currentSnapshotId) {
-                // see above; the final step replaces its twin through the regular write path
-                table.fileIO().deleteQuietly(pathFactory.toMetadataPath(snapshotId));
-            }
+            Path basePath =
+                    snapshotId - 1 < firstStagedId
+                            ? pathFactory.toMetadataPath(snapshotId - 1)
+                            : stagedMetadataPath(rebuildUuid, snapshotId - 1);
             createMetadataWithBase(
                     (removedFiles, addedFiles) ->
                             collectFileChanges(snapshotId, removedFiles, addedFiles),
                     indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX),
                     snapshot,
-                    pathFactory.toMetadataPath(snapshotId - 1),
+                    basePath,
                     lastColumnIdFloor,
                     nextRowIdFloor,
-                    snapshotId != currentSnapshotId);
+                    stagedMetadataPath(rebuildUuid, snapshotId));
         }
 
-        if (staleBuild != null) {
-            // only after the replay's final step may have published: a rebuild superseded by a
-            // newer commit leaves the old build in place for that commit's own rebuild
-            Long latestAfterReplay = table.snapshotManager().latestSnapshotId();
-            if (latestAfterReplay != null && latestAfterReplay == currentSnapshotId) {
-                deleteStaleBuild(staleBuild, currentSnapshotId, startId);
+        boolean promoted =
+                promoteStagedReplay(rebuildUuid, firstStagedId, currentSnapshotId, startId);
+        if (promoted && staleBuild != null) {
+            deleteStaleBuild(staleBuild, currentSnapshotId, startId);
+        }
+    }
+
+    /**
+     * Whether an existing metadata file can serve as the resume base of a full-history replay. On
+     * top of the structural checks, the base must describe the live timeline: an abandoned base (a
+     * rolled-back Paimon snapshot reused the id) or one carrying re-evolved schema definitions
+     * would be rejected again by the first replay step, and a rebuild must never select a base its
+     * own replay refuses to extend.
+     */
+    private boolean isUsableReplayBase(IcebergMetadata metadata, long baseId, long startId) {
+        if (!isSameFormatVersion(metadata.formatVersion())) {
+            return false;
+        }
+        if (formatVersion >= IcebergMetadata.FORMAT_VERSION_V3 && metadata.nextRowId() == null) {
+            return false;
+        }
+        if (!coversRetainedPrefix(metadata, baseId, startId)) {
+            return false;
+        }
+        SnapshotManager snapshotManager = table.snapshotManager();
+        if (!snapshotManager.snapshotExists(baseId)
+                || !metadataMatchesSnapshot(metadata, snapshotManager.snapshot(baseId))) {
+            return false;
+        }
+        SchemaCache schemaCache = new SchemaCache();
+        long latestSchemaId = schemaCache.getLatestSchemaId();
+        for (IcebergSchema known : metadata.schemas()) {
+            if (known.schemaId() > latestSchemaId
+                    || !known.equals(schemaCache.get(known.schemaId()))) {
+                return false;
             }
         }
+        return true;
+    }
+
+    private Path stagedMetadataPath(String rebuildUuid, long snapshotId) {
+        return new Path(
+                pathFactory.metadataDirectory(),
+                String.format("rebuild-%s-v%d.metadata.json", rebuildUuid, snapshotId));
+    }
+
+    /** Staged files of crashed or superseded rebuilds; only ever garbage. */
+    private void deleteStagedLeftovers() throws IOException {
+        FileStatus[] statuses;
+        try {
+            statuses = table.fileIO().listStatus(pathFactory.metadataDirectory());
+        } catch (FileNotFoundException e) {
+            return;
+        }
+        for (FileStatus status : statuses) {
+            String name = status.getPath().getName();
+            if (name.startsWith("rebuild-") && name.endsWith(".metadata.json")) {
+                table.fileIO().deleteQuietly(status.getPath());
+            }
+        }
+    }
+
+    /**
+     * Switch the published chain to the staged one, then the version hint and the external catalog.
+     * The staged head is durable and validated before any published path is touched; the remaining
+     * window is the per-file replacement of each chain position, ending one below the head, and
+     * every path serves complete metadata again as soon as its replacement lands.
+     *
+     * @return false if a newer commit superseded this rebuild; the staged files are discarded and
+     *     the published chain is left for that commit's own rebuild
+     */
+    private boolean promoteStagedReplay(
+            String rebuildUuid, long firstStagedId, long currentSnapshotId, long startId)
+            throws IOException {
+        IcebergMetadata head =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), stagedMetadataPath(rebuildUuid, currentSnapshotId));
+        Preconditions.checkState(
+                head.currentSnapshotId() == currentSnapshotId,
+                "Staged replay head is at snapshot %s instead of %s",
+                head.currentSnapshotId(),
+                currentSnapshotId);
+        // a truncated chain must never be promoted, no matter what produced it
+        Preconditions.checkState(
+                coversRetainedPrefix(head, currentSnapshotId, startId),
+                "Staged replay head for snapshot %s does not cover the retained history",
+                currentSnapshotId);
+
+        Long latest = table.snapshotManager().latestSnapshotId();
+        if (latest == null || latest != currentSnapshotId) {
+            for (long id = firstStagedId; id <= currentSnapshotId; id++) {
+                table.fileIO().deleteQuietly(stagedMetadataPath(rebuildUuid, id));
+            }
+            return false;
+        }
+
+        for (long id = firstStagedId; id <= currentSnapshotId; id++) {
+            Path staged = stagedMetadataPath(rebuildUuid, id);
+            Path published = pathFactory.toMetadataPath(id);
+            if (table.fileIO().exists(published)) {
+                table.fileIO().deleteQuietly(published);
+            }
+            if (!table.fileIO().rename(staged, published)) {
+                table.fileIO().deleteQuietly(published);
+                if (!table.fileIO().rename(staged, published)) {
+                    throw new IllegalStateException(
+                            "Failed to promote staged Iceberg metadata " + staged);
+                }
+            }
+        }
+
+        Path headPath = pathFactory.toMetadataPath(currentSnapshotId);
+        table.fileIO()
+                .overwriteFileUtf8(
+                        new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
+                        String.valueOf(currentSnapshotId));
+        commitToExternalCatalog(head, headPath, null, null);
+        deleteApplicableMetadataFiles(currentSnapshotId);
+        return true;
+    }
+
+    /** Identity recovered from the newest readable metadata below an unreadable base. */
+    private static class RecoveredIdentity {
+        private @Nullable String uuid;
+        private int lastColumnId;
+    }
+
+    private RecoveredIdentity recoverIdentityBelow(long snapshotId) {
+        RecoveredIdentity recovered = new RecoveredIdentity();
+        try {
+            long newestReadable = -1;
+            Iterator<Path> it =
+                    pathFactory.getAllMetadataPathBefore(table.fileIO(), snapshotId).iterator();
+            while (it.hasNext()) {
+                Path path = it.next();
+                long version = metadataVersionOf(path);
+                if (version <= newestReadable) {
+                    continue;
+                }
+                try {
+                    IcebergMetadata metadata = IcebergMetadata.fromPath(table.fileIO(), path);
+                    newestReadable = version;
+                    recovered.uuid = metadata.tableUuid();
+                    recovered.lastColumnId =
+                            Math.max(recovered.lastColumnId, metadata.lastColumnId());
+                } catch (Exception ignored) {
+                    // unreadable files are exactly what this recovery works around
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("Failed to scan older Iceberg metadata for identity recovery.", e);
+        }
+        return recovered;
     }
 
     /** File names of the metadata chain being replaced by a from-scratch full-history replay. */
@@ -728,21 +872,20 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             int lastColumnIdFloor,
             long nextRowIdFloor)
             throws IOException {
-        createMetadataWithoutBase(
-                snapshotId, inheritUuid, lastColumnIdFloor, nextRowIdFloor, false);
+        createMetadataWithoutBase(snapshotId, inheritUuid, lastColumnIdFloor, nextRowIdFloor, null);
     }
 
     /**
-     * @param intermediate whether this metadata is an intermediate step of a {@link
-     *     #rebuildFullHistory} replay; intermediate steps skip the version hint and the external
-     *     catalog commit, which only the final step publishes.
+     * @param stagedTarget when non-null, this metadata is a step of a {@link #rebuildFullHistory}
+     *     replay: it is written to this staging path instead of the published one, and nothing is
+     *     published; the replay promotes the staged chain after its final step.
      */
     private void createMetadataWithoutBase(
             long snapshotId,
             @Nullable String inheritUuid,
             int lastColumnIdFloor,
             long nextRowIdFloor,
-            boolean intermediate)
+            @Nullable Path stagedTarget)
             throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
         Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
@@ -901,6 +1044,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         nextRowId,
                         refs);
 
+        if (stagedTarget != null) {
+            // a replay step: only the staging path is touched, the published chain stays
+            // intact until the replay promotes; staging names are unique, so a failed write
+            // is a hard error, never a twin
+            if (!table.fileIO().tryToWriteAtomic(stagedTarget, metadata.toJson())) {
+                throw new IllegalStateException(
+                        "Failed to write staged Iceberg metadata " + stagedTarget);
+            }
+            return;
+        }
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         // atomic-first: where rename overwrites, a stale twin is replaced with no window at
         // all; otherwise fall back to delete-then-write, the smallest window available
@@ -916,10 +1069,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
-        // only the current head may move the hint and the external catalog; an intermediate
-        // replay step publishes nothing and cleans nothing, the final step covers both
+        // only the current head may move the hint and the external catalog
         Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (!intermediate && latestAtPublish != null && latestAtPublish == snapshotId) {
+        if (latestAtPublish != null && latestAtPublish == snapshotId) {
             table.fileIO()
                     .overwriteFileUtf8(
                             new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
@@ -1262,13 +1414,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 baseMetadataPath,
                 lastColumnIdFloor,
                 nextRowIdFloor,
-                false);
+                null);
     }
 
     /**
-     * @param intermediate whether this metadata is an intermediate step of a {@link
-     *     #rebuildFullHistory} replay; intermediate steps skip the version hint and the external
-     *     catalog commit, which only the final step publishes.
+     * @param stagedTarget when non-null, this metadata is a step of a {@link #rebuildFullHistory}
+     *     replay: it is written to this staging path instead of the published one, and nothing is
+     *     published; the replay promotes the staged chain after its final step.
      */
     private void createMetadataWithBase(
             FileChangesCollector fileChangesCollector,
@@ -1277,21 +1429,39 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             Path baseMetadataPath,
             int lastColumnIdFloor,
             long nextRowIdFloor,
-            boolean intermediate)
+            @Nullable Path stagedTarget)
             throws IOException {
         long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata;
         try {
             baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
         } catch (Exception e) {
-            // an unreadable base is an unusable base: recreate instead of failing the commit,
-            // so a corrupted metadata file self-heals like a structurally invalid one
+            if (formatVersion >= IcebergMetadata.FORMAT_VERSION_V3) {
+                // the unreadable base may already have issued row ids that no other file
+                // records; rebuilding without its high-water mark would reuse them, so fail
+                // until the file is repaired or its history is removed together with it
+                // (the external catalog's watermark could lift this in the future)
+                throw new IllegalStateException(
+                        "Base Iceberg metadata "
+                                + baseMetadataPath
+                                + " is unreadable and format version 3 forbids rebuilding "
+                                + "without its row-id high-water mark. Repair or remove the "
+                                + "Iceberg metadata directory to republish from scratch.",
+                        e);
+            }
+            // v2 has no row lineage to reset: recreate instead of failing the commit, keeping
+            // the identity of the newest readable metadata so catalogs track the same table
             LOG.warn(
                     "Unreadable base Iceberg metadata {}, recreating metadata.",
                     baseMetadataPath,
                     e);
+            RecoveredIdentity recovered = recoverIdentityBelow(snapshotId);
             recreateFromUnusableBase(
-                    snapshotId, null, lastColumnIdFloor, nextRowIdFloor, intermediate);
+                    snapshotId,
+                    recovered.uuid,
+                    Math.max(lastColumnIdFloor, recovered.lastColumnId),
+                    nextRowIdFloor,
+                    stagedTarget != null);
             return;
         }
         // row ids handed out by the base or by abandoned metadata must never be reused
@@ -1315,7 +1485,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     baseMetadata.tableUuid(),
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
                     rowIdFloor,
-                    intermediate);
+                    stagedTarget != null);
             return;
         }
 
@@ -1326,7 +1496,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     null,
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
                     rowIdFloor,
-                    intermediate);
+                    stagedTarget != null);
             return;
         }
 
@@ -1338,7 +1508,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     baseMetadata.tableUuid(),
                     Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
                     rowIdFloor,
-                    intermediate);
+                    stagedTarget != null);
             return;
         }
 
@@ -1364,7 +1534,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         baseMetadata.tableUuid(),
                         Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
                         rowIdFloor,
-                        intermediate);
+                        stagedTarget != null);
                 return;
             }
         }
@@ -1384,7 +1554,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         baseMetadata.tableUuid(),
                         Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
                         rowIdFloor,
-                        intermediate);
+                        stagedTarget != null);
                 return;
             }
         }
@@ -1601,6 +1771,14 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         nextRowId,
                         refs);
 
+        if (stagedTarget != null) {
+            // a replay step: only the staging path is touched; see the no-base path
+            if (!table.fileIO().tryToWriteAtomic(stagedTarget, metadata.toJson())) {
+                throw new IllegalStateException(
+                        "Failed to write staged Iceberg metadata " + stagedTarget);
+            }
+            return;
+        }
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
         // atomic-first: see the no-base path
         boolean written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
@@ -1615,10 +1793,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
-        // only the current head may move the hint and the external catalog; an intermediate
-        // replay step publishes nothing and cleans nothing, the final step covers both
+        // only the current head may move the hint and the external catalog
         Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (!intermediate && latestAtPublish != null && latestAtPublish == snapshotId) {
+        if (latestAtPublish != null && latestAtPublish == snapshotId) {
             table.fileIO()
                     .overwriteFileUtf8(
                             new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
@@ -1647,14 +1824,20 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             @Nullable String inheritUuid,
             int lastColumnIdFloor,
             long nextRowIdFloor,
-            boolean intermediate)
+            boolean insideReplay)
             throws IOException {
-        if (intermediate) {
-            createMetadataWithoutBase(
-                    snapshotId, inheritUuid, lastColumnIdFloor, nextRowIdFloor, true);
-        } else {
-            recreateMetadata(snapshotId, inheritUuid, lastColumnIdFloor, nextRowIdFloor);
+        if (insideReplay) {
+            // the base of a replay step was written or validated by the replay itself, so an
+            // unusable one means interference or corruption; writing reduced metadata here
+            // would silently truncate the replayed history, and recursing into another
+            // replay from inside this one does not terminate. Fail the commit instead: the
+            // published chain is untouched and the next commit restarts the rebuild.
+            throw new IllegalStateException(
+                    "The base metadata of a full-history replay step for snapshot "
+                            + snapshotId
+                            + " is unusable; failing the rebuild so it restarts cleanly.");
         }
+        recreateMetadata(snapshotId, inheritUuid, lastColumnIdFloor, nextRowIdFloor);
     }
 
     private interface FileChangesCollector {

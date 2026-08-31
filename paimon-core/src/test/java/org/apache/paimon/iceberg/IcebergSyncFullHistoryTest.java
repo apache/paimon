@@ -55,6 +55,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests for {@link IcebergOptions#SYNC_FULL_HISTORY}: when Iceberg metadata is created from
@@ -303,6 +304,83 @@ public class IcebergSyncFullHistoryTest {
                 .containsExactly(1L, 2L, 3L);
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+    }
+
+    @Test
+    public void testCorruptedV3BaseFailsClosed() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        createAppendTable(options);
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+        assertThat(readMetadata(2).nextRowId()).isEqualTo(2);
+        String metadata1Before =
+                table.fileIO()
+                        .readFileUtf8(new Path(table.location(), "metadata/v1.metadata.json"));
+
+        // the unreadable base may have issued row ids no other file records; rebuilding
+        // without its high-water mark would reuse them, so the commit must fail instead
+        Path corrupted = new Path(table.location(), "metadata/v2.metadata.json");
+        table.fileIO().deleteQuietly(corrupted);
+        table.fileIO().overwriteFileUtf8(corrupted, "{ not json");
+
+        assertThatThrownBy(() -> writeCommit(3, GenericRow.of(3, 30)))
+                .hasStackTraceContaining("forbids rebuilding");
+        // nothing was reset or replaced
+        assertThat(
+                        table.fileIO()
+                                .readFileUtf8(
+                                        new Path(table.location(), "metadata/v1.metadata.json")))
+                .isEqualTo(metadata1Before);
+        assertThat(table.fileIO().exists(new Path(table.location(), "metadata/v3.metadata.json")))
+                .isFalse();
+    }
+
+    @Test
+    public void testAbandonedResumeCandidateDoesNotRecurse() throws Exception {
+        // a rollback plus an Iceberg-disabled commit reuses snapshot id 2 on a new timeline,
+        // leaving the old v2 metadata abandoned; the rebuild must reject it as a resume base
+        // instead of selecting it and recursing when the replay refuses to extend it
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        createAppendTable(options);
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+
+        table.rollbackTo(1);
+
+        Map<String, String> disable = new HashMap<>();
+        disable.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.DISABLED.toString());
+        reopen(disable);
+        writeCommit(3, GenericRow.of(22, 220));
+
+        Map<String, String> enable = new HashMap<>();
+        enable.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        reopen(enable);
+        writeCommit(4, GenericRow.of(3, 30));
+
+        IcebergMetadata metadata = readMetadata(table.snapshotManager().latestSnapshotId());
+        assertThat(
+                        metadata.snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .contains(1L)
+                .doesNotHaveDuplicates();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(22, 220)", "Record(3, 30)");
     }
 
     @Test
