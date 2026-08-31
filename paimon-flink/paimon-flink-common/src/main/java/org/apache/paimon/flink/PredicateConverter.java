@@ -93,29 +93,53 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             requireArity(children, 1);
             return visit(children.get(0), !negated);
         } else if (func == BuiltInFunctionDefinitions.EQUALS) {
-            return negated
-                    ? visitBiFunction(children, builder::notEqual, builder::notEqual)
-                    : visitBiFunction(children, builder::equal, builder::equal);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::notEqual,
+                    builder::notEqual,
+                    builder::equal,
+                    builder::equal);
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
-            return negated
-                    ? visitBiFunction(children, builder::equal, builder::equal)
-                    : visitBiFunction(children, builder::notEqual, builder::notEqual);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::equal,
+                    builder::equal,
+                    builder::notEqual,
+                    builder::notEqual);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
-            return negated
-                    ? visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual)
-                    : visitBiFunction(children, builder::greaterThan, builder::lessThan);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::lessOrEqual,
+                    builder::greaterOrEqual,
+                    builder::greaterThan,
+                    builder::lessThan);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
-            return negated
-                    ? visitBiFunction(children, builder::lessThan, builder::greaterThan)
-                    : visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::lessThan,
+                    builder::greaterThan,
+                    builder::greaterOrEqual,
+                    builder::lessOrEqual);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN) {
-            return negated
-                    ? visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual)
-                    : visitBiFunction(children, builder::lessThan, builder::greaterThan);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::greaterOrEqual,
+                    builder::lessOrEqual,
+                    builder::lessThan,
+                    builder::greaterThan);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
-            return negated
-                    ? visitBiFunction(children, builder::greaterThan, builder::lessThan)
-                    : visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
+            return visitComparison(
+                    children,
+                    negated,
+                    builder::greaterThan,
+                    builder::lessThan,
+                    builder::lessOrEqual,
+                    builder::greaterOrEqual);
         } else if (func == BuiltInFunctionDefinitions.IN) {
             requireAtLeastArity(children, 2);
             ResolvedField field = resolveField(children.get(0));
@@ -123,9 +147,17 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             for (int i = 1; i < children.size(); i++) {
                 literals.add(extractLiteral(field.expression.getOutputDataType(), children.get(i)));
             }
-            return negated
-                    ? builder.notIn(field.index, literals)
-                    : builder.in(field.index, literals);
+            if (negated) {
+                // SQL WHERE: v NOT IN (..., NULL, ...) is never true regardless of
+                // type, so this runs before the float residual. Passing NULL to
+                // notIn is also unsafe for BSI/range-bitmap file-index evaluation.
+                if (literals.contains(null)) {
+                    return PredicateBuilder.alwaysFalse();
+                }
+                rejectNegatedFloatingPoint(field.expression);
+                return builder.notIn(field.index, literals);
+            }
+            return builder.in(field.index, literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             requireArity(children, 1);
             ResolvedField field = resolveField(children.get(0));
@@ -137,10 +169,21 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
             requireArity(children, 3);
             ResolvedField field = resolveField(children.get(0));
-            Object lower = extractLiteral(field.expression.getOutputDataType(), children.get(1));
-            Object upper = extractLiteral(field.expression.getOutputDataType(), children.get(2));
+            DataType fieldType = field.expression.getOutputDataType();
+            Object lower = extractLiteral(fieldType, children.get(1));
+            Object upper = extractLiteral(fieldType, children.get(2));
             Predicate between = builder.between(field.index, lower, upper);
-            return negated ? negate(between) : between;
+            if (negated) {
+                rejectNegatedFloatingPoint(field.expression);
+                // LeafTernaryFunction.test returns false if any literal is null, but
+                // 12 NOT BETWEEN 15 AND NULL is TRUE (TRUE OR UNKNOWN). Keep residual
+                // so Flink can evaluate the three-valued cases.
+                if (lower == null || upper == null) {
+                    throw new UnsupportedExpression();
+                }
+                return negate(between);
+            }
+            return between;
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
             if (children.size() != 2 && children.size() != 3) {
                 throw new UnsupportedExpression();
@@ -290,6 +333,48 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             }
         }
         return result;
+    }
+
+    private Predicate visitComparison(
+            List<Expression> children,
+            boolean negated,
+            BiFunction<Integer, Object, Predicate> negatedVisit1,
+            BiFunction<Integer, Object, Predicate> negatedVisit2,
+            BiFunction<Integer, Object, Predicate> visit1,
+            BiFunction<Integer, Object, Predicate> visit2) {
+        // Flink FLOAT/DOUBLE comparisons use Java operators; Paimon uses
+        // Float/Double.compareTo. Negated equality, inequality, IN and BETWEEN
+        // are therefore not equivalent (NaN identity and signed zeros). Simple
+        // SQL such as NOT (d > 1.0) is often simplified to d <= 1.0 before
+        // pushdown; keep this guard for unsimplified NOT that still reaches
+        // applyFilters (for example De Morgan over AND/OR).
+        if (negated && isFloatingPointComparison(children)) {
+            throw new UnsupportedExpression();
+        }
+        return negated
+                ? visitBiFunction(children, negatedVisit1, negatedVisit2)
+                : visitBiFunction(children, visit1, visit2);
+    }
+
+    private void rejectNegatedFloatingPoint(FieldReferenceExpression field) {
+        if (isFloatingPointField(field)) {
+            throw new UnsupportedExpression();
+        }
+    }
+
+    private boolean isFloatingPointComparison(List<Expression> children) {
+        for (Expression child : children) {
+            Optional<FieldReferenceExpression> field = extractFieldReference(child);
+            if (field.isPresent() && isFloatingPointField(field.get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isFloatingPointField(FieldReferenceExpression field) {
+        LogicalTypeRoot root = field.getOutputDataType().getLogicalType().getTypeRoot();
+        return root == LogicalTypeRoot.FLOAT || root == LogicalTypeRoot.DOUBLE;
     }
 
     private Predicate visitBiFunction(
