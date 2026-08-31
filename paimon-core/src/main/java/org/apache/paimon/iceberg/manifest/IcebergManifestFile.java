@@ -48,12 +48,16 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 
+import org.apache.paimon.format.avro.AvroFileFormat;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.iceberg.manifest.IcebergConversions.toByteBuffer;
@@ -99,6 +103,11 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
     }
 
     public static IcebergManifestFile create(FileStoreTable table, IcebergPathFactory pathFactory) {
+        return create(table, pathFactory, new HashMap<>());
+    }
+
+    public static IcebergManifestFile create(
+            FileStoreTable table, IcebergPathFactory pathFactory, Map<String, String> avroMetadata) {
         RowType partitionType = table.schema().logicalPartitionType();
         Options avroOptions = Options.fromMap(table.options());
         boolean withFirstRowId =
@@ -120,6 +129,7 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                         + "kv_name_r2_upper_bounds:k129_v130,"
                         + "k_id_k129_v130:129,"
                         + "v_id_k129_v130:130");
+        AvroFileFormat.setAvroMetadata(avroOptions, avroMetadata);
         FileFormat manifestFileAvro = FileFormat.fromIdentifier("avro", avroOptions);
         return new IcebergManifestFile(
                 table.fileIO(),

@@ -72,6 +72,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -189,8 +190,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 metadataCommitterFactory == null ? null : metadataCommitterFactory.create(table);
 
         this.fileStorePathFactory = table.store().pathFactory();
-        this.manifestFile = IcebergManifestFile.create(table, pathFactory);
-        this.manifestList = IcebergManifestList.create(table, pathFactory);
 
         this.formatVersion =
                 table.coreOptions().toConfiguration().get(IcebergOptions.FORMAT_VERSION);
@@ -199,6 +198,21 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
                 "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is ",
                 formatVersion);
+
+        // Compute Iceberg schema and partition spec for Avro manifest metadata.
+        // Snowflake and other Iceberg readers require these in the manifest file header.
+        IcebergSchema icebergSchema = IcebergSchema.create(table.schema());
+        List<IcebergPartitionField> partitionFields =
+                getPartitionFields(table.schema().partitionKeys(), icebergSchema);
+        IcebergPartitionSpec partitionSpec = new IcebergPartitionSpec(partitionFields);
+        Map<String, String> avroMetadata = new HashMap<>();
+        avroMetadata.put("schema", icebergSchema.toJson());
+        avroMetadata.put("partition-spec", JsonSerdeUtil.toJson(partitionSpec));
+        avroMetadata.put("partition-spec-id", String.valueOf(IcebergPartitionSpec.SPEC_ID));
+        avroMetadata.put("format-version", String.valueOf(formatVersion));
+        this.manifestFile = IcebergManifestFile.create(table, pathFactory, avroMetadata);
+
+        this.manifestList = IcebergManifestList.create(table, pathFactory);
 
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.needAddDvToIceberg = needAddDvToIceberg();
