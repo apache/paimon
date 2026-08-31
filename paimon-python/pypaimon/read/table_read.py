@@ -669,7 +669,8 @@ class TableRead:
 
         Args:
             splits: Splits to read.
-            streaming: Whether to stream data.
+            streaming: Whether to return an iterable dataset. Non-streaming
+                row-tracking tables fetch map-style batches lazily by row ID.
             prefetch_concurrency: Reader threads per DataLoader worker in row
                 format.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch

@@ -40,6 +40,7 @@ from pypaimon.read.datasource.torch_dataset import (
     TorchShuffledIterDataset,
     _resolve_distributed_context,
 )
+from pypaimon.read.table_read import TableRead
 from pypaimon.table.file_store_table import FileStoreTable
 
 
@@ -500,7 +501,134 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(sorted_behaviors, expected_behaviors,
                          f"Behaviors mismatch. Expected {expected_behaviors}, got {sorted_behaviors}")
 
+        if not is_streaming:
+            self.assertIsInstance(dataset._data, pa.Table)
+
         print(f"✓ Test passed: Successfully read {len(all_user_ids)} rows with correct data")
+
+    def test_non_streaming_row_tracking_reads_batches_lazily(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            },
+        )
+        identifier = 'default.test_torch_lazy_row_tracking'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior'])
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        table_read = read_builder.new_read()
+        expected = table_read.to_arrow(splits).to_pylist()
+
+        with patch.object(
+                TableRead, 'to_arrow', side_effect=AssertionError(
+                    'dataset construction must not read table data')):
+            dataset = table_read.to_torch(splits, streaming=False)
+
+        self.assertIsNone(dataset._data)
+        self.assertEqual(len(expected), len(dataset))
+        indices = [len(dataset) - 1, 1, 1, 0]
+        self.assertEqual(
+            [expected[index] for index in indices],
+            dataset.__getitems__(indices),
+        )
+        self.assertEqual(expected[-1], dataset[-1])
+        restored = pickle.loads(pickle.dumps(dataset))
+        self.assertEqual(expected[1], restored[1])
+
+        row_id_builder = table.new_read_builder().with_projection(
+            ['user_id', '_ROW_ID'])
+        row_id_splits = row_id_builder.new_scan().plan().splits()
+        row_id_read = row_id_builder.new_read()
+        expected_row_id = row_id_read.to_arrow(
+            row_id_splits).to_pylist()[0]
+        row_id_dataset = row_id_read.to_torch(
+            row_id_splits, streaming=False)
+        self.assertEqual(expected_row_id, row_id_dataset[0])
+
+        loader = DataLoader(
+            dataset,
+            batch_size=3,
+            num_workers=2,
+            shuffle=True,
+            generator=torch.Generator().manual_seed(7),
+        )
+        actual_ids = []
+        for batch in loader:
+            actual_ids.extend(batch['user_id'].tolist())
+        self.assertEqual(
+            sorted(row['user_id'] for row in expected),
+            sorted(actual_ids),
+        )
+
+    def test_non_streaming_row_tracking_preserves_filter_and_limit(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+            },
+        )
+        identifier = 'default.test_torch_lazy_filter_limit'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior'])
+        predicate = read_builder.new_predicate_builder().greater_than(
+            'user_id', 2)
+        read_builder.with_filter(predicate).with_limit(3)
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        expected = table_read.to_arrow(
+            splits, parallelism=1).to_pylist()
+        dataset = table_read.to_torch(splits, streaming=False)
+
+        self.assertIsNone(dataset._data)
+        self.assertEqual(3, len(dataset))
+        self.assertEqual(
+            expected,
+            dataset.__getitems__(range(len(dataset))),
+        )
+
+    def test_non_streaming_row_tracking_respects_deletion_vectors(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            options={
+                'data-evolution.enabled': 'true',
+                'row-tracking.enabled': 'true',
+                'deletion-vectors.enabled': 'true',
+            },
+        )
+        identifier = 'default.test_torch_lazy_deletion_vector'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        self._write_test_table(table)
+
+        write_builder = table.new_batch_write_builder()
+        messages = write_builder.new_update().delete_by_row_id([2])
+        table_commit = write_builder.new_commit()
+        table_commit.commit(messages)
+        table_commit.close()
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        expected = table_read.to_arrow(splits).to_pylist()
+        dataset = table_read.to_torch(splits, streaming=False)
+
+        self.assertIsNone(dataset._data)
+        self.assertIsInstance(dataset._row_ids, pa.Array)
+        self.assertEqual(expected, dataset[:])
 
     def test_torch_streaming_prefetch_concurrency(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
