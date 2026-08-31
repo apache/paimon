@@ -3671,6 +3671,76 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
         # Row 0 should be top result (exact match)
         self.assertIn(0, list(results[0].results()))
 
+    def test_all_null_list_array_returns_empty(self):
+        """All-null ARRAY<FLOAT> column must return empty, not raise IndexError."""
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            _raw_search_from_arrow,
+            _raw_batch_search_from_arrow,
+        )
+
+        vectors = [None, None, None]
+        table = pa.table({
+            "_ROW_ID": pa.array([0, 1, 2], type=pa.int64()),
+            "vector": pa.array(vectors, type=pa.list_(pa.float32())),
+        })
+
+        result = _raw_search_from_arrow(
+            table, "vector", np.array([1.0, 0.0]), "cosine", 10)
+        self.assertEqual(result.results().cardinality(), 0)
+
+        batch = _raw_batch_search_from_arrow(
+            table, "vector", [np.array([1.0, 0.0])], "cosine", 10)
+        self.assertEqual(len(batch), 1)
+        self.assertEqual(batch[0].results().cardinality(), 0)
+
+    def test_topk_tie_break_prefers_smaller_row_id(self):
+        """Equal-score rows must be selected by smallest row_id first."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _topk_indices
+
+        row_ids = np.array([4, 3, 2, 1], dtype=np.int64)
+        scores = np.array([0.5, 0.5, 0.5, 0.5])
+
+        indices = _topk_indices(scores, row_ids, 2)
+        selected = sorted(int(row_ids[i]) for i in indices)
+        self.assertEqual(selected, [1, 2])
+
+    def test_numpy_topk_tie_break_matches_heap(self):
+        """_numpy_topk tie-break must match _offer_score / top_k semantics."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_topk
+
+        row_ids = np.array([10, 20, 30, 40], dtype=np.int64)
+        # All identical vectors → identical scores.
+        stored = np.array([
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 0.0],
+        ], dtype=np.float32)
+        query = np.array([1.0, 0.0], dtype=np.float32)
+
+        result = _numpy_topk(row_ids, stored, query, "cosine", 2)
+        selected = sorted(result.results())
+        self.assertEqual(selected, [10, 20])
+
+    def test_numpy_batch_topk_tie_break(self):
+        """_numpy_batch_topk tie-break must prefer smaller row_id."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_batch_topk
+
+        row_ids = np.array([4, 3, 2, 1], dtype=np.int64)
+        stored = np.tile(np.array([1.0, 0.0], dtype=np.float32), (4, 1))
+        queries = np.array([[1.0, 0.0]], dtype=np.float32)
+
+        for metric in ("cosine", "l2", "inner_product"):
+            results = _numpy_batch_topk(row_ids, stored, queries, metric, 2)
+            selected = sorted(results[0].results())
+            self.assertEqual(selected, [1, 2],
+                             "tie-break failed for metric=%s" % metric)
+
 
 if __name__ == "__main__":
     unittest.main()
