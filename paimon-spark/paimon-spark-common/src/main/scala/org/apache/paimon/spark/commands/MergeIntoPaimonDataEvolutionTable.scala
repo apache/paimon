@@ -27,6 +27,7 @@ import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -155,7 +156,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def passthroughSourceRelation(plan: LogicalPlan): Option[DataSourceV2Relation] = {
     EliminateSubqueryAliases(plan) match {
-      case relation: DataSourceV2Relation if relation.table.isInstanceOf[SparkTable] =>
+      case relation: DataSourceV2Relation if isPaimonRelationWithoutTimeTravel(relation) =>
         Some(relation)
       case Project(projectList, child) if isPassthroughProject(projectList, child) =>
         passthroughSourceRelation(child)
@@ -163,6 +164,13 @@ case class MergeIntoPaimonDataEvolutionTable(
         None
     }
   }
+
+  private def isPaimonRelationWithoutTimeTravel(relation: DataSourceV2Relation): Boolean =
+    relation.table match {
+      case sparkTable: SparkTable =>
+        !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(sparkTable.getTable.options()))
+      case _ => false
+    }
 
   private def isPassthroughProject(projectList: Seq[Expression], child: LogicalPlan): Boolean = {
     val childAttributes = child.output ++ child.metadataOutput
