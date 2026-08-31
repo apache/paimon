@@ -360,6 +360,49 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_empty_fast_path_validates_required_counts(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_counts_"))
+        try:
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            base_info = {
+                "codebase_version": "v3.0",
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                },
+            }
+            cases = [
+                ("missing_frames", {}, "total_frames",
+                 "missing required field total_frames"),
+                ("inconsistent_episodes", {"total_episodes": 1}, None,
+                 "must both be zero or both be positive"),
+                ("negative_tasks", {"total_tasks": -1}, None,
+                 "must be a non-negative integer"),
+            ]
+            for name, updates, missing_field, message in cases:
+                with self.subTest(name=name):
+                    info = dict(base_info)
+                    info.update(updates)
+                    if missing_field is not None:
+                        info.pop(missing_field)
+                    source = temp_dir / name
+                    (source / "meta").mkdir(parents=True)
+                    (source / "meta" / "info.json").write_text(
+                        json.dumps(info))
+                    with patch(
+                            "pypaimon.multimodal.lerobot.api."
+                            "_import_lerobot_dataset"
+                    ) as import_lerobot:
+                        with self.assertRaisesRegex(ValueError, message):
+                            connection.load_from_lerobot(name, source)
+                    import_lerobot.assert_not_called()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_source_values_are_safely_converted(self):
         class Dataset:
 

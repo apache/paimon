@@ -16,6 +16,7 @@
 
 """Public LeRobot import API."""
 
+import numbers
 import sys
 from typing import Mapping, Optional
 
@@ -82,10 +83,12 @@ def load_from_lerobot(
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
         _schema_from_info(local_info, include_task=False)
-        if int(local_info.get("total_frames", 0)) == 0:
+        total_frames, _, total_tasks = \
+            _validated_counts(local_info, resolved_source.path)
+        if total_frames == 0:
             source_schema = _schema_from_info(
                 local_info,
-                include_task=int(local_info.get("total_tasks", 0)) > 0,
+                include_task=total_tasks > 0,
             )
             _validated_table(
                 connection,
@@ -101,6 +104,8 @@ def load_from_lerobot(
         try:
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
+            row_count, _, _ = \
+                _validated_counts(info, resolved_source.path)
 
             source_schema = _schema_from_info(
                 info, include_task=_has_tasks(dataset, info))
@@ -112,7 +117,6 @@ def load_from_lerobot(
                 resolved_source,
             )
 
-            row_count = int(info.get("total_frames", len(dataset)))
             if row_count == 0:
                 return None
             return _write_dataset(
@@ -127,6 +131,32 @@ def load_from_lerobot(
             close = getattr(dataset, "close", None)
             if callable(close):
                 close()
+
+
+def _validated_counts(info, source):
+    total_frames = _required_count(info, "total_frames", source)
+    total_episodes = _required_count(info, "total_episodes", source)
+    total_tasks = _required_count(info, "total_tasks", source)
+    if (total_frames == 0) != (total_episodes == 0):
+        raise ValueError(
+            "LeRobot metadata %s has inconsistent counts: total_frames=%d "
+            "and total_episodes=%d must both be zero or both be positive."
+            % (source, total_frames, total_episodes))
+    return total_frames, total_episodes, total_tasks
+
+
+def _required_count(info, name, source):
+    if name not in info:
+        raise ValueError(
+            "LeRobot metadata %s is missing required field %s."
+            % (source, name))
+    value = info[name]
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral) \
+            or value < 0:
+        raise ValueError(
+            "LeRobot metadata %s field %s must be a non-negative integer; "
+            "found %r." % (source, name, value))
+    return int(value)
 
 
 def _validated_table(
