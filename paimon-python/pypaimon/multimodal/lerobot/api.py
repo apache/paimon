@@ -49,6 +49,13 @@ from pypaimon.multimodal.source_utils import (
     _validate_source_kerberos,
 )
 from pypaimon.multimodal.table import _target_schema
+from pypaimon.table.bucket_mode import BucketMode
+
+
+_VIDEO_LAYOUT_ERROR = (
+    "LeRobot video import requires an unpartitioned, bucket-unaware "
+    "target table so each Episode is written by one writer."
+)
 
 
 def load_from_lerobot(
@@ -190,6 +197,10 @@ def _validated_table(
             "'video-frame-field'=%r; found %s."
             % (list(video_fields), ",".join(video_fields), sorted(configured))
         )
+    if video_fields and (
+            table.raw_table.partition_keys
+            or table.raw_table.bucket_mode() != BucketMode.BUCKET_UNAWARE):
+        raise ValueError(_VIDEO_LAYOUT_ERROR)
     return table
 
 
@@ -199,6 +210,8 @@ def _get_or_create_table(
         return connection.get_table(table_name)
     except (DatabaseNotExistException, TableNotExistException):
         options = dict(options or {})
+        if video_fields and str(options.get("bucket", "-1")).strip() != "-1":
+            raise ValueError(_VIDEO_LAYOUT_ERROR)
         configured = options.get("video-frame-field")
         if configured is not None:
             requested = {

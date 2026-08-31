@@ -502,6 +502,25 @@ class DedicatedFormatWriter(DataWriter):
         # Check if normal data exceeds target size
         return self._normal_buffer.nbytes > self.target_file_size
 
+    def begin_video_episode(self, row_count: int):
+        """Roll only between complete Episodes, before writing the next one."""
+        self._require_finished_flush()
+        if self._video_group_policy is None:
+            return
+
+        normal_rows = self._normal_buffer.num_rows
+        should_roll_normal = normal_rows > 0 and (
+            self._video_group_policy.pending_roll
+            or normal_rows + row_count > self.target_file_row_num
+            or self._normal_buffer.nbytes > self.target_file_size
+        )
+        if should_roll_normal:
+            self._close_current_writers()
+            return
+
+        for column in self.video_frame_columns:
+            self.blob_writers[column].begin_video_episode(row_count)
+
     def _roll_or_defer_for_video_group(self):
         if self._video_group_policy is not None and self._video_group_policy.defer_roll():
             return

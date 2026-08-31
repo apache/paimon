@@ -85,6 +85,13 @@ class TableWrite:
                     sub_table = pa.compute.take(data, row_indices)
             self._write_partition_bucket_batch(partition, bucket, sub_table)
 
+    def begin_video_episode(self, row_count: int):
+        """Keep the next video Episode within one aligned normal file."""
+        if isinstance(row_count, bool) or not isinstance(row_count, int) \
+                or row_count <= 0:
+            raise ValueError("Video Episode row count must be a positive integer.")
+        self.file_store_write.begin_video_episode(row_count)
+
     def _write_partition_bucket_batch(self, partition, bucket, data):
         self.file_store_write.write(partition, bucket, data)
 

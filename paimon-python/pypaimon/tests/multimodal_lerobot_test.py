@@ -422,6 +422,51 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_video_import_requires_single_writer_layout(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_layout_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            info = {
+                "codebase_version": "v3.0",
+                "fps": 10,
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "features": {
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "camera": {"dtype": "video", "shape": [8, 10, 3]},
+                },
+            }
+            (source / "meta" / "info.json").write_text(json.dumps(info))
+            schema = _schema_from_info(info, include_task=False)
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            connection.create_table(
+                "partitioned",
+                schema=schema,
+                options={"video-frame-field": "camera"},
+                partitioned=["episode_index"],
+            )
+            connection.create_table(
+                "bucketed",
+                schema=schema,
+                options={"video-frame-field": "camera", "bucket": "1"},
+            )
+
+            for table_name in ("partitioned", "bucketed"):
+                with self.subTest(table_name=table_name):
+                    with self.assertRaisesRegex(
+                            ValueError, "unpartitioned, bucket-unaware"):
+                        connection.load_from_lerobot(table_name, source)
+            with self.assertRaisesRegex(
+                    ValueError, "unpartitioned, bucket-unaware"):
+                connection.load_from_lerobot(
+                    "new_bucketed", source, options={"bucket": "1"})
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_empty_fast_path_validates_required_counts(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_counts_"))
         try:
@@ -720,6 +765,43 @@ class LeRobotValidationTest(unittest.TestCase):
                     "index", "camera_a", "camera_b"
                 ]).read_blobs()
             self.assertEqual(bodies, remote_bodies)
+
+            # Both cameras now share one physical MP4 across Episodes. The
+            # logical Episode boundary must still control normal-file rolling.
+            episodes[1].update({
+                "videos/camera_b/file_index": 0,
+                "videos/camera_b/from_timestamp": 0.2,
+                "videos/camera_b/to_timestamp": 0.5,
+            })
+            with patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_open_resolved_dataset",
+                    return_value=Dataset(),
+            ):
+                connection.load_from_lerobot(
+                    "shared_video_frames",
+                    temp_dir,
+                    batch_size=1,
+                    options={"target-file-row-num": "1"},
+                )
+            raw_table = connection.get_table(
+                "shared_video_frames").raw_table
+            files = {
+                file.file_name: file
+                for split in raw_table.new_read_builder().new_scan().plan().splits()
+                for file in split.files
+            }.values()
+            self.assertEqual(
+                [2, 3],
+                sorted(
+                    file.row_count for file in files
+                    if not file.file_name.endswith(".video")
+                ),
+            )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

@@ -111,6 +111,11 @@ class FileStoreWrite:
         )
         writer.write(data.to_batches()[0])
 
+    def begin_video_episode(self, row_count: int):
+        for writer in self.data_writers.values():
+            if isinstance(writer, DedicatedFormatWriter):
+                writer.begin_video_episode(row_count)
+
     def _check_runtime_bucket(self, partition, bucket, total_buckets):
         if total_buckets is None:
             return

@@ -559,6 +559,9 @@ validation and append semantics. Scalars map to scalar types, vectors to
 `VECTOR`, higher-rank tensors to nested `ARRAY`, and images or video frames to
 `BLOB`. Images keep their compressed bytes; videos pack encoded MP4 payloads
 instead of repeating them per frame, with frame ordinals in the video field.
+Video imports keep each Episode in one normal file while camera sidecars roll
+independently at Episode boundaries; their target table must be unpartitioned
+and bucket-unaware.
 
 Only v3 is supported. `uint64` and language event structures are rejected.
 

@@ -88,26 +88,29 @@ def _write_dataset(
             table_write.with_blob_uri_reader_factory(reader_factory)
         table_commit = write_builder.new_commit()
         table_commit.add_commit_callback(snapshot_recorder)
-        for episode, begin, end in _episode_batches(
-                dataset, info, batch_size):
-            batch = _read_batch(
-                dataset,
-                info,
-                begin,
-                end,
-                source_schema,
-                episode=episode,
-                video_sources=video_sources,
-            )
-            batch = _strict_lerobot_table(
-                batch,
-                target_schema,
-                source,
-                batch_count,
-            )
-            table_write.write_arrow(batch)
-            batch_count += 1
-            row_count += batch.num_rows
+        for episode, episode_begin, episode_end in _episodes(dataset, info):
+            if video_fields:
+                table_write.begin_video_episode(episode_end - episode_begin)
+            for begin in range(episode_begin, episode_end, batch_size):
+                end = min(begin + batch_size, episode_end)
+                batch = _read_batch(
+                    dataset,
+                    info,
+                    begin,
+                    end,
+                    source_schema,
+                    episode=episode,
+                    video_sources=video_sources,
+                )
+                batch = _strict_lerobot_table(
+                    batch,
+                    target_schema,
+                    source,
+                    batch_count,
+                )
+                table_write.write_arrow(batch)
+                batch_count += 1
+                row_count += batch.num_rows
 
         expected_rows = int(info.get("total_frames", len(dataset)))
         if row_count != expected_rows:
@@ -134,7 +137,7 @@ def _write_dataset(
                 table_commit.close()
 
 
-def _episode_batches(dataset, info, batch_size):
+def _episodes(dataset, info):
     episodes = getattr(dataset.meta, "episodes", None)
     episode_count = int(info.get("total_episodes", 0))
     total_frames = int(info.get("total_frames", len(dataset)))
@@ -160,10 +163,7 @@ def _episode_batches(dataset, info, batch_size):
                 "LeRobot episode %d has invalid index, length, or frame "
                 "range [%d, %d); expected it to start at %d."
                 % (ordinal, begin, end, expected_begin))
-        while begin < end:
-            batch_end = min(begin + batch_size, end)
-            yield episode, begin, batch_end
-            begin = batch_end
+        yield episode, begin, end
         expected_begin = end
     if expected_begin != total_frames:
         raise ValueError(
