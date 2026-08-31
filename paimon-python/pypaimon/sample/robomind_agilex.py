@@ -453,8 +453,95 @@ def backfill_canonical_action(
     )
 
 
+def backfill_canonical_action_ray(
+        warehouse,
+        *,
+        database=DEFAULT_DATABASE,
+        statistics_version=DEFAULT_STATISTICS_VERSION,
+        num_partitions=None):
+    """Run distributed action materialization, then refresh statistics."""
+    row_count, frames_snapshot_id = _materialize_canonical_action_ray(
+        warehouse,
+        database=database,
+        num_partitions=num_partitions,
+    )
+    statistics_snapshot_id = refresh_action_statistics(
+        warehouse,
+        database=database,
+        statistics_version=statistics_version,
+    )
+    return BackfillResult(
+        row_count=row_count,
+        frames_snapshot_id=frames_snapshot_id,
+        statistics_snapshot_id=statistics_snapshot_id,
+        statistics_version=statistics_version,
+    )
+
+
 def materialize_canonical_action(warehouse, *, database=DEFAULT_DATABASE):
     """Stage one: add and populate canonical action, then commit it."""
+    connection, frames_table = _prepare_canonical_action_table(
+        warehouse, database)
+    row_count = _update_canonical_action_batches(frames_table.raw_table)
+    frames_table = connection.get_table(FRAMES_TABLE)
+    frames_snapshot_id = _snapshot_id(frames_table)
+    return row_count, frames_snapshot_id
+
+
+def _materialize_canonical_action_ray(
+        warehouse,
+        *,
+        database=DEFAULT_DATABASE,
+        num_partitions=None):
+    """Stage one: materialize canonical action with Ray self-merge."""
+    if num_partitions is not None:
+        num_partitions = _positive_int(num_partitions, "num_partitions")
+
+    try:
+        import ray
+    except ImportError:
+        raise ImportError(
+            "Ray backfill requires ray; install pypaimon[ray].")
+
+    initialized_here = not ray.is_initialized()
+    if initialized_here:
+        ray.init(
+            include_dashboard=False,
+            ignore_reinit_error=True,
+            num_cpus=2,
+        )
+    try:
+        from pypaimon.ray import WhenMatched, merge_into
+
+        connection, _ = _prepare_canonical_action_table(
+            warehouse, database)
+        catalog_options = {
+            "warehouse": str(Path(warehouse).expanduser().resolve())}
+
+        def canonical_action(rows):
+            return build_canonical_action_backfill(rows)[_ACTION_COLUMN]
+
+        target = "%s.%s" % (database, FRAMES_TABLE)
+        result = merge_into(
+            target,
+            target,
+            catalog_options,
+            on=["_ROW_ID"],
+            when_matched=[WhenMatched.update({
+                _ACTION_COLUMN: canonical_action,
+            })],
+            read_columns=[_ACTION_LEFT, _ACTION_RIGHT],
+            num_partitions=num_partitions,
+        )
+    finally:
+        if initialized_here:
+            ray.shutdown()
+
+    frames_table = connection.get_table(FRAMES_TABLE)
+    return result["num_matched"], _snapshot_id(frames_table)
+
+
+def _prepare_canonical_action_table(warehouse, database):
     connection = pmm.connect(
         database=database,
         options={"warehouse": str(Path(warehouse).expanduser().resolve())},
@@ -478,10 +565,7 @@ def materialize_canonical_action(warehouse, *, database=DEFAULT_DATABASE):
             False,
         )
         frames_table = connection.get_table(FRAMES_TABLE)
-    row_count = _update_canonical_action_batches(frames_table.raw_table)
-    frames_table = connection.get_table(FRAMES_TABLE)
-    frames_snapshot_id = _snapshot_id(frames_table)
-    return row_count, frames_snapshot_id
+    return connection, frames_table
 
 
 def refresh_action_statistics(

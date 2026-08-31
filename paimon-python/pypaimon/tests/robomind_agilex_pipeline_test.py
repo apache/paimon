@@ -402,13 +402,12 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
     try:
         ray_result = agilex.ingest_ray(
             root, ray_warehouse, batch_size=2, concurrency=2)
+        ray_backfill = agilex.backfill_canonical_action_ray(
+            ray_warehouse, statistics_version="synthetic-actions@1")
     finally:
         ray.shutdown()
     assert ray_result.episodes_snapshot_id == 1
     assert ray_result.frames_snapshot_id == 1
-    ray_backfill = agilex.backfill_canonical_action(
-        ray_warehouse, statistics_version="synthetic-actions@1")
-
     assert ray_result.mode == "ray"
     assert ray_result.episode_count == len(paths)
     assert ray_result.frame_count == 12

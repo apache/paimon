@@ -84,6 +84,7 @@ pytest -q pypaimon/tests/robomind_agilex_pipeline_test.py \
 ```python
 from pypaimon.sample.robomind_agilex import (
     backfill_canonical_action,
+    backfill_canonical_action_ray,
     ingest_local,
     ingest_ray,
     run_local_pipeline,
@@ -103,17 +104,24 @@ ingest = ingest_ray(
     concurrency=8,
 )
 
-backfill = backfill_canonical_action(
+backfill = backfill_canonical_action_ray(
     "/data/warehouse",
     statistics_version="robomind-agilex-joint-position@1",
+    num_partitions=8,
 )
 ```
 
 Episode and frame ingestion commit separately and use the generic
 `pypaimon.ray.load_from_hdf5` API in Ray mode. Canonical action materialization
-and statistics refresh also commit separately. If statistics need to be
-regenerated, call `refresh_action_statistics` without repeating ingestion or
-the row-id update.
+and statistics refresh also commit separately. The Ray backfill uses the
+optimized self-merge path: each target file group is processed by one task, so
+updates originating from multiple input batches cannot produce competing delta
+files for the same target file. The driver coordinates one commit after all
+file groups finish. If statistics need to be regenerated, call
+`refresh_action_statistics` without repeating ingestion or the row-id update.
+
+Use `backfill_canonical_action` for the local iterable path and
+`backfill_canonical_action_ray` after distributed ingestion.
 
 The canonical `action` is `float32(concat(master/joint_position_left,
 master/joint_position_right))`. The backfill materializes only this consumed
