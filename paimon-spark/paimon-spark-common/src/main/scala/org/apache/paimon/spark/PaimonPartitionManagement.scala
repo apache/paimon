@@ -165,6 +165,30 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
         } else {
           Map.empty[String, String].asJava
         }
+      case formatTable: FormatTable =>
+        val partitionManager = formatTable.partitionManager()
+        if (partitionManager == null) {
+          Map.empty[String, String].asJava
+        } else {
+          val partitionSpec =
+            toPaimonPartition(ident, formatTable.partitionKeys().asScala.toSeq)
+          val partitions = partitionManager.listPartitionsByNames(Seq(partitionSpec).asJava)
+          if (!partitions.isEmpty) {
+            val partition = partitions.get(0)
+            Map(
+              PartitionStatistics.FIELD_RECORD_COUNT -> partition.recordCount().toString,
+              PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> partition
+                .fileSizeInBytes()
+                .toString,
+              PartitionStatistics.FIELD_FILE_COUNT -> partition.fileCount().toString,
+              PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> partition
+                .lastFileCreationTime()
+                .toString
+            ).asJava
+          } else {
+            Map.empty[String, String].asJava
+          }
+        }
       case _ =>
         Map.empty[String, String].asJava
     }

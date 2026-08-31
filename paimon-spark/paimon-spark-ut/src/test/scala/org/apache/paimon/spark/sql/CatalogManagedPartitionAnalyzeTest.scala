@@ -338,6 +338,55 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
     }
   }
 
+  test("SHOW TABLE EXTENDED displays catalog-managed Format Table partition statistics") {
+    val tableName = "analyze_show_partition_statistics"
+    withTable(tableName) {
+      sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)
+             |USING PARQUET
+             |PARTITIONED BY (dt, hour)
+             |TBLPROPERTIES (
+             |  'format-table.implementation' = 'paimon',
+             |  'metastore.partitioned-table' = 'true')
+             |""".stripMargin)
+      sql(s"""INSERT INTO ${qualified(tableName)} VALUES
+             |(1, 'a', '20260101', '00'), (2, 'b', '20260101', '00')
+             |""".stripMargin)
+      sql(
+        s"ANALYZE TABLE ${qualified(tableName)} " +
+          s"PARTITION (dt = '20260101', hour = '00') COMPUTE STATISTICS").collect()
+
+      val information =
+        sql(
+          s"SHOW TABLE EXTENDED IN paimon.$dbName0 LIKE '$tableName' " +
+            s"PARTITION (dt = '20260101', hour = '00')")
+          .select("information")
+          .collect()
+          .head
+          .getString(0)
+
+      assert(information.contains(s"${PartitionStatistics.FIELD_RECORD_COUNT}=2"), information)
+      val statistics = statisticsOf(tableName, "20260101", "00")
+      assert(statistics.fileCount() > 0L, statistics.toString)
+      assert(statistics.fileSizeInBytes() > 0L, statistics.toString)
+      assert(statistics.lastFileCreationTime() > 0L, statistics.toString)
+      assert(
+        information.contains(s"${PartitionStatistics.FIELD_FILE_COUNT}=${statistics.fileCount()}"),
+        information)
+      assert(
+        information.contains(
+          s"${PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES}=${statistics.fileSizeInBytes()}"),
+        information)
+      assert(
+        information.contains(
+          s"${PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME}=" +
+            s"${statistics.lastFileCreationTime()}"),
+        information)
+      assert(
+        information.matches("(?s).*Partition Statistics: 2 rows, [1-9]\\d* bytes.*"),
+        information)
+    }
+  }
+
   test("a full ANALYZE clamps non-positive statistics parallelism") {
     Seq("zero" -> 0, "negative" -> -1).foreach {
       case (label, parallelism) =>
