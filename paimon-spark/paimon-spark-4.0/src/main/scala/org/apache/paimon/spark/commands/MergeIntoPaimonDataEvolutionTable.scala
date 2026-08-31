@@ -61,6 +61,7 @@ import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.util.control.NonFatal
 
 /** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
@@ -150,25 +151,65 @@ case class MergeIntoPaimonDataEvolutionTable(
    *
    * without any extra shuffle, join, or sort.
    */
-  private lazy val isSelfMergeOnRowId: Boolean = {
+  private case class SelfMergeSpec(residualCondition: Option[Expression])
+
+  private lazy val sameSourceAndTargetTable: Boolean = {
     if (!isPaimonTable(sourceTable)) {
       false
-    } else if (
-      !originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
-    ) {
-      false
     } else {
-      matchedCondition match {
-        case EqualTo(left: AttributeReference, right: AttributeReference)
-            if left.name == ROW_ID_NAME && right.name == ROW_ID_NAME =>
-          true
-        case _ => false
+      originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
+    }
+  }
+
+  private def isTargetRowId(attr: AttributeReference): Boolean = {
+    attr.name == ROW_ID_NAME && (originalTargetRelation.output ++
+      originalTargetRelation.metadataOutput).exists(_.exprId == attr.exprId)
+  }
+
+  private def isSourceRowId(attr: AttributeReference): Boolean = {
+    attr.name == ROW_ID_NAME && (sourceTable.output ++ sourceTable.metadataOutput)
+      .exists(_.exprId == attr.exprId)
+  }
+
+  private def isRowIdEquality(expression: Expression): Boolean = expression match {
+    case EqualTo(left: AttributeReference, right: AttributeReference) =>
+      (isTargetRowId(left) && isSourceRowId(right)) ||
+      (isSourceRowId(left) && isTargetRowId(right))
+    case _ => false
+  }
+
+  private lazy val isExactSelfMergeOnRowId: Boolean =
+    sameSourceAndTargetTable && isRowIdEquality(matchedCondition)
+
+  private lazy val selfMergeSpec: Option[SelfMergeSpec] = {
+    if (!sameSourceAndTargetTable) {
+      None
+    } else {
+      val conjuncts = splitConjunctivePredicates(matchedCondition)
+      val rowIdEqualities = conjuncts.filter(isRowIdEquality)
+      val residualConditions = conjuncts.filterNot(isRowIdEquality)
+      val partitionRowType = table.schema().logicalPartitionType()
+      val targetOnlyResidualConditions = residualConditions.filter {
+        condition => canEvaluate(condition, targetTable) && canEvaluateWithinJoin(condition)
+      }
+      val allResidualConditionsArePartitionPredicates =
+        extractMergePartitionFilters(targetOnlyResidualConditions, partitionRowType).size ==
+          residualConditions.size && residualConditions.forall(canConvertToPaimonPredicate)
+
+      if (rowIdEqualities.size != 1 || !allResidualConditionsArePartitionPredicates) {
+        None
+      } else {
+        Some(SelfMergeSpec(residualConditions.reduceOption(And)))
       }
     }
   }
 
+  private lazy val useSelfMergeShortcut: Boolean =
+    selfMergeSpec.isDefined && notMatchedActions.isEmpty && notMatchedBySourceActions.isEmpty
+
   assert(
-    !(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
+    !(isExactSelfMergeOnRowId &&
+      (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
     "Self-Merge on _ROW_ID only supports WHEN MATCHED actions. WHEN NOT MATCHED and " +
       "WHEN NOT MATCHED BY SOURCE are not supported."
   )
@@ -340,6 +381,18 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
+  private def canConvertToPaimonPredicate(expression: Expression): Boolean = {
+    try {
+      convertConditionToPaimonPredicate(
+        expression,
+        targetRelation.output,
+        rowType,
+        ignorePartialFailure = false).isDefined
+    } catch {
+      case NonFatal(_) => false
+    }
+  }
+
   private def targetRelatedSplits(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
@@ -347,8 +400,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
     // Self-Merge shortcut:
-    // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
-    if (isSelfMergeOnRowId) {
+    // The snapshot-level partition filter has already removed unrelated partitions. Every row in
+    // the remaining splits may be updated, so the shortcut scans all of them.
+    if (useSelfMergeShortcut) {
       return tableSplits
     }
 
@@ -583,7 +637,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     def matchedActionInstructions(actions: Seq[MergeAction]): Seq[MergeRows.Instruction] =
       actions.map(matchedActionInstruction) ++ keepCopyInstructions
 
-    val targetActionOutput: Dataset[Row] = if (isSelfMergeOnRowId) {
+    val targetActionOutput: Dataset[Row] = if (useSelfMergeShortcut) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.
@@ -632,8 +686,13 @@ case class MergeIntoPaimonDataEvolutionTable(
           throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
       }
 
+      // The shortcut removes the source scan and join. A target row has a matching source only
+      // when the residual ON condition holds.
+      val sourceRowPresentCondition =
+        selfMergeSpec.flatMap(_.residualCondition).getOrElse(TrueLiteral)
+
       val mergeRows = MergeRows(
-        isSourceRowPresent = TrueLiteral,
+        isSourceRowPresent = sourceRowPresentCondition,
         isTargetRowPresent = TrueLiteral,
         matchedInstructions = matchedActionInstructions(rewrittenMatchedActions),
         notMatchedInstructions = Nil,

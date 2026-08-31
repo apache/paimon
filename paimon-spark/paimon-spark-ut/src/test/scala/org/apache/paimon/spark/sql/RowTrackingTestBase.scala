@@ -940,43 +940,54 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
   }
 
   private def executeMergeIntoAndAssertPartitionPruned(mergeSql: String): Unit = {
+    val (_, resultedTableFiles) = executeMergeIntoAndCollectPlans(mergeSql)
+    assert(
+      resultedTableFiles.nonEmpty,
+      "Expected target PaimonSplitScan in merge into executed plans.")
+    assert(
+      resultedTableFiles.contains(1),
+      s"Expected target scan to read only one partition file, but got resulted table files: " +
+        resultedTableFiles.mkString(", ")
+    )
+  }
+
+  private def executeMergeIntoAndCollectPlans(mergeSql: String): (Seq[LogicalPlan], Seq[Long]) = {
+    val mergeRowsPlans = new java.util.concurrent.CopyOnWriteArrayList[LogicalPlan]()
     val resultedTableFiles = new java.util.concurrent.CopyOnWriteArrayList[Long]()
 
     val listener = new QueryExecutionListener {
       override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
-        checkPlan(qe)
+        collectPlans(qe)
       }
 
       override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
-        checkPlan(qe)
+        collectPlans(qe)
       }
 
-      private def checkPlan(qe: QueryExecution): Unit = {
+      private def collectPlans(qe: QueryExecution): Unit = {
+        if (qe.analyzed.collectFirst { case _: MergeRows => true }.nonEmpty) {
+          mergeRowsPlans.add(qe.analyzed)
+        }
         collect(qe.executedPlan) {
           case scanExec: BatchScanExec
               if scanExec.scan.isInstanceOf[PaimonSplitScan] &&
                 scanExec.scan.description().startsWith("PaimonSplitScan: [target]") =>
-            val scan = scanExec.scan.asInstanceOf[PaimonSplitScan]
-            metric(scan.reportDriverMetrics(), RESULTED_TABLE_FILES)
-        }.foreach(resultedTableFile => resultedTableFiles.add(resultedTableFile))
+            metric(
+              scanExec.scan.asInstanceOf[PaimonSplitScan].reportDriverMetrics(),
+              RESULTED_TABLE_FILES)
+        }.foreach(resultedTableFiles.add)
       }
     }
 
     spark.listenerManager.register(listener)
     try {
-      sql(mergeSql)
+      sql(mergeSql).collect()
       Utils.waitUntilEventEmpty(spark)
     } finally {
       spark.listenerManager.unregister(listener)
     }
 
-    val metrics = resultedTableFiles.asScala
-    assert(metrics.nonEmpty, "Expected target PaimonSplitScan in merge into executed plans.")
-    assert(
-      metrics.contains(1),
-      s"Expected target scan to read only one partition file, but got resulted table files: " +
-        metrics.mkString(", ")
-    )
+    (mergeRowsPlans.asScala.toSeq, resultedTableFiles.asScala.map(_.toLong).toSeq)
   }
 
   private def metric(metrics: Array[CustomTaskMetric], name: String): Long = {
@@ -1128,6 +1139,143 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           Row(4, 120, "c4c4", 3, 2),
           Row(5, 100, "c5", 4, 2))
       )
+    }
+  }
+
+  test("Data Evolution: self-merge on _ROW_ID with partition pruning") {
+    withSparkSQLConf("spark.paimon.data-evolution.merge-into.file-pruning" -> "false") {
+      withTable("target") {
+        sql("""
+              |CREATE TABLE target (id INT, b INT, dt STRING)
+              |TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+        sql("""
+              |INSERT INTO target VALUES
+              |  (1, 10, '2026-08-30'),
+              |  (2, 20, '2026-08-30'),
+              |  (3, 30, '2026-08-31'),
+              |  (4, 40, '2026-09-01')
+              |""".stripMargin)
+
+        val (mergeRowsPlans, resultedTableFiles) = executeMergeIntoAndCollectPlans(
+          """
+            |MERGE INTO target
+            |USING target AS source
+            |ON source._ROW_ID = target._ROW_ID AND target.dt = '2026-08-30'
+            |WHEN MATCHED AND target.id = 1 THEN UPDATE SET target.b = source.b + 100
+            |""".stripMargin)
+
+        assert(mergeRowsPlans.nonEmpty, "Expected a MergeRows plan for self-merge.")
+        assert(
+          mergeRowsPlans.forall(_.collectFirst {
+            case p: Join => p
+            case p: Sort => p
+            case p: RepartitionByExpression => p
+          }.isEmpty),
+          s"Found unexpected Join/Sort/Exchange in plans: ${mergeRowsPlans.mkString("\n")}"
+        )
+        assert(
+          resultedTableFiles.contains(1L),
+          s"Expected target scan to read one partition file, but got: " +
+            resultedTableFiles.mkString(", "))
+
+        checkAnswer(
+          sql("SELECT id, b, dt FROM target ORDER BY id"),
+          Seq(
+            Row(1, 110, "2026-08-30"),
+            Row(2, 20, "2026-08-30"),
+            Row(3, 30, "2026-08-31"),
+            Row(4, 40, "2026-09-01")))
+      }
+    }
+  }
+
+  test("Data Evolution: self-merge falls back for non-partition residual condition") {
+    withTable("target") {
+      sql(
+        "CREATE TABLE target (id INT, b INT) TBLPROPERTIES " +
+          "('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO target VALUES (1, 10), (2, 20)")
+
+      val (mergeRowsPlans, _) =
+        executeMergeIntoAndCollectPlans("""
+                                          |MERGE INTO target
+                                          |USING target AS source
+                                          |ON target._ROW_ID = source._ROW_ID AND target.id = 1
+                                          |WHEN MATCHED THEN UPDATE SET target.b = source.b + 100
+                                          |""".stripMargin)
+
+      assert(
+        mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+        s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+      )
+      checkAnswer(sql("SELECT id, b FROM target ORDER BY id"), Seq(Row(1, 110), Row(2, 20)))
+    }
+  }
+
+  test("Data Evolution: self-merge falls back for dynamic partition condition") {
+    withTable("target") {
+      sql("""
+            |CREATE TABLE target (id INT, b INT, dt STRING)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |PARTITIONED BY (dt)
+            |""".stripMargin)
+      sql("INSERT INTO target VALUES (1, 10, 'p1'), (2, 20, 'p2')")
+
+      val (mergeRowsPlans, _) =
+        executeMergeIntoAndCollectPlans(
+          """
+            |MERGE INTO target
+            |USING target AS source
+            |ON target._ROW_ID = source._ROW_ID AND target.dt = source.dt
+            |WHEN MATCHED THEN UPDATE SET target.b = source.b + 100
+            |""".stripMargin)
+
+      assert(
+        mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+        s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+      )
+      checkAnswer(
+        sql("SELECT id, b, dt FROM target ORDER BY id"),
+        Seq(Row(1, 110, "p1"), Row(2, 120, "p2")))
+    }
+  }
+
+  test("Data Evolution: self-merge with not matched action uses general MERGE path") {
+    withSparkSQLConf("spark.paimon.data-evolution.merge-into.file-pruning" -> "false") {
+      withTable("target") {
+        sql("""
+              |CREATE TABLE target (id INT, b INT, dt STRING)
+              |TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true')
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+        sql("INSERT INTO target VALUES (1, 10, 'p1'), (2, 20, 'p2')")
+
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("""
+                                            |MERGE INTO target
+                                            |USING target AS source
+                                            |ON target._ROW_ID = source._ROW_ID AND target.dt = 'p1'
+                                            |WHEN MATCHED THEN UPDATE SET target.b = source.b + 100
+                                            |WHEN NOT MATCHED THEN INSERT (id, b, dt)
+                                            |  VALUES (source.id + 10, source.b, source.dt)
+                                            |""".stripMargin)
+
+        assert(
+          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+          s"Expected general MERGE plan with Join, but got: ${mergeRowsPlans.mkString("\n")}"
+        )
+        checkAnswer(
+          sql("SELECT id, b, dt FROM target ORDER BY id"),
+          Seq(Row(1, 110, "p1"), Row(2, 20, "p2"), Row(12, 20, "p2")))
+      }
     }
   }
 
