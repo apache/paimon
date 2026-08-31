@@ -54,9 +54,9 @@ for batch_idx, batch_data in enumerate(dataloader):
 #   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
 ```
 
-With `streaming=True`, rows are iterated without random access. With
-`streaming=False`, row-tracking tables fetch each DataLoader batch lazily by
-row ID. Other tables retain an Arrow table in memory for map-style access.
+When the `streaming` parameter is true, it will iteratively read. When it is
+false, row-tracking tables fetch each DataLoader batch lazily by row ID; other
+tables retain an Arrow table in memory for map-style access.
 
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
