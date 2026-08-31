@@ -83,6 +83,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1272,6 +1273,63 @@ public abstract class SimpleTableTestBase {
                                         + " 'scan.fallback-branch'. Unset 'scan.fallback-branch' first."));
 
         table.deleteBranch("fallback");
+    }
+
+    @Test
+    public void testDeleteTagReferencedByBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch("branch1", "tag1");
+
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Cannot delete tag 'tag1' because it is still referenced by branches: [branch1]"));
+
+        table.createBranch("branch2", "tag1");
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Cannot delete tag 'tag1' because it is still referenced by branches:"));
+
+        table.deleteBranch("branch1");
+        table.deleteBranch("branch2");
+
+        table.deleteTag("tag1");
+        assertThat(table.tagManager().tagExists("tag1")).isFalse();
+    }
+
+    @Test
+    public void testExpireTagsSkipsTagReferencedByBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1, Duration.ofMillis(1));
+        table.createBranch("branch1", "tag1");
+        Thread.sleep(10);
+
+        List<String> expired = table.store().newTagAutoManager(table).getTagTimeExpire().expire();
+        assertThat(expired).isEmpty();
+        assertThat(table.tagManager().tagExists("tag1")).isTrue();
+
+        table.deleteBranch("branch1");
+        expired = table.store().newTagAutoManager(table).getTagTimeExpire().expire();
+        assertThat(expired).containsExactly("tag1");
+        assertThat(table.tagManager().tagExists("tag1")).isFalse();
     }
 
     @Test

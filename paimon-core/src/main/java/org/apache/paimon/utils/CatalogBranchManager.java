@@ -21,9 +21,12 @@ package org.apache.paimon.utils;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** A {@link BranchManager} implementation to manage branches via catalog. */
@@ -31,10 +34,13 @@ public class CatalogBranchManager implements BranchManager {
 
     private final CatalogLoader catalogLoader;
     private final Identifier identifier;
+    private final TagManager tagManager;
 
-    public CatalogBranchManager(CatalogLoader catalogLoader, Identifier identifier) {
+    public CatalogBranchManager(
+            CatalogLoader catalogLoader, Identifier identifier, FileIO fileIO, Path tablePath) {
         this.catalogLoader = catalogLoader;
         this.identifier = identifier;
+        this.tagManager = new TagManager(fileIO, tablePath);
     }
 
     private void executePost(ThrowingConsumer<Catalog, Exception> func) {
@@ -121,5 +127,16 @@ public class CatalogBranchManager implements BranchManager {
     @Override
     public List<String> branches() {
         return executeGet(catalog -> catalog.listBranches(identifier));
+    }
+
+    @Override
+    public List<String> branchesCreatedFromTag(String tagName) {
+        List<String> result = new ArrayList<>();
+        for (String branchName : branches()) {
+            if (tagManager.copyWithBranch(branchName).tagExists(tagName)) {
+                result.add(branchName);
+            }
+        }
+        return result;
     }
 }
