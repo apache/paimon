@@ -29,6 +29,7 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
+from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
 from pypaimon.multimodal.rosbag import (
     RosbagLoadResult,
     RosbagSource,
@@ -60,6 +61,7 @@ __all__ = [
     "MultimodalTable",
     "NoSuchKey",
     "ObjectInfo",
+    "PaimonLeRobotDataset",
     "PutObjectResult",
     "RosbagLoadResult",
     "RosbagSource",

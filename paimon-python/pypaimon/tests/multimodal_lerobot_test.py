@@ -16,6 +16,7 @@
 
 import builtins
 from array import array
+import io
 import json
 import shutil
 import sys
@@ -37,6 +38,10 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
+from pypaimon.multimodal.lerobot.dataset import (
+    _image_tensor,
+    _select_manifest,
+)
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
     _companion_identifier,
@@ -97,6 +102,17 @@ def _catalog_arrow(connection, name):
 
 class LeRobotValidationTest(unittest.TestCase):
 
+    def test_dataset_selects_latest_or_requested_published_version(self):
+        manifests = [
+            {"version_id": 1},
+            {"version_id": 3},
+            {"version_id": 2},
+        ]
+        self.assertEqual((3, manifests[1]), _select_manifest(manifests, None))
+        self.assertEqual((2, manifests[2]), _select_manifest(manifests, 2))
+        with self.assertRaisesRegex(ValueError, "version 4 has 0"):
+            _select_manifest(manifests, 4)
+
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
             _managed_table_options("db.robot$branch_dev")
@@ -108,6 +124,43 @@ class LeRobotValidationTest(unittest.TestCase):
 
         self.assertEqual("db.name", identifier.get_database_name())
         self.assertEqual("robot.data__tasks", identifier.get_table_name())
+
+    def test_image_tensor_preserves_declared_channels(self):
+        try:
+            from PIL import Image
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        cases = [
+            ("L", np.full((4, 5), 64, dtype=np.uint8),
+             [4, 5, 1], [64]),
+            ("RGB", np.tile(
+                np.array([32, 64, 96], dtype=np.uint8), (4, 5, 1)),
+             [4, 5, 3], [32, 64, 96]),
+            ("RGBA", np.tile(
+                np.array([32, 64, 96, 128], dtype=np.uint8), (4, 5, 1)),
+             [4, 5, 4], [32, 64, 96, 128]),
+        ]
+        for mode, values, shape, expected in cases:
+            with self.subTest(mode=mode):
+                output = io.BytesIO()
+                Image.fromarray(values, mode=mode).save(output, format="PNG")
+                tensor = _image_tensor(
+                    output.getvalue(), {"dtype": "image", "shape": shape})
+                self.assertEqual(
+                    [shape[2], shape[0], shape[1]], list(tensor.shape))
+                for actual, value in zip(tensor[:, 0, 0], expected):
+                    self.assertAlmostEqual(
+                        value / 255, float(actual), places=6)
+
+        output = io.BytesIO()
+        Image.fromarray(cases[1][1], mode="RGB").save(output, format="PNG")
+        tensor = _image_tensor(output.getvalue(), {
+            "dtype": "image",
+            "shape": [3, 4, 5],
+            "names": ["channels", "height", "width"],
+        })
+        self.assertEqual([3, 4, 5], list(tensor.shape))
 
     def test_dataset_open_never_downloads_videos(self):
         calls = []
@@ -1190,6 +1243,10 @@ class LeRobotImportTest(unittest.TestCase):
         )
         self.assertTrue(_catalog_rows(
             self.connection, "with_subtasks__versions")[0]["has_subtasks"])
+        dataset = pmm.PaimonLeRobotDataset(frames, version_id=version_id)
+        self.assertEqual(["reach", "grasp"], list(
+            dataset.meta.subtasks.index))
+        self.assertEqual("reach", dataset[0]["subtask"])
         self.assertEqual(
             1,
             self.connection.catalog.get_tag(
@@ -1348,6 +1405,70 @@ class LeRobotImportTest(unittest.TestCase):
         self.connection.get_table("missing_tasks")
         self.assertEqual([], _catalog_rows(
             self.connection, "missing_tasks__versions"))
+
+    def test_paimon_dataset_reads_lazy_batches_with_lerobot_metadata(self):
+        version_id = self.connection.load_from_lerobot(
+            "training_data", self.image_source, batch_size=2)
+        table = self.connection.get_table("training_data")
+        dataset = pmm.PaimonLeRobotDataset(
+            table,
+            version_id=version_id,
+            delta_timestamps={"action": [-0.1, 0.0, 0.1]},
+            blob_parallelism=3,
+        )
+
+        self.assertEqual(1, dataset.version_id)
+        self.assertEqual(5, len(dataset))
+        self.assertEqual(2, dataset.num_episodes)
+        self.assertIsNotNone(dataset.meta.stats)
+        self.assertEqual(["pick", "place"], list(dataset.meta.tasks.index))
+        self.assertEqual(2, len(dataset.meta.episodes))
+        self.assertIsNone(dataset._dataset._data)
+
+        from pypaimon.multimodal.blob_read import fetch_blob_bodies
+        with patch(
+                "pypaimon.multimodal.blob_read.fetch_blob_bodies",
+                wraps=fetch_blob_bodies) as fetch:
+            last, first = dataset.__getitems__([4, 0])
+        self.assertEqual(3, fetch.call_args.args[3])
+        self.assertEqual("place", last["task"])
+        self.assertEqual([3, 8, 10], list(last["observation.image"].shape))
+        self.assertAlmostEqual(
+            100.0 / 255.0,
+            float(last["observation.image"].mean()),
+            places=5,
+        )
+        self.assertEqual(
+            [[1.0, -1.0], [2.0, -2.0], [2.0, -2.0]],
+            last["action"].tolist(),
+        )
+        self.assertEqual([False, False, True],
+                         last["action_is_pad"].tolist())
+        self.assertEqual([True, False, False],
+                         first["action_is_pad"].tolist())
+
+        table.add(pa.Table.from_pylist([{
+            "index": 999,
+            "episode_index": 99,
+            "frame_index": 0,
+            "timestamp": 0.0,
+            "task_index": 0,
+            "observation.state": [0.0, 0.0, 0.0],
+            "observation.matrix": [[0.0, 0.0], [0.0, 0.0]],
+            "action": [0.0, 0.0],
+            "reward": 0.0,
+            "observation.image": _image_bytes(
+                np.zeros((8, 10, 3), dtype=np.uint8), self.temp_dir),
+        }], schema=_target_schema(table.raw_table)))
+        self.assertEqual(6, table.scan().to_arrow().num_rows)
+
+        episode = pmm.PaimonLeRobotDataset(
+            table,
+            episodes=[1],
+        )
+        self.assertEqual(3, len(episode))
+        self.assertEqual(1, episode.num_episodes)
+        self.assertEqual(2, int(episode[0]["index"]))
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"

@@ -34,6 +34,17 @@ from torch.utils.data import DataLoader
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+from pypaimon.multimodal.lerobot.dataset import (
+    PaimonLeRobotDataset,
+    _validate_control_row,
+)
+from pypaimon.multimodal.lerobot.metadata import (
+    _VERSIONS_SCHEMA,
+    _append_arrow,
+    _managed_table_options,
+    _prepare_metadata_tables,
+)
+from pypaimon.multimodal.lerobot.schema import _schema_from_info
 from pypaimon.multimodal.table import MultimodalTable
 
 from pypaimon.read.datasource.torch_dataset import (
@@ -569,6 +580,208 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(
             sorted(row['user_id'] for row in expected),
             sorted(actual_ids),
+        )
+
+    def test_paimon_lerobot_dataset_reuses_lazy_map_reader(self):
+        import pandas as pd
+
+        features = {
+            'index': {'dtype': 'int64', 'shape': [1]},
+            'episode_index': {'dtype': 'int64', 'shape': [1]},
+            'frame_index': {'dtype': 'int64', 'shape': [1]},
+            'timestamp': {'dtype': 'float32', 'shape': [1]},
+            'task_index': {'dtype': 'int64', 'shape': [1]},
+            'observation.state': {'dtype': 'float32', 'shape': [2]},
+            'observation.half': {'dtype': 'float16', 'shape': [2]},
+            'observation.double': {'dtype': 'float64', 'shape': [1]},
+            'observation.small': {'dtype': 'int8', 'shape': [1]},
+            'action': {'dtype': 'float32', 'shape': [2]},
+        }
+        info = {
+            'codebase_version': 'v3.0',
+            'total_frames': 5,
+            'total_episodes': 2,
+            'total_tasks': 1,
+            'fps': 10,
+            'features': features,
+        }
+        arrow_schema = _schema_from_info(info)
+        identifier = 'default.test_paimon_lerobot_dataset'
+        table_options = {
+            'data-evolution.enabled': 'true',
+            'row-tracking.enabled': 'true',
+            'blob-as-descriptor': 'true',
+            'vector.file.format': 'parquet',
+        }
+        table_options.update(_managed_table_options(identifier))
+        schema = Schema.from_pyarrow_schema(
+            arrow_schema,
+            partition_keys=['frame_index'],
+            options=table_options,
+        )
+        self.catalog.create_table(identifier, schema, False)
+        raw_table = self.catalog.get_table(identifier)
+        table = MultimodalTable(self.catalog, identifier, raw_table)
+        table.add(pa.Table.from_pylist([
+            {
+                'index': index,
+                'episode_index': 0 if index < 2 else 1,
+                'frame_index': index if index < 2 else index - 2,
+                'timestamp': (index if index < 2 else index - 2) / 10,
+                'task_index': 0,
+                'observation.state': [float(index), float(index + 1)],
+                'observation.half': [float(index), float(index + 1)],
+                'observation.double': 1e40,
+                'observation.small': index,
+                'action': [float(index), float(-index)],
+            }
+            for index in range(5)
+        ], schema=arrow_schema))
+        episodes = pa.Table.from_pylist([
+            {
+                'episode_index': 0,
+                'dataset_from_index': 0,
+                'dataset_to_index': 2,
+                'tasks': ['pick'],
+                'length': 2,
+            },
+            {
+                'episode_index': 1,
+                'dataset_from_index': 2,
+                'dataset_to_index': 5,
+                'tasks': ['pick'],
+                'length': 3,
+            },
+        ])
+        tasks = pa.Table.from_pandas(pd.DataFrame(
+            {'task_index': [0]},
+            index=pd.Index(['pick'], name='task'),
+        ))
+        component_tables = _prepare_metadata_tables(
+            SimpleNamespace(catalog=self.catalog),
+            raw_table,
+            {
+                'episodes_schema': episodes.schema,
+                'tasks_table': tasks,
+                'subtasks_table': None,
+            },
+        )
+        raw_table.create_tag('1', snapshot_id=1)
+        for name, data in (('episodes', episodes), ('tasks', tasks)):
+            self.assertEqual(1, _append_arrow(component_tables[name], data))
+            component_tables[name].create_tag('1', snapshot_id=1)
+        _append_arrow(component_tables['versions'], pa.Table.from_pylist([{
+            'version_id': 1,
+            'info_json': json.dumps(info),
+            'stats_json': json.dumps({'action': {}}),
+            'has_subtasks': False,
+        }], schema=_VERSIONS_SCHEMA))
+
+        dataset = PaimonLeRobotDataset(
+            table,
+            episodes=[1, 0],
+            delta_timestamps={'action': [-0.1, 0.0, 0.1]},
+        )
+
+        self.assertEqual(1, dataset.version_id)
+        self.assertEqual(['pick'], list(dataset.meta.tasks.index))
+        self.assertIsNone(dataset._dataset._data)
+        self.assertEqual(5, len(dataset))
+        first, last = dataset.__getitems__([0, 2])
+        self.assertEqual(0, int(first['index']))
+        self.assertEqual(torch.float16, first['observation.half'].dtype)
+        self.assertEqual(torch.float64, first['observation.double'].dtype)
+        self.assertEqual(1e40, first['observation.double'].item())
+        self.assertEqual(torch.int8, first['observation.small'].dtype)
+        self.assertEqual(
+            [[0.0, 0.0], [0.0, 0.0], [1.0, -1.0]],
+            first['action'].tolist(),
+        )
+        self.assertEqual([True, False, False],
+                         first['action_is_pad'].tolist())
+        self.assertEqual(2, int(last['index']))
+        self.assertEqual([True, False, False],
+                         last['action_is_pad'].tolist())
+        self.assertEqual(3, int(dataset[3]['index']))
+        self.assertEqual('pick', dataset[3]['task'])
+        restored = pickle.loads(pickle.dumps(dataset))
+        self.assertEqual('pick', restored[0]['task'])
+
+        duplicate_a, duplicate_b = dataset.__getitems__([0, 0])
+        self.assertIsNot(duplicate_a['action'], duplicate_b['action'])
+        duplicate_a['action'].add_(1)
+        self.assertNotEqual(
+            duplicate_a['action'].tolist(), duplicate_b['action'].tolist())
+
+        batch = next(iter(DataLoader(
+            dataset, batch_size=2, num_workers=2, shuffle=False)))
+        self.assertEqual([0, 1], batch['index'].tolist())
+
+        with patch(
+                'pypaimon.multimodal.lerobot.dataset.'
+                '_semantic_index_mapping') as rebuild:
+            reused = PaimonLeRobotDataset(
+                table,
+                episodes=[1],
+                index_mapping=pickle.loads(
+                    pickle.dumps(dataset.index_mapping)),
+                blob_parallelism=3,
+            )
+        rebuild.assert_not_called()
+        self.assertEqual(3, reused.blob_parallelism)
+        self.assertEqual(2, int(reused[0]['index']))
+        with self.assertRaisesRegex(ValueError, 'looser tolerance_s'):
+            PaimonLeRobotDataset(
+                table,
+                index_mapping=dataset.index_mapping,
+                tolerance_s=1e-5,
+            )
+        with self.assertRaisesRegex(
+                ValueError, 'blob_parallelism must be a positive integer'):
+            PaimonLeRobotDataset(table, blob_parallelism=0)
+        with self.assertRaisesRegex(
+                ValueError, "version 2 has 0 manifest rows"):
+            PaimonLeRobotDataset(table, version_id=2)
+
+        component_tables['tasks'].delete_tag('1')
+        with self.assertRaisesRegex(ValueError, "missing tag 1"):
+            PaimonLeRobotDataset(table)
+        component_tables['tasks'].create_tag('1', snapshot_id=1)
+
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={
+                '_ROW_ID': json.dumps({'name': 'NULL'}),
+            },
+        )
+        raw_table.catalog_environment.table_query_auth = (
+            lambda options, table_identifier: lambda select: auth
+        )
+        with self.assertRaisesRegex(
+                ValueError, 'requires .*visible _ROW_ID'):
+            PaimonLeRobotDataset(table)
+
+    def test_paimon_lerobot_timestamp_uses_float32_quantization(self):
+        frame_index = 61441
+        _validate_control_row(
+            {
+                'episode_index': 0,
+                'frame_index': frame_index,
+                'timestamp': pa.scalar(
+                    frame_index / 30, type=pa.float32()).as_py(),
+                'task_index': 0,
+            },
+            frame_index,
+            {
+                'episode_ranges': [(0, frame_index + 1)],
+                'episode_ends': [frame_index + 1],
+                'fps': 30,
+                'task_names': {0: 'pick'},
+                'subtask_names': None,
+                'episode_tasks': (('pick',),),
+                'timestamp_type': pa.float32(),
+            },
+            1e-4,
         )
 
     def test_non_streaming_row_tracking_without_data_evolution_materializes(self):
