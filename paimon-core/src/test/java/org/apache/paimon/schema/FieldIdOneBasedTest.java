@@ -103,6 +103,52 @@ public class FieldIdOneBasedTest {
     }
 
     @Test
+    public void testCreateFromPersistedOneBasedSchemaPreservesIds() throws Exception {
+        // the copy_files procedure rebuilds a Schema from a persisted TableSchema, options
+        // included; already-shifted ids must survive creation unchanged, since the copied
+        // data files embed them
+        SchemaManager source = newSchemaManager("src");
+        TableSchema sourceSchema =
+                source.createTable(
+                        schemaBuilder()
+                                .option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true")
+                                .build());
+        assertThat(topLevelIds(sourceSchema)).containsExactly(1, 2, 5);
+
+        Schema copied =
+                new Schema(
+                        sourceSchema.fields(),
+                        sourceSchema.partitionKeys(),
+                        sourceSchema.primaryKeys(),
+                        sourceSchema.options(),
+                        sourceSchema.comment());
+        TableSchema copiedSchema = newSchemaManager("dst").createTable(copied);
+        assertThat(topLevelIds(copiedSchema)).isEqualTo(topLevelIds(sourceSchema));
+        RowType sourceNested = (RowType) sourceSchema.fields().get(1).type();
+        RowType copiedNested = (RowType) copiedSchema.fields().get(1).type();
+        assertThat(copiedNested.getFields().stream().map(DataField::id))
+                .containsExactlyElementsOf(
+                        sourceNested.getFields().stream()
+                                .map(DataField::id)
+                                .collect(java.util.stream.Collectors.toList()));
+        assertThat(copiedSchema.highestFieldId()).isEqualTo(sourceSchema.highestFieldId());
+    }
+
+    @Test
+    public void testInvalidOptionValueRejected() throws Exception {
+        SchemaManager manager = newSchemaManager("t");
+        manager.createTable(schemaBuilder().build());
+        // a lax parse would persist this as an accidental 'false' that the immutability
+        // check then freezes forever
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.FIELD_ID_ONE_BASED.key(), "yes")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     public void testOneBasedImmutableAndCreateTimeOnly() throws Exception {
         // registered as immutable, so ALTER is rejected once the table has snapshots
         assertThat(CoreOptions.IMMUTABLE_OPTIONS).contains(CoreOptions.FIELD_ID_ONE_BASED.key());

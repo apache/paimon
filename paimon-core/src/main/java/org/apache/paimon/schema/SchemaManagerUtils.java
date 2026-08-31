@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.VectorIndexOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
@@ -157,7 +158,7 @@ final class SchemaManagerUtils {
                 // so changing the value later only makes the option lie about the schema
                 // (restating the effective value, e.g. an explicit default, stays allowed)
                 if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(setOption.key())
-                        && Boolean.parseBoolean(oldValue) != Boolean.parseBoolean(newValue)) {
+                        && fieldIdOneBasedValue(oldValue) != fieldIdOneBasedValue(newValue)) {
                     throw new UnsupportedOperationException(
                             "Change '"
                                     + CoreOptions.FIELD_ID_ONE_BASED.key()
@@ -175,7 +176,7 @@ final class SchemaManagerUtils {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
                 if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(removeOption.key())
-                        && Boolean.parseBoolean(oldOptions.get(removeOption.key()))) {
+                        && fieldIdOneBasedValue(oldOptions.get(removeOption.key()))) {
                     // removing the option while it is true changes the effective value
                     throw new UnsupportedOperationException(
                             "Change '"
@@ -1272,5 +1273,19 @@ final class SchemaManagerUtils {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * The effective value of {@link CoreOptions#FIELD_ID_ONE_BASED} for a raw option string, parsed
+     * strictly: an invalid value is rejected here instead of being persisted as an accidental
+     * {@code false} that the immutability check would then freeze forever.
+     */
+    private static boolean fieldIdOneBasedValue(@Nullable String value) {
+        if (value == null) {
+            return CoreOptions.FIELD_ID_ONE_BASED.defaultValue();
+        }
+        Options options = new Options();
+        options.setString(CoreOptions.FIELD_ID_ONE_BASED.key(), value);
+        return options.get(CoreOptions.FIELD_ID_ONE_BASED);
     }
 }

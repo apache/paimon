@@ -168,6 +168,12 @@ public class FileSystemSchemaManager implements SchemaManager {
         if (!CoreOptions.fromMap(schema.options()).fieldIdOneBased()) {
             return schema;
         }
+        if (!ShiftFieldId.containsFieldId(schema.rowType(), 0)) {
+            // Already conformant: no field carries id 0. A persisted schema passed back into
+            // creation (e.g. the copy_files procedure copies a table's fields together with
+            // this option) must keep its ids, which the copied data files embed.
+            return schema;
+        }
         return schema.copy((RowType) ShiftFieldId.shift(schema.rowType(), 1));
     }
 
