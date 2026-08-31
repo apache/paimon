@@ -101,6 +101,20 @@ public class FixedBucketRowKeyExtractorTest {
         }
     }
 
+    @Test
+    public void testPerPartitionBucketCount() {
+        int defaultBuckets = 100;
+        BinaryRow mappedPartition = BinaryRow.singleColumn(1);
+        Map<BinaryRow, Integer> partitionMap = new HashMap<>();
+        partitionMap.put(mappedPartition, 4);
+        PartitionBucketMapping mapping = new PartitionBucketMapping(defaultBuckets, partitionMap);
+
+        FixedBucketRowKeyExtractor extractor = extractor("a", "b", "a,b", defaultBuckets, mapping);
+
+        assertThat(bucket(extractor, GenericRow.of(1, 456, 7))).isEqualTo(3);
+        assertThat(bucket(extractor, GenericRow.of(99, 456, 7))).isEqualTo(47);
+    }
+
     private int bucket(FixedBucketRowKeyExtractor extractor, InternalRow row) {
         extractor.setRecord(row);
         return extractor.bucket();
@@ -126,7 +140,28 @@ public class FixedBucketRowKeyExtractorTest {
     }
 
     private FixedBucketRowKeyExtractor extractor(
+            String partK, String bk, String pk, int numBucket, PartitionBucketMapping mapping) {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType()),
+                                new DataField(2, "c", new IntType())));
+        return extractor(rowType, partK, bk, pk, numBucket, mapping);
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
             RowType rowType, String partK, String bk, String pk, int numBucket) {
+        return extractor(rowType, partK, bk, pk, numBucket, new PartitionBucketMapping(numBucket));
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
+            RowType rowType,
+            String partK,
+            String bk,
+            String pk,
+            int numBucket,
+            PartitionBucketMapping mapping) {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
@@ -142,6 +177,6 @@ public class FixedBucketRowKeyExtractorTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new FixedBucketRowKeyExtractor(schema);
+        return new FixedBucketRowKeyExtractor(schema, mapping);
     }
 }
