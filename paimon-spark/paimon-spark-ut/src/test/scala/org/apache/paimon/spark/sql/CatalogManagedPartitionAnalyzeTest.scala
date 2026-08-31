@@ -338,6 +338,40 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
     }
   }
 
+  test("a full ANALYZE clamps non-positive statistics parallelism") {
+    Seq("zero" -> 0, "negative" -> -1).foreach {
+      case (label, parallelism) =>
+        val tableName = s"analyze_${label}_parallelism"
+        withTable(tableName) {
+          sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)
+                 |USING PARQUET
+                 |PARTITIONED BY (dt, hour)
+                 |TBLPROPERTIES (
+                 |  'format-table.implementation' = 'paimon',
+                 |  'metastore.partitioned-table' = 'true')
+                 |""".stripMargin)
+          sql(s"""INSERT INTO ${qualified(tableName)}
+                 |VALUES (1, 'a', '20260101', '00'), (2, 'b', '20260101', '00')
+                 |""".stripMargin)
+          copyPartitionFiles(tableName, "20260101", "20260102")
+          repair(tableName)
+          assert(
+            !PartitionStatistics.isKnown(statisticsOf(tableName, "20260102", "00").recordCount()))
+
+          withSparkSQLConf(
+            "spark.paimon.format-table.statistics.parallelism" -> parallelism.toString) {
+            sql(
+              s"ANALYZE TABLE ${qualified(tableName)} PARTITION (dt = '20260102') " +
+                s"COMPUTE STATISTICS").collect()
+          }
+
+          val scanned = statisticsOf(tableName, "20260102", "00")
+          // The exact row count confirms that ANALYZE completed the Parquet footer scan.
+          assert(scanned.recordCount() == 2L, scanned.toString)
+        }
+    }
+  }
+
   test("catalog partition row counts feed scan statistics after partition pruning") {
     val tableName = "analyze_scan_statistics"
     withTable(tableName) {
