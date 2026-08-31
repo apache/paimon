@@ -88,6 +88,7 @@ from pypaimon.sample.robomind_agilex import (
     ingest_local,
     ingest_ray,
     run_local_pipeline,
+    run_ray_pipeline,
 )
 
 # Run local ingestion and canonical-action backfill together.
@@ -96,18 +97,14 @@ pipeline = run_local_pipeline(
     "/data/warehouse",
 )
 
-# Or compose the lower-level operations explicitly. Ray chooses distributed
-# task placement; concurrency is only an optional upper bound.
-ingest = ingest_ray(
+# Run distributed ingestion and backfill on one managed Ray cluster.
+pipeline = run_ray_pipeline(
     "/data/RoboMIND/h5_agilex_3rgb",
     "/data/warehouse",
     concurrency=8,
-)
-
-backfill = backfill_canonical_action_ray(
-    "/data/warehouse",
     statistics_version="robomind-agilex-joint-position@1",
     num_partitions=8,
+    ray_address="ray://cluster:10001",
 )
 ```
 
@@ -121,7 +118,10 @@ file groups finish. If statistics need to be regenerated, call
 `refresh_action_statistics` without repeating ingestion or the row-id update.
 
 Use `backfill_canonical_action` for the local iterable path and
-`backfill_canonical_action_ray` after distributed ingestion.
+`run_ray_pipeline` for managed distributed ingestion and backfill. The Ray
+pipeline requires Ray 2.50 or newer. The lower-level `ingest_ray` and
+`backfill_canonical_action_ray` stages assume that Ray has already been
+initialized, which allows either stage to be retried independently.
 
 The canonical `action` is `float32(concat(master/joint_position_left,
 master/joint_position_right))`. The backfill materializes only this consumed

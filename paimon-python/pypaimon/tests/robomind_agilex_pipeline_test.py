@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -398,14 +399,16 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
     local_backfill = agilex.backfill_canonical_action(
         local_warehouse, statistics_version="synthetic-actions@1")
 
-    ray.init(num_cpus=2, include_dashboard=False)
-    try:
-        ray_result = agilex.ingest_ray(
-            root, ray_warehouse, batch_size=2, concurrency=2)
-        ray_backfill = agilex.backfill_canonical_action_ray(
-            ray_warehouse, statistics_version="synthetic-actions@1")
-    finally:
-        ray.shutdown()
+    ray_pipeline = agilex.run_ray_pipeline(
+        root,
+        ray_warehouse,
+        batch_size=2,
+        concurrency=2,
+        statistics_version="synthetic-actions@1",
+    )
+    ray_result = ray_pipeline.ingest
+    ray_backfill = ray_pipeline.backfill
+    assert not ray.is_initialized()
     assert ray_result.episodes_snapshot_id == 1
     assert ray_result.frames_snapshot_id == 1
     assert ray_result.mode == "ray"
@@ -423,6 +426,64 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
             ray_table.raw_table.table_schema.options)
         assert _logical_rows(local_warehouse, table_name, schema).equals(
             _logical_rows(ray_warehouse, table_name, schema))
+
+
+def test_run_ray_pipeline_owns_cluster_lifecycle(monkeypatch):
+    ray = pytest.importorskip("ray")
+    ray_init = MagicMock()
+    ray_shutdown = MagicMock()
+    ingest = MagicMock(return_value=MagicMock())
+    backfill = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(ray, "__version__", "2.50.0")
+    monkeypatch.setattr(ray, "is_initialized", lambda: False)
+    monkeypatch.setattr(ray, "init", ray_init)
+    monkeypatch.setattr(ray, "shutdown", ray_shutdown)
+    monkeypatch.setattr(agilex, "ingest_ray", ingest)
+    monkeypatch.setattr(agilex, "backfill_canonical_action_ray", backfill)
+
+    result = agilex.run_ray_pipeline(
+        "input", "warehouse", ray_address="ray://cluster")
+
+    ray_init.assert_called_once_with(
+        include_dashboard=False,
+        ignore_reinit_error=True,
+        address="ray://cluster",
+    )
+    ingest.assert_called_once_with(
+        "input",
+        "warehouse",
+        database=agilex.DEFAULT_DATABASE,
+        batch_size=64,
+        concurrency=None,
+    )
+    backfill.assert_called_once_with(
+        "warehouse",
+        database=agilex.DEFAULT_DATABASE,
+        statistics_version=agilex.DEFAULT_STATISTICS_VERSION,
+        num_partitions=None,
+    )
+    ray_shutdown.assert_called_once_with()
+    assert result.ingest is ingest.return_value
+    assert result.backfill is backfill.return_value
+
+
+def test_run_ray_pipeline_rejects_old_ray_before_ingest(monkeypatch):
+    ray = pytest.importorskip("ray")
+    ingest = MagicMock()
+    monkeypatch.setattr(ray, "__version__", "2.49.0")
+    monkeypatch.setattr(ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(agilex, "ingest_ray", ingest)
+
+    with pytest.raises(RuntimeError, match="requires ray>=2.50"):
+        agilex.run_ray_pipeline("input", "warehouse")
+
+    ingest.assert_not_called()
+
+
+def test_ray_stage_apis_do_not_accept_cluster_addresses():
+    assert "ray_address" not in inspect.signature(agilex.ingest_ray).parameters
+    assert "ray_address" not in inspect.signature(
+        agilex.backfill_canonical_action_ray).parameters
 
 
 def test_stream_action_statistics_are_stable_and_order_independent(monkeypatch):

@@ -114,6 +114,14 @@ class LocalPipelineResult:
     backfill: BackfillResult
 
 
+@dataclass(frozen=True)
+class RayPipelineResult:
+    """Result of the complete Ray ingestion and backfill pipeline."""
+
+    ingest: IngestResult
+    backfill: BackfillResult
+
+
 def episode_schema():
     """Return the shared AgileX episode business schema."""
     return pa.schema([
@@ -341,25 +349,27 @@ def run_local_pipeline(
     return LocalPipelineResult(ingest=ingest, backfill=backfill)
 
 
-def ingest_ray(
+def run_ray_pipeline(
         input_root,
         warehouse,
         *,
         database=DEFAULT_DATABASE,
         batch_size=64,
         concurrency=None,
+        statistics_version=DEFAULT_STATISTICS_VERSION,
+        num_partitions=None,
         ray_address=None):
-    """Ingest AgileX through the public distributed HDF5 loader."""
-    if concurrency is not None:
-        concurrency = _positive_int(concurrency, "concurrency")
-    episodes = discover_episodes(input_root)
-    _create_tables(warehouse, database)
-
+    """Run Ray ingestion and backfill on one managed Ray cluster."""
     try:
         import ray
     except ImportError:
         raise ImportError(
-            "Ray ingestion requires ray; install pypaimon[ray,hdf5].")
+            "Ray pipeline requires ray; install pypaimon[ray,hdf5].")
+    from packaging.version import parse
+    if parse(ray.__version__) < parse("2.50.0"):
+        raise RuntimeError(
+            "Ray pipeline requires ray>=2.50; installed ray is %s."
+            % ray.__version__)
 
     initialized_here = not ray.is_initialized()
     if initialized_here:
@@ -377,31 +387,60 @@ def ingest_ray(
             "ray_address cannot be set after Ray has already been initialized.")
 
     try:
-        from pypaimon.ray import load_from_hdf5
-        catalog_options = {
-            "warehouse": str(Path(warehouse).expanduser().resolve())}
-        paths = [episode.path for episode in episodes]
-        episode_result = load_from_hdf5(
-            "%s.%s" % (database, EPISODES_TABLE), paths, catalog_options,
-            transform=RoboMindAgileXEpisodeTransform(episodes),
+        ingest = ingest_ray(
+            input_root,
+            warehouse,
+            database=database,
+            batch_size=batch_size,
             concurrency=concurrency,
         )
-        frame_result = load_from_hdf5(
-            "%s.%s" % (database, FRAMES_TABLE), paths, catalog_options,
-            transform=RoboMindAgileXFrameTransform(
-                episodes, batch_size=batch_size),
-            concurrency=concurrency,
+        backfill = backfill_canonical_action_ray(
+            warehouse,
+            database=database,
+            statistics_version=statistics_version,
+            num_partitions=num_partitions,
         )
-        return IngestResult(
-            mode="ray",
-            episode_count=episode_result.row_count,
-            frame_count=frame_result.row_count,
-            episodes_snapshot_id=episode_result.snapshot_id,
-            frames_snapshot_id=frame_result.snapshot_id,
-        )
+        return RayPipelineResult(ingest=ingest, backfill=backfill)
     finally:
         if initialized_here:
             ray.shutdown()
+
+
+def ingest_ray(
+        input_root,
+        warehouse,
+        *,
+        database=DEFAULT_DATABASE,
+        batch_size=64,
+        concurrency=None):
+    """Ingest AgileX through an already initialized Ray cluster."""
+    if concurrency is not None:
+        concurrency = _positive_int(concurrency, "concurrency")
+    episodes = discover_episodes(input_root)
+    _create_tables(warehouse, database)
+
+    from pypaimon.ray import load_from_hdf5
+    catalog_options = {
+        "warehouse": str(Path(warehouse).expanduser().resolve())}
+    paths = [episode.path for episode in episodes]
+    episode_result = load_from_hdf5(
+        "%s.%s" % (database, EPISODES_TABLE), paths, catalog_options,
+        transform=RoboMindAgileXEpisodeTransform(episodes),
+        concurrency=concurrency,
+    )
+    frame_result = load_from_hdf5(
+        "%s.%s" % (database, FRAMES_TABLE), paths, catalog_options,
+        transform=RoboMindAgileXFrameTransform(
+            episodes, batch_size=batch_size),
+        concurrency=concurrency,
+    )
+    return IngestResult(
+        mode="ray",
+        episode_count=episode_result.row_count,
+        frame_count=frame_result.row_count,
+        episodes_snapshot_id=episode_result.snapshot_id,
+        frames_snapshot_id=frame_result.snapshot_id,
+    )
 
 
 def build_canonical_action_backfill(source):
@@ -459,7 +498,7 @@ def backfill_canonical_action_ray(
         database=DEFAULT_DATABASE,
         statistics_version=DEFAULT_STATISTICS_VERSION,
         num_partitions=None):
-    """Run distributed action materialization, then refresh statistics."""
+    """Run distributed backfill on an already initialized Ray cluster."""
     row_count, frames_snapshot_id = _materialize_canonical_action_ray(
         warehouse,
         database=database,
@@ -497,45 +536,28 @@ def _materialize_canonical_action_ray(
     if num_partitions is not None:
         num_partitions = _positive_int(num_partitions, "num_partitions")
 
-    try:
-        import ray
-    except ImportError:
-        raise ImportError(
-            "Ray backfill requires ray; install pypaimon[ray].")
+    from pypaimon.ray import WhenMatched, merge_into
 
-    initialized_here = not ray.is_initialized()
-    if initialized_here:
-        ray.init(
-            include_dashboard=False,
-            ignore_reinit_error=True,
-            num_cpus=2,
-        )
-    try:
-        from pypaimon.ray import WhenMatched, merge_into
+    connection, _ = _prepare_canonical_action_table(
+        warehouse, database)
+    catalog_options = {
+        "warehouse": str(Path(warehouse).expanduser().resolve())}
 
-        connection, _ = _prepare_canonical_action_table(
-            warehouse, database)
-        catalog_options = {
-            "warehouse": str(Path(warehouse).expanduser().resolve())}
+    def canonical_action(rows):
+        return build_canonical_action_backfill(rows)[_ACTION_COLUMN]
 
-        def canonical_action(rows):
-            return build_canonical_action_backfill(rows)[_ACTION_COLUMN]
-
-        target = "%s.%s" % (database, FRAMES_TABLE)
-        result = merge_into(
-            target,
-            target,
-            catalog_options,
-            on=["_ROW_ID"],
-            when_matched=[WhenMatched.update({
-                _ACTION_COLUMN: canonical_action,
-            })],
-            read_columns=[_ACTION_LEFT, _ACTION_RIGHT],
-            num_partitions=num_partitions,
-        )
-    finally:
-        if initialized_here:
-            ray.shutdown()
+    target = "%s.%s" % (database, FRAMES_TABLE)
+    result = merge_into(
+        target,
+        target,
+        catalog_options,
+        on=["_ROW_ID"],
+        when_matched=[WhenMatched.update({
+            _ACTION_COLUMN: canonical_action,
+        })],
+        read_columns=[_ACTION_LEFT, _ACTION_RIGHT],
+        num_partitions=num_partitions,
+    )
 
     frames_table = connection.get_table(FRAMES_TABLE)
     return result["num_matched"], _snapshot_id(frames_table)
