@@ -226,6 +226,15 @@ class TableWrite:
         self.file_store_write.blob_consumer = blob_consumer
         return self
 
+    def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "with_blob_uri_reader_factory must be called before any "
+                "write operation."
+            )
+        self.file_store_write.blob_uri_reader_factory = uri_reader_factory
+        return self
+
     def write_ray(
         self,
         dataset: "Dataset",

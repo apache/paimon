@@ -21,11 +21,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.fs as pafs
+import pyarrow.parquet as pq
 
 import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
@@ -228,8 +230,11 @@ class LeRobotValidationTest(unittest.TestCase):
                 "shape": [8, 10, 3],
             }
         }
-        with self.assertRaisesRegex(ValueError, "video feature camera.*not supported"):
-            _schema_from_info(info, include_task=False)
+        self.assertEqual(
+            pa.large_binary(),
+            _schema_from_info(
+                info, include_task=False).field("camera").type,
+        )
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -313,6 +318,7 @@ class LeRobotValidationTest(unittest.TestCase):
             "episode_index": [0],
             "dataset_from_index": [0],
             "dataset_to_index": [1],
+            "length": [1],
             "data/chunk_index": [0],
             "data/file_index": [0],
         })
@@ -343,6 +349,16 @@ class LeRobotValidationTest(unittest.TestCase):
                 "total_tasks": 0,
                 "features": {
                     "index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {
+                        "dtype": "float32",
+                        "shape": [1],
+                        "fps": 10.0,
+                    },
+                    "camera": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
                 },
             }))
             connection = pmm.connect(options={
@@ -355,8 +371,54 @@ class LeRobotValidationTest(unittest.TestCase):
                     "empty_frames", source))
             import_lerobot.assert_not_called()
             table = connection.get_table("empty_frames")
+            self.assertEqual(
+                {"camera"}, table.raw_table.options.video_frame_fields())
             self.assertIsNone(
                 table.raw_table.snapshot_manager().get_latest_snapshot())
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_video_options_must_match_metadata(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_options_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            info = {
+                "codebase_version": "v3.0",
+                "fps": 10,
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "camera_a": {"dtype": "video", "shape": [8, 10, 3]},
+                    "camera_b": {"dtype": "video", "shape": [8, 10, 3]},
+                },
+            }
+            (source / "meta" / "info.json").write_text(json.dumps(info))
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+
+            with self.assertRaisesRegex(ValueError, "do not match"):
+                connection.load_from_lerobot(
+                    "conflict",
+                    source,
+                    options={"video-frame-field": "camera_a"},
+                )
+
+            schema = _schema_from_info(info, include_task=False)
+            connection.create_table("missing_option", schema=schema)
+            with self.assertRaisesRegex(ValueError, "require table option"):
+                connection.load_from_lerobot("missing_option", source)
+
+            connection.create_table(
+                "reordered",
+                schema=schema,
+                options={"video-frame-field": "camera_b,camera_a"},
+            )
+            self.assertIsNone(connection.load_from_lerobot(
+                "reordered", source))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -464,23 +526,200 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_local_video_is_rejected_before_opening(self):
+    def test_episode_aware_multi_video_import(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_video_"))
         try:
             info_dir = temp_dir / "meta"
             info_dir.mkdir()
-            (info_dir / "info.json").write_text(json.dumps({
+            info = {
                 "codebase_version": "v3.0",
+                "fps": 10,
+                "total_frames": 5,
+                "total_episodes": 2,
+                "total_tasks": 0,
+                "data_path": (
+                    "data/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.parquet"
+                ),
+                "video_path": (
+                    "videos/{video_key}/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.mp4"
+                ),
                 "features": {
-                    "camera": {"dtype": "video", "shape": [8, 10, 3]},
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "frame_index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {
+                        "dtype": "float32",
+                        "shape": [1],
+                        "fps": 10.0,
+                    },
+                    "camera_a": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
+                    "camera_b": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
                 },
-            }))
+            }
+            (info_dir / "info.json").write_text(json.dumps(info))
+            payloads = {
+                "camera_a/chunk-000/file-000.mp4": b"camera-a",
+                "camera_b/chunk-000/file-000.mp4": b"camera-b-0",
+                "camera_b/chunk-000/file-001.mp4": b"camera-b-1",
+            }
+            for relative, payload in payloads.items():
+                path = temp_dir / "videos" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+
+            episodes = [
+                {
+                    "episode_index": 0,
+                    "dataset_from_index": 0,
+                    "dataset_to_index": 2,
+                    "length": 2,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "videos/camera_a/chunk_index": 0,
+                    "videos/camera_a/file_index": 0,
+                    "videos/camera_a/from_timestamp": 0.0,
+                    "videos/camera_a/to_timestamp": 0.2,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.0,
+                    "videos/camera_b/to_timestamp": 0.2,
+                },
+                {
+                    "episode_index": 1,
+                    "dataset_from_index": 2,
+                    "dataset_to_index": 5,
+                    "length": 3,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "videos/camera_a/chunk_index": 0,
+                    "videos/camera_a/file_index": 0,
+                    "videos/camera_a/from_timestamp": 0.2,
+                    "videos/camera_a/to_timestamp": 0.5,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 1,
+                    "videos/camera_b/from_timestamp": 0.0,
+                    "videos/camera_b/to_timestamp": 0.3,
+                },
+            ]
+
+            class Dataset:
+
+                root = temp_dir
+                meta = SimpleNamespace(
+                    info=info, episodes=episodes, tasks=None)
+                rows = pa.table({
+                    "index": pa.array(range(5), type=pa.int64()),
+                    "episode_index": pa.array(
+                        [0, 0, 1, 1, 1], type=pa.int64()),
+                    "frame_index": pa.array(
+                        [0, 1, 0, 1, 2], type=pa.int64()),
+                    "timestamp": pa.array(
+                        [0.0, 0.1, 0.0, 0.1, 0.2],
+                        type=pa.float32(),
+                    ),
+                })
+
+                def __len__(self):
+                    return 5
+
+                def read_batch(self, begin, end):
+                    return self.rows.slice(begin, end - begin)
+
             connection = pmm.connect(options={
                 "warehouse": str(temp_dir / "warehouse"),
             })
-            with self.assertRaisesRegex(
-                    ValueError, "video feature camera.*not supported"):
-                connection.load_from_lerobot("frames", temp_dir)
+            with patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_open_resolved_dataset",
+                    return_value=Dataset(),
+            ):
+                snapshot_id = connection.load_from_lerobot(
+                    "frames", temp_dir, batch_size=1)
+
+            self.assertEqual(1, snapshot_id)
+            table = connection.get_table("frames")
+            self.assertEqual(
+                {"camera_a", "camera_b"},
+                table.raw_table.options.video_frame_fields(),
+            )
+            rows = table.scan().select([
+                "index", "camera_a", "camera_b"
+            ]).to_arrow().sort_by("index").to_pylist()
+            camera_a = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera_a"])
+                for row in rows
+            ]
+            camera_b = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera_b"])
+                for row in rows
+            ]
+            self.assertEqual(
+                [0, 1, 2, 3, 4],
+                [descriptor.frame_index for descriptor in camera_a],
+            )
+            self.assertEqual(
+                [0, 1, 0, 1, 2],
+                [descriptor.frame_index for descriptor in camera_b],
+            )
+            _, bodies = table.scan().select([
+                "index", "camera_a", "camera_b"
+            ]).read_blobs()
+            self.assertEqual(
+                [payloads["camera_a/chunk-000/file-000.mp4"]] * 5,
+                bodies["camera_a"],
+            )
+            self.assertEqual(
+                [payloads["camera_b/chunk-000/file-000.mp4"]] * 2
+                + [payloads["camera_b/chunk-000/file-001.mp4"]] * 3,
+                bodies["camera_b"],
+            )
+
+            data_path = temp_dir / "data/chunk-000/file-000.parquet"
+            data_path.parent.mkdir(parents=True)
+            pq.write_table(Dataset.rows, data_path)
+            episodes_path = (
+                temp_dir / "meta/episodes/chunk-000/file-000.parquet")
+            episodes_path.parent.mkdir(parents=True)
+            pq.write_table(pa.Table.from_pylist(episodes), episodes_path)
+            remote = "oss://source-bucket/robot-videos"
+            source_file_io = _RemoteLeRobotFileIO(temp_dir, remote)
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+                    return_value=source_file_io,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ):
+                remote_snapshot = connection.load_from_lerobot(
+                    "remote_frames", remote, batch_size=1)
+
+            self.assertEqual(1, remote_snapshot)
+            opened_videos = [
+                path for path in source_file_io.opened_paths
+                if path.endswith(".mp4")
+            ]
+            self.assertEqual(3, len(opened_videos))
+            self.assertEqual(1, source_file_io.close_count)
+            _, remote_bodies = connection.get_table(
+                "remote_frames").scan().select([
+                    "index", "camera_a", "camera_b"
+                ]).read_blobs()
+            self.assertEqual(bodies, remote_bodies)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -509,7 +748,9 @@ class _RemoteLeRobotFileIO:
         native_path = remote_path.split("://", 1)[1]
         file_type = pafs.FileType.Directory if local_path.is_dir() \
             else pafs.FileType.File
-        return pafs.FileInfo(native_path, file_type)
+        size = local_path.stat().st_size \
+            if file_type == pafs.FileType.File else None
+        return pafs.FileInfo(native_path, file_type, size=size)
 
     def get_file_status(self, remote_path):
         local_path = self._local_path(remote_path)

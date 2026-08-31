@@ -27,6 +27,7 @@ from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.lerobot.schema import _feature_shape
 from pypaimon.multimodal.table import _target_schema
+from pypaimon.table.row.blob import VideoFrameDescriptor
 
 
 _DECLARED_NUMERIC_RANGES = {
@@ -67,7 +68,8 @@ def _write_dataset(
         info,
         source,
         source_schema,
-        batch_size):
+        batch_size,
+        video_fields=()):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
     table_write = None
@@ -76,14 +78,27 @@ def _write_dataset(
     batch_count = 0
     row_count = 0
     snapshot_recorder = _SnapshotRecorder()
+    video_sources = {}
 
     try:
         table_write = write_builder.new_write()
+        reader_factory = getattr(
+            dataset, "video_uri_reader_factory", None)
+        if video_fields and reader_factory is not None:
+            table_write.with_blob_uri_reader_factory(reader_factory)
         table_commit = write_builder.new_commit()
         table_commit.add_commit_callback(snapshot_recorder)
-        for begin, end in _episode_batches(dataset, info, batch_size):
+        for episode, begin, end in _episode_batches(
+                dataset, info, batch_size):
             batch = _read_batch(
-                dataset, info, begin, end, source_schema)
+                dataset,
+                info,
+                begin,
+                end,
+                source_schema,
+                episode=episode,
+                video_sources=video_sources,
+            )
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -129,16 +144,25 @@ def _episode_batches(dataset, info, batch_size):
     for ordinal in range(episode_count):
         episode = episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
             else episodes[ordinal]
+        try:
+            episode_index = int(_python_scalar(episode["episode_index"]))
+            length = int(_python_scalar(episode["length"]))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "LeRobot episode %d has invalid index or length metadata."
+                % ordinal
+            ) from error
         begin = int(_python_scalar(episode["dataset_from_index"]))
         end = int(_python_scalar(episode["dataset_to_index"]))
-        if begin != expected_begin or end <= begin:
+        if episode_index != ordinal or begin != expected_begin \
+                or end <= begin or length != end - begin:
             raise ValueError(
-                "LeRobot episode %d has invalid frame range [%d, %d); "
-                "expected it to start at %d."
+                "LeRobot episode %d has invalid index, length, or frame "
+                "range [%d, %d); expected it to start at %d."
                 % (ordinal, begin, end, expected_begin))
         while begin < end:
             batch_end = min(begin + batch_size, end)
-            yield begin, batch_end
+            yield episode, begin, batch_end
             begin = batch_end
         expected_begin = end
     if expected_begin != total_frames:
@@ -147,7 +171,9 @@ def _episode_batches(dataset, info, batch_size):
             % (expected_begin, total_frames))
 
 
-def _read_batch(dataset, info, begin, end, schema):
+def _read_batch(
+        dataset, info, begin, end, schema, episode=None,
+        video_sources=None):
     read_batch = getattr(dataset, "read_batch", None)
     if callable(read_batch):
         raw = read_batch(begin, end)
@@ -158,26 +184,47 @@ def _read_batch(dataset, info, begin, end, schema):
     elif not isinstance(raw, pa.Table):
         raw = pa.Table.from_pydict(raw)
     features = info["features"]
+    video_timestamps = None
+    if any(feature.get("dtype") == "video"
+           for feature in features.values()):
+        video_timestamps = _validate_video_rows(
+            raw, info, episode, begin, end)
 
     arrays = []
     fields = []
     for name, feature in features.items():
         field = schema.field(name)
         dtype = feature["dtype"]
-        if name not in raw.column_names:
+        if dtype == "video":
+            if episode is None:
+                raise ValueError(
+                    "LeRobot video import requires Episode metadata.")
+            values = _video_frame_descriptors(
+                dataset,
+                info,
+                episode,
+                video_timestamps,
+                name,
+                feature,
+                begin,
+                end,
+                video_sources if video_sources is not None else {},
+            )
+        elif name not in raw.column_names:
             raise ValueError(
                 "LeRobot data is missing metadata feature %s." % name)
-        values = raw.column(name).to_pylist()
-        if dtype == "image":
-            image_reader = getattr(dataset, "image_bytes", None)
-            if callable(image_reader):
-                values = [image_reader(value) for value in values]
-            else:
-                values = [_image_bytes(value, dataset.root)
-                          for value in values]
         else:
-            values = [_normalize_value(value, feature, name)
-                      for value in values]
+            values = raw.column(name).to_pylist()
+            if dtype == "image":
+                image_reader = getattr(dataset, "image_bytes", None)
+                if callable(image_reader):
+                    values = [image_reader(value) for value in values]
+                else:
+                    values = [_image_bytes(value, dataset.root)
+                              for value in values]
+            else:
+                values = [_normalize_value(value, feature, name)
+                          for value in values]
         arrays.append(_safe_array(values, field, name, dtype))
         fields.append(field)
 
@@ -189,6 +236,180 @@ def _read_batch(dataset, info, begin, end, schema):
         ))
         fields.append(schema.field("task"))
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
+
+def _video_frame_descriptors(
+        dataset, info, episode, timestamps, name, feature, begin, end, cache):
+    episode_begin = int(_python_scalar(episode["dataset_from_index"]))
+    episode_end = int(_python_scalar(episode["dataset_to_index"]))
+    if begin < episode_begin or end > episode_end:
+        raise ValueError(
+            "LeRobot video batch [%d, %d) crosses Episode range [%d, %d)."
+            % (begin, end, episode_begin, episode_end)
+        )
+
+    fps = _video_fps(info, feature, name)
+    prefix = "videos/%s/" % name
+    try:
+        chunk_index = int(_python_scalar(
+            episode[prefix + "chunk_index"]))
+        file_index = int(_python_scalar(
+            episode[prefix + "file_index"]))
+        from_timestamp = float(_python_scalar(
+            episode[prefix + "from_timestamp"]))
+        to_timestamp = float(_python_scalar(
+            episode[prefix + "to_timestamp"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "LeRobot Episode metadata is missing video mapping for %s."
+            % name
+        ) from error
+
+    first_frame = int(round(from_timestamp * fps))
+    to_frame = int(round(to_timestamp * fps))
+    if first_frame < 0 or to_frame - first_frame != episode_end - episode_begin:
+        raise ValueError(
+            "LeRobot video feature %s has frame range [%d, %d), but "
+            "Episode [%d, %d) contains %d frames."
+            % (
+                name,
+                first_frame,
+                to_frame,
+                episode_begin,
+                episode_end,
+                episode_end - episode_begin,
+            )
+        )
+
+    source_key = (name, chunk_index, file_index)
+    source = cache.get(source_key)
+    if source is None:
+        source = _video_source(
+            dataset, info, episode, name, chunk_index, file_index)
+        cache[source_key] = source
+    uri, length = source
+    descriptors = []
+    for timestamp in timestamps:
+        try:
+            frame_index = int(round(
+                (from_timestamp + float(_python_scalar(timestamp))) * fps
+            ))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "LeRobot video feature %s has an invalid timestamp." % name
+            ) from error
+        descriptors.append(VideoFrameDescriptor(
+            uri, 0, length, frame_index).serialize())
+    return descriptors
+
+
+def _validate_video_rows(raw, info, episode, begin, end):
+    required = ("episode_index", "frame_index", "timestamp")
+    missing = [name for name in required if name not in raw.column_names]
+    if missing:
+        raise ValueError(
+            "LeRobot video import requires frame columns %s."
+            % ", ".join(missing)
+        )
+    episode_index = int(_python_scalar(episode["episode_index"]))
+    episode_begin = int(_python_scalar(episode["dataset_from_index"]))
+    expected_frames = list(range(
+        begin - episode_begin, end - episode_begin))
+    actual_episodes = [
+        int(_python_scalar(value))
+        for value in raw.column("episode_index").to_pylist()
+    ]
+    actual_frames = [
+        int(_python_scalar(value))
+        for value in raw.column("frame_index").to_pylist()
+    ]
+    if actual_episodes != [episode_index] * (end - begin) \
+            or actual_frames != expected_frames:
+        raise ValueError(
+            "LeRobot frame rows do not match Episode %d range [%d, %d)."
+            % (episode_index, begin, end)
+        )
+    timestamps = raw.column("timestamp").to_pylist()
+    global_fps = _positive_fps(info.get("fps"), "dataset")
+    for frame_index, timestamp in zip(actual_frames, timestamps):
+        try:
+            value = float(_python_scalar(timestamp))
+        except (TypeError, ValueError) as error:
+            raise ValueError("LeRobot frame timestamp is invalid.") from error
+        if not math.isfinite(value) or not math.isclose(
+                value, frame_index / global_fps, abs_tol=1e-4):
+            raise ValueError(
+                "LeRobot frame %d has timestamp %r, expected %s."
+                % (frame_index, timestamp, frame_index / global_fps)
+            )
+    return timestamps
+
+
+def _video_fps(info, feature, name):
+    global_fps = _positive_fps(info.get("fps"), "dataset")
+    values = []
+    for key in ("info", "video_info"):
+        details = feature.get(key)
+        if isinstance(details, dict) and "video.fps" in details:
+            values.append(details["video.fps"])
+    if "fps" in feature:
+        values.append(feature["fps"])
+    value = values[0] if values else global_fps
+    fps = _positive_fps(value, "video feature %s" % name)
+    if any(not math.isclose(
+            fps, _positive_fps(other, "video feature %s" % name),
+            rel_tol=1e-6, abs_tol=1e-6) for other in values[1:]) \
+            or not math.isclose(
+                fps, global_fps, rel_tol=1e-6, abs_tol=1e-6):
+        raise ValueError(
+            "LeRobot video feature %s FPS does not match dataset FPS."
+            % name
+        )
+    return fps
+
+
+def _positive_fps(value, owner):
+    try:
+        fps = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "LeRobot %s is missing a valid FPS." % owner
+        ) from error
+    if not math.isfinite(fps) or fps <= 0:
+        raise ValueError(
+            "LeRobot %s is missing a valid FPS." % owner)
+    return fps
+
+
+def _video_source(
+        dataset, info, episode, name, chunk_index, file_index):
+    resolver = getattr(dataset, "video_source", None)
+    if callable(resolver):
+        return resolver(name, episode)
+
+    template = info.get("video_path")
+    if not isinstance(template, str) or not template:
+        raise ValueError("LeRobot v3 metadata is missing info.video_path.")
+    relative = template.format(
+        video_key=name,
+        chunk_index=chunk_index,
+        file_index=file_index,
+    )
+    root = Path(dataset.root).resolve()
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as error:
+        raise ValueError(
+            "LeRobot video path must stay within the source directory: %s"
+            % relative
+        ) from error
+    if not path.is_file():
+        raise FileNotFoundError("LeRobot video file does not exist: %s" % path)
+    length = path.stat().st_size
+    if length <= 0:
+        raise ValueError("LeRobot video file is empty: %s" % path)
+    return path.as_uri(), length
 
 
 def _safe_array(values, field, name, dtype):

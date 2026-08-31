@@ -48,6 +48,7 @@ class FileStoreWrite:
         self.max_seq_numbers: dict = {}
         self.write_cols = None
         self.blob_consumer = None
+        self.blob_uri_reader_factory = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         self.changelog_producer = self.options.changelog_producer()
@@ -168,6 +169,7 @@ class FileStoreWrite:
                 write_cols=self.write_cols,
                 blob_consumer=self.blob_consumer,
                 changelog_producer=self.changelog_producer,
+                blob_uri_reader_factory=self.blob_uri_reader_factory,
             )
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(

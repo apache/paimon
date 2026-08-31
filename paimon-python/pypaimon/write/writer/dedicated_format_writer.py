@@ -68,7 +68,8 @@ class DedicatedFormatWriter(DataWriter):
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
                  write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None,
-                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE,
+                 blob_uri_reader_factory=None):
         super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols,
                          changelog_producer=changelog_producer)
 
@@ -172,6 +173,7 @@ class DedicatedFormatWriter(DataWriter):
                 options=options,
                 blob_consumer=blob_consumer,
                 video=blob_column in configured_video_fields,
+                uri_reader_factory=blob_uri_reader_factory,
             )
 
         # Initialize vector writer when vector.file.format is configured.

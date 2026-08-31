@@ -34,6 +34,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
     _validate_lerobot_schema,
+    _video_feature_names,
 )
 from pypaimon.multimodal.lerobot.source import (
     _has_tasks,
@@ -83,6 +84,7 @@ def load_from_lerobot(
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
         _schema_from_info(local_info, include_task=False)
+        video_fields = _video_feature_names(local_info)
         total_frames, _, total_tasks = \
             _validated_counts(local_info, resolved_source.path)
         if total_frames == 0:
@@ -96,11 +98,16 @@ def load_from_lerobot(
                 source_schema,
                 options,
                 resolved_source,
+                video_fields,
             )
             return None
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
-            LeRobotDataset, resolved_source, local_info)
+            LeRobotDataset,
+            resolved_source,
+            local_info,
+            download_videos=bool(video_fields),
+        )
         try:
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
@@ -109,12 +116,14 @@ def load_from_lerobot(
 
             source_schema = _schema_from_info(
                 info, include_task=_has_tasks(dataset, info))
+            video_fields = _video_feature_names(info)
             table = _validated_table(
                 connection,
                 table_name,
                 source_schema,
                 options,
                 resolved_source,
+                video_fields,
             )
 
             if row_count == 0:
@@ -126,6 +135,7 @@ def load_from_lerobot(
                 resolved_source,
                 source_schema,
                 batch_size,
+                video_fields,
             )
         finally:
             close = getattr(dataset, "close", None)
@@ -160,9 +170,10 @@ def _required_count(info, name, source):
 
 
 def _validated_table(
-        connection, table_name, source_schema, options, source):
+        connection, table_name, source_schema, options, source,
+        video_fields=()):
     table = _get_or_create_table(
-        connection, table_name, source_schema, options)
+        connection, table_name, source_schema, options, video_fields)
     target_schema = _target_schema(table.raw_table)
     _validate_lerobot_schema(
         source_schema, target_schema, source.path)
@@ -172,13 +183,36 @@ def _validated_table(
         source,
         0,
     )
+    configured = table.raw_table.options.video_frame_fields()
+    if configured != set(video_fields):
+        raise ValueError(
+            "LeRobot video features %s require table option "
+            "'video-frame-field'=%r; found %s."
+            % (list(video_fields), ",".join(video_fields), sorted(configured))
+        )
     return table
 
 
-def _get_or_create_table(connection, table_name, schema, options):
+def _get_or_create_table(
+        connection, table_name, schema, options, video_fields=()):
     try:
         return connection.get_table(table_name)
     except (DatabaseNotExistException, TableNotExistException):
+        options = dict(options or {})
+        configured = options.get("video-frame-field")
+        if configured is not None:
+            requested = {
+                name.strip() for name in str(configured).split(",")
+                if name.strip()
+            }
+            if requested != set(video_fields):
+                raise ValueError(
+                    "LeRobot video features %s do not match "
+                    "'video-frame-field'=%r."
+                    % (list(video_fields), configured)
+                )
+        if video_fields:
+            options["video-frame-field"] = ",".join(video_fields)
         return connection.create_table(
             table_name,
             schema=schema,

@@ -37,7 +37,7 @@ class BlobWriter(AppendOnlyDataWriter):
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str,
                  options: Dict[str, str] = None, blob_consumer: Optional[BlobConsumer] = None,
-                 video: bool = False):
+                 video: bool = False, uri_reader_factory=None):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols=[blob_column])
 
@@ -61,6 +61,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.blob_copy_buffer_size = self.options.blob_copy_buffer_size()
 
         self._blob_consumer = blob_consumer
+        self._uri_reader_factory = uri_reader_factory
         self.current_writer: Optional[BlobFileWriter] = None
         self.current_file_path: Optional[str] = None
         self.record_count = 0
@@ -140,6 +141,7 @@ class BlobWriter(AppendOnlyDataWriter):
             blob_consumer=self._blob_consumer,
             copy_buffer_size=self.blob_copy_buffer_size,
             video=self.video,
+            uri_reader_factory=self._uri_reader_factory,
         )
 
     def rolling_file(self) -> bool:

@@ -65,6 +65,14 @@ def _schema_from_info(info, include_task):
     return pa.schema(fields)
 
 
+def _video_feature_names(info):
+    return [
+        name
+        for name, feature in info.get("features", {}).items()
+        if isinstance(feature, dict) and feature.get("dtype") == "video"
+    ]
+
+
 def _validate_lerobot_schema(source_schema, target_schema, source):
     """Require an existing table to preserve the LeRobot feature contract."""
     for source_field in source_schema:
@@ -104,11 +112,7 @@ def _feature_field(name, feature):
             "LeRobot feature %s metadata must be an object." % name)
     dtype = str(feature.get("dtype", ""))
     shape = _feature_shape(feature, name)
-    if dtype == "video":
-        raise ValueError(
-            "LeRobot video feature %s is not supported yet; use an "
-            "image-based dataset." % name)
-    if dtype == "image":
+    if dtype in ("image", "video"):
         arrow_type = pa.large_binary()
     else:
         scalar_type = _SCALAR_DTYPES.get(dtype)
