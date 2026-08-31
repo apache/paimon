@@ -118,7 +118,7 @@ public class FlinkSourceBuilderTest {
                                                 dataFile("file-2", 25L, 1000L)))
                                 .build());
 
-        assertThat(FlinkSourceBuilder.splitFileSizeOrRowCount(split)).isEqualTo(35L);
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(35L);
     }
 
     @Test
@@ -137,14 +137,14 @@ public class FlinkSourceBuilderTest {
         FileStoreSourceSplit split =
                 new FileStoreSourceSplit("split-1", new QueryAuthSplit(dataSplit, null));
 
-        assertThat(FlinkSourceBuilder.splitFileSizeOrRowCount(split)).isEqualTo(35L);
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(35L);
     }
 
     @Test
     public void testSplitFileSizeOrRowCountFallsBackToRowCount() {
         FileStoreSourceSplit split = new FileStoreSourceSplit("split-1", new TestSplit(123L));
 
-        assertThat(FlinkSourceBuilder.splitFileSizeOrRowCount(split)).isEqualTo(123L);
+        assertThat(SplitWeightUtils.splitFileSizeOrRowCount(split)).isEqualTo(123L);
     }
 
     private static DataFileMeta dataFile(String fileName, long fileSize, long rowCount) {

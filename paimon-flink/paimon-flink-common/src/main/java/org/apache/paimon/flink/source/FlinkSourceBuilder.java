@@ -37,10 +37,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.PostponeMergePlan;
 import org.apache.paimon.table.source.PostponeMergeReadBuilder;
-import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.utils.SerializableFunction;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -222,7 +219,6 @@ public class FlinkSourceBuilder {
 
     private DataStream<RowData> buildStaticFileSource() {
         Options options = Options.fromMap(table.options());
-        validateSplitWeightMode(options);
         return toDataStream(
                 new StaticFileStoreSource(
                         createReadBuilder(projectedRowType()),
@@ -231,56 +227,10 @@ public class FlinkSourceBuilder {
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
                         dynamicPartitionFilteringInfo,
                         outerProject(),
-                        splitWeightFunc(options),
+                        SplitWeightUtils.splitWeightFunc(options),
                         null,
                         options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
                         skipPreloadTargetSnapshot));
-    }
-
-    private static SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc(
-            Options options) {
-        if (isFileSizeWeightMode(options)) {
-            return FlinkSourceBuilder::splitFileSizeOrRowCount;
-        }
-        switch (options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE)) {
-            case ROW_COUNT:
-                return split -> split.split().rowCount();
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported split weight mode "
-                                + options.get(
-                                        FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE));
-        }
-    }
-
-    private static void validateSplitWeightMode(Options options) {
-        checkArgument(
-                !isFileSizeWeightMode(options)
-                        || options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE)
-                                == FlinkConnectorOptions.SplitAssignMode.FAIR,
-                "'%s' = '%s' only works with '%s' = '%s'.",
-                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
-                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE,
-                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
-                FlinkConnectorOptions.SplitAssignMode.FAIR);
-    }
-
-    private static boolean isFileSizeWeightMode(Options options) {
-        return options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE)
-                == FlinkConnectorOptions.SplitWeightMode.FILE_SIZE;
-    }
-
-    @VisibleForTesting
-    static long splitFileSizeOrRowCount(FileStoreSourceSplit sourceSplit) {
-        Split split = sourceSplit.split();
-        while (split instanceof QueryAuthSplit) {
-            split = ((QueryAuthSplit) split).split();
-        }
-        if (split instanceof DataSplit) {
-            return ((DataSplit) split)
-                    .dataFiles().stream().mapToLong(file -> file.fileSize()).sum();
-        }
-        return split.rowCount();
     }
 
     private @Nullable DataStream<RowData> buildPostponeMergeSource() {
