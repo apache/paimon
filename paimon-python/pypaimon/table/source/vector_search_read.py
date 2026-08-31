@@ -1403,6 +1403,9 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
 
     query_np = np.asarray(query_vector, dtype=np.float32)
 
+    if stored_matrix.ndim < 2 or stored_matrix.shape[0] == 0:
+        return DictBasedScoredIndexResult({})
+
     if stored_matrix.shape[1] != query_np.shape[0]:
         raise ValueError(
             "Query vector dimension mismatch: expected %d, got %d"
@@ -1447,16 +1450,25 @@ def _numpy_topk(row_id_array, stored_matrix, query_np, metric, limit):
     else:
         raise ValueError("Unknown vector search metric: %s" % metric)
 
-    n = len(scores)
-    if n <= limit:
-        top_indices = np.argsort(-scores)
-    else:
-        top_indices = np.argpartition(-scores, limit)[:limit]
-        top_indices = top_indices[np.argsort(-scores[top_indices])]
+    top_indices = _topk_indices(scores, row_id_array, limit)
 
     return DictBasedScoredIndexResult(
         {int(row_id_array[i]): float(scores[i]) for i in top_indices}
     )
+
+
+def _topk_indices(scores, row_id_array, limit):
+    """Select top-limit indices by (highest score, smallest row_id) tie-break."""
+    import numpy as np
+
+    n = len(scores)
+    if n <= limit:
+        return np.lexsort((row_id_array, -scores))
+
+    # Full lexsort is O(n log n) but guarantees correct tie-break at the
+    # partition boundary where argpartition alone would pick arbitrarily.
+    order = np.lexsort((row_id_array, -scores))
+    return order[:limit]
 
 
 def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
@@ -1494,6 +1506,11 @@ def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
         [q if isinstance(q, np.ndarray) else list(q) for q in query_vectors],
         dtype=np.float32)
 
+    n = len(query_vectors)
+
+    if stored_matrix.ndim < 2 or stored_matrix.shape[0] == 0:
+        return [DictBasedScoredIndexResult({}) for _ in range(n)]
+
     if stored_matrix.shape[1] != query_matrix.shape[1]:
         raise ValueError(
             "Query vector dimension mismatch: expected %d, got %d"
@@ -1513,7 +1530,7 @@ def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
             stored_matrix = stored_matrix[null_mask]
 
     if len(row_id_array) == 0:
-        return [DictBasedScoredIndexResult({}) for _ in range(len(query_vectors))]
+        return [DictBasedScoredIndexResult({}) for _ in range(n)]
 
     return _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit)
 
@@ -1524,7 +1541,6 @@ def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
 
     QUERY_TILE = 8
     n_queries = query_matrix.shape[0]
-    n_rows = stored_matrix.shape[0]
 
     # Pre-compute stored-side norms (reused across all tiles) for cosine.
     if metric == "cosine":
@@ -1540,11 +1556,7 @@ def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
                 diffs = stored_matrix - q_chunk[i]
                 dists = np.sum(diffs * diffs, axis=1)
                 scores = 1.0 / (1.0 + dists)
-                if n_rows <= limit:
-                    top_indices = np.argsort(-scores)
-                else:
-                    top_indices = np.argpartition(-scores, limit)[:limit]
-                    top_indices = top_indices[np.argsort(-scores[top_indices])]
+                top_indices = _topk_indices(scores, row_id_array, limit)
                 results.append(DictBasedScoredIndexResult(
                     {int(row_id_array[j]): float(scores[j]) for j in top_indices}
                 ))
@@ -1563,11 +1575,7 @@ def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
 
         for i in range(tile_scores.shape[1]):
             scores = tile_scores[:, i]
-            if n_rows <= limit:
-                top_indices = np.argsort(-scores)
-            else:
-                top_indices = np.argpartition(-scores, limit)[:limit]
-                top_indices = top_indices[np.argsort(-scores[top_indices])]
+            top_indices = _topk_indices(scores, row_id_array, limit)
             results.append(DictBasedScoredIndexResult(
                 {int(row_id_array[j]): float(scores[j]) for j in top_indices}
             ))
