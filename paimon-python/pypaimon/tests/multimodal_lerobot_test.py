@@ -372,6 +372,11 @@ class LeRobotValidationTest(unittest.TestCase):
         cases = [
             ({"dtype": "int32", "shape": [1]}, 1.5, "safely converted"),
             ({"dtype": "float32", "shape": [1]}, 1e100, "float32 range"),
+            ({"dtype": "uint8", "shape": [1]}, -1, "uint8 range"),
+            ({"dtype": "uint8", "shape": [2]}, [0, 256], "uint8 range"),
+            ({"dtype": "uint16", "shape": [1]}, 65536, "uint16 range"),
+            ({"dtype": "uint32", "shape": [1]}, -1, "uint32 range"),
+            ({"dtype": "float16", "shape": [1]}, 70000, "float16 range"),
         ]
         for feature, value, message in cases:
             with self.subTest(feature=feature, value=value):
@@ -379,6 +384,19 @@ class LeRobotValidationTest(unittest.TestCase):
                 schema = _schema_from_info(info, include_task=False)
                 with self.assertRaisesRegex(ValueError, message):
                     _read_batch(Dataset(value), info, 0, 1, schema)
+
+        boundary_cases = [
+            ({"dtype": "uint8", "shape": [1]}, 255),
+            ({"dtype": "uint16", "shape": [1]}, 65535),
+            ({"dtype": "uint32", "shape": [1]}, 4294967295),
+            ({"dtype": "float16", "shape": [1]}, 65504),
+        ]
+        for feature, value in boundary_cases:
+            with self.subTest(feature=feature, value=value):
+                info = {"features": {"value": feature}}
+                schema = _schema_from_info(info, include_task=False)
+                result = _read_batch(Dataset(value), info, 0, 1, schema)
+                self.assertEqual(value, result.column("value")[0].as_py())
 
     def test_local_v2_is_rejected_before_opening(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_v2_"))

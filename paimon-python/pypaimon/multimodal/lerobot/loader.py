@@ -29,6 +29,15 @@ from pypaimon.multimodal.lerobot.schema import _feature_shape
 from pypaimon.multimodal.table import _target_schema
 
 
+_DECLARED_NUMERIC_RANGES = {
+    "uint8": (0, 255),
+    "uint16": (0, 65535),
+    "uint32": (0, 4294967295),
+    "float16": (-65504.0, 65504.0),
+    "float32": (-3.4028234663852886e38, 3.4028234663852886e38),
+}
+
+
 def _strict_lerobot_table(data, target_schema, source, batch_index):
     return strict_arrow_table(
         data,
@@ -156,7 +165,7 @@ def _read_batch(dataset, info, begin, end, schema):
         else:
             values = [_normalize_value(value, feature, name)
                       for value in values]
-        arrays.append(_safe_array(values, field, name))
+        arrays.append(_safe_array(values, field, name, dtype))
         fields.append(field)
 
     if "task" in schema.names:
@@ -169,8 +178,8 @@ def _read_batch(dataset, info, begin, end, schema):
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
 
 
-def _safe_array(values, field, name):
-    _validate_float32_range(values, field.type, name)
+def _safe_array(values, field, name, dtype):
+    _validate_declared_range(values, field.type, name, dtype)
     try:
         return pa.array(values).cast(field.type, safe=True)
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as error:
@@ -179,28 +188,38 @@ def _safe_array(values, field, name):
             % (name, field.type, error)) from error
 
 
-def _validate_float32_range(values, target_type, name):
-    if pa.types.is_float32(target_type):
-        maximum = 3.4028234663852886e38
+def _validate_declared_range(values, target_type, name, dtype):
+    value_range = _DECLARED_NUMERIC_RANGES.get(dtype)
+    if not (pa.types.is_list(target_type)
+            or pa.types.is_large_list(target_type)
+            or pa.types.is_fixed_size_list(target_type)):
+        if value_range is None:
+            return
+        minimum, maximum = value_range
         for value in values:
-            if isinstance(value, numbers.Integral):
-                out_of_range = abs(value) > maximum
-            else:
-                out_of_range = isinstance(value, numbers.Real) \
-                    and math.isfinite(value) \
-                    and abs(value) > maximum
+            if value is None:
+                continue
+            if dtype.startswith("float") and not isinstance(
+                    value, numbers.Integral):
+                try:
+                    if not math.isfinite(value):
+                        continue
+                except (TypeError, ValueError, OverflowError):
+                    continue
+            try:
+                out_of_range = value < minimum or value > maximum
+            except (TypeError, ValueError, OverflowError):
+                continue
             if out_of_range:
                 raise ValueError(
-                    "LeRobot feature %s contains a value outside the "
-                    "float32 range: %r" % (name, value))
+                    "LeRobot feature %s contains a value outside the %s "
+                    "range [%s, %s]: %r"
+                    % (name, dtype, minimum, maximum, value))
         return
-    if pa.types.is_list(target_type) \
-            or pa.types.is_large_list(target_type) \
-            or pa.types.is_fixed_size_list(target_type):
-        for value in values:
-            if value is not None:
-                _validate_float32_range(
-                    value, target_type.value_type, name)
+    for value in values:
+        if value is not None:
+            _validate_declared_range(
+                value, target_type.value_type, name, dtype)
 
 
 def _normalize_value(value, feature, name):
