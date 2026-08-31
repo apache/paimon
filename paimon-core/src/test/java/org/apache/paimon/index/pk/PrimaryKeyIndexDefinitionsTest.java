@@ -110,7 +110,7 @@ class PrimaryKeyIndexDefinitionsTest {
                 PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
 
         assertThat(definition.column()).isEqualTo("name");
-        assertThat(definition.indexType()).isEqualTo("fmindex");
+        assertThat(definition.indexType()).isEqualTo("fm");
         assertThat(definition.family()).isEqualTo(PrimaryKeyIndexDefinition.Family.FM);
         assertThat(definition.options().get("fm-index.sa-sample-rate")).isEqualTo("16");
         assertThat(definition.options().get("fm-index.partition-row-count")).isEqualTo("2");

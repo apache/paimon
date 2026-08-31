@@ -43,7 +43,7 @@ public class DefaultGlobalIndexTopoBuilderTest {
 
     @Test
     void testFMIndexUsesDefaultTopologyBuilder() {
-        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fmindex"))
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fm"))
                 .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
     }
 

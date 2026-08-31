@@ -560,14 +560,14 @@ This section introduce all available spark procedures about paimon.
          To create global index files for a given column. The table must have <code>row-tracking.enabled=true</code>. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>index_column: the name of the column to index. Cannot be empty.</li>
-            <li>index_type: type of the index to build, e.g. 'btree', 'bitmap', or 'fmindex'. Cannot be empty.</li>
+            <li>index_type: type of the index to build, e.g. 'btree', 'bitmap', or 'fm'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions on which to build the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
             <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'tag', index_type => 'bitmap', options => 'sorted-index.records-per-range=1000000')<br/><br/>
-         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'fmindex')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'fm')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'full-text', options => 'full-text.tokenizer=ngram,full-text.ngram.min-gram=2,full-text.ngram.max-gram=2')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'full-text', options => 'full-text.tokenizer=jieba')<br/><br/>

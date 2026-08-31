@@ -295,7 +295,7 @@ public class FMGlobalIndexTest {
         try (GlobalIndexReader reader = createReader(Collections.emptyList(), 0)) {
             assertRows(reader.visitContains(fieldRef, str("")).join());
         }
-        assertThat(GlobalIndexer.create("fmindex", dataField, new Options()))
+        assertThat(GlobalIndexer.create("fm", dataField, new Options()))
                 .isInstanceOf(FMGlobalIndexer.class);
 
         List<GlobalIndexIOMeta> shifted = writeData(Collections.singletonList(str("value")), 1);
