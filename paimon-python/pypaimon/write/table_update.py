@@ -170,7 +170,6 @@ class TableUpdate:
             self, tables: Iterable[pa.Table], commit_identifier: int
     ) -> List[CommitMessage]:
         updater = None
-        updated_first_row_ids = set()
         try:
             for table in tables:
                 cols = self.update_cols if self.update_cols is not None else [
@@ -181,15 +180,6 @@ class TableUpdate:
                     updater = TableUpdateByRowId(
                         self.table, self.commit_user, commit_identifier)
                 updater.update_columns(table, cols)
-                overlapping_first_row_ids = updated_first_row_ids.intersection(
-                    updater._last_updated_first_row_ids)
-                if overlapping_first_row_ids:
-                    raise ValueError(
-                        "Input batches contain overlapping first_row_ids: "
-                        f"{sorted(overlapping_first_row_ids)}"
-                    )
-                updated_first_row_ids.update(
-                    updater._last_updated_first_row_ids)
             return [] if updater is None else updater.commit_messages
         except Exception:
             if updater is not None:
@@ -659,8 +649,9 @@ class BatchTableUpdate(TableUpdate):
     ) -> List[CommitMessage]:
         """Apply row-id updates from batches using one target-file index.
 
-        Batches must target disjoint ``first_row_id`` file groups. Overlap is
-        rejected and all files staged by earlier batches are aborted.
+        For each updated column, batches must target disjoint ``first_row_id``
+        file groups. Conflicting overlap is rejected and all files staged by
+        earlier batches are aborted.
         """
         return self._update_by_arrow_batches_with_row_id(
             tables, BATCH_COMMIT_IDENTIFIER)

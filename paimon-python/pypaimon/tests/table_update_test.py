@@ -32,6 +32,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     StreamModeMixin,
 )
 from pypaimon.write.table_update import BatchTableUpdate
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
 # ======================================================================
@@ -53,8 +54,6 @@ def test_batch_row_id_update_batches_reuse_file_index():
         updater.commit_messages = []
 
         def update_columns(batch, columns):
-            updater._last_updated_first_row_ids = {
-                batch['_ROW_ID'][0].as_py()}
             updater.commit_messages.append((batch, columns))
             return updater.commit_messages
 
@@ -71,6 +70,30 @@ def test_batch_row_id_update_batches_reuse_file_index():
         (batches[0], ["value"]),
         (batches[1], ["value"]),
     ]
+
+
+def test_batch_row_id_update_detects_overlap_before_write():
+    updater = TableUpdateByRowId.__new__(TableUpdateByRowId)
+    updater.table = mock.Mock(field_names=['age'])
+    updater.commit_messages = []
+    updater._updated_first_row_ids_by_column = {}
+
+    def route(data):
+        return data.append_column(
+            TableUpdateByRowId.FIRST_ROW_ID_COLUMN,
+            pa.array([0], type=pa.int64()),
+        )
+
+    with mock.patch.object(
+            updater, '_calculate_first_row_id', side_effect=route):
+        with mock.patch.object(updater, '_write_by_first_row_id') as write:
+            updater.update_columns(
+                pa.table({'_ROW_ID': [0], 'age': [26]}), ['age'])
+            with pytest.raises(ValueError, match='overlapping first_row_ids'):
+                updater.update_columns(
+                    pa.table({'_ROW_ID': [1], 'age': [31]}), ['age'])
+
+    assert write.call_count == 1
 
 
 class _TableUpdateTestBase(DataEvolutionTestBase):
@@ -1630,6 +1653,28 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
             self._read_all(table)['age'].to_pylist(),
         )
 
+    def test_update_batches_allow_same_file_for_different_columns(self):
+        table = self._create_seeded_table()
+        builder = self._make_write_builder(table)
+        messages = (
+            builder.new_update()
+            .update_by_arrow_batches_with_row_id(iter([
+                pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+                pa.Table.from_pydict({'_ROW_ID': [1], 'city': ['Seattle']}),
+            ]))
+        )
+
+        commit = builder.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        rows = self._read_all(table)
+        self.assertEqual([26, 30, 35, 40, 45], rows['age'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'Seattle', 'Chicago', 'Houston', 'Phoenix'],
+            rows['city'].to_pylist(),
+        )
+
     def test_callable_output_preserves_large_offset_chunks(self):
         from pypaimon.write.table_update import TableUpdate
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -1653,6 +1698,7 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
         updater = TableUpdateByRowId.__new__(TableUpdateByRowId)
         updater.table = mock.Mock(field_names=['payload'])
         updater.commit_messages = []
+        updater._updated_first_row_ids_by_column = {}
         updates = pa.Table.from_arrays(
             [pa.array([1, 0], type=pa.int64()), result],
             names=['_ROW_ID', 'payload'],
