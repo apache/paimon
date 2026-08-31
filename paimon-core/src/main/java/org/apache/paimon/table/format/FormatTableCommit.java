@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -1203,6 +1204,12 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void compactManifests() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void replaceManifests(
+            List<ManifestFileMeta> removedManifests, List<ManifestFileMeta> addedManifests) {
         throw new UnsupportedOperationException();
     }
 
