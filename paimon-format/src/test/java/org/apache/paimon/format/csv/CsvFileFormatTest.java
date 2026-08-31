@@ -464,16 +464,16 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
         String[] nullLiterals = {"", "NULL", "null"};
 
-        // Create test data with null values
-        List<InternalRow> testData =
-                Arrays.asList(
-                        GenericRow.of(1, BinaryString.fromString("Alice"), null),
-                        GenericRow.of(2, null, 100),
-                        GenericRow.of(3, BinaryString.fromString("Charlie"), 300));
-
         for (String nullLiteral : nullLiterals) {
             Options options = new Options();
             options.set(CsvOptions.NULL_LITERAL, nullLiteral);
+
+            List<InternalRow> testData =
+                    Arrays.asList(
+                            GenericRow.of(1, BinaryString.fromString("Alice"), null),
+                            GenericRow.of(2, null, 100),
+                            GenericRow.of(3, BinaryString.fromString("Charlie"), 300),
+                            GenericRow.of(4, BinaryString.fromString(nullLiteral), 400));
 
             List<InternalRow> result =
                     writeThenRead(
@@ -484,7 +484,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                             "test_null_literal_" + nullLiteral.hashCode());
 
             // Verify results
-            assertThat(result).hasSize(3);
+            assertThat(result).hasSize(4);
             assertThat(result.get(0).getInt(0)).isEqualTo(1);
             assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
             assertThat(result.get(0).isNullAt(2)).isTrue();
@@ -494,6 +494,9 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
             assertThat(result.get(2).getString(1).toString()).isEqualTo("Charlie");
             assertThat(result.get(2).getInt(2)).isEqualTo(300);
+            assertThat(result.get(3).getInt(0)).isEqualTo(4);
+            assertThat(result.get(3).getString(1).toString()).isEqualTo(nullLiteral);
+            assertThat(result.get(3).getInt(2)).isEqualTo(400);
         }
     }
 
