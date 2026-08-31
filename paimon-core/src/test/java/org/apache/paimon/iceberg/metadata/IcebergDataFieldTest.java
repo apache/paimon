@@ -226,19 +226,16 @@ class IcebergDataFieldTest {
         IcebergDataField icebergTimestampLtz = new IcebergDataField(timestampLtzField);
         assertThat(icebergTimestampLtz.type()).isEqualTo("timestamptz");
 
+        // Nanoseconds name the Iceberg v3 type; SchemaValidation decides who may publish one.
         for (int precision = 7; precision <= 9; precision++) {
             DataField nanosField =
                     new DataField(3, "timestamp_ns", new TimestampType(false, precision));
-            assertThatThrownBy(() -> new IcebergDataField(nanosField))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("precision from 3 to 6");
+            assertThat(new IcebergDataField(nanosField).type()).isEqualTo("timestamp_ns");
 
             DataField nanosLtzField =
                     new DataField(
                             4, "timestamptz_ns", new LocalZonedTimestampType(false, precision));
-            assertThatThrownBy(() -> new IcebergDataField(nanosLtzField))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("precision from 3 to 6");
+            assertThat(new IcebergDataField(nanosLtzField).type()).isEqualTo("timestamptz_ns");
         }
     }
 
@@ -250,21 +247,21 @@ class IcebergDataFieldTest {
                 new DataField(1, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("precision from 3 to 6");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test invalid precision (<= 3)
         DataField invalidTimestampField2 =
                 new DataField(2, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField2))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("precision from 3 to 6");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test invalid local timezone timestamp precision (<= 3)
         DataField invalidTimestampLtzField =
                 new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampLtzField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("precision from 3 to 6");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test valid precision boundaries
         DataField validTimestamp4 = new DataField(4, "timestamp", new TimestampType(false, 4));
