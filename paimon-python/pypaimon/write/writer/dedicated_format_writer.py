@@ -188,6 +188,7 @@ class DedicatedFormatWriter(DataWriter):
                 vector_columns=self.vector_write_columns,
                 vector_file_format=options.vector_file_format(),
                 options=options,
+                rolling_managed_by_parent=bool(self.video_frame_columns),
             )
 
         logger.info(
@@ -263,8 +264,8 @@ class DedicatedFormatWriter(DataWriter):
 
         self.record_count += data.num_rows
 
-        # Check if normal data rolling is needed
-        if self._should_roll_normal():
+        # Defer any active video-group roll to its Episode boundary.
+        if self._should_roll_active_group():
             self._roll_or_defer_for_video_group()
 
     def write_row(self, row):
@@ -317,7 +318,7 @@ class DedicatedFormatWriter(DataWriter):
                 self.vector_writer.write(vector_data)
 
             self.record_count += 1
-            if self._should_roll_normal():
+            if self._should_roll_active_group():
                 self._roll_or_defer_for_video_group()
 
         except Exception as e:
@@ -508,19 +509,33 @@ class DedicatedFormatWriter(DataWriter):
         if self._video_group_policy is None:
             return
 
-        normal_rows = self._normal_buffer.num_rows
-        should_roll = normal_rows > 0 and (
+        pending_rows = self.pending_row_count
+        should_roll = pending_rows > 0 and (
             self._video_group_policy.pending_roll
-            or normal_rows + row_count > self.target_file_row_num
-            or self._normal_buffer.nbytes > self.target_file_size
+            or pending_rows + row_count > self.target_file_row_num
+            or (
+                not self._normal_buffer.is_empty
+                and self._normal_buffer.nbytes > self.target_file_size
+            )
         )
         should_roll = should_roll or any(
             self.blob_writers[column].should_roll_before_video_episode(
                 row_count)
             for column in self.video_frame_columns
         )
+        should_roll = should_roll or (
+            self.vector_writer is not None
+            and self.vector_writer.should_roll_before_video_episode(row_count)
+        )
         if should_roll:
             self._close_current_writers()
+
+    def _should_roll_active_group(self) -> bool:
+        return self._should_roll_normal() or (
+            self._video_group_policy is not None
+            and self.vector_writer is not None
+            and self.vector_writer.rolling_file()
+        )
 
     def _roll_or_defer_for_video_group(self):
         if self._video_group_policy is not None and self._video_group_policy.defer_roll():

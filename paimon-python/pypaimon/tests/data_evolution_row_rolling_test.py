@@ -545,6 +545,72 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             )
         self.assertEqual(list(range(4)), self._read_ids(table))
 
+    def test_vector_rolling_waits_for_video_episode_boundary(self):
+        path = os.path.join(self.tempdir, 'vector-episodes.mp4')
+        payload = b'shared-video'
+        with open(path, 'wb') as output:
+            output.write(payload)
+        descriptor = BlobDescriptor(path, 0, len(payload))
+        table = self._create_with_schema(
+            self.blob_vector_schema,
+            {
+                **self.de_options,
+                'target-file-row-num': '100',
+                'video-frame-field': 'payload',
+                'blob-as-descriptor': 'true',
+                'vector.file.format': 'parquet',
+                'vector.target-file-size': '1 b',
+            },
+        )
+        rows = pa.Table.from_pydict(
+            {
+                'id': list(range(4)),
+                'payload': [
+                    VideoFrameDescriptor(
+                        descriptor.uri,
+                        descriptor.offset,
+                        descriptor.length,
+                        frame,
+                    ).serialize()
+                    for frame in range(4)
+                ],
+                'embedding': [
+                    [float(frame), float(frame + 1), float(frame + 2)]
+                    for frame in range(4)
+                ],
+            },
+            schema=self.blob_vector_schema,
+        )
+
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        for episode_start in (0, 2):
+            writer.begin_video_episode(2)
+            for row in range(episode_start, episode_start + 2):
+                writer.write_arrow(rows.slice(row, 1))
+        messages = writer.prepare_commit()
+        files = [file for message in messages for file in message.new_files]
+        wb.new_commit().commit(messages)
+        writer.close()
+
+        normal_rows = sorted(
+            file.row_count for file in files
+            if not file.file_name.endswith('.video')
+            and '.vector.' not in file.file_name
+        )
+        video_rows = sorted(
+            file.row_count for file in files
+            if file.file_name.endswith('.video')
+        )
+        vector_rows = sorted(
+            file.row_count for file in files
+            if '.vector.' in file.file_name
+        )
+        self.assertEqual([2, 2], normal_rows)
+        self.assertEqual([2, 2], video_rows)
+        self.assertEqual([2, 2], vector_rows)
+        self.assertEqual(list(range(4)), self._read_ids(table))
+
     def test_blob_consumer_descriptors_survive_abort_after_rolling(self):
         table = self._create_with_schema(
             self.blob_schema,

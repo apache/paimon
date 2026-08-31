@@ -50,6 +50,7 @@ _NUMERIC_DTYPES = {
     "float64",
 }
 _BOOLEAN_DTYPES = {"bool", "boolean"}
+_VIDEO_TIMESTAMP_TOLERANCE = 1e-4
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
@@ -148,15 +149,18 @@ def _episodes(dataset, info):
         episode = episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
             else episodes[ordinal]
         try:
-            episode_index = int(_python_scalar(episode["episode_index"]))
-            length = int(_python_scalar(episode["length"]))
-        except (KeyError, TypeError, ValueError) as error:
+            episode_index = _nonnegative_integer(
+                episode["episode_index"], "episode_index")
+            length = _nonnegative_integer(episode["length"], "length")
+            begin = _nonnegative_integer(
+                episode["dataset_from_index"], "dataset_from_index")
+            end = _nonnegative_integer(
+                episode["dataset_to_index"], "dataset_to_index")
+        except (KeyError, TypeError) as error:
             raise ValueError(
-                "LeRobot episode %d has invalid index or length metadata."
+                "LeRobot episode %d is missing required boundary metadata."
                 % ordinal
             ) from error
-        begin = int(_python_scalar(episode["dataset_from_index"]))
-        end = int(_python_scalar(episode["dataset_to_index"]))
         if episode_index != ordinal or begin != expected_begin \
                 or end <= begin or length != end - begin:
             raise ValueError(
@@ -184,10 +188,10 @@ def _read_batch(
     elif not isinstance(raw, pa.Table):
         raw = pa.Table.from_pydict(raw)
     features = info["features"]
-    video_timestamps = None
+    video_rows = None
     if any(feature.get("dtype") == "video"
            for feature in features.values()):
-        video_timestamps = _validate_video_rows(
+        video_rows = _validate_video_rows(
             raw, info, episode, begin, end)
 
     arrays = []
@@ -203,7 +207,7 @@ def _read_batch(
                 dataset,
                 info,
                 episode,
-                video_timestamps,
+                video_rows,
                 name,
                 feature,
                 begin,
@@ -239,9 +243,11 @@ def _read_batch(
 
 
 def _video_frame_descriptors(
-        dataset, info, episode, timestamps, name, feature, begin, end, cache):
-    episode_begin = int(_python_scalar(episode["dataset_from_index"]))
-    episode_end = int(_python_scalar(episode["dataset_to_index"]))
+        dataset, info, episode, video_rows, name, feature, begin, end, cache):
+    episode_begin = _nonnegative_integer(
+        episode["dataset_from_index"], "dataset_from_index")
+    episode_end = _nonnegative_integer(
+        episode["dataset_to_index"], "dataset_to_index")
     if begin < episode_begin or end > episode_end:
         raise ValueError(
             "LeRobot video batch [%d, %d) crosses Episode range [%d, %d)."
@@ -251,10 +257,10 @@ def _video_frame_descriptors(
     fps = _video_fps(info, feature, name)
     prefix = "videos/%s/" % name
     try:
-        chunk_index = int(_python_scalar(
-            episode[prefix + "chunk_index"]))
-        file_index = int(_python_scalar(
-            episode[prefix + "file_index"]))
+        chunk_index = _nonnegative_integer(
+            episode[prefix + "chunk_index"], prefix + "chunk_index")
+        file_index = _nonnegative_integer(
+            episode[prefix + "file_index"], prefix + "file_index")
         from_timestamp = float(_python_scalar(
             episode[prefix + "from_timestamp"]))
         to_timestamp = float(_python_scalar(
@@ -265,8 +271,10 @@ def _video_frame_descriptors(
             % name
         ) from error
 
-    first_frame = int(round(from_timestamp * fps))
-    to_frame = int(round(to_timestamp * fps))
+    first_frame = _aligned_frame_ordinal(
+        from_timestamp, fps, "video feature %s from_timestamp" % name)
+    to_frame = _aligned_frame_ordinal(
+        to_timestamp, fps, "video feature %s to_timestamp" % name)
     if first_frame < 0 or to_frame - first_frame != episode_end - episode_begin:
         raise ValueError(
             "LeRobot video feature %s has frame range [%d, %d), but "
@@ -289,15 +297,20 @@ def _video_frame_descriptors(
         cache[source_key] = source
     uri, length = source
     descriptors = []
-    for timestamp in timestamps:
-        try:
-            frame_index = int(round(
-                (from_timestamp + float(_python_scalar(timestamp))) * fps
-            ))
-        except (TypeError, ValueError) as error:
+    for episode_frame_index, timestamp in video_rows:
+        frame_index = first_frame + episode_frame_index
+        shifted_timestamp = from_timestamp + timestamp
+        if not math.isclose(
+                shifted_timestamp,
+                frame_index / fps,
+                rel_tol=0.0,
+                abs_tol=_VIDEO_TIMESTAMP_TOLERANCE):
             raise ValueError(
-                "LeRobot video feature %s has an invalid timestamp." % name
-            ) from error
+                "LeRobot video feature %s frame %d has shifted timestamp "
+                "%s, expected %s."
+                % (name, episode_frame_index, shifted_timestamp,
+                   frame_index / fps)
+            )
         descriptors.append(VideoFrameDescriptor(
             uri, 0, length, frame_index).serialize())
     return descriptors
@@ -311,16 +324,18 @@ def _validate_video_rows(raw, info, episode, begin, end):
             "LeRobot video import requires frame columns %s."
             % ", ".join(missing)
         )
-    episode_index = int(_python_scalar(episode["episode_index"]))
-    episode_begin = int(_python_scalar(episode["dataset_from_index"]))
+    episode_index = _nonnegative_integer(
+        episode["episode_index"], "episode_index")
+    episode_begin = _nonnegative_integer(
+        episode["dataset_from_index"], "dataset_from_index")
     expected_frames = list(range(
         begin - episode_begin, end - episode_begin))
     actual_episodes = [
-        int(_python_scalar(value))
+        _nonnegative_integer(value, "episode_index")
         for value in raw.column("episode_index").to_pylist()
     ]
     actual_frames = [
-        int(_python_scalar(value))
+        _nonnegative_integer(value, "frame_index")
         for value in raw.column("frame_index").to_pylist()
     ]
     if actual_episodes != [episode_index] * (end - begin) \
@@ -331,18 +346,39 @@ def _validate_video_rows(raw, info, episode, begin, end):
         )
     timestamps = raw.column("timestamp").to_pylist()
     global_fps = _positive_fps(info.get("fps"), "dataset")
+    timestamp_values = []
     for frame_index, timestamp in zip(actual_frames, timestamps):
         try:
             value = float(_python_scalar(timestamp))
         except (TypeError, ValueError) as error:
             raise ValueError("LeRobot frame timestamp is invalid.") from error
         if not math.isfinite(value) or not math.isclose(
-                value, frame_index / global_fps, abs_tol=1e-4):
+                value,
+                frame_index / global_fps,
+                rel_tol=0.0,
+                abs_tol=_VIDEO_TIMESTAMP_TOLERANCE):
             raise ValueError(
                 "LeRobot frame %d has timestamp %r, expected %s."
                 % (frame_index, timestamp, frame_index / global_fps)
             )
-    return timestamps
+        timestamp_values.append(value)
+    return list(zip(actual_frames, timestamp_values))
+
+
+def _aligned_frame_ordinal(timestamp, fps, owner):
+    if not math.isfinite(timestamp):
+        raise ValueError("LeRobot %s is invalid." % owner)
+    frame = int(round(timestamp * fps))
+    if not math.isclose(
+            timestamp,
+            frame / fps,
+            rel_tol=0.0,
+            abs_tol=_VIDEO_TIMESTAMP_TOLERANCE):
+        raise ValueError(
+            "LeRobot %s %s is not aligned to FPS %s."
+            % (owner, timestamp, fps)
+        )
+    return frame
 
 
 def _video_fps(info, feature, name):
@@ -517,6 +553,17 @@ def _python_scalar(value):
     if callable(item):
         return item()
     return value
+
+
+def _nonnegative_integer(value, name):
+    value = _python_scalar(value)
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral) \
+            or value < 0:
+        raise ValueError(
+            "LeRobot metadata field %s must be a non-negative integer; "
+            "found %r." % (name, value)
+        )
+    return int(value)
 
 
 def _image_bytes(value, root):

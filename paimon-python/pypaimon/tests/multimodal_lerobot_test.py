@@ -34,6 +34,7 @@ from pypaimon.common.options import Options
 from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.loader import (
+    _episodes,
     _image_bytes,
     _read_batch,
     _task_name,
@@ -67,6 +68,36 @@ def _replaced_contract(field, old, new):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_episode_boundaries_require_integer_metadata(self):
+        base = {
+            "episode_index": 0,
+            "length": 2,
+            "dataset_from_index": 0,
+            "dataset_to_index": 2,
+        }
+        info = {"total_episodes": 1, "total_frames": 2}
+
+        class Dataset:
+
+            def __init__(self, episode):
+                self.meta = SimpleNamespace(episodes=[episode])
+
+            def __len__(self):
+                return 2
+
+        for field, value in (
+                ("episode_index", 0.9),
+                ("length", 2.9),
+                ("dataset_from_index", 0.9),
+                ("dataset_to_index", 2.9),
+                ("length", True),
+                ("length", "2")):
+            episode = dict(base)
+            episode[field] = value
+            with self.subTest(field=field, value=value), \
+                    self.assertRaisesRegex(ValueError, field):
+                list(_episodes(Dataset(episode), info))
 
     def test_dataset_open_never_downloads_videos(self):
         calls = []
@@ -804,6 +835,73 @@ class LeRobotValidationTest(unittest.TestCase):
             )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_video_timestamp_phase_must_match_frame_ordinals(self):
+        info = {
+            "fps": 10,
+            "features": {
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "camera": {
+                    "dtype": "video",
+                    "shape": [8, 10, 3],
+                    "video_info": {"video.fps": 10.0},
+                },
+            },
+        }
+        rows = pa.table({
+            "episode_index": pa.array([0, 0], type=pa.int64()),
+            "frame_index": pa.array([0, 1], type=pa.int64()),
+            "timestamp": pa.array([0.0, 0.1], type=pa.float32()),
+        })
+
+        class Dataset:
+
+            root = Path("/")
+
+            def __init__(self, rows):
+                self.rows = rows
+
+            def read_batch(self, begin, end):
+                return self.rows.slice(begin, end - begin)
+
+        schema = _schema_from_info(info, include_task=False)
+        for from_timestamp in (0.05, 1000000.0005):
+            episode = {
+                "episode_index": 0,
+                "length": 2,
+                "dataset_from_index": 0,
+                "dataset_to_index": 2,
+                "videos/camera/chunk_index": 0,
+                "videos/camera/file_index": 0,
+                "videos/camera/from_timestamp": from_timestamp,
+                "videos/camera/to_timestamp": from_timestamp + 0.2,
+            }
+            with self.subTest(from_timestamp=from_timestamp), patch(
+                    "pypaimon.multimodal.lerobot.loader._video_source",
+                    return_value=("file:/video.mp4", 10),
+            ), self.assertRaisesRegex(ValueError, "not aligned"):
+                _read_batch(
+                    Dataset(rows), info, 0, 2, schema, episode=episode,
+                    video_sources={})
+
+        shifted_rows = rows.set_column(
+            rows.schema.get_field_index("timestamp"),
+            "timestamp",
+            pa.array([0.00009, 0.10009], type=pa.float32()),
+        )
+        episode.update({
+            "videos/camera/from_timestamp": 0.00009,
+            "videos/camera/to_timestamp": 0.20009,
+        })
+        with patch(
+                "pypaimon.multimodal.lerobot.loader._video_source",
+                return_value=("file:/video.mp4", 10),
+        ), self.assertRaisesRegex(ValueError, "shifted timestamp"):
+            _read_batch(
+                Dataset(shifted_rows), info, 0, 2, schema,
+                episode=episode, video_sources={})
 
 
 class _RemoteLeRobotFileIO:
