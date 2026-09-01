@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: E402
+
 import json
 import tracemalloc
 from io import BytesIO
@@ -21,8 +23,11 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-import torch
-from PIL import Image
+
+
+torch = pytest.importorskip("torch")
+Image = pytest.importorskip("PIL.Image")
+h5py = pytest.importorskip("h5py")
 
 import pypaimon.multimodal as pmm
 import pypaimon.benchmark.act_harness as act_harness
@@ -40,9 +45,6 @@ from pypaimon.benchmark.act_harness import build_window_plan, run_backend
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
 from pypaimon.sample import robomind_agilex as agilex
-
-
-h5py = pytest.importorskip("h5py")
 
 
 def test_default_fetch_group_covers_eight_logical_batches():
@@ -223,12 +225,16 @@ def _write_episode(root, split, name, offset, frames=6):
 
 
 @pytest.fixture
-def paired_input(tmp_path):
+def paired_input(tmp_path, monkeypatch):
     root = tmp_path / "input"
     _write_episode(root, "train", "train-a", 1)
     _write_episode(root, "train", "train-b", 11)
     _write_episode(root, "val", "val-a", 21)
     warehouse = tmp_path / "warehouse"
+    monkeypatch.setattr(agilex, "TABLE_OPTIONS", {
+        **agilex.TABLE_OPTIONS,
+        "vector.file.format": "parquet",
+    })
     agilex.ingest_local(root, warehouse, batch_size=2)
     agilex.backfill_canonical_action(
         warehouse, statistics_version="paired-test@1")
@@ -343,13 +349,16 @@ def test_runs_three_alternating_rounds_with_one_shared_contract(
             by_backend["paimon"]["validation_loss"])
 
 
-def test_paimon_windows_are_lazy_and_snapshot_pinned(paired_input):
+def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
+        paired_input):
     input_root, warehouse = paired_input
     connection = pmm.connect(
         database=agilex.DEFAULT_DATABASE,
         options={"warehouse": str(warehouse)},
     )
     frames = connection.get_table(agilex.FRAMES_TABLE)
+    assert frames.raw_table.table_schema.options["vector.file.format"] == (
+        "parquet")
     snapshot_id = _snapshot_id(frames)
     normalization, _ = _shared_normalization(
         agilex.discover_episodes(input_root),
