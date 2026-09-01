@@ -36,11 +36,7 @@ from pypaimon.benchmark.paired_act import (
     _snapshot_id,
     run,
 )
-from pypaimon.benchmark.act_harness import (
-    _SequenceDataset,
-    build_window_plan,
-    run_backend,
-)
+from pypaimon.benchmark.act_harness import build_window_plan, run_backend
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
 from pypaimon.sample import robomind_agilex as agilex
@@ -51,16 +47,6 @@ h5py = pytest.importorskip("h5py")
 
 def test_default_fetch_group_covers_eight_logical_batches():
     assert BenchmarkConfig().fetch_batches == 8
-
-
-def test_sequence_dataset_forwards_plural_access():
-    class BatchDataset:
-        def __getitems__(self, indices):
-            return ["sample-%d" % index for index in indices]
-
-    dataset = _SequenceDataset(BatchDataset(), (7, 3, 5))
-
-    assert dataset.__getitems__([0, 2]) == ["sample-7", "sample-5"]
 
 
 def test_logical_batches_coalesce_one_physical_fetch():
@@ -87,7 +73,7 @@ def test_logical_batches_coalesce_one_physical_fetch():
     ]
 
 
-def test_logical_batches_reject_partial_checkpoint_tail():
+def test_logical_batches_reject_incomplete_batch_tail():
     class BatchDataset:
         def __getitems__(self, indices):
             return [{"value": torch.tensor(index)} for index in indices]
@@ -111,7 +97,7 @@ def test_backend_times_without_tracemalloc_and_measures_memory_separately():
         image_height=2,
         image_width=2,
         warmup_batches=1,
-        loader_batches=1,
+        timed_batches=1,
         rounds=3,
     )
 
@@ -149,7 +135,7 @@ def test_backend_times_without_tracemalloc_and_measures_memory_separately():
         "python-tracemalloc-separate-dataset-first-batch")
 
 
-def test_backend_coalesces_timed_loader_fetches():
+def test_backend_coalesces_timed_batch_fetches():
     config = BenchmarkConfig(
         seed=11,
         action_horizon=1,
@@ -158,7 +144,7 @@ def test_backend_coalesces_timed_loader_fetches():
         image_height=2,
         image_width=2,
         warmup_batches=1,
-        loader_batches=4,
+        timed_batches=4,
         fetch_batches=4,
         rounds=3,
     )
@@ -188,17 +174,23 @@ def test_backend_coalesces_timed_loader_fetches():
     dataset = BatchDataset()
     plan = build_window_plan(len(dataset), len(dataset), config)
 
-    run_backend(
-        "test",
-        1,
-        lambda: (dataset, dataset),
-        plan,
-        config,
-        "sequence-sha256",
-        policy_factory=_policy_factory,
-    )
+    with patch.object(act_harness, "_measure_python_peak", return_value=0):
+        run_backend(
+            "test",
+            1,
+            lambda: (dataset, dataset),
+            plan,
+            config,
+            "sequence-sha256",
+            policy_factory=_policy_factory,
+        )
 
-    assert any(len(indices) == 8 for indices in dataset.calls)
+    assert dataset.calls == [
+        list(plan.measurement_indices[:2]),
+        list(plan.measurement_indices[2:10]),
+        list(plan.train_indices),
+        list(plan.validation_indices),
+    ]
 
 
 def _jpeg(value):
@@ -279,7 +271,7 @@ def test_runs_three_alternating_rounds_with_one_shared_contract(
         image_height=8,
         image_width=10,
         warmup_batches=1,
-        loader_batches=2,
+        timed_batches=2,
         rounds=3,
     )
 
@@ -333,7 +325,7 @@ def test_runs_three_alternating_rounds_with_one_shared_contract(
         assert report["summary"][backend]["round_count"] == 3
         for metric in (
                 "first_batch_s",
-                "dataloader_samples_per_s",
+                "batch_fetch_samples_per_s",
                 "fixed_steps_s",
                 "python_peak_allocated_bytes"):
             assert set(report["summary"][backend][metric]) == {

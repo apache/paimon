@@ -44,7 +44,7 @@ not write a successful report.
 One immutable configuration controls both paths. The runner computes train-only
 normalization once, verifies its canonical action values against the requested
 version in `feature_stats_agilex`, and passes the same object to both adapters.
-A seeded window plan fixes every warmup, loader, training, and validation
+A seeded window plan fixes every warmup, batch-fetch, training, and validation
 anchor. Before training, the runner compares `sample_id`, `episode_id`, and
 `step_idx` by value and requires exact `torch.equal` parity for state, action,
 image, and padding tensors.
@@ -53,19 +53,19 @@ The Paimon adapter uses `ContiguousWindowDataset`, not an ACT-specific table
 reader. Dataset construction indexes only episode, frame, and row IDs. Window
 payloads remain lazy until `__getitem__`, and all train and validation reads are
 pinned to the exact frames snapshot recorded by the normalization statistics.
-PyTorch batch access coalesces overlapping row IDs into one payload read. The
-image columns are marked as anchor-only, so each sample loads the observation
-images once rather than once per action-horizon row. The adapter maps each
-generic window to the same tensor contract as the HDF5 adapter without
+`ContiguousWindowDataset.__getitems__` coalesces overlapping row IDs into one
+payload read. The image columns are marked as anchor-only, so each sample loads
+the observation images once rather than once per action-horizon row. The adapter
+maps each generic window to the same tensor contract as the HDF5 adapter without
 materializing episodes in memory.
 
 The logical training batch remains unchanged, while `fetch_batches` controls
 how many consecutive logical batches are requested from the Dataset together.
 The default of eight lets Paimon coalesce 16 samples when the logical batch
 size is two, then yields the original eight ordered batches. The transient
-buffer is discarded after that physical fetch; checkpoint recovery resumes
-from the next logical-batch cursor and reconstructs it. Larger values trade
-fewer Paimon reads for higher per-process memory.
+buffer is discarded after that physical fetch. Recovery behavior is not covered
+by this benchmark. Larger values trade fewer Paimon reads for higher per-process
+memory.
 
 Each backend then uses the same CPU LeRobot ACT policy, initial seed, AdamW
 optimizer, batch size, window sequence, and optimizer step count. At least
@@ -78,7 +78,8 @@ The JSON report contains:
 - input manifest, table snapshot, normalization, configuration, and window
   sequence digests;
 - exact tensor, train-loss, and validation-loss parity gates;
-- first-batch latency, DataLoader samples per second, fixed-step time, and a
+- first-batch latency, dataset batch-fetch samples per second, fixed-step time,
+  and a
   separate dataset-build-plus-first-batch Python allocation replay for every
   run;
 - per-backend median, minimum, and maximum across rounds;

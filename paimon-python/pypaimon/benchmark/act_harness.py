@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.nn.functional as functional
 from PIL import Image
-from torch.utils.data import Dataset, default_collate
+from torch.utils.data import default_collate
 
 
 CAMERA_KEYS = (
@@ -53,7 +53,7 @@ class BenchmarkConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     warmup_batches: int = 1
-    loader_batches: int = 4
+    timed_batches: int = 4
     fetch_batches: int = 8
     rounds: int = 3
 
@@ -65,7 +65,7 @@ class BenchmarkConfig:
             "image_height",
             "image_width",
             "warmup_batches",
-            "loader_batches",
+            "timed_batches",
             "fetch_batches",
         )
         for name in positive_ints:
@@ -95,7 +95,7 @@ class WindowPlan:
     """Explicit window indices consumed identically by both backends."""
 
     seed: int
-    loader_indices: tuple
+    measurement_indices: tuple
     train_indices: tuple
     validation_indices: tuple
 
@@ -108,25 +108,25 @@ class WindowPlan:
     def to_dict(self):
         return {
             "seed": self.seed,
-            "loader_indices": list(self.loader_indices),
+            "measurement_indices": list(self.measurement_indices),
             "train_indices": list(self.train_indices),
             "validation_indices": list(self.validation_indices),
         }
 
 
 def build_window_plan(train_window_count, validation_window_count, config):
-    """Build stable indices for training, validation, and loader timing."""
+    """Build stable indices for training, validation, and batch-fetch timing."""
     train_window_count = _positive_int(
         train_window_count, "train_window_count")
     validation_window_count = _positive_int(
         validation_window_count, "validation_window_count")
-    loader_count = (
-        config.warmup_batches + config.loader_batches) * config.batch_size
+    batch_fetch_count = (
+        config.warmup_batches + config.timed_batches) * config.batch_size
     train_count = config.optimizer_steps * config.batch_size
     return WindowPlan(
         seed=config.seed,
-        loader_indices=tuple(_repeat_permutations(
-            train_window_count, loader_count, config.seed + 1)),
+        measurement_indices=tuple(_repeat_permutations(
+            train_window_count, batch_fetch_count, config.seed + 1)),
         train_indices=tuple(_repeat_permutations(
             train_window_count, train_count, config.seed + 2)),
         validation_indices=tuple(_repeat_permutations(
@@ -293,7 +293,7 @@ def run_backend(
     warmup_sample_count = config.warmup_batches * config.batch_size
     warmup_iterator = _iter_logical_batches(
         train_dataset,
-        plan.loader_indices[:warmup_sample_count],
+        plan.measurement_indices[:warmup_sample_count],
         logical_batch_size=config.batch_size,
         fetch_batches=1,
     )
@@ -304,19 +304,19 @@ def run_backend(
     for _ in range(config.warmup_batches - 1):
         validate_act_batch(next(warmup_iterator), config)
 
-    loader_iterator = _iter_logical_batches(
+    batch_fetch_iterator = _iter_logical_batches(
         train_dataset,
-        plan.loader_indices[warmup_sample_count:],
+        plan.measurement_indices[warmup_sample_count:],
         logical_batch_size=config.batch_size,
         fetch_batches=config.fetch_batches,
     )
-    loader_started = time.monotonic()
-    loader_sample_count = 0
-    for _ in range(config.loader_batches):
-        batch = next(loader_iterator)
+    batch_fetch_started = time.monotonic()
+    batch_fetch_sample_count = 0
+    for _ in range(config.timed_batches):
+        batch = next(batch_fetch_iterator)
         validate_act_batch(batch, config)
-        loader_sample_count += len(batch["sample_id"])
-    loader_seconds = time.monotonic() - loader_started
+        batch_fetch_sample_count += len(batch["sample_id"])
+    batch_fetch_seconds = time.monotonic() - batch_fetch_started
 
     _seed_everything(config.seed)
     policy, model = policy_factory(config)
@@ -392,9 +392,10 @@ def run_backend(
         "warmup_batches": config.warmup_batches,
         "first_batch_s": first_batch_s,
         "dataset_build_s": dataset_build_s,
-        "dataloader_samples": loader_sample_count,
-        "dataloader_s": loader_seconds,
-        "dataloader_samples_per_s": loader_sample_count / loader_seconds,
+        "batch_fetch_samples": batch_fetch_sample_count,
+        "batch_fetch_s": batch_fetch_seconds,
+        "batch_fetch_samples_per_s": (
+            batch_fetch_sample_count / batch_fetch_seconds),
         "fixed_steps_s": fixed_steps_s,
         "train_loss": [item["total"] for item in losses],
         "train_trace": losses,
@@ -411,7 +412,7 @@ def _measure_python_peak(dataset_factory, plan, config):
     tracemalloc.start()
     try:
         train_dataset, _ = dataset_factory()
-        indices = plan.loader_indices[
+        indices = plan.measurement_indices[
             :config.batch_size * config.fetch_batches
         ]
         next(_iter_logical_batches(
@@ -457,25 +458,6 @@ def _positive_int(value, name):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("%s must be a positive int." % name)
     return value
-
-
-class _SequenceDataset(Dataset):
-    def __init__(self, dataset, indices):
-        self._dataset = dataset
-        self._indices = indices
-
-    def __len__(self):
-        return len(self._indices)
-
-    def __getitem__(self, index):
-        return self._dataset[self._indices[index]]
-
-    def __getitems__(self, indices):
-        source_indices = [self._indices[index] for index in indices]
-        getitems = getattr(self._dataset, "__getitems__", None)
-        if getitems is not None:
-            return getitems(source_indices)
-        return [self._dataset[index] for index in source_indices]
 
 
 def _iter_logical_batches(

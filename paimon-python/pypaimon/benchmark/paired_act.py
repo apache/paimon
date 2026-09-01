@@ -117,7 +117,7 @@ class Hdf5ACTWindowDataset(Dataset):
                 slice(anchor, anchor + self.action_horizon),
             )
             images = np.stack([
-                _decode_hdf5_image(h5[field][anchor])
+                _decode_image(h5[field][anchor])
                 for field in HDF5_IMAGE_FIELDS
             ])
         qpos = (
@@ -320,7 +320,6 @@ def run(
             "config": config.to_dict(),
             "cache_control": "uncontrolled",
             "device": "cpu",
-            "data_loader_workers": 0,
         },
         "normalization": normalization_metadata,
         "window_plan": {
@@ -356,7 +355,7 @@ def run(
             "OS page cache is uncontrolled; no cache dropping was attempted.",
             "CPU fixed-step loss parity proves engineering equivalence, "
             "not policy quality.",
-            "GPU, multi-worker DataLoader, distributed training, and "
+            "GPU, multi-worker dataset loading, distributed training, and "
             "recovery are unverified.",
             "Python tracemalloc does not include all native Arrow or "
             "Torch allocations and is measured in a separate dataset-first-"
@@ -574,7 +573,7 @@ def _select_episode(source_by_id, split, requested, action_horizon):
 def _tensor_parity(hdf5_datasets, paimon_datasets, plan):
     comparisons = (
         ("train", hdf5_datasets[0], paimon_datasets[0],
-         sorted(set(plan.loader_indices + plan.train_indices))),
+         sorted(set(plan.measurement_indices + plan.train_indices))),
         ("validation", hdf5_datasets[1], paimon_datasets[1],
          sorted(set(plan.validation_indices))),
     )
@@ -651,7 +650,7 @@ def _summarize(runs):
     metrics = (
         "dataset_build_s",
         "first_batch_s",
-        "dataloader_samples_per_s",
+        "batch_fetch_samples_per_s",
         "fixed_steps_s",
         "validation_loss",
         "python_peak_allocated_bytes",
@@ -670,9 +669,9 @@ def _summarize(runs):
 
 def _sample_sequence_sha256(train_episode_id, validation_episode_id, plan):
     value = {
-        "loader": [
+        "batch_fetch": [
             "%s#%d" % (train_episode_id, index)
-            for index in plan.loader_indices
+            for index in plan.measurement_indices
         ],
         "train": [
             "%s#%d" % (train_episode_id, index)
@@ -696,10 +695,6 @@ def _read_vectors(h5, fields, selection, dtype=np.float32):
     if not np.isfinite(value).all():
         raise ValueError("ACT vector contains NaN or Inf.")
     return value
-
-
-def _decode_hdf5_image(value):
-    return _decode_image(value)
 
 
 def _decode_image(value):
@@ -804,7 +799,7 @@ def main(argv=None):
         help="Number of contiguous action rows in each sample.")
     parser.add_argument(
         "--batch-size", type=int, default=BenchmarkConfig.batch_size,
-        help="Shared DataLoader batch size.")
+        help="Shared logical batch size.")
     parser.add_argument(
         "--optimizer-steps", type=int, default=BenchmarkConfig.optimizer_steps,
         help="Fixed optimizer steps per backend run.")
@@ -822,10 +817,11 @@ def main(argv=None):
         help="Shared AdamW weight decay.")
     parser.add_argument(
         "--warmup-batches", type=int, default=BenchmarkConfig.warmup_batches,
-        help="DataLoader batches consumed before timing.")
+        help="Logical batches consumed before batch-fetch timing.")
     parser.add_argument(
-        "--loader-batches", type=int, default=BenchmarkConfig.loader_batches,
-        help="Batches used for DataLoader throughput measurement.")
+        "--timed-batches", type=int,
+        default=BenchmarkConfig.timed_batches,
+        help="Logical batches used for dataset batch-fetch throughput.")
     parser.add_argument(
         "--fetch-batches", type=int, default=BenchmarkConfig.fetch_batches,
         help="Logical batches coalesced into one physical dataset fetch.")
@@ -843,7 +839,7 @@ def main(argv=None):
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         warmup_batches=args.warmup_batches,
-        loader_batches=args.loader_batches,
+        timed_batches=args.timed_batches,
         fetch_batches=args.fetch_batches,
         rounds=args.rounds,
     )

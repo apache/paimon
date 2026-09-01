@@ -216,6 +216,15 @@ def read_requirements():
 
 install_requires = read_requirements()
 
+LEROBOT_DEPENDENCIES = [
+    # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
+    # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
+    # by LeRobot's media dependencies.
+    'datasets>=4,<4.1; python_version>="3.10"',
+    'pandas>=2.2.2,<3; python_version>="3.10"',
+    'lerobot>=0.4.4,<0.5; python_version>="3.10"',
+]
+
 long_description = "See Apache Paimon Python API \
 [Doc](https://paimon.apache.org/docs/master/pypaimon/python-api/) for usage."
 
@@ -241,23 +250,15 @@ setup(
             # rosbags is pure Python and does not require a ROS installation.
             'rosbags>=0.11.5,<0.12; python_version>="3.10"',
         ],
-        'lerobot': [
-            # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
-            # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected
-            # by LeRobot's media dependencies.
-            'datasets>=4,<4.1; python_version>="3.10"',
-            'pandas>=2.2.2,<3; python_version>="3.10"',
-            'lerobot>=0.4.4,<0.5; python_version>="3.10"',
-        ],
+        'lerobot': LEROBOT_DEPENDENCIES,
         'ray': [
             'ray>=2.10,<3; python_version>="3.8"',
         ],
         'torch': [
             'torch',
         ],
-        'act': [
-            'lerobot==0.4.4',
-            'Pillow',
+        'act': LEROBOT_DEPENDENCIES + [
+            'Pillow; python_version>="3.10"',
         ],
         'daft': [
             'daft>=0.7.6; python_version>="3.10"',
