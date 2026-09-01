@@ -82,6 +82,7 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -106,6 +107,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -1705,10 +1707,18 @@ public class IcebergCompatibilityTest {
                 .hasMessageContaining("precision from 3 to 6");
     }
 
+    /** Below the floor, and above the ceiling in both timestamp families. */
+    static Stream<DataType> unpublishableTimestampTypes() {
+        return Stream.of(
+                DataTypes.TIMESTAMP(2),
+                DataTypes.TIMESTAMP(9),
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+    }
+
     @ParameterizedTest
-    @ValueSource(ints = {2, 9})
-    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(int precision)
-            throws Exception {
+    @MethodSource("unpublishableTimestampTypes")
+    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(
+            DataType timestampType) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path warehouse = new Path(tempDir.toString());
         Options options = new Options();
@@ -1716,8 +1726,7 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.FILE_FORMAT, "parquet");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(precision)},
-                        new String[] {"k", "ts"});
+                        new DataType[] {DataTypes.INT(), timestampType}, new String[] {"k", "ts"});
         Schema schema =
                 new Schema(
                         rowType.getFields(),

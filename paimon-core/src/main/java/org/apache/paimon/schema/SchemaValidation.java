@@ -128,7 +128,10 @@ public class SchemaValidation {
     /** The ceiling {@code IcebergDataField} converts. */
     private static final int MAX_ICEBERG_TIME_PRECISION = 3;
 
-    /** The precisions {@code IcebergDataField} maps to the Iceberg timestamp types. */
+    /**
+     * The timestamp precisions the mirror can publish, narrower than the 3 to 9 {@code
+     * IcebergDataField} names a type for.
+     */
     private static final int MIN_ICEBERG_TIMESTAMP_PRECISION = 3;
 
     private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
@@ -564,10 +567,10 @@ public class SchemaValidation {
     }
 
     /**
-     * Refuses the timestamp precisions the Iceberg mirror cannot publish, matching the range {@link
-     * org.apache.paimon.iceberg.metadata.IcebergDataField} converts. A higher precision is written
-     * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
-     * nanoseconds the column declares, so the two disagree about the data.
+     * Refuses the timestamp precisions the Iceberg mirror cannot publish. A higher precision is
+     * written as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than
+     * the nanoseconds the column declares, so the two disagree about the data. The refusal belongs
+     * here rather than in the type mapping, which does not know who writes the files.
      */
     public static void validateIcebergTimestampPrecisions(DataType dataType, CoreOptions options) {
         if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
