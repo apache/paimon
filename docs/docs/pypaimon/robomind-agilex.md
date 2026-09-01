@@ -84,9 +84,11 @@ pytest -q pypaimon/tests/robomind_agilex_pipeline_test.py \
 ```python
 from pypaimon.sample.robomind_agilex import (
     backfill_canonical_action,
+    backfill_canonical_action_ray,
     ingest_local,
     ingest_ray,
     run_local_pipeline,
+    run_ray_pipeline,
 )
 
 # Run local ingestion and canonical-action backfill together.
@@ -95,25 +97,31 @@ pipeline = run_local_pipeline(
     "/data/warehouse",
 )
 
-# Or compose the lower-level operations explicitly. Ray chooses distributed
-# task placement; concurrency is only an optional upper bound.
-ingest = ingest_ray(
+# Run distributed ingestion and backfill on one managed Ray cluster.
+pipeline = run_ray_pipeline(
     "/data/RoboMIND/h5_agilex_3rgb",
     "/data/warehouse",
     concurrency=8,
-)
-
-backfill = backfill_canonical_action(
-    "/data/warehouse",
     statistics_version="robomind-agilex-joint-position@1",
+    num_partitions=8,
+    ray_address="ray://cluster:10001",
 )
 ```
 
 Episode and frame ingestion commit separately and use the generic
 `pypaimon.ray.load_from_hdf5` API in Ray mode. Canonical action materialization
-and statistics refresh also commit separately. If statistics need to be
-regenerated, call `refresh_action_statistics` without repeating ingestion or
-the row-id update.
+and statistics refresh also commit separately. The Ray backfill uses the
+optimized self-merge path: each target file group is processed by one task, so
+updates originating from multiple input batches cannot produce competing delta
+files for the same target file. The driver coordinates one commit after all
+file groups finish. If statistics need to be regenerated, call
+`refresh_action_statistics` without repeating ingestion or the row-id update.
+
+Use `backfill_canonical_action` for the local iterable path and
+`run_ray_pipeline` for managed distributed ingestion and backfill. The Ray
+pipeline requires Ray 2.50 or newer. The lower-level `ingest_ray` and
+`backfill_canonical_action_ray` stages assume that Ray has already been
+initialized, which allows either stage to be retried independently.
 
 The canonical `action` is `float32(concat(master/joint_position_left,
 master/joint_position_right))`. The backfill materializes only this consumed
