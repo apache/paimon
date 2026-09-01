@@ -185,12 +185,14 @@ def test_compare_rejects_tampered_result_experiment_hash():
 
 
 def test_shared_harness_is_imported_from_act_package():
+    _require_act_runtime()
     from pypaimon.benchmark.act.harness import BenchmarkConfig
 
     assert BenchmarkConfig().to_dict() == load_experiment()["config"]
 
 
 def test_hdf5_dataset_is_owned_by_hdf5_backend():
+    _require_act_runtime()
     from pypaimon.benchmark.act.hdf5 import Hdf5ACTWindowDataset
 
     assert Hdf5ACTWindowDataset.__module__ == (
@@ -198,10 +200,16 @@ def test_hdf5_dataset_is_owned_by_hdf5_backend():
 
 
 def test_paimon_adapter_is_owned_by_paimon_backend():
+    _require_act_runtime()
     from pypaimon.benchmark.act.paimon import PaimonACTAdapter
 
     assert PaimonACTAdapter.__module__ == (
         "pypaimon.benchmark.act.paimon")
+
+
+def _require_act_runtime():
+    pytest.importorskip("torch")
+    pytest.importorskip("PIL.Image")
 
 
 def _result(backend, experiment, environment, throughput):
