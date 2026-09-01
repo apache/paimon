@@ -21,15 +21,10 @@ import sys
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
-import pyarrow as pa
-
-from pypaimon.catalog.catalog_exception import (
-    DatabaseNotExistException,
-    TableNotExistException,
-)
+from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
     _DEFAULT_DATASET_ID_OPTION,
-    _OWNER_ID_OPTION,
+    _drop_import_tables,
     _frame_schema,
     _load_dataset_metadata,
     _managed_table_options,
@@ -39,14 +34,10 @@ from pypaimon.multimodal.lerobot.metadata import (
     _reject_subtasks,
     _reserve_dataset_version,
 )
-from pypaimon.multimodal.lerobot.loader import (
-    _strict_lerobot_table,
-    _write_dataset,
-)
+from pypaimon.multimodal.lerobot.loader import _write_dataset
 from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
-    _validate_lerobot_schema,
 )
 from pypaimon.multimodal.lerobot.source import (
     _has_tasks,
@@ -60,7 +51,6 @@ from pypaimon.multimodal.source_utils import (
     _validated_source_options,
     _validate_source_kerberos,
 )
-from pypaimon.multimodal.table import _target_schema
 
 
 @dataclass(frozen=True)
@@ -86,7 +76,7 @@ def load_from_lerobot(
 ) -> LeRobotLoadResult:
     """Import LeRobot Dataset v3 and return its published Paimon state.
 
-    A missing target table is created from LeRobot metadata. Episode, task, and
+    A new target table is created from LeRobot metadata. Episode, task, and
     dataset metadata are stored in companion Paimon tables. ``dataset_id``
     defaults to the target identifier. FileIO URI
     credentials come only from ``source_options`` and are not inherited from
@@ -120,45 +110,19 @@ def load_from_lerobot(
                 include_task=total_tasks > 0,
             )
             _reject_subtasks(None, resolved_source)
-            table, owner_id = _validated_table(
-                connection,
-                table_name,
-                source_schema,
-                options,
-                resolved_source,
-            )
-            resolved_dataset_id = _resolved_dataset_id(
-                dataset_id, table)
             metadata = _load_dataset_metadata(
                 None, local_info, resolved_source)
-            tables = _prepare_metadata_tables(
-                connection, table.raw_table, owner_id)
-            version_id = _new_id()
-            _reserve_dataset_version(
-                tables["datasets"],
-                resolved_dataset_id,
-                version_id,
-                local_info,
-                resolved_source,
-                metadata,
-            )
-            episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
+            return _import_dataset(
                 connection,
-                tables,
-                resolved_dataset_id,
-                version_id,
+                table_name,
+                None,
                 local_info,
                 resolved_source,
+                source_schema,
+                batch_size,
+                dataset_id,
+                options,
                 metadata,
-                table.identifier,
-                None,
-            )
-            return LeRobotLoadResult(
-                dataset_id=resolved_dataset_id,
-                version_id=version_id,
-                frames_snapshot_id=None,
-                episodes_snapshot_id=episodes_snapshot_id,
-                tasks_snapshot_id=tasks_snapshot_id,
             )
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
@@ -166,86 +130,97 @@ def load_from_lerobot(
         try:
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
-            row_count, _, _ = \
-                _validated_counts(info, resolved_source.path)
+            _validated_counts(info, resolved_source.path)
 
             lerobot_schema = _schema_from_info(
                 info, include_task=_has_tasks(dataset, info))
             _reject_subtasks(dataset, resolved_source)
-            table, owner_id = _validated_table(
-                connection,
-                table_name,
-                lerobot_schema,
-                options,
-                resolved_source,
-            )
-            resolved_dataset_id = _resolved_dataset_id(
-                dataset_id, table)
             metadata = _load_dataset_metadata(
                 dataset, info, resolved_source)
-            tables = _prepare_metadata_tables(
-                connection, table.raw_table, owner_id)
-            version_id = _new_id()
-            _reserve_dataset_version(
-                tables["datasets"],
-                resolved_dataset_id,
-                version_id,
-                info,
-                resolved_source,
-                metadata,
-            )
-
-            if row_count == 0:
-                episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
-                    connection,
-                    tables,
-                    resolved_dataset_id,
-                    version_id,
-                    info,
-                    resolved_source,
-                    metadata,
-                    table.identifier,
-                    None,
-                )
-                return LeRobotLoadResult(
-                    dataset_id=resolved_dataset_id,
-                    version_id=version_id,
-                    frames_snapshot_id=None,
-                    episodes_snapshot_id=episodes_snapshot_id,
-                    tasks_snapshot_id=tasks_snapshot_id,
-                )
-            frames_snapshot_id = _write_dataset(
-                table,
+            return _import_dataset(
+                connection,
+                table_name,
                 dataset,
                 info,
                 resolved_source,
                 lerobot_schema,
                 batch_size,
-                resolved_dataset_id,
+                dataset_id,
+                options,
                 metadata,
-            )
-            episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
-                connection,
-                tables,
-                resolved_dataset_id,
-                version_id,
-                info,
-                resolved_source,
-                metadata,
-                table.identifier,
-                frames_snapshot_id,
-            )
-            return LeRobotLoadResult(
-                dataset_id=resolved_dataset_id,
-                version_id=version_id,
-                frames_snapshot_id=frames_snapshot_id,
-                episodes_snapshot_id=episodes_snapshot_id,
-                tasks_snapshot_id=tasks_snapshot_id,
             )
         finally:
             close = getattr(dataset, "close", None)
             if callable(close):
                 close()
+
+
+def _import_dataset(
+        connection,
+        table_name,
+        dataset,
+        info,
+        source,
+        source_schema,
+        batch_size,
+        dataset_id,
+        options,
+        metadata):
+    table, owner_id = _create_target_table(
+        connection, table_name, source_schema, options)
+    try:
+        resolved_dataset_id = _resolved_dataset_id(dataset_id, table)
+        tables = _prepare_metadata_tables(
+            connection, table.raw_table, owner_id)
+        version_id = _new_id()
+        _reserve_dataset_version(
+            tables["datasets"],
+            resolved_dataset_id,
+            version_id,
+            info,
+            source,
+            metadata,
+        )
+        frames_snapshot_id = None
+        if int(info["total_frames"]) > 0:
+            frames_snapshot_id = _write_dataset(
+                table,
+                dataset,
+                info,
+                source,
+                source_schema,
+                batch_size,
+                resolved_dataset_id,
+                metadata,
+            )
+        episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
+            connection,
+            tables,
+            resolved_dataset_id,
+            version_id,
+            info,
+            source,
+            metadata,
+            table.identifier,
+            frames_snapshot_id,
+        )
+        return LeRobotLoadResult(
+            dataset_id=resolved_dataset_id,
+            version_id=version_id,
+            frames_snapshot_id=frames_snapshot_id,
+            episodes_snapshot_id=episodes_snapshot_id,
+            tasks_snapshot_id=tasks_snapshot_id,
+        )
+    except BaseException as error:
+        try:
+            _drop_import_tables(
+                connection.catalog, table.raw_table, owner_id)
+        except BaseException as cleanup_error:
+            raise RuntimeError(
+                "LeRobot import failed and cleanup also failed: %s"
+                % cleanup_error
+            ) from error
+        raise
 
 
 def _validated_counts(info, source):
@@ -289,48 +264,27 @@ def _resolved_dataset_id(value, table):
     return value.strip()
 
 
-def _validated_table(
-        connection, table_name, source_schema, options, source):
+def _create_target_table(
+        connection, table_name, source_schema, options):
+    owner_id = _new_id()
+    create_options = dict(options or {})
+    managed_options = _managed_table_options(
+        connection._identifier(table_name), owner_id)
+    reserved_options = set(managed_options).intersection(create_options)
+    if reserved_options:
+        raise ValueError(
+            "%s are managed by load_from_lerobot."
+            % sorted(reserved_options))
+    create_options.update(managed_options)
     try:
-        table = connection.get_table(table_name)
-    except (DatabaseNotExistException, TableNotExistException):
-        owner_id = _new_id()
-        create_options = dict(options or {})
-        managed_options = _managed_table_options(
-            connection._identifier(table_name), owner_id)
-        reserved_options = set(managed_options).intersection(create_options)
-        if reserved_options:
-            raise ValueError(
-                "%s are managed by load_from_lerobot."
-                % sorted(reserved_options))
-        create_options.update(managed_options)
         table = connection.create_table(
             table_name,
             schema=_frame_schema(source_schema),
             options=create_options,
         )
-        _validate_target_schema(table, _frame_schema(source_schema), source)
-        return table, owner_id
-
-    owner_id = table.raw_table.table_schema.options.get(_OWNER_ID_OPTION)
-    if owner_id is None:
+    except TableAlreadyExistException as error:
         raise ValueError(
-            "Existing LeRobot target %s is not managed by "
-            "load_from_lerobot; use a new target table." % table.identifier)
-    if table.raw_table.identifier.get_branch_name() is not None:
-        raise ValueError(
-            "LeRobot import does not support table branches.")
-    _validate_target_schema(table, _frame_schema(source_schema), source)
+            "LeRobot target %s already exists; use a new target table."
+            % connection._identifier(table_name)
+        ) from error
     return table, owner_id
-
-
-def _validate_target_schema(table, source_schema, source):
-    target_schema = _target_schema(table.raw_table)
-    _validate_lerobot_schema(
-        source_schema, target_schema, source.path)
-    _strict_lerobot_table(
-        pa.Table.from_batches([], schema=source_schema),
-        target_schema,
-        source,
-        0,
-    )

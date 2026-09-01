@@ -246,7 +246,6 @@ def _reserve_dataset_version(
         info,
         source,
         metadata):
-    _ensure_dataset_is_new(datasets_table, dataset_id)
     pending = _manifest_row(
         dataset_id,
         version_id,
@@ -361,16 +360,17 @@ def _dataset_table(rows, schema, dataset_id):
     return pa.Table.from_pylist(values, schema=schema)
 
 
-def _ensure_dataset_is_new(datasets_table, dataset_id):
-    snapshot = datasets_table.snapshot_manager().get_latest_snapshot()
-    if snapshot is None:
-        return
-    builder = datasets_table.new_read_builder()
-    plan = builder.new_scan().plan()
-    rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
-    if any(row[_DATASET_ID] == dataset_id for row in rows):
-        raise ValueError(
-            "LeRobot dataset_id %s has already been imported." % dataset_id)
+def _drop_import_tables(catalog, frames_table, owner_id):
+    identifiers = list(
+        _companion_table_identifiers(frames_table).values())
+    identifiers.append(frames_table.identifier.get_full_name())
+    for identifier in identifiers:
+        try:
+            table = catalog.get_table(identifier)
+        except (DatabaseNotExistException, TableNotExistException):
+            continue
+        if table.table_schema.options.get(_OWNER_ID_OPTION) == owner_id:
+            catalog.drop_table(identifier, ignore_if_not_exists=True)
 
 
 def _append_arrow(table, data):

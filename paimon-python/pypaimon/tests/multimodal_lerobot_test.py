@@ -19,7 +19,9 @@ import json
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -28,18 +30,12 @@ import pyarrow as pa
 import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
-from pypaimon import Schema as PaimonSchema
 from pypaimon.catalog.catalog_exception import TableNotExistException
 import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
 from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
-from pypaimon.multimodal.lerobot.metadata import (
-    _DATASETS_SCHEMA,
-    _OWNER_ID_OPTION,
-    _frame_schema,
-    _managed_table_options,
-)
+from pypaimon.multimodal.lerobot.metadata import _managed_table_options
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _read_batch,
@@ -529,12 +525,8 @@ class LeRobotValidationTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "fps must be positive"):
                 connection.load_from_lerobot("frames", source)
-            table = connection.get_table("frames")
-            self.assertIsNone(
-                table.raw_table.snapshot_manager().get_latest_snapshot())
             with self.assertRaises(TableNotExistException):
-                connection.catalog.get_table(
-                    connection._identifier("frames__datasets"))
+                connection.get_table("frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -882,7 +874,7 @@ class LeRobotImportTest(unittest.TestCase):
             [imported[index] for index in range(5)],
         )
 
-        with self.assertRaisesRegex(ValueError, "already been imported"):
+        with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
                 "robot_data", self.image_source, batch_size=4)
         self.assertEqual(5, table.scan().to_arrow().num_rows)
@@ -915,14 +907,10 @@ class LeRobotImportTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "has %s" % column):
                     self.connection.load_from_lerobot(table_name, source)
-                manifests = _catalog_rows(
-                    self.connection, table_name + "__datasets")
-                self.assertEqual(["PENDING"], [
-                    row["status"] for row in manifests
-                ])
-                table = self.connection.get_table(table_name)
-                self.assertIsNone(
-                    table.raw_table.snapshot_manager().get_latest_snapshot())
+                for suffix in ("", "__datasets", "__episodes", "__tasks"):
+                    with self.assertRaises(TableNotExistException):
+                        self.connection.catalog.get_table(
+                            self.connection._identifier(table_name + suffix))
 
     def test_explicit_dataset_id_is_shared_by_all_tables(self):
         dataset_id = "aloha_pick_cube@3"
@@ -977,14 +965,8 @@ class LeRobotImportTest(unittest.TestCase):
                 ValueError, "declares task indices"):
             self.connection.load_from_lerobot(
                 "extra_episode_task", source)
-        self.assertEqual(
-            ["PENDING"],
-            [row["status"] for row in _catalog_rows(
-                self.connection, "extra_episode_task__datasets")],
-        )
-        table = self.connection.get_table("extra_episode_task")
-        self.assertIsNone(
-            table.raw_table.snapshot_manager().get_latest_snapshot())
+        with self.assertRaises(TableNotExistException):
+            self.connection.get_table("extra_episode_task")
 
     def test_nonempty_dataset_cannot_publish_without_tasks(self):
         source = self.temp_dir / "missing_tasks"
@@ -1009,14 +991,8 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "task_index"):
             self.connection.load_from_lerobot("missing_tasks", source)
-        self.assertEqual(
-            ["PENDING"],
-            [row["status"] for row in _catalog_rows(
-                self.connection, "missing_tasks__datasets")],
-        )
-        table = self.connection.get_table("missing_tasks")
-        self.assertIsNone(
-            table.raw_table.snapshot_manager().get_latest_snapshot())
+        with self.assertRaises(TableNotExistException):
+            self.connection.get_table("missing_tasks")
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"
@@ -1100,7 +1076,7 @@ class LeRobotImportTest(unittest.TestCase):
             table.raw_table.tag_manager().get(tag).id,
         )
 
-    def test_failed_publication_leaves_pending_manifest(self):
+    def test_failed_publication_is_cleaned_and_can_retry(self):
         with patch(
                 "pypaimon.multimodal.lerobot.api._publish_dataset",
                 side_effect=RuntimeError("publish failed")):
@@ -1108,89 +1084,65 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "failed_publish", self.image_source)
 
-        manifests = _catalog_rows(
-            self.connection, "failed_publish__datasets")
-        self.assertEqual(["PENDING"], [
-            row["status"] for row in manifests
-        ])
-        frames = self.connection.get_table("failed_publish").scan().select([
-            "dataset_id"
-        ]).to_arrow()
-        self.assertEqual(5, frames.num_rows)
-        self.assertEqual(1, len(set(frames.column(0).to_pylist())))
+        for suffix in ("", "__datasets", "__episodes", "__tasks"):
+            with self.assertRaises(TableNotExistException):
+                self.connection.catalog.get_table(
+                    self.connection._identifier("failed_publish" + suffix))
 
-    def test_existing_unmanaged_table_is_rejected(self):
+        result = self.connection.load_from_lerobot(
+            "failed_publish", self.image_source)
+        self.assertEqual(1, result.frames_snapshot_id)
+
+    def test_existing_target_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
         schema = _schema_from_info(info, include_task=True)
-        table = self.connection.create_table("unmanaged", schema=schema)
+        table = self.connection.create_table("existing", schema=schema)
 
-        with self.assertRaisesRegex(ValueError, "is not managed"):
+        with self.assertRaisesRegex(ValueError, "already exists"):
             self.connection.load_from_lerobot(
-                "unmanaged", self.image_source)
+                "existing", self.image_source)
         self.assertIsNone(
             table.raw_table.snapshot_manager().get_latest_snapshot())
 
-    def test_companion_tables_must_be_append_only(self):
-        info = json.loads((self.image_source / "meta" / "info.json").read_text())
-        source_schema = _schema_from_info(info, include_task=True)
-        owner_id = "test-owner"
-        table = self.connection.create_table(
-            "invalid_group",
-            schema=_frame_schema(source_schema),
-            options=_managed_table_options(
-                self.connection._identifier("invalid_group"), owner_id),
-        )
-        identifier = self.connection._identifier("invalid_group__datasets")
-        self.connection.catalog.create_table(
-            identifier,
-            PaimonSchema.from_pyarrow_schema(
-                _DATASETS_SCHEMA,
-                primary_keys=["version_id"],
-                options={
-                    "bucket": "1",
-                    _OWNER_ID_OPTION: owner_id,
-                },
-            ),
-            False,
-        )
+    def test_concurrent_import_cannot_claim_the_same_target(self):
+        from pypaimon.multimodal.lerobot import api
 
-        with self.assertRaisesRegex(ValueError, "must be append-only"):
-            self.connection.load_from_lerobot(
-                "invalid_group", self.image_source)
-        self.assertIsNone(
-            table.raw_table.snapshot_manager().get_latest_snapshot())
+        original_reserve = api._reserve_dataset_version
+        reserved = threading.Event()
+        release = threading.Event()
 
-    def test_stale_companion_tables_are_rejected(self):
-        info = json.loads((self.image_source / "meta" / "info.json").read_text())
-        source_schema = _schema_from_info(info, include_task=True)
-        table = self.connection.create_table(
-            "stale_group",
-            schema=_frame_schema(source_schema),
-            options=_managed_table_options(
-                self.connection._identifier("stale_group"), "new-owner"),
-        )
-        identifier = self.connection._identifier("stale_group__datasets")
-        self.connection.catalog.create_table(
-            identifier,
-            PaimonSchema.from_pyarrow_schema(
-                _DATASETS_SCHEMA,
-                options={
-                    "bucket": "-1",
-                    _OWNER_ID_OPTION: "old-owner",
-                },
-            ),
-            False,
-        )
+        def reserve_then_wait(*args, **kwargs):
+            result = original_reserve(*args, **kwargs)
+            reserved.set()
+            release.wait(10)
+            return result
 
-        with self.assertRaisesRegex(ValueError, "different target table"):
-            self.connection.load_from_lerobot(
-                "stale_group", self.image_source)
-        self.assertIsNone(
-            table.raw_table.snapshot_manager().get_latest_snapshot())
-        with self.assertRaisesRegex(ValueError, "Refusing to drop"):
-            self.connection.drop_table("stale_group")
-        self.connection.get_table("stale_group")
-        self.connection.catalog.get_table(identifier)
+        with patch.object(
+                api,
+                "_reserve_dataset_version",
+                side_effect=reserve_then_wait):
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self.connection.load_from_lerobot,
+                    "concurrent",
+                    self.image_source,
+                )
+                try:
+                    self.assertTrue(reserved.wait(10))
+                    with self.assertRaisesRegex(
+                            ValueError, "already exists"):
+                        self.connection.load_from_lerobot(
+                            "concurrent", self.image_source)
+                finally:
+                    release.set()
+                result = future.result(timeout=30)
+
+        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(
+            5,
+            self.connection.get_table(
+                "concurrent").scan().to_arrow().num_rows,
+        )
 
     def test_drop_table_removes_companion_tables(self):
         self.connection.load_from_lerobot("drop_group", self.image_source)
@@ -1232,14 +1184,16 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog.get_table(
                     self.connection._identifier(name))
 
-    def test_companion_table_can_be_dropped_directly(self):
+    def test_companion_table_cannot_be_dropped_directly(self):
         self.connection.load_from_lerobot(
             "direct_drop", self.image_source)
-        self.connection.drop_table("direct_drop__tasks")
+
+        with self.assertRaisesRegex(ValueError, "companion table"):
+            self.connection.drop_table("direct_drop__tasks")
 
         self.connection.get_table("direct_drop")
-        with self.assertRaises(TableNotExistException):
-            self.connection.get_table("direct_drop__tasks")
+        self.connection.catalog.get_table(
+            self.connection._identifier("direct_drop__tasks"))
         self.connection.drop_table("direct_drop")
 
     def test_drop_table_rejects_managed_branch(self):
@@ -1263,26 +1217,9 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection._identifier("after_rename"),
         )
 
-        result = self.connection.load_from_lerobot(
-            "after_rename",
-            self.image_source,
-            dataset_id="renamed-dataset",
-        )
-        self.assertEqual(2, result.frames_snapshot_id)
-        manifests = _catalog_rows(
-            self.connection, "before_rename__datasets")
-        ready = [row for row in manifests if row["status"] == "READY"]
-        self.assertEqual(2, len(ready))
-        self.assertEqual(2, len({
-            row["version_id"] for row in ready
-        }))
-        self.assertEqual(
-            {
-                self.connection._identifier("before_rename"),
-                "renamed-dataset",
-            },
-            {row["dataset_id"] for row in ready},
-        )
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.connection.load_from_lerobot(
+                "after_rename", self.image_source)
 
         self.connection.drop_table("after_rename")
         for name in (
@@ -1291,81 +1228,6 @@ class LeRobotImportTest(unittest.TestCase):
             with self.assertRaises(TableNotExistException):
                 self.connection.catalog.get_table(
                     self.connection._identifier(name))
-
-    def test_existing_incompatible_schema_fails_without_snapshot(self):
-        info = json.loads((self.image_source / "meta" / "info.json").read_text())
-        schema = _schema_from_info(info, include_task=True)
-        incompatible_fields = {
-            "shape": pa.field(
-                "observation.matrix",
-                schema.field("observation.matrix").type,
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("observation.matrix"),
-                    "shape=[2,2]",
-                    "shape=[5,2]",
-                ),
-            ),
-            "dtype": pa.field(
-                "action",
-                pa.list_(pa.float64(), 2),
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("action"),
-                    "dtype=float32",
-                    "dtype=float64",
-                ),
-            ),
-            "names": pa.field(
-                "action",
-                schema.field("action").type,
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("action"),
-                    'names=["x","y"]',
-                    'names=["y","x"]',
-                ),
-            ),
-            "array": pa.field(
-                "action",
-                pa.list_(pa.float32()),
-                nullable=False,
-                metadata=schema.field("action").metadata,
-            ),
-            "bytes": pa.field(
-                "observation.image",
-                pa.binary(),
-                nullable=False,
-                metadata=schema.field("observation.image").metadata,
-            ),
-        }
-        for name, replacement in incompatible_fields.items():
-            with self.subTest(name=name):
-                table_name = "incompatible_%s" % name
-                options = {
-                    "file.format": "parquet",
-                    "vector.file.format": "parquet",
-                }
-                options.update(_managed_table_options(
-                    self.connection._identifier(table_name),
-                    "owner-%s" % name,
-                ))
-                table = self.connection.create_table(
-                    table_name,
-                    schema=_frame_schema(pa.schema([
-                        replacement if field.name == replacement.name
-                        else field
-                        for field in schema
-                    ])),
-                    options=options,
-                )
-
-                with self.assertRaisesRegex(
-                        ValueError, "cannot be converted"):
-                    self.connection.load_from_lerobot(
-                        table_name, self.image_source)
-                self.assertIsNone(
-                    table.raw_table.snapshot_manager().get_latest_snapshot())
 
 if __name__ == "__main__":
     unittest.main()

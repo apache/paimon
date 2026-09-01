@@ -563,7 +563,9 @@ Component rows carry `dataset_id` and stable LeRobot indices. `version_id`
 exists only in the Dataset manifest, where it resolves the exact frame,
 Episode, and Task snapshots. These snapshots define the published Dataset
 state; tags retain them. Set `dataset_id=` to choose a stable ID. The one-time
-importer accepts each `dataset_id` once. `drop_table()` removes all four tables.
+importer requires a new target table. A failed import removes the table group
+so the call can be retried. `drop_table()` removes all four tables; companion
+tables cannot be dropped separately through `MultimodalConnection`.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
