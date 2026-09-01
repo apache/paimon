@@ -23,6 +23,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +33,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests that {@link BTreeIndexWriter} releases the file it opened when writing fails. */
+/**
+ * Tests that {@link BTreeIndexWriter} releases the file it opened, on every path that abandons it.
+ */
 public class BTreeIndexWriterCloseTest {
 
     /**
@@ -57,6 +60,51 @@ public class BTreeIndexWriterCloseTest {
         assertThatThrownBy(writer::finish)
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Error in closing BTree index writer");
+
+        assertThat(closed).hasValue(1);
+    }
+
+    /**
+     * A build can be abandoned before finish() ever runs - the row source fails, or a Flink or
+     * Spark index build task is cancelled. The owner cleanup paths, PkSortedIndexFile#build and
+     * SortedSingleColumnIndexWriter#close, release the writer only if they can see it as an
+     * AutoCloseable, and skip it silently otherwise. This is that exact idiom.
+     */
+    @Test
+    public void testTheOwnerCleanupPathReleasesAnAbandonedWriter() throws IOException {
+        AtomicInteger closed = new AtomicInteger();
+        BTreeIndexWriter writer =
+                new BTreeIndexWriter(
+                        failingWriter(closed),
+                        KeySerializer.create(new IntType()),
+                        1024,
+                        (BlockCompressionFactory) null);
+        writer.write(1, 1L);
+
+        if (writer instanceof AutoCloseable) {
+            IOUtils.closeQuietly((AutoCloseable) writer);
+        }
+
+        assertThat(closed).hasValue(1);
+    }
+
+    /**
+     * SortedGlobalIndexWriter holds the task writer in a try-with-resources, so close() can follow
+     * a successful finish(). It must not close the stream a second time.
+     */
+    @Test
+    public void testCloseIsIdempotent() throws IOException {
+        AtomicInteger closed = new AtomicInteger();
+        BTreeIndexWriter writer =
+                new BTreeIndexWriter(
+                        failingWriter(closed),
+                        KeySerializer.create(new IntType()),
+                        1024,
+                        (BlockCompressionFactory) null);
+        writer.write(1, 1L);
+
+        writer.close();
+        writer.close();
 
         assertThat(closed).hasValue(1);
     }
