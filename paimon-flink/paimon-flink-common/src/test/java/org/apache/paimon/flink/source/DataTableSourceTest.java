@@ -24,6 +24,7 @@ import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -31,9 +32,11 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.ReadOptimizedTable;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -171,6 +174,89 @@ class DataTableSourceTest {
     }
 
     @Test
+    void testBoundedSystemTableUsesFileSizeWeightModeAfterCopy() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket",
+                                "1",
+                                "bucket-key",
+                                "a",
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
+                                FlinkConnectorOptions.SplitAssignMode.FAIR.toString(),
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString()));
+        SystemTableSource tableSource =
+                new SystemTableSource(
+                                new ReadOptimizedTable(fileStoreTable),
+                                false,
+                                ObjectIdentifier.of("cat", "db", "table$ro"))
+                        .copy();
+
+        StaticFileStoreSource source = staticSource(tableSource);
+        java.lang.reflect.Field weightFuncField =
+                StaticFileStoreSource.class.getDeclaredField("splitWeightFunc");
+        weightFuncField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        SerializableFunction<FileStoreSourceSplit, Long> weightFunc =
+                (SerializableFunction<FileStoreSourceSplit, Long>) weightFuncField.get(source);
+        FileStoreSourceSplit split =
+                new FileStoreSourceSplit(
+                        "split-1",
+                        DataSplit.builder()
+                                .withSnapshot(1L)
+                                .withPartition(org.apache.paimon.data.BinaryRow.EMPTY_ROW)
+                                .withBucket(0)
+                                .withBucketPath("bucket-0")
+                                .withDataFiles(
+                                        Collections.singletonList(
+                                                DataFileMeta.forAppend(
+                                                        "file-1",
+                                                        35L,
+                                                        1000L,
+                                                        null,
+                                                        0L,
+                                                        0L,
+                                                        0L,
+                                                        Collections.emptyList(),
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null)))
+                                .build());
+
+        assertThat(weightFunc.apply(split)).isEqualTo(35L);
+    }
+
+    @Test
+    void testBoundedSystemTableRejectsFileSizeWithPreemptiveMode() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket",
+                                "1",
+                                "bucket-key",
+                                "a",
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key(),
+                                FlinkConnectorOptions.SplitAssignMode.PREEMPTIVE.toString(),
+                                FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key(),
+                                FlinkConnectorOptions.SplitWeightMode.FILE_SIZE.toString()));
+
+        assertThatThrownBy(
+                        () ->
+                                new SystemTableSource(
+                                        new ReadOptimizedTable(fileStoreTable),
+                                        false,
+                                        ObjectIdentifier.of("cat", "db", "table$ro")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE.key())
+                .hasMessageContaining(
+                        FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE.key());
+    }
+
+    @Test
     public void testSystemTableSourceUnorderedForBucketUnawareTable() throws Exception {
         // bucket = -1 (BUCKET_UNAWARE append-only table) wrapped in a system table should produce
         // unordered = true so splits are distributed via FIFOSplitAssigner across all tasks
@@ -248,6 +334,17 @@ class DataTableSourceTest {
                                 throw new UnsupportedOperationException();
                             }
                         });
+    }
+
+    private StaticFileStoreSource staticSource(SystemTableSource tableSource) {
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+        return (StaticFileStoreSource)
+                ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                                sourceStream.getTransformation())
+                        .getSource();
     }
 
     private FileStoreTable createTable(Map<String, String> options) throws Exception {

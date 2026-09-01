@@ -57,13 +57,13 @@ public class BinPacking {
         return packed;
     }
 
-    /** A bin packing implementation for fixed bin number. */
+    /** A bin packing implementation for fixed bin number using longest processing time first. */
     public static <T> List<List<T>> packForFixedBinNumber(
             Iterable<T> items, Function<T, Long> weightFunc, int binNumber) {
         // 1. sort items first
         List<T> sorted = new ArrayList<>();
         items.forEach(sorted::add);
-        sorted.sort(comparingLong(weightFunc::apply));
+        sorted.sort(comparingLong(weightFunc::apply).reversed());
 
         // 2. packing
         PriorityQueue<FixedNumberBin<T>> bins = new PriorityQueue<>();
