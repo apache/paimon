@@ -47,6 +47,12 @@ class PaimonACTAdapter:
         self.normalization = normalization
 
     def __call__(self, sample):
+        """Convert the generic window mapping into ACT tensors and identity.
+
+        The persisted ``frame_index`` becomes the shared ACT ``step_idx``.
+        State and image columns are singleton lists; action retains the full
+        horizon and ``is_pad`` is forwarded unchanged.
+        """
         qpos = np.concatenate([
             np.asarray(sample[name][0], dtype=np.float32)
             for name in QPOS_COLUMNS
@@ -86,8 +92,9 @@ def create_datasets(
         config):
     """Create lazy train and validation windows pinned to one snapshot.
 
-    Image columns are anchor-only, so one sample reads three observation
-    images rather than one image set per action-horizon row.
+    State and image columns are anchor-only, so one sample reads the initial
+    joint position and three observation images once rather than once per
+    action-horizon row.
 
     Args:
         frames: Paimon frames table used to create both scans.
@@ -108,7 +115,7 @@ def create_datasets(
         ).to_contiguous_window_dataset(
             window_size=config.action_horizon,
             columns=QPOS_COLUMNS + ACTION_COLUMNS + IMAGE_COLUMNS,
-            anchor_columns=IMAGE_COLUMNS,
+            anchor_columns=QPOS_COLUMNS + IMAGE_COLUMNS,
             group_key="episode_id",
             order_key="frame_index",
             stride=1,

@@ -19,6 +19,7 @@
 import json
 import tracemalloc
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -41,8 +42,11 @@ from pypaimon.benchmark.act.runner import (
 from pypaimon.benchmark.act.experiment import load_experiment
 from pypaimon.benchmark.act.compare import canonical_sha256, compare_results
 from pypaimon.benchmark.act.harness import build_window_plan, run_backend
+from pypaimon.benchmark.act.hdf5 import Hdf5ACTWindowDataset
 from pypaimon.benchmark.act.paimon import (
+    ACTION_COLUMNS,
     IMAGE_COLUMNS,
+    QPOS_COLUMNS,
     create_datasets as create_paimon_datasets,
     latest_snapshot_id,
 )
@@ -382,6 +386,92 @@ def test_independent_backend_results_preserve_tensor_and_loss_parity(
     assert comparison["experiments"][0]["backends"] == ["hdf5", "paimon"]
 
 
+def test_backends_match_the_golden_act_window_contract(benchmark_input):
+    input_root, warehouse = benchmark_input
+    normalization = {
+        "qpos_mean": np.zeros(14, dtype=np.float32),
+        "qpos_std": np.ones(14, dtype=np.float32),
+        "action_mean": np.zeros(14, dtype=np.float32),
+        "action_std": np.ones(14, dtype=np.float32),
+    }
+    hdf5 = Hdf5ACTWindowDataset(
+        SimpleNamespace(
+            path=(input_root / "13_packbowl" / "success_episodes" / "train"
+                  / "train-a" / "data" / "trajectory.hdf5"),
+            episode_id="train-a",
+            frame_count=6,
+        ),
+        normalization,
+        action_horizon=3,
+    )
+    connection = pmm.connect(
+        database=agilex.DEFAULT_DATABASE,
+        options={"warehouse": str(warehouse)},
+    )
+    frames = connection.get_table(agilex.FRAMES_TABLE)
+    paimon, _ = create_paimon_datasets(
+        frames,
+        latest_snapshot_id(frames),
+        "train-a",
+        "val-a",
+        normalization,
+        BenchmarkConfig(action_horizon=3),
+    )
+
+    expected = hdf5[1]
+    actual = paimon[1]
+
+    assert set(expected) == {
+        "sample_id", "episode_id", "step_idx", "qpos", "action",
+        "images", "is_pad",
+    }
+    assert expected["sample_id"] == "train-a#1"
+    assert expected["episode_id"] == "train-a"
+    assert expected["step_idx"] == 1
+    assert torch.equal(expected["qpos"], torch.tensor(
+        list(range(408, 415)) + list(range(508, 515)),
+        dtype=torch.float32,
+    ))
+    assert torch.equal(expected["action"], torch.tensor([
+        list(range(1208, 1215)) + list(range(1308, 1315)),
+        list(range(1215, 1222)) + list(range(1315, 1322)),
+        list(range(1222, 1229)) + list(range(1322, 1329)),
+    ], dtype=torch.float32))
+    assert torch.allclose(
+        expected["images"][:, :, 0, 0],
+        torch.tensor([[2 / 255] * 3, [3 / 255] * 3, [4 / 255] * 3]),
+    )
+    assert not expected["is_pad"].any()
+    for name in ("qpos", "action", "images", "is_pad"):
+        assert torch.equal(expected[name], actual[name])
+    for name in ("sample_id", "episode_id", "step_idx"):
+        assert expected[name] == actual[name]
+
+
+def test_hdf5_window_index_bounds(tmp_path):
+    path = _write_episode(tmp_path, "train", "train-a", 1)
+    dataset = Hdf5ACTWindowDataset(
+        SimpleNamespace(
+            path=path,
+            episode_id="train-a",
+            frame_count=6,
+        ),
+        {
+            "qpos_mean": np.zeros(14, dtype=np.float32),
+            "qpos_std": np.ones(14, dtype=np.float32),
+            "action_mean": np.zeros(14, dtype=np.float32),
+            "action_std": np.ones(14, dtype=np.float32),
+        },
+        action_horizon=3,
+    )
+
+    assert dataset[-1]["sample_id"] == "train-a#3"
+    with pytest.raises(IndexError):
+        dataset[-len(dataset) - 1]
+    with pytest.raises(IndexError):
+        dataset[len(dataset)]
+
+
 def test_paimon_run_rejects_normalization_not_recorded_in_statistics(
         benchmark_input, tmp_path):
     input_root, warehouse = benchmark_input
@@ -513,7 +603,14 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
         assert fetch.call_count == 0
         assert isinstance(train, ContiguousWindowDataset)
         assert isinstance(validation, ContiguousWindowDataset)
-        sample_before_append = train[0]
+        with patch.object(
+                train, "_read_rows", wraps=train._read_rows) as read_rows:
+            sample_before_append = train[0]
+        assert [call.args[1] for call in read_rows.call_args_list] == [
+            list(ACTION_COLUMNS),
+            list(QPOS_COLUMNS + IMAGE_COLUMNS),
+        ]
+        assert [len(call.args[0]) for call in read_rows.call_args_list] == [3, 1]
         assert fetch.call_count == 1
         assert {
             name: len(fetch.call_args.args[1][name])
