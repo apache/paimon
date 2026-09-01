@@ -2359,6 +2359,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         options.update({
             'commit.max-retries': '0',
             'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+            'global-index.enabled': 'true',
+            'bucket': '-1',
         })
         variant_type = pa.struct([
             pa.field('value', pa.binary(), nullable=False),
@@ -2366,6 +2368,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         ])
         schema = pa.schema([
             ('id', pa.int32()),
+            ('content_key', pa.string()),
+            ('clip_id', pa.string()),
             ('payload', variant_type),
             ('topic_schema', pa.string()),
         ])
@@ -2392,19 +2396,28 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             target,
             pa.table({
                 'id': pa.array([1, 2], type=pa.int32()),
+                'content_key': ['topic.imu', 'topic.imu'],
+                'clip_id': ['clip-a', 'clip-b'],
                 'payload': payload([1.0, 10.0]),
-                'topic_schema': ['old', 'old'],
+                'topic_schema': [None, None],
             }, schema=schema),
         )
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('content_key'), 0)
+
+        # Keep the second content key outside the existing global index.
         self._write(
             target,
             pa.table({
                 'id': pa.array([3, 4], type=pa.int32()),
+                'content_key': [
+                    'topic.imu_filtered', 'topic.imu_filtered',
+                ],
+                'clip_id': ['clip-a', 'clip-b'],
                 'payload': payload([20.0, 30.0]),
-                'topic_schema': ['old', 'old'],
+                'topic_schema': [None, None],
             }, schema=schema),
         )
-        table = self.catalog.get_table(target)
         real_apply = merge_module.distributed_self_merge_update_apply
         stale_paths = []
 
@@ -2451,8 +2464,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 read_columns=['payload'],
                 when_matched=[WhenMatched.update({
                     'payload': negate_imu_yz,
-                    'topic_schema': lit('imu-yz-negated-v1'),
-                })],
+                    'topic_schema': lit('imu_yz_negated_v1'),
+                }, condition=(
+                    "t.content_key IN "
+                    "('topic.imu', 'topic.imu_filtered') "
+                    "AND t.clip_id IN ('clip-a', 'clip-b') "
+                    "AND (t.topic_schema IS NULL OR "
+                    "t.topic_schema <> 'imu_yz_negated_v1')"
+                ))],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
 
@@ -2468,7 +2487,14 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         )
         self.assertEqual(
             output['topic_schema'],
-            ['imu-yz-negated-v1'] * 4,
+            ['imu_yz_negated_v1'] * 4,
+        )
+        self.assertEqual(
+            output['content_key'],
+            [
+                'topic.imu', 'topic.imu',
+                'topic.imu_filtered', 'topic.imu_filtered',
+            ],
         )
         self.assertTrue(stale_paths)
         # Match Spark: replaced staging files are left for orphan cleanup.
