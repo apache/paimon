@@ -17,6 +17,7 @@
 """LeRobot source resolution for local, Hub, and FileIO datasets."""
 
 import json
+import logging
 import posixpath
 from bisect import bisect_right
 from contextlib import closing, contextmanager
@@ -37,6 +38,9 @@ from pypaimon.multimodal.hdf5 import (
     _qualified_status_path,
 )
 from pypaimon.multimodal.lerobot.loader import _encode_media_frame
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,14 @@ def _resolved_source(source, source_options):
             info,
         )
     finally:
-        source_file_io.close()
+        _close_quietly(source_file_io, "source FileIO")
+
+
+def _close_quietly(resource, name):
+    try:
+        resource.close()
+    except Exception:
+        _LOGGER.warning("Failed to close LeRobot %s.", name, exc_info=True)
 
 
 def _local_source(root, display_path=None):

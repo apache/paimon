@@ -73,6 +73,7 @@ class MultimodalConnection:
         identifier = self._identifier(name)
         already_exists = _table_exists(self.catalog, identifier)
         paimon_schema = _to_paimon_schema(schema, data, options, partitioned)
+        _validate_multimodal_schema(paimon_schema, identifier)
 
         self._create_database_for(identifier)
         try:
@@ -217,7 +218,10 @@ def _table_exists(catalog, identifier: str) -> bool:
 
 
 def _validate_multimodal_table(table, identifier: str):
-    table_schema = table.table_schema
+    _validate_multimodal_schema(table.table_schema, identifier)
+
+
+def _validate_multimodal_schema(table_schema, identifier: str):
     options = table_schema.options
     if str(options.get("data-evolution.enabled", "false")).lower() != "true":
         raise ValueError(

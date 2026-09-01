@@ -40,6 +40,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
 )
 from pypaimon.multimodal.lerobot.source import (
+    _close_quietly,
     _has_tasks,
     _import_lerobot_dataset,
     _load_hub_info,
@@ -152,7 +153,7 @@ def load_from_lerobot(
         finally:
             close = getattr(dataset, "close", None)
             if callable(close):
-                close()
+                _close_quietly(dataset, "dataset")
 
 
 def _import_dataset(

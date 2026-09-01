@@ -656,6 +656,21 @@ class _RemoteLeRobotFileIO:
         self.close_count += 1
 
 
+class _FailingCloseDataset:
+
+    def __init__(self, dataset):
+        self._dataset = dataset
+
+    def __getattr__(self, name):
+        return getattr(self._dataset, name)
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def close(self):
+        raise RuntimeError("close failed")
+
+
 @unittest.skipUnless(
     sys.version_info >= (3, 10) and LeRobotDataset is not None,
     "LeRobot 0.4.x requires Python 3.10+ and the lerobot extra",
@@ -1092,6 +1107,65 @@ class LeRobotImportTest(unittest.TestCase):
         result = self.connection.load_from_lerobot(
             "failed_publish", self.image_source)
         self.assertEqual(1, result.frames_snapshot_id)
+
+    def test_invalid_target_options_do_not_leave_table(self):
+        with self.assertRaisesRegex(ValueError, "data-evolution.enabled"):
+            self.connection.load_from_lerobot(
+                "invalid_options",
+                self.image_source,
+                options={"data-evolution.enabled": "false"},
+            )
+        with self.assertRaises(TableNotExistException):
+            self.connection.catalog.get_table(
+                self.connection._identifier("invalid_options"))
+
+        result = self.connection.load_from_lerobot(
+            "invalid_options", self.image_source)
+        self.assertEqual(1, result.frames_snapshot_id)
+
+    def test_dataset_close_failure_does_not_override_success(self):
+        from pypaimon.multimodal.lerobot import api
+
+        original_open = api._open_resolved_dataset
+
+        def open_with_failing_close(*args, **kwargs):
+            return _FailingCloseDataset(original_open(*args, **kwargs))
+
+        with self.assertLogs(
+                "pypaimon.multimodal.lerobot.source", level="WARNING"):
+            with patch.object(
+                    api,
+                    "_open_resolved_dataset",
+                    side_effect=open_with_failing_close):
+                result = self.connection.load_from_lerobot(
+                    "close_failure", self.image_source)
+
+        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(
+            ["PENDING", "READY"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "close_failure__datasets")],
+        )
+
+    def test_source_close_failure_does_not_override_success(self):
+        source = "oss://source-bucket/robot-images"
+        source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
+        source_file_io.close = Mock(side_effect=RuntimeError("close failed"))
+
+        with self.assertLogs(
+                "pypaimon.multimodal.lerobot.source", level="WARNING"):
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+                    return_value=source_file_io):
+                result = self.connection.load_from_lerobot(
+                    "source_close_failure", source)
+
+        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(
+            ["PENDING", "READY"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "source_close_failure__datasets")],
+        )
 
     def test_existing_target_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
