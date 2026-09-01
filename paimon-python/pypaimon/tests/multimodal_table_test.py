@@ -777,7 +777,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(expected.identifier, actual.identifier)
         with patch(
                 "pypaimon.multimodal.connection._table_exists",
-                side_effect=[False, True]):
+                return_value=False):
             raced = self.conn.create_table(
                 "existing",
                 schema=_schema({
@@ -788,6 +788,50 @@ class MultimodalTableTest(unittest.TestCase):
                 ignore_if_exists=True,
             )
         self.assertEqual(expected.identifier, raced.identifier)
+
+    def test_create_table_handles_concurrent_delete_when_ignoring(self):
+        schema = _schema({"id": pa.int32()})
+        self.conn.create_table("deleted", schema=schema)
+        original_get = self.conn.get_table
+        deleted = [False]
+
+        def delete_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table("default.deleted", False)
+            return original_get(name)
+
+        with patch.object(
+                self.conn, "get_table", side_effect=delete_once):
+            table = self.conn.create_table(
+                "deleted", schema=schema, ignore_if_exists=True)
+        self.assertEqual("default.deleted", table.identifier)
+
+        self.conn.create_table("fallback_deleted", schema=schema)
+        deleted[0] = False
+
+        def delete_fallback_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table(
+                    "default.fallback_deleted", False)
+            return original_get(name)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            with patch.object(
+                    self.conn,
+                    "get_table",
+                    side_effect=delete_fallback_once):
+                with self.assertRaisesRegex(
+                        ValueError, "data-evolution.enabled"):
+                    self.conn.create_table(
+                        "fallback_deleted",
+                        schema=schema,
+                        options={"data-evolution.enabled": "false"},
+                        ignore_if_exists=True,
+                    )
 
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(
