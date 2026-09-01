@@ -574,7 +574,11 @@ public class InferVariantShreddingSchema {
             if (current != null && !(current instanceof VariantType)) {
                 combined = current;
             } else if (previousSelected != null) {
-                combined = previousSelected;
+                // This node has no evidence in the current file. A previously selected schema is
+                // not
+                // evidence - its fields carry no counts - so it cannot be run through admission and
+                // retention again; carry it forward unchanged.
+                return previousSelected;
             } else {
                 return DataTypes.VARIANT();
             }
