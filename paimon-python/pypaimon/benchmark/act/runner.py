@@ -417,6 +417,7 @@ def _paimon_factory_from_experiment(
             or not np.array_equal(action_std, normalization["action_std"])):
         raise ValueError(
             "Paimon normalization differs from the ACT experiment.")
+
     def factory():
         return create_paimon_datasets(
             frames,
@@ -473,7 +474,6 @@ def _tensor_fingerprint(datasets, plan):
             "images", "is_pad",
         ],
     }
-
 
 
 def _shared_normalization(
