@@ -70,7 +70,6 @@ def _write_dataset(
         source_schema,
         batch_size,
         dataset_id,
-        metadata_version,
         metadata):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
@@ -104,8 +103,7 @@ def _write_dataset(
             )
             observed_tasks.setdefault(episode_index, set()).update(
                 seen_tasks)
-            batch = _with_frame_identity(
-                batch, dataset_id, metadata_version)
+            batch = _with_frame_identity(batch, dataset_id)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,

@@ -18,6 +18,7 @@
 
 import numbers
 import sys
+from dataclasses import dataclass
 from typing import Mapping, Optional
 
 import pyarrow as pa
@@ -36,6 +37,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _prepare_metadata_tables,
     _publish_dataset,
     _reject_subtasks,
+    _reserve_dataset_version,
 )
 from pypaimon.multimodal.lerobot.loader import (
     _strict_lerobot_table,
@@ -61,6 +63,17 @@ from pypaimon.multimodal.source_utils import (
 from pypaimon.multimodal.table import _target_schema
 
 
+@dataclass(frozen=True)
+class LeRobotLoadResult:
+    """Published Paimon state for one imported LeRobot Dataset."""
+
+    dataset_id: str
+    version_id: str
+    frames_snapshot_id: Optional[int]
+    episodes_snapshot_id: Optional[int]
+    tasks_snapshot_id: Optional[int]
+
+
 def load_from_lerobot(
         connection,
         table_name: str,
@@ -69,8 +82,9 @@ def load_from_lerobot(
         batch_size: int = 1024,
         dataset_id: Optional[str] = None,
         options: Optional[Mapping[str, object]] = None,
-        source_options: Optional[Mapping[str, object]] = None):
-    """Import LeRobot Dataset v3 and return the committed snapshot ID.
+        source_options: Optional[Mapping[str, object]] = None,
+) -> LeRobotLoadResult:
+    """Import LeRobot Dataset v3 and return its published Paimon state.
 
     A missing target table is created from LeRobot metadata. Episode, task, and
     dataset metadata are stored in companion Paimon tables. ``dataset_id``
@@ -119,19 +133,33 @@ def load_from_lerobot(
                 None, local_info, resolved_source)
             tables = _prepare_metadata_tables(
                 connection, table.raw_table, owner_id)
-            metadata_version = _new_id()
-            _publish_dataset(
+            version_id = _new_id()
+            _reserve_dataset_version(
+                tables["datasets"],
+                resolved_dataset_id,
+                version_id,
+                local_info,
+                resolved_source,
+                metadata,
+            )
+            episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
                 connection,
                 tables,
                 resolved_dataset_id,
-                metadata_version,
+                version_id,
                 local_info,
                 resolved_source,
                 metadata,
                 table.identifier,
                 None,
             )
-            return None
+            return LeRobotLoadResult(
+                dataset_id=resolved_dataset_id,
+                version_id=version_id,
+                frames_snapshot_id=None,
+                episodes_snapshot_id=episodes_snapshot_id,
+                tasks_snapshot_id=tasks_snapshot_id,
+            )
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -157,22 +185,36 @@ def load_from_lerobot(
                 dataset, info, resolved_source)
             tables = _prepare_metadata_tables(
                 connection, table.raw_table, owner_id)
-            metadata_version = _new_id()
+            version_id = _new_id()
+            _reserve_dataset_version(
+                tables["datasets"],
+                resolved_dataset_id,
+                version_id,
+                info,
+                resolved_source,
+                metadata,
+            )
 
             if row_count == 0:
-                _publish_dataset(
+                episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
                     connection,
                     tables,
                     resolved_dataset_id,
-                    metadata_version,
+                    version_id,
                     info,
                     resolved_source,
                     metadata,
                     table.identifier,
                     None,
                 )
-                return None
-            snapshot_id = _write_dataset(
+                return LeRobotLoadResult(
+                    dataset_id=resolved_dataset_id,
+                    version_id=version_id,
+                    frames_snapshot_id=None,
+                    episodes_snapshot_id=episodes_snapshot_id,
+                    tasks_snapshot_id=tasks_snapshot_id,
+                )
+            frames_snapshot_id = _write_dataset(
                 table,
                 dataset,
                 info,
@@ -180,21 +222,26 @@ def load_from_lerobot(
                 lerobot_schema,
                 batch_size,
                 resolved_dataset_id,
-                metadata_version,
                 metadata,
             )
-            _publish_dataset(
+            episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
                 connection,
                 tables,
                 resolved_dataset_id,
-                metadata_version,
+                version_id,
                 info,
                 resolved_source,
                 metadata,
                 table.identifier,
-                snapshot_id,
+                frames_snapshot_id,
             )
-            return snapshot_id
+            return LeRobotLoadResult(
+                dataset_id=resolved_dataset_id,
+                version_id=version_id,
+                frames_snapshot_id=frames_snapshot_id,
+                episodes_snapshot_id=episodes_snapshot_id,
+                tasks_snapshot_id=tasks_snapshot_id,
+            )
         finally:
             close = getattr(dataset, "close", None)
             if callable(close):
@@ -236,7 +283,7 @@ def _resolved_dataset_id(value, table):
             _DEFAULT_DATASET_ID_OPTION)
         if not default_id:
             raise ValueError(
-                "Self-contained LeRobot table %s has no default dataset_id."
+                "LeRobot table %s has no default dataset_id."
                 % table.identifier)
         return default_id
     return value.strip()
@@ -272,7 +319,7 @@ def _validated_table(
             "load_from_lerobot; use a new target table." % table.identifier)
     if table.raw_table.identifier.get_branch_name() is not None:
         raise ValueError(
-            "Self-contained LeRobot import does not support table branches.")
+            "LeRobot import does not support table branches.")
     _validate_target_schema(table, _frame_schema(source_schema), source)
     return table, owner_id
 

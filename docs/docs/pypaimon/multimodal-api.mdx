@@ -524,28 +524,31 @@ source drift. Calling it again with the same input appends the rows again.
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json`, writes one row per
-frame, and creates a self-contained LeRobot dataset backed by the frame table,
+frame, and creates a LeRobot dataset backed by the frame table,
 `<table>__datasets`, `<table>__episodes`, and `<table>__tasks`. A manifest row is
-marked `READY` only after all component snapshots are committed and tagged.
+reserved as `PENDING` before the component writes and marked `READY` only after
+all component snapshots are committed and tagged. Readers ignore `PENDING`.
 
 ```shell
 pip install 'pypaimon[lerobot]'
 ```
 
 ```python
-snapshot_id = conn.load_from_lerobot(
+result = conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(snapshot_id)
+print(result.version_id)
+print(result.frames_snapshot_id)
 ```
 
-The return value is `None` when the source has no frames.
+The result contains the `dataset_id`, `version_id`, and the frame, Episode, and
+Task snapshot IDs. Empty components have no snapshot.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
-snapshot_id = conn.load_from_lerobot(
+result = conn.load_from_lerobot(
     "robot_data",
     "oss://source-bucket/lerobot_dataset",
     source_options={
@@ -556,11 +559,11 @@ snapshot_id = conn.load_from_lerobot(
 )
 ```
 
-All four tables share a `dataset_id` (the target identifier by default) and a
-unique `metadata_version` per import. A `READY` manifest is appended only after
-all component snapshots are committed and tagged. Set `dataset_id=` to choose
-a stable ID and select `metadata_version` to read a specific imported version.
-`drop_table()` removes all four tables.
+Component rows carry `dataset_id` and stable LeRobot indices. `version_id`
+exists only in the Dataset manifest, where it resolves the exact frame,
+Episode, and Task snapshots. These snapshots define the published Dataset
+state; tags retain them. Set `dataset_id=` to choose a stable ID. The one-time
+importer accepts each `dataset_id` once. `drop_table()` removes all four tables.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.

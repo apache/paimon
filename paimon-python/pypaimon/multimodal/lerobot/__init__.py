@@ -16,9 +16,13 @@
 
 """One-time LeRobot Dataset v3 import into a multimodal Paimon table."""
 
-from pypaimon.multimodal.lerobot.api import load_from_lerobot
+from pypaimon.multimodal.lerobot.api import (
+    LeRobotLoadResult,
+    load_from_lerobot,
+)
 
 
 __all__ = [
+    "LeRobotLoadResult",
     "load_from_lerobot",
 ]

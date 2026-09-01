@@ -127,7 +127,7 @@ class MultimodalConnection:
             dataset_id: Optional[str] = None,
             options=None,
             source_options=None):
-        """Import LeRobot Dataset v3 and return the committed snapshot ID."""
+        """Import LeRobot Dataset v3 and return its published table state."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
         return load_from_lerobot(
             self,

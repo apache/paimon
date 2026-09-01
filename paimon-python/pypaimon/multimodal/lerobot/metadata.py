@@ -14,12 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Self-contained metadata tables for imported LeRobot datasets."""
+"""Metadata tables for imported LeRobot datasets."""
 
 import hashlib
 import json
 import numbers
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pyarrow as pa
@@ -37,7 +38,7 @@ from pypaimon.multimodal.table import _target_schema
 
 
 _DATASET_ID = "dataset_id"
-_METADATA_VERSION = "metadata_version"
+_VERSION_ID = "version_id"
 _OWNER_ID_OPTION = "pypaimon.lerobot.owner-id"
 _DEFAULT_DATASET_ID_OPTION = "pypaimon.lerobot.dataset-id"
 _TABLE_SUFFIXES = {
@@ -52,12 +53,13 @@ _COMPANION_OPTION_KEYS = {
 
 _FRAME_ID_FIELDS = [
     pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field(_METADATA_VERSION, pa.string(), nullable=False),
 ]
 _DATASETS_SCHEMA = pa.schema([
     pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field(_METADATA_VERSION, pa.string(), nullable=False),
+    pa.field(_VERSION_ID, pa.string(), nullable=False),
+    pa.field("parent_version_id", pa.string()),
     pa.field("status", pa.string(), nullable=False),
+    pa.field("published_at", pa.timestamp("us", tz="UTC")),
     pa.field("format", pa.string(), nullable=False),
     pa.field("format_version", pa.string(), nullable=False),
     pa.field("fps", pa.int64(), nullable=False),
@@ -75,7 +77,6 @@ _DATASETS_SCHEMA = pa.schema([
 ])
 _EPISODES_SCHEMA = pa.schema([
     pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field(_METADATA_VERSION, pa.string(), nullable=False),
     pa.field("episode_index", pa.int64(), nullable=False),
     pa.field("dataset_from_index", pa.int64(), nullable=False),
     pa.field("dataset_to_index", pa.int64(), nullable=False),
@@ -87,7 +88,6 @@ _EPISODES_SCHEMA = pa.schema([
 ])
 _TASKS_SCHEMA = pa.schema([
     pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field(_METADATA_VERSION, pa.string(), nullable=False),
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
     pa.field("task_metadata_json", pa.string()),
@@ -105,12 +105,11 @@ def _frame_schema(source_schema):
     return pa.schema(list(source_schema) + _FRAME_ID_FIELDS)
 
 
-def _with_frame_identity(table, dataset_id, metadata_version):
+def _with_frame_identity(table, dataset_id):
     size = table.num_rows
     return pa.Table.from_arrays(
         list(table.columns) + [
             pa.array([dataset_id] * size, type=pa.string()),
-            pa.array([metadata_version] * size, type=pa.string()),
         ],
         schema=pa.schema(list(table.schema) + _FRAME_ID_FIELDS),
     )
@@ -172,7 +171,7 @@ def _managed_table_options(frames_identifier, owner_id):
     identifier = Identifier.from_string(str(frames_identifier))
     if identifier.get_branch_name() is not None:
         raise ValueError(
-            "Self-contained LeRobot import does not support table branches.")
+            "LeRobot import does not support table branches.")
     result = {
         _OWNER_ID_OPTION: owner_id,
         _DEFAULT_DATASET_ID_OPTION: str(frames_identifier),
@@ -240,32 +239,59 @@ def _prepare_metadata_tables(connection, frames_table, owner_id):
     return tables
 
 
+def _reserve_dataset_version(
+        datasets_table,
+        dataset_id,
+        version_id,
+        info,
+        source,
+        metadata):
+    _ensure_dataset_is_new(datasets_table, dataset_id)
+    pending = _manifest_row(
+        dataset_id,
+        version_id,
+        None,
+        "PENDING",
+        None,
+        info,
+        source,
+        metadata,
+        None,
+        None,
+        None,
+    )
+    snapshot_id = _append_arrow(
+        datasets_table,
+        pa.Table.from_pylist([pending], schema=_DATASETS_SCHEMA),
+    )
+    if snapshot_id is None:
+        raise RuntimeError("LeRobot version reservation created no snapshot.")
+
+
 def _publish_dataset(
         connection,
         tables,
         dataset_id,
-        metadata_version,
+        version_id,
         info,
         source,
         metadata,
         frames_identifier,
         frames_snapshot_id):
-    episodes = _versioned_table(
+    episodes = _dataset_table(
         metadata["episodes"],
         _EPISODES_SCHEMA,
         dataset_id,
-        metadata_version,
     )
-    tasks = _versioned_table(
+    tasks = _dataset_table(
         metadata["tasks"],
         _TASKS_SCHEMA,
         dataset_id,
-        metadata_version,
     )
     episodes_snapshot_id = _append_arrow(tables["episodes"], episodes)
     tasks_snapshot_id = _append_arrow(tables["tasks"], tasks)
 
-    tag = "pypaimon-lerobot-%s" % metadata_version
+    tag = "pypaimon-lerobot-%s" % version_id
     for identifier, snapshot_id in (
             (frames_identifier, frames_snapshot_id),
             (tables["episodes"].identifier, episodes_snapshot_id),
@@ -275,7 +301,10 @@ def _publish_dataset(
 
     manifest = _manifest_row(
         dataset_id,
-        metadata_version,
+        version_id,
+        None,
+        "READY",
+        datetime.now(timezone.utc),
         info,
         source,
         metadata,
@@ -285,11 +314,15 @@ def _publish_dataset(
     )
     _append_arrow(tables["datasets"], pa.Table.from_pylist(
         [manifest], schema=_DATASETS_SCHEMA))
+    return episodes_snapshot_id, tasks_snapshot_id
 
 
 def _manifest_row(
         dataset_id,
-        metadata_version,
+        version_id,
+        parent_version_id,
+        status,
+        published_at,
         info,
         source,
         metadata,
@@ -298,8 +331,10 @@ def _manifest_row(
         tasks_snapshot_id):
     return {
         _DATASET_ID: dataset_id,
-        _METADATA_VERSION: metadata_version,
-        "status": "READY",
+        _VERSION_ID: version_id,
+        "parent_version_id": parent_version_id,
+        "status": status,
+        "published_at": published_at,
         "format": "lerobot",
         "format_version": str(info["codebase_version"]),
         "fps": metadata["fps"],
@@ -317,14 +352,25 @@ def _manifest_row(
     }
 
 
-def _versioned_table(rows, schema, dataset_id, metadata_version):
+def _dataset_table(rows, schema, dataset_id):
     values = []
     for row in rows:
         value = dict(row)
         value[_DATASET_ID] = dataset_id
-        value[_METADATA_VERSION] = metadata_version
         values.append(value)
     return pa.Table.from_pylist(values, schema=schema)
+
+
+def _ensure_dataset_is_new(datasets_table, dataset_id):
+    snapshot = datasets_table.snapshot_manager().get_latest_snapshot()
+    if snapshot is None:
+        return
+    builder = datasets_table.new_read_builder()
+    plan = builder.new_scan().plan()
+    rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+    if any(row[_DATASET_ID] == dataset_id for row in rows):
+        raise ValueError(
+            "LeRobot dataset_id %s has already been imported." % dataset_id)
 
 
 def _append_arrow(table, data):

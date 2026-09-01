@@ -372,19 +372,25 @@ class LeRobotValidationTest(unittest.TestCase):
             with patch(
                     "pypaimon.multimodal.lerobot.api._import_lerobot_dataset"
             ) as import_lerobot:
-                self.assertIsNone(connection.load_from_lerobot(
-                    "empty_frames", source))
+                result = connection.load_from_lerobot(
+                    "empty_frames", source)
             import_lerobot.assert_not_called()
+            self.assertEqual("default.empty_frames", result.dataset_id)
+            self.assertEqual(32, len(result.version_id))
+            self.assertIsNone(result.frames_snapshot_id)
+            self.assertIsNone(result.episodes_snapshot_id)
+            self.assertIsNone(result.tasks_snapshot_id)
             table = connection.get_table("empty_frames")
             self.assertIsNone(
                 table.raw_table.snapshot_manager().get_latest_snapshot())
             manifests = _catalog_rows(
                 connection, "empty_frames__datasets")
-            self.assertEqual(["READY"], [
+            self.assertEqual(["PENDING", "READY"], [
                 row["status"] for row in manifests
             ])
-            self.assertEqual(0, manifests[0]["total_frames"])
-            self.assertIsNone(manifests[0]["frames_snapshot_id"])
+            self.assertEqual(result.version_id, manifests[1]["version_id"])
+            self.assertEqual(0, manifests[1]["total_frames"])
+            self.assertIsNone(manifests[1]["frames_snapshot_id"])
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -460,8 +466,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 "warehouse": str(temp_dir / "warehouse"),
             })
 
-            self.assertIsNone(connection.load_from_lerobot("frames", source))
-            manifest = _catalog_rows(connection, "frames__datasets")[0]
+            result = connection.load_from_lerobot("frames", source)
+            self.assertIsNone(result.frames_snapshot_id)
+            self.assertEqual(1, result.tasks_snapshot_id)
+            manifest = _catalog_rows(connection, "frames__datasets")[1]
             self.assertIsNotNone(manifest["global_stats_json"])
             self.assertEqual(1, manifest["total_tasks"])
             self.assertEqual(1, manifest["tasks_snapshot_id"])
@@ -741,11 +749,15 @@ class LeRobotImportTest(unittest.TestCase):
             dataset.save_episode()
         dataset.finalize()
 
-    def test_import_infers_schema_preserves_episodes_and_appends(self):
-        snapshot_id = self.connection.load_from_lerobot(
+    def test_import_infers_schema_and_preserves_episodes(self):
+        result = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
-        self.assertEqual(1, snapshot_id)
+        self.assertIsInstance(result, pmm.LeRobotLoadResult)
+        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, result.episodes_snapshot_id)
+        self.assertEqual(1, result.tasks_snapshot_id)
+        self.assertEqual(32, len(result.version_id))
 
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
@@ -760,7 +772,8 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])
         self.assertEqual("STRING NOT NULL", types["dataset_id"])
-        self.assertEqual("STRING NOT NULL", types["metadata_version"])
+        self.assertNotIn("metadata_version", types)
+        self.assertNotIn("version_id", types)
 
         rows = table.scan().select([
             "episode_index",
@@ -774,7 +787,6 @@ class LeRobotImportTest(unittest.TestCase):
             "action",
             "reward",
             "dataset_id",
-            "metadata_version",
         ]).to_arrow().sort_by("index").to_pylist()
         self.assertEqual([0, 0, 1, 1, 1], [row["episode_index"] for row in rows])
         self.assertEqual([0, 1, 0, 1, 2], [row["frame_index"] for row in rows])
@@ -791,26 +803,27 @@ class LeRobotImportTest(unittest.TestCase):
             [row["dataset_id"] for row in rows],
         )
         manifests = _catalog_rows(self.connection, "robot_data__datasets")
-        self.assertEqual(["READY"], [
+        self.assertEqual(["PENDING", "READY"], [
             row["status"] for row in manifests
         ])
-        manifest = manifests[0]
+        manifest = manifests[1]
         self.assertEqual(str(table.identifier), manifest["dataset_id"])
-        self.assertEqual(32, len(manifest["metadata_version"]))
-        self.assertEqual(snapshot_id, manifest["frames_snapshot_id"])
-        self.assertEqual(1, manifest["episodes_snapshot_id"])
-        self.assertEqual(1, manifest["tasks_snapshot_id"])
+        self.assertEqual(result.version_id, manifest["version_id"])
+        self.assertIsNone(manifest["parent_version_id"])
+        self.assertIsNotNone(manifest["published_at"])
+        self.assertEqual(
+            result.frames_snapshot_id, manifest["frames_snapshot_id"])
+        self.assertEqual(
+            result.episodes_snapshot_id, manifest["episodes_snapshot_id"])
+        self.assertEqual(
+            result.tasks_snapshot_id, manifest["tasks_snapshot_id"])
         self.assertEqual("lerobot", manifest["format"])
         self.assertEqual("v3.0", manifest["format_version"])
         self.assertIsNotNone(manifest["global_stats_json"])
         self.assertTrue(manifest["metadata_checksum"].startswith("sha256:"))
+        tag = "pypaimon-lerobot-%s" % manifest["version_id"]
         self.assertEqual(
-            [manifest["metadata_version"]] * 5,
-            [row["metadata_version"] for row in rows],
-        )
-        tag = "pypaimon-lerobot-%s" % manifest["metadata_version"]
-        self.assertEqual(
-            snapshot_id,
+            result.frames_snapshot_id,
             self.connection.catalog.get_tag(
                 table.identifier, tag).snapshot.id,
         )
@@ -824,6 +837,12 @@ class LeRobotImportTest(unittest.TestCase):
             )
 
         episodes = _catalog_rows(self.connection, "robot_data__episodes")
+        episode_fields = {
+            field.name for field in self.connection.catalog.get_table(
+                self.connection._identifier(
+                    "robot_data__episodes")).fields
+        }
+        self.assertNotIn("version_id", episode_fields)
         self.assertEqual([(0, 0, 2), (1, 2, 5)], [
             (row["episode_index"], row["dataset_from_index"],
              row["dataset_to_index"])
@@ -835,11 +854,16 @@ class LeRobotImportTest(unittest.TestCase):
             row["episode_stats_json"] is not None for row in episodes))
 
         tasks = _catalog_rows(self.connection, "robot_data__tasks")
+        task_fields = {
+            field.name for field in self.connection.catalog.get_table(
+                self.connection._identifier("robot_data__tasks")).fields
+        }
+        self.assertNotIn("version_id", task_fields)
         self.assertEqual([(0, "pick"), (1, "place")], [
             (row["task_index"], row["task"]) for row in tasks
         ])
         self.assertEqual(
-            snapshot_id,
+            result.frames_snapshot_id,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
         )
 
@@ -858,22 +882,10 @@ class LeRobotImportTest(unittest.TestCase):
             [imported[index] for index in range(5)],
         )
 
-        appended_snapshot_id = self.connection.load_from_lerobot(
-            "robot_data", self.image_source, batch_size=4)
-        self.assertEqual(2, appended_snapshot_id)
-        self.assertEqual(10, table.scan().to_arrow().num_rows)
-        manifests = _catalog_rows(self.connection, "robot_data__datasets")
-        ready_versions = [
-            row["metadata_version"] for row in manifests
-            if row["status"] == "READY"
-        ]
-        self.assertEqual(2, len(ready_versions))
-        self.assertEqual(2, len(set(ready_versions)))
-        versions = table.scan().select([
-            "metadata_version"
-        ]).to_arrow().column(0).to_pylist()
-        self.assertEqual([5, 5], sorted(
-            versions.count(version) for version in set(versions)))
+        with self.assertRaisesRegex(ValueError, "already been imported"):
+            self.connection.load_from_lerobot(
+                "robot_data", self.image_source, batch_size=4)
+        self.assertEqual(5, table.scan().to_arrow().num_rows)
 
     def test_frame_controls_must_match_published_episode_metadata(self):
         cases = [
@@ -903,11 +915,11 @@ class LeRobotImportTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "has %s" % column):
                     self.connection.load_from_lerobot(table_name, source)
-                datasets = self.connection.catalog.get_table(
-                    self.connection._identifier(
-                        table_name + "__datasets"))
-                self.assertIsNone(
-                    datasets.snapshot_manager().get_latest_snapshot())
+                manifests = _catalog_rows(
+                    self.connection, table_name + "__datasets")
+                self.assertEqual(["PENDING"], [
+                    row["status"] for row in manifests
+                ])
                 table = self.connection.get_table(table_name)
                 self.assertIsNone(
                     table.raw_table.snapshot_manager().get_latest_snapshot())
@@ -965,10 +977,11 @@ class LeRobotImportTest(unittest.TestCase):
                 ValueError, "declares task indices"):
             self.connection.load_from_lerobot(
                 "extra_episode_task", source)
-        datasets = self.connection.catalog.get_table(
-            self.connection._identifier("extra_episode_task__datasets"))
-        self.assertIsNone(
-            datasets.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "extra_episode_task__datasets")],
+        )
         table = self.connection.get_table("extra_episode_task")
         self.assertIsNone(
             table.raw_table.snapshot_manager().get_latest_snapshot())
@@ -996,10 +1009,11 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "task_index"):
             self.connection.load_from_lerobot("missing_tasks", source)
-        datasets = self.connection.catalog.get_table(
-            self.connection._identifier("missing_tasks__datasets"))
-        self.assertIsNone(
-            datasets.snapshot_manager().get_latest_snapshot())
+        self.assertEqual(
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "missing_tasks__datasets")],
+        )
         table = self.connection.get_table("missing_tasks")
         self.assertIsNone(
             table.raw_table.snapshot_manager().get_latest_snapshot())
@@ -1011,13 +1025,13 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
                 return_value=source_file_io):
-            snapshot_id = self.connection.load_from_lerobot(
+            result = self.connection.load_from_lerobot(
                 "oss_images",
                 source,
                 batch_size=2,
             )
 
-        self.assertEqual(1, snapshot_id)
+        self.assertEqual(1, result.frames_snapshot_id)
         table = self.connection.get_table("oss_images")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task"
@@ -1060,8 +1074,9 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
                 return_value=source_file_io):
-            self.assertIsNone(self.connection.load_from_lerobot(
-                "empty_oss", source))
+            result = self.connection.load_from_lerobot(
+                "empty_oss", source)
+        self.assertIsNone(result.frames_snapshot_id)
         self.assertEqual(
             0,
             _catalog_rows(
@@ -1073,19 +1088,19 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog,
                 "create_tag",
                 side_effect=NotImplementedError):
-            snapshot_id = self.connection.load_from_lerobot(
+            result = self.connection.load_from_lerobot(
                 "tag_fallback", self.image_source)
 
         manifest = _catalog_rows(
-            self.connection, "tag_fallback__datasets")[0]
-        tag = "pypaimon-lerobot-%s" % manifest["metadata_version"]
+            self.connection, "tag_fallback__datasets")[1]
+        tag = "pypaimon-lerobot-%s" % manifest["version_id"]
         table = self.connection.get_table("tag_fallback")
         self.assertEqual(
-            snapshot_id,
+            result.frames_snapshot_id,
             table.raw_table.tag_manager().get(tag).id,
         )
 
-    def test_failed_publication_leaves_no_manifest(self):
+    def test_failed_publication_leaves_pending_manifest(self):
         with patch(
                 "pypaimon.multimodal.lerobot.api._publish_dataset",
                 side_effect=RuntimeError("publish failed")):
@@ -1093,17 +1108,16 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "failed_publish", self.image_source)
 
-        datasets = self.connection.catalog.get_table(
-            self.connection._identifier("failed_publish__datasets"))
-        self.assertIsNone(
-            datasets.snapshot_manager().get_latest_snapshot())
+        manifests = _catalog_rows(
+            self.connection, "failed_publish__datasets")
+        self.assertEqual(["PENDING"], [
+            row["status"] for row in manifests
+        ])
         frames = self.connection.get_table("failed_publish").scan().select([
-            "metadata_version"
+            "dataset_id"
         ]).to_arrow()
         self.assertEqual(5, frames.num_rows)
-        versions = set(frames.column(0).to_pylist())
-        self.assertEqual(1, len(versions))
-        self.assertEqual(32, len(next(iter(versions))))
+        self.assertEqual(1, len(set(frames.column(0).to_pylist())))
 
     def test_existing_unmanaged_table_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
@@ -1131,7 +1145,7 @@ class LeRobotImportTest(unittest.TestCase):
             identifier,
             PaimonSchema.from_pyarrow_schema(
                 _DATASETS_SCHEMA,
-                primary_keys=["metadata_version"],
+                primary_keys=["version_id"],
                 options={
                     "bucket": "1",
                     _OWNER_ID_OPTION: owner_id,
@@ -1249,17 +1263,24 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection._identifier("after_rename"),
         )
 
-        self.assertEqual(2, self.connection.load_from_lerobot(
-            "after_rename", self.image_source))
+        result = self.connection.load_from_lerobot(
+            "after_rename",
+            self.image_source,
+            dataset_id="renamed-dataset",
+        )
+        self.assertEqual(2, result.frames_snapshot_id)
         manifests = _catalog_rows(
             self.connection, "before_rename__datasets")
         ready = [row for row in manifests if row["status"] == "READY"]
         self.assertEqual(2, len(ready))
         self.assertEqual(2, len({
-            row["metadata_version"] for row in ready
+            row["version_id"] for row in ready
         }))
         self.assertEqual(
-            {self.connection._identifier("before_rename")},
+            {
+                self.connection._identifier("before_rename"),
+                "renamed-dataset",
+            },
             {row["dataset_id"] for row in ready},
         )
 

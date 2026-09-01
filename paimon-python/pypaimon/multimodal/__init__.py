@@ -29,6 +29,7 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
+from pypaimon.multimodal.lerobot import LeRobotLoadResult
 from pypaimon.multimodal.table import (
     MultimodalTable,
     TextRoute,
@@ -51,6 +52,7 @@ __all__ = [
     "BlobStore",
     "Hdf5File",
     "Hdf5LoadResult",
+    "LeRobotLoadResult",
     "MultimodalConnection",
     "MultimodalTable",
     "NoSuchKey",
