@@ -42,7 +42,12 @@ CAMERA_KEYS = (
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
-    """One immutable ACT and measurement configuration for both backends."""
+    """Immutable model, sampling, training, and measurement parameters.
+
+    Every backend reconstructs this configuration from the resolved experiment
+    so tensor shapes, optimizer behavior, random seeds, and metric boundaries
+    remain comparable.
+    """
 
     seed: int = 20260825
     action_horizon: int = 32
@@ -92,7 +97,13 @@ class BenchmarkConfig:
 
 @dataclass(frozen=True)
 class WindowPlan:
-    """Explicit window indices consumed identically by both backends."""
+    """Logical dataset-window indices consumed by one experiment.
+
+    Measurement indices cover warm-up and timed reads, train indices cover
+    fixed optimizer steps, and validation indices cover the final loss. These
+    are map-style dataset indices, not Paimon row IDs. ``sha256`` identifies
+    the exact plan across independent backend processes.
+    """
 
     seed: int
     measurement_indices: tuple
@@ -115,7 +126,18 @@ class WindowPlan:
 
 
 def build_window_plan(train_window_count, validation_window_count, config):
-    """Build stable indices for training, validation, and batch-fetch timing."""
+    """Build deterministic measurement, training, and validation indices.
+
+    Args:
+        train_window_count: Number of complete windows in the train dataset.
+        validation_window_count: Number of complete validation windows.
+        config: Shared benchmark configuration supplying counts and the seed.
+
+    Returns:
+        A :class:`WindowPlan`. When more samples are needed than a dataset
+        contains, consecutive seeded permutations are concatenated; sampling
+        does not become independent sampling with replacement.
+    """
     train_window_count = _positive_int(
         train_window_count, "train_window_count")
     validation_window_count = _positive_int(
@@ -135,15 +157,40 @@ def build_window_plan(train_window_count, validation_window_count, config):
 
 
 def decode_rgb_image(payload):
-    """Decode one JPEG/PNG payload identically for HDF5 and Paimon."""
+    """Decode JPEG/PNG bytes into an ``H x W x 3`` RGB NumPy array.
+
+    Raises:
+        ValueError: If Pillow cannot decode the payload as an image.
+    """
     try:
         return np.asarray(Image.open(BytesIO(payload)).convert("RGB"))
     except Exception as error:
         raise ValueError("Cannot decode ACT RGB image bytes.") from error
 
 
+def decode_image_tensor(value):
+    """Decode bytes or an HDF5 uint8 value into normalized ``C x H x W``.
+
+    The returned NumPy array is float32 with values in ``[0, 1]``. Both
+    storage backends call this function so image conversion is not part of the
+    performance difference being measured.
+    """
+    payload = (
+        bytes(value)
+        if isinstance(value, (bytes, bytearray, memoryview))
+        else np.asarray(value, dtype=np.uint8).tobytes()
+    )
+    image = decode_rgb_image(payload)
+    return np.transpose(image, (2, 0, 1)).astype(np.float32) / 255.0
+
+
 def validate_act_batch(batch, config):
-    """Validate the exact tensor contract passed to the shared ACT policy."""
+    """Validate a collated batch against the shared ACT tensor contract.
+
+    Successful validation returns ``None``. It checks exact fields, tensor
+    shapes and dtypes, finite values, image range, complete unpadded windows,
+    and ``sample_id == episode_id#step_idx`` identity.
+    """
     required = {
         "sample_id", "episode_id", "step_idx", "qpos", "action",
         "images", "is_pad",
@@ -181,7 +228,7 @@ def validate_act_batch(batch, config):
     if torch.any(batch["images"] < 0) or torch.any(batch["images"] > 1):
         raise ValueError("images must be normalized to [0, 1].")
     if batch["is_pad"].any():
-        raise ValueError("Paired ACT benchmark windows must be complete and unpadded.")
+        raise ValueError("ACT benchmark windows must be complete and unpadded.")
     for sample_id, episode_id, step_idx in zip(
             batch["sample_id"], batch["episode_id"],
             batch["step_idx"].tolist()):
@@ -191,7 +238,11 @@ def validate_act_batch(batch, config):
 
 
 def build_lerobot_batch(batch, config):
-    """Map the common window contract to LeRobot ACTPolicy feature names."""
+    """Map a shared ACT batch to LeRobot ``ACTPolicy`` feature names.
+
+    Images are resized bilinearly to the configured height and width when
+    necessary. State, action, and padding retain their original semantics.
+    """
     validate_act_batch(batch, config)
     images = batch["images"]
     target_size = (config.image_height, config.image_width)
@@ -211,7 +262,14 @@ def build_lerobot_batch(batch, config):
 
 
 def build_act_policy(config):
-    """Build the reduced CPU LeRobot ACT configuration used by the benchmark."""
+    """Build the reduced CPU ACT policy used only by this benchmark.
+
+    Returns:
+        ``(policy, metadata)`` containing the LeRobot policy and a
+        JSON-compatible description of its architecture and parameter counts.
+        Pretrained weights are disabled, so this function performs no model
+        download and does not represent a production training configuration.
+    """
     try:
         import importlib.metadata
         from lerobot.configs.types import FeatureType, PolicyFeature
@@ -219,7 +277,7 @@ def build_act_policy(config):
         from lerobot.policies.act.modeling_act import ACTPolicy
     except ImportError as error:
         raise ImportError(
-            "Paired ACT benchmark requires: "
+            "ACT benchmark requires: "
             "pip install -e '.[act]'.") from error
 
     inputs = {
@@ -282,7 +340,20 @@ def run_backend(
         config,
         sample_sequence_sha256,
         policy_factory=None):
-    """Measure a backend with the shared plan, model, and trainer."""
+    """Measure one backend with the shared plan, model, and trainer.
+
+    ``backend`` is a result label and ``round_number`` identifies the repeat.
+    ``dataset_factory`` must return ``(train_dataset, validation_dataset)`` and
+    must be reusable: it is called for the timed run and again by the separate
+    Python-memory replay. ``policy_factory`` is an optional test hook returning
+    ``(policy, model_metadata)``.
+
+    Returns:
+        A JSON-compatible metrics dictionary covering dataset construction,
+        first batch, timed batch fetch, fixed optimizer steps, validation loss,
+        and a separate ``tracemalloc`` peak replay. OS page cache is not
+        controlled and native Arrow/Torch allocations are outside tracemalloc.
+    """
     _seed_everything(config.seed)
     policy_factory = policy_factory or build_act_policy
     started = time.monotonic()
@@ -408,6 +479,11 @@ def run_backend(
 
 
 def _measure_python_peak(dataset_factory, plan, config):
+    """Measure Python allocation peak in a separate dataset-first-batch replay.
+
+    The factory is called again so tracing overhead cannot distort the main
+    throughput timings. The returned integer is the tracemalloc peak in bytes.
+    """
     gc.collect()
     tracemalloc.start()
     try:
@@ -428,6 +504,7 @@ def _measure_python_peak(dataset_factory, plan, config):
 
 
 def _repeat_permutations(size, count, seed):
+    """Return ``count`` indices by concatenating seeded permutations."""
     values = []
     generator = np.random.RandomState(seed)
     while len(values) < count:
@@ -436,6 +513,7 @@ def _repeat_permutations(size, count, seed):
 
 
 def _seed_everything(seed):
+    """Reset Python, NumPy, and Torch RNGs and enable deterministic Torch ops."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -462,6 +540,21 @@ def _positive_int(value, name):
 
 def _iter_logical_batches(
         dataset, indices, *, logical_batch_size, fetch_batches):
+    """Yield collated model batches while coalescing physical dataset reads.
+
+    Args:
+        dataset: Map-style dataset implementing ``__getitem__`` and optionally
+            plural ``__getitems__(indices)`` access.
+        indices: Explicit ordered logical-window indices. Their count must be
+            divisible by ``logical_batch_size``.
+        logical_batch_size: Number of samples consumed by one model step.
+        fetch_batches: Logical batches combined into one physical dataset read.
+
+    Yields:
+        Collated logical batches in the exact input-index order. A plural
+        dataset method is preferred when available; otherwise samples are read
+        individually and split back into the same logical batches.
+    """
     logical_batch_size = _positive_int(
         logical_batch_size, "logical_batch_size")
     fetch_batches = _positive_int(fetch_batches, "fetch_batches")

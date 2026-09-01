@@ -1,0 +1,22 @@
+{
+  "benchmark_id": "robomind-act",
+  "config": {
+    "action_horizon": 32,
+    "batch_size": 2,
+    "fetch_batches": 8,
+    "image_height": 64,
+    "image_width": 80,
+    "learning_rate": 0.0001,
+    "optimizer_steps": 2,
+    "rounds": 3,
+    "seed": 20260825,
+    "timed_batches": 4,
+    "warmup_batches": 1,
+    "weight_decay": 0.0001
+  },
+  "dataset": "RoboMIND AgileX",
+  "schema_version": "act-benchmark-experiment@1",
+  "statistics_version": "robomind-agilex-joint-position@1",
+  "train_episode_id": null,
+  "validation_episode_id": null
+}

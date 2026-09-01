@@ -30,18 +30,22 @@ Image = pytest.importorskip("PIL.Image")
 h5py = pytest.importorskip("h5py")
 
 import pypaimon.multimodal as pmm
-import pypaimon.benchmark.act_harness as act_harness
-import pypaimon.benchmark.paired_act as paired_act
-from pypaimon.benchmark.paired_act import (
-    IMAGE_COLUMNS,
+import pypaimon.benchmark.act.harness as act_harness
+import pypaimon.benchmark.act.__main__ as act_cli
+from pypaimon.benchmark.act.runner import (
     BenchmarkConfig,
     _git_head,
-    _paimon_datasets,
-    _shared_normalization,
-    _snapshot_id,
-    run,
+    prepare_experiment,
+    run_experiment,
 )
-from pypaimon.benchmark.act_harness import build_window_plan, run_backend
+from pypaimon.benchmark.act.experiment import load_experiment
+from pypaimon.benchmark.act.compare import canonical_sha256, compare_results
+from pypaimon.benchmark.act.harness import build_window_plan, run_backend
+from pypaimon.benchmark.act.paimon import (
+    IMAGE_COLUMNS,
+    create_datasets as create_paimon_datasets,
+    latest_snapshot_id,
+)
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
 from pypaimon.sample import robomind_agilex as agilex
@@ -225,7 +229,7 @@ def _write_episode(root, split, name, offset, frames=6):
 
 
 @pytest.fixture
-def paired_input(tmp_path, monkeypatch):
+def benchmark_input(tmp_path, monkeypatch):
     root = tmp_path / "input"
     _write_episode(root, "train", "train-a", 1)
     _write_episode(root, "train", "train-b", 11)
@@ -237,7 +241,7 @@ def paired_input(tmp_path, monkeypatch):
     })
     agilex.ingest_local(root, warehouse, batch_size=2)
     agilex.backfill_canonical_action(
-        warehouse, statistics_version="paired-test@1")
+        warehouse, statistics_version="act-test@1")
     return root, warehouse
 
 
@@ -265,93 +269,220 @@ def _policy_factory(config):
     }
 
 
-def test_runs_three_alternating_rounds_with_one_shared_contract(
-        paired_input, tmp_path):
-    input_root, warehouse = paired_input
-    report_path = tmp_path / "paired-report.json"
-    config = BenchmarkConfig(
-        seed=17,
-        action_horizon=3,
-        batch_size=2,
-        optimizer_steps=2,
-        image_height=8,
-        image_width=10,
-        warmup_batches=1,
-        timed_batches=2,
-        rounds=3,
-    )
+def test_prepare_writes_resolved_experiment(benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "seed": 17,
+        "action_horizon": 3,
+        "batch_size": 2,
+        "optimizer_steps": 2,
+        "image_height": 8,
+        "image_width": 10,
+        "timed_batches": 2,
+    })
+    output = tmp_path / "experiment.json"
 
-    report = run(
-        input_root,
-        warehouse,
-        report_path,
-        config=config,
-        statistics_version="paired-test@1",
+    experiment = prepare_experiment(
+        input_root, warehouse, output, definition=definition)
+
+    assert json.loads(output.read_text()) == experiment
+    assert experiment["schema_version"] == "act-benchmark-experiment@1"
+    assert experiment["train_episode_id"] == "train-a"
+    assert experiment["validation_episode_id"] == "val-a"
+    assert experiment["source"]["episodes"][0]["frame_count"] == 6
+    assert len(experiment["source"]["sha256"]) == 64
+    assert len(experiment["normalization"]["sha256"]) == 64
+    assert len(experiment["window_plan"]["sha256"]) == 64
+    assert experiment["paimon"]["frames_snapshot_id"] > 0
+
+
+def test_hdf5_run_consumes_resolved_experiment_without_warehouse(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "seed": 17,
+        "action_horizon": 3,
+        "batch_size": 2,
+        "optimizer_steps": 2,
+        "image_height": 8,
+        "image_width": 10,
+        "timed_batches": 2,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    experiment = prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+    result_path = tmp_path / "hdf5-result.json"
+
+    result = run_experiment(
+        "hdf5",
+        experiment_path,
+        result_path,
+        input_root=input_root,
         policy_factory=_policy_factory,
     )
 
-    assert report_path.exists()
-    assert json.loads(report_path.read_text()) == report
-    assert report["schema_version"] == "robomind-paired-act-benchmark@1"
-    assert report["status"] == "SUCCEEDED"
-    assert report["parameters"]["config"] == config.to_dict()
-    assert report["parameters"]["cache_control"] == "uncontrolled"
-    assert report["input"]["paimon_window_dataset"] == (
-        "pypaimon.multimodal.ContiguousWindowDataset")
-    assert report["input"]["paimon_window_snapshot_id"] == (
-        report["input"]["frames_snapshot_id"])
-    assert report["execution_order"] == [
-        "hdf5", "paimon", "paimon", "hdf5", "hdf5", "paimon",
+    assert json.loads(result_path.read_text()) == result
+    assert result["schema_version"] == "act-benchmark-result@1"
+    assert result["status"] == "SUCCEEDED"
+    assert result["backend"] == "hdf5"
+    assert result["experiment"] == experiment
+    assert len(result["experiment_sha256"]) == 64
+    assert len(result["tensor_fingerprint"]["sha256"]) == 64
+    assert len(result["runs"]) == 3
+    assert result["summary"]["round_count"] == 3
+
+
+def test_independent_backend_results_preserve_tensor_and_loss_parity(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "seed": 17,
+        "action_horizon": 3,
+        "batch_size": 2,
+        "optimizer_steps": 2,
+        "image_height": 8,
+        "image_width": 10,
+        "timed_batches": 2,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+
+    hdf5_result = run_experiment(
+        "hdf5",
+        experiment_path,
+        tmp_path / "hdf5-result.json",
+        input_root=input_root,
+        policy_factory=_policy_factory,
+    )
+    paimon_result = run_experiment(
+        "paimon",
+        experiment_path,
+        tmp_path / "paimon-result.json",
+        warehouse=warehouse,
+        policy_factory=_policy_factory,
+    )
+
+    assert hdf5_result["tensor_fingerprint"] == (
+        paimon_result["tensor_fingerprint"])
+    assert [run["train_loss"] for run in hdf5_result["runs"]] == [
+        run["train_loss"] for run in paimon_result["runs"]
     ]
-    assert len(report["runs"]) == 6
-    assert all(report["correctness"]["checks"].values())
-    assert report["correctness"]["tensor_parity"]["passed"]
-    assert report["correctness"]["tensor_parity"][
-        "checked_window_count"] > 0
-    assert (
-        report["correctness"]["tensor_parity"]["max_absolute_difference"]
-        == {
-            "qpos": 0.0,
-            "action": 0.0,
-            "images": 0.0,
-        }
-    )
-    assert report["correctness"]["loss_parity"]["passed"]
-    assert all(
-        comparison["train_loss_exact"]
-        and comparison["validation_loss_exact"]
-        for comparison in report["correctness"]["loss_parity"]["rounds"]
-    )
-    assert report["window_plan"]["seed"] == 17
-    assert len(report["window_plan"]["sha256"]) == 64
-    assert report["normalization"]["statistics_version"] == "paired-test@1"
-    assert len(report["normalization"]["sha256"]) == 64
-    assert set(report["summary"]) == {"hdf5", "paimon"}
-    for backend in ("hdf5", "paimon"):
-        assert report["summary"][backend]["round_count"] == 3
-        for metric in (
-                "first_batch_s",
-                "batch_fetch_samples_per_s",
-                "fixed_steps_s",
-                "python_peak_allocated_bytes"):
-            assert set(report["summary"][backend][metric]) == {
-                "median", "min", "max",
-            }
-    for round_index in range(3):
-        paired = [item for item in report["runs"]
-                  if item["round"] == round_index + 1]
-        by_backend = {item["backend"]: item for item in paired}
-        assert by_backend["hdf5"]["sample_sequence_sha256"] == (
-            by_backend["paimon"]["sample_sequence_sha256"])
-        assert by_backend["hdf5"]["train_loss"] == (
-            by_backend["paimon"]["train_loss"])
-        assert by_backend["hdf5"]["validation_loss"] == (
-            by_backend["paimon"]["validation_loss"])
+    assert [run["validation_loss"] for run in hdf5_result["runs"]] == [
+        run["validation_loss"] for run in paimon_result["runs"]
+    ]
+    comparison = compare_results([hdf5_result, paimon_result])
+    assert comparison["status"] == "SUCCEEDED"
+    assert comparison["experiments"][0]["backends"] == ["hdf5", "paimon"]
+
+
+def test_paimon_run_rejects_normalization_not_recorded_in_statistics(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "action_horizon": 3,
+        "batch_size": 1,
+        "optimizer_steps": 1,
+        "image_height": 8,
+        "image_width": 10,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    experiment = prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+    experiment["normalization"]["values"]["action_mean"][0] += 1
+    experiment["normalization"]["sha256"] = canonical_sha256(
+        experiment["normalization"]["values"])
+    experiment_path.write_text(json.dumps(experiment))
+
+    with pytest.raises(ValueError, match="normalization differs"):
+        run_experiment(
+            "paimon",
+            experiment_path,
+            tmp_path / "must-not-exist.json",
+            warehouse=warehouse,
+            policy_factory=_policy_factory,
+        )
+
+
+def test_run_rejects_tampered_source_manifest(benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "action_horizon": 3,
+        "batch_size": 1,
+        "optimizer_steps": 1,
+        "image_height": 8,
+        "image_width": 10,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    experiment = prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+    experiment["source"]["episodes"][0]["frame_count"] += 1
+    experiment_path.write_text(json.dumps(experiment))
+
+    with pytest.raises(ValueError, match="source-manifest hash differs"):
+        run_experiment(
+            "hdf5",
+            experiment_path,
+            tmp_path / "must-not-exist.json",
+            input_root=input_root,
+            policy_factory=_policy_factory,
+        )
+
+
+def test_run_rejects_config_not_used_to_build_window_plan(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "action_horizon": 3,
+        "batch_size": 1,
+        "optimizer_steps": 1,
+        "image_height": 8,
+        "image_width": 10,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    experiment = prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+    experiment["config"]["seed"] += 1
+    experiment_path.write_text(json.dumps(experiment))
+
+    with pytest.raises(ValueError, match="window plan was not built"):
+        run_experiment(
+            "hdf5",
+            experiment_path,
+            tmp_path / "must-not-exist.json",
+            input_root=input_root,
+            policy_factory=_policy_factory,
+        )
 
 
 def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
-        paired_input):
-    input_root, warehouse = paired_input
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"]["action_horizon"] = 3
+    experiment = prepare_experiment(
+        input_root,
+        warehouse,
+        tmp_path / "experiment.json",
+        definition=definition,
+    )
+    normalization = {
+        name: np.asarray(value, dtype=np.float32)
+        for name, value in experiment["normalization"]["values"].items()
+    }
     connection = pmm.connect(
         database=agilex.DEFAULT_DATABASE,
         options={"warehouse": str(warehouse)},
@@ -359,18 +490,12 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
     frames = connection.get_table(agilex.FRAMES_TABLE)
     assert frames.raw_table.table_schema.options["vector.file.format"] == (
         "parquet")
-    snapshot_id = _snapshot_id(frames)
-    normalization, _ = _shared_normalization(
-        agilex.discover_episodes(input_root),
-        connection,
-        snapshot_id,
-        "paired-test@1",
-    )
+    snapshot_id = latest_snapshot_id(frames)
 
     original = ScanQuery._fetch_bodies
     with patch.object(
             ScanQuery, "_fetch_bodies", side_effect=original) as fetch:
-        train, validation = _paimon_datasets(
+        train, validation = create_paimon_datasets(
             frames,
             snapshot_id,
             "train-a",
@@ -406,7 +531,7 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
 
     assert train.snapshot_id == snapshot_id
     assert validation.snapshot_id == snapshot_id
-    assert _snapshot_id(frames) != snapshot_id
+    assert latest_snapshot_id(frames) != snapshot_id
     assert len(train) == 4
     sample_after_append = train[0]
     for name in ("qpos", "action", "images", "is_pad"):
@@ -414,33 +539,48 @@ def test_paimon_windows_are_lazy_snapshot_pinned_and_vortex_independent(
             sample_before_append[name], sample_after_append[name])
 
 
-def test_tensor_parity_rejects_different_hdf5_bytes(
-        paired_input, tmp_path):
-    input_root, warehouse = paired_input
+def test_compare_rejects_different_hdf5_tensor_bytes(
+        benchmark_input, tmp_path):
+    input_root, warehouse = benchmark_input
+    definition = load_experiment()
+    definition["statistics_version"] = "act-test@1"
+    definition["config"].update({
+        "action_horizon": 3,
+        "batch_size": 1,
+        "optimizer_steps": 1,
+        "image_height": 8,
+        "image_width": 10,
+    })
+    experiment_path = tmp_path / "experiment.json"
+    prepare_experiment(
+        input_root, warehouse, experiment_path, definition=definition)
+    paimon_result = run_experiment(
+        "paimon",
+        experiment_path,
+        tmp_path / "paimon-result.json",
+        warehouse=warehouse,
+        policy_factory=_policy_factory,
+    )
     changed = (input_root / "13_packbowl" / "success_episodes" / "train"
                / "train-a" / "data" / "trajectory.hdf5")
     with h5py.File(changed, "r+") as h5:
         h5["puppet/joint_position_left"][0, 0] += 1
 
-    with pytest.raises(AssertionError, match="tensor differs"):
-        run(
-            input_root,
-            warehouse,
-            tmp_path / "must-not-exist.json",
-            config=BenchmarkConfig(
-                action_horizon=3,
-                batch_size=1,
-                optimizer_steps=1,
-                image_height=8,
-                image_width=10,
-                rounds=3,
-            ),
-            statistics_version="paired-test@1",
-            policy_factory=_policy_factory,
-        )
+    hdf5_result = run_experiment(
+        "hdf5",
+        experiment_path,
+        tmp_path / "hdf5-result.json",
+        input_root=input_root,
+        policy_factory=_policy_factory,
+    )
+
+    comparison = compare_results([hdf5_result, paimon_result])
+    assert comparison["status"] == "FAILED"
+    assert comparison["experiments"][0]["reason"] == (
+        "tensor fingerprints differ")
 
 
-def test_requires_at_least_three_alternating_rounds():
+def test_requires_at_least_three_measurement_rounds():
     with pytest.raises(ValueError, match="rounds must be at least 3"):
         BenchmarkConfig(rounds=2)
 
@@ -451,15 +591,42 @@ def test_fetch_batches_must_be_positive():
         BenchmarkConfig(fetch_batches=0)
 
 
-def test_cli_documents_physical_fetch_batches(capsys):
+def test_cli_exposes_prepare_run_and_compare_contracts(capsys):
     with pytest.raises(SystemExit):
-        paired_act.main(["--help"])
+        act_cli.main(["prepare", "--help"])
 
-    assert "--fetch-batches" in capsys.readouterr().out
+    prepare_help = capsys.readouterr().out
+    assert "--experiment" in prepare_help
+    assert "--fetch-batches" in prepare_help
+
+    with pytest.raises(SystemExit):
+        act_cli.main(["run", "--help"])
+
+    run_help = capsys.readouterr().out
+    assert "--backend" in run_help
+    assert "--experiment" in run_help
+    assert "--results-dir" in run_help
+
+    with pytest.raises(SystemExit):
+        act_cli.main(["compare", "--help"])
+
+    assert "--results-dir" in capsys.readouterr().out
+
+
+def test_automatic_artifact_paths_do_not_overwrite_same_second(tmp_path):
+    with patch.object(act_cli, "datetime") as now:
+        now.now.return_value.strftime.return_value = "20260901T120000Z"
+
+        first = act_cli._artifact_path(tmp_path, "robomind-act-hdf5")
+        second = act_cli._artifact_path(tmp_path, "robomind-act-hdf5")
+
+    assert first != second
+    assert first.parent == tmp_path
+    assert second.parent == tmp_path
 
 
 def test_source_commit_falls_back_outside_git_checkout(tmp_path):
     with patch(
-            "pypaimon.benchmark.paired_act.subprocess.check_output",
+            "pypaimon.benchmark.act.runner.subprocess.check_output",
             side_effect=FileNotFoundError):
         assert _git_head(tmp_path) == "UNKNOWN"

@@ -233,7 +233,12 @@ setup(
     version=VERSION,
     packages=PACKAGES,
     include_package_data=True,
-    package_data={"pypaimon": ["_full_version"]},
+    package_data={
+        "pypaimon": [
+            "_full_version",
+            "benchmark/act/default_experiment.json",
+        ],
+    },
     cmdclass={"build_py": PaimonBuildPy, "sdist": PaimonSdist},
     install_requires=install_requires,
     entry_points={
