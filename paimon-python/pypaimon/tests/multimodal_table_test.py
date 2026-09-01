@@ -810,6 +810,30 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_scan_to_arrow_batch_reader(self):
+        users = self.conn.create_table(
+            "batch_users",
+            data=[
+                {"id": 1, "age": 20},
+                {"id": 2, "age": 30},
+                {"id": 3, "age": 40},
+            ],
+            schema=_schema({"id": pa.int32(), "age": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        reader = (
+            users.scan()
+            .where("age >= 30")
+            .select("id")
+            .to_arrow_batch_reader()
+        )
+
+        self.assertEqual([{"id": 2}, {"id": 3}], reader.read_all().to_pylist())
+
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            users.search("thirty", column="id").to_arrow_batch_reader()
+
     def test_scan_with_row_id_returns_system_column(self):
         users = self.conn.create_table(
             "users",
