@@ -72,8 +72,16 @@ class MultimodalConnection:
         """Create a multimodal table and optionally add initial data."""
         identifier = self._identifier(name)
         already_exists = _table_exists(self.catalog, identifier)
-        paimon_schema = _to_paimon_schema(schema, data, options, partitioned)
-        _validate_multimodal_schema(paimon_schema, identifier)
+        if already_exists and ignore_if_exists:
+            return self.get_table(name)
+        try:
+            paimon_schema = _to_paimon_schema(
+                schema, data, options, partitioned)
+            _validate_multimodal_schema(paimon_schema, identifier)
+        except ValueError:
+            if ignore_if_exists and _table_exists(self.catalog, identifier):
+                return self.get_table(name)
+            raise
 
         self._create_database_for(identifier)
         try:

@@ -35,7 +35,10 @@ import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
 from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
-from pypaimon.multimodal.lerobot.metadata import _managed_table_options
+from pypaimon.multimodal.lerobot.metadata import (
+    _managed_table_options,
+    _OWNER_ID_OPTION,
+)
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _read_batch,
@@ -1122,6 +1125,51 @@ class LeRobotImportTest(unittest.TestCase):
         result = self.connection.load_from_lerobot(
             "invalid_options", self.image_source)
         self.assertEqual(1, result.frames_snapshot_id)
+
+    def test_target_open_failure_is_cleaned_and_can_retry(self):
+        original_get = self.connection.get_table
+        failed = [False]
+
+        def fail_once(name):
+            if not failed[0]:
+                failed[0] = True
+                raise RuntimeError("get failed")
+            return original_get(name)
+
+        with patch.object(
+                self.connection, "get_table", side_effect=fail_once):
+            with self.assertRaisesRegex(RuntimeError, "get failed"):
+                self.connection.load_from_lerobot(
+                    "failed_open", self.image_source)
+            result = self.connection.load_from_lerobot(
+                "failed_open", self.image_source)
+
+        self.assertEqual(1, result.frames_snapshot_id)
+
+    def test_target_open_failure_does_not_drop_another_owner(self):
+        original_create = self.connection.create_table
+
+        def create_other_owner(*args, **kwargs):
+            options = dict(kwargs["options"])
+            options[_OWNER_ID_OPTION] = "other-owner"
+            kwargs["options"] = options
+            original_create(*args, **kwargs)
+            raise RuntimeError("get failed")
+
+        with patch.object(
+                self.connection,
+                "create_table",
+                side_effect=create_other_owner):
+            with self.assertRaisesRegex(RuntimeError, "get failed"):
+                self.connection.load_from_lerobot(
+                    "other_owner", self.image_source)
+
+        table = self.connection.catalog.get_table(
+            self.connection._identifier("other_owner"))
+        self.assertEqual(
+            "other-owner",
+            table.table_schema.options[_OWNER_ID_OPTION],
+        )
 
     def test_dataset_close_failure_does_not_override_success(self):
         from pypaimon.multimodal.lerobot import api

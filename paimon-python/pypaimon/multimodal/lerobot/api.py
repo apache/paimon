@@ -21,9 +21,14 @@ import sys
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
-from pypaimon.catalog.catalog_exception import TableAlreadyExistException
+from pypaimon.catalog.catalog_exception import (
+    DatabaseNotExistException,
+    TableAlreadyExistException,
+    TableNotExistException,
+)
 from pypaimon.multimodal.lerobot.metadata import (
     _DEFAULT_DATASET_ID_OPTION,
+    _OWNER_ID_OPTION,
     _drop_import_tables,
     _frame_schema,
     _load_dataset_metadata,
@@ -288,4 +293,21 @@ def _create_target_table(
             "LeRobot target %s already exists; use a new target table."
             % connection._identifier(table_name)
         ) from error
+    except BaseException as error:
+        try:
+            frames_table = connection.catalog.get_table(
+                connection._identifier(table_name))
+        except (DatabaseNotExistException, TableNotExistException):
+            frames_table = None
+        if frames_table is not None and frames_table.table_schema.options.get(
+                _OWNER_ID_OPTION) == owner_id:
+            try:
+                _drop_import_tables(
+                    connection.catalog, frames_table, owner_id)
+            except BaseException as cleanup_error:
+                raise RuntimeError(
+                    "LeRobot target creation failed and cleanup also failed: "
+                    "%s" % cleanup_error
+                ) from error
+        raise
     return table, owner_id

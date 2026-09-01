@@ -760,6 +760,35 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "primary keys"):
             self.conn.get_table("pk")
 
+    def test_create_table_ignores_invalid_options_when_table_exists(self):
+        schema = _schema({"id": pa.int32()})
+        expected = self.conn.create_table("existing", schema=schema)
+
+        actual = self.conn.create_table(
+            "existing",
+            schema=_schema({
+                "id": pa.int32(),
+                "embedding": _vector(3),
+            }),
+            options={"data-evolution.enabled": "false"},
+            ignore_if_exists=True,
+        )
+
+        self.assertEqual(expected.identifier, actual.identifier)
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                side_effect=[False, True]):
+            raced = self.conn.create_table(
+                "existing",
+                schema=_schema({
+                    "id": pa.int32(),
+                    "embedding": _vector(3),
+                }),
+                options={"data-evolution.enabled": "false"},
+                ignore_if_exists=True,
+            )
+        self.assertEqual(expected.identifier, raced.identifier)
+
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(
             "users",
