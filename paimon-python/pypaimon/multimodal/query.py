@@ -182,10 +182,31 @@ class ScanQuery:
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
         IDs, then reads projected values on demand. Columns listed in
-        ``anchor_columns`` are read only for the first row of each window. It
-        sorts rows within each group and never creates a window across groups. See
-        :class:`pypaimon.multimodal.window_dataset.ContiguousWindowDataset`
-        for tail, padding, mask, transform, and adapter semantics.
+        ``anchor_columns`` are provided to ``column_transforms`` as one-element
+        lists read from the first row of each window; ``adapter`` receives the
+        transformed values. ``order_key`` must contain non-null integers that
+        increase by exactly one within each group. The Dataset sorts rows within
+        each group and never creates a window across groups.
+
+        Args:
+            window_size: Number of rows in a complete window.
+            columns: Value columns to return, excluding the group and order
+                keys. The scan projection is used when omitted.
+            anchor_columns: Subset of ``columns`` read only from the window's
+                first row.
+            group_key: Column identifying an independent row sequence.
+            order_key: Integer position column within each group.
+            stride: Distance between scheduled window starts.
+            tail: Handling for incomplete final windows: ``drop``, ``pad``, or
+                ``error``.
+            column_transforms: Per-column callables applied to value lists.
+            pad_values: Optional replacement values used by ``tail='pad'``.
+            adapter: Callable that converts the complete sample mapping.
+            blob_parallelism: Maximum concurrent BLOB body reads per fetch.
+
+        Returns:
+            A snapshot-pinned ``ContiguousWindowDataset``. See that class for
+            padding, mask, transform, and adapter result semantics.
         """
         if self._result_factory is not None:
             raise TypeError(

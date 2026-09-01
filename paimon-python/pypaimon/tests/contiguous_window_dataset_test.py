@@ -16,6 +16,7 @@
 # under the License.
 
 import os
+import pickle
 import shutil
 import tempfile
 import unittest
@@ -159,24 +160,30 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertEqual(1, len(fetch.call_args.args[1]["payload"]))
 
     def test_plural_access_coalesces_overlapping_window_reads(self):
-        dataset = self._dataset(self._table())
-        expected = [dataset[0], dataset[1]]
+        dataset = self._dataset(
+            self._table(), anchor_columns=["payload"])
 
         with patch.object(
                 dataset, "_read_rows", wraps=dataset._read_rows) as read:
-            actual = dataset.__getitems__([0, 1])
+            actual = dataset.__getitems__([1, 0, 1])
 
-        self.assertEqual(1, read.call_count)
-        self.assertEqual(4, len(read.call_args.args[0]))
-        for expected_sample, actual_sample in zip(expected, actual):
-            self.assertEqual(
-                expected_sample["episode"], actual_sample["episode"])
-            self.assertEqual(expected_sample["step"], actual_sample["step"])
-            self.assertEqual(expected_sample["value"], actual_sample["value"])
-            self.assertEqual(
-                expected_sample["payload"], actual_sample["payload"])
-            self.assertTrue(torch.equal(
-                expected_sample["is_pad"], actual_sample["is_pad"]))
+        self.assertEqual(2, read.call_count)
+        self.assertEqual(4, len(read.call_args_list[0].args[0]))
+        self.assertEqual(["value"], read.call_args_list[0].args[1])
+        self.assertEqual(2, len(read.call_args_list[1].args[0]))
+        self.assertEqual(["payload"], read.call_args_list[1].args[1])
+        self.assertEqual(
+            [("episode-b", 1), ("episode-b", 0), ("episode-b", 1)],
+            [(sample["episode"], sample["step"]) for sample in actual],
+        )
+        self.assertEqual(
+            [[101, 102, 103], [100, 101, 102], [101, 102, 103]],
+            [sample["value"] for sample in actual],
+        )
+        self.assertEqual(
+            [[b"episode-b-1"], [b"episode-b-0"], [b"episode-b-1"]],
+            [sample["payload"] for sample in actual],
+        )
 
     def test_pad_tail_repeats_last_row_and_marks_real_padding(self):
         dataset = self._dataset(
@@ -246,6 +253,25 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             snapshot_id, table.raw_table.snapshot_manager().get_latest_snapshot().id)
         self.assertEqual(2, len(dataset))
         self.assertEqual([101, 102, 103], dataset[-1]["value"])
+
+    def test_pickle_round_trip_preserves_snapshot_and_window(self):
+        dataset = self._dataset(
+            self._table(), anchor_columns=["payload"])
+        expected = dataset[-1]
+
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        self.assertEqual(dataset.snapshot_id, restored.snapshot_id)
+        self.assertEqual(
+            dataset.snapshot_id,
+            restored._table.options.scan_snapshot_id(),
+        )
+        actual = restored[-1]
+        self.assertEqual(expected["episode"], actual["episode"])
+        self.assertEqual(expected["step"], actual["step"])
+        self.assertEqual(expected["value"], actual["value"])
+        self.assertEqual(expected["payload"], actual["payload"])
+        self.assertTrue(torch.equal(expected["is_pad"], actual["is_pad"]))
 
     def test_projection_filter_transform_and_dataloader_workers(self):
         table = self._table()

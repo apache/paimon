@@ -37,17 +37,22 @@ class ContiguousWindowDataset(Dataset):
 
     The in-memory index contains only group values, order values, and Paimon
     row IDs. Each ``__getitem__`` reads the projected rows from the snapshot
-    resolved while the index was built. ``tail`` controls scheduled anchors
-    whose remaining rows are shorter than ``window_size``:
+    resolved while the index was built. Within each group, ``order_key`` must
+    contain non-null integers that increase by exactly one; rows from different
+    groups never share a window. ``tail`` controls scheduled anchors whose
+    remaining rows are shorter than ``window_size``:
 
     * ``drop`` omits them;
     * ``pad`` repeats final values and marks repeats in ``is_pad``;
     * ``error`` rejects the dataset.
 
-    ``anchor_columns`` limits selected columns to the first row of each window,
-    which avoids loading repeated context such as observation images.
-    ``column_transforms`` convert individual column lists and ``adapter`` can
-    adapt the complete mapping to a model-specific contract.
+    The raw result mapping contains scalar group and order values, a
+    length-``window_size`` Boolean ``is_pad`` tensor, one-element lists for
+    ``anchor_columns``, and length-``window_size`` lists for other projected
+    columns. ``anchor_columns`` therefore avoids loading repeated context such
+    as observation images or initial robot state. ``column_transforms`` then
+    convert individual column lists before ``adapter`` adapts the complete
+    mapping to a model-specific contract.
     ``blob_parallelism`` controls concurrent BLOB reads for each item or batch.
     """
 
@@ -120,6 +125,12 @@ class ContiguousWindowDataset(Dataset):
         return len(self._anchors)
 
     def __getitem__(self, index):
+        """Read one window by map-style Dataset index.
+
+        Negative indices follow Python sequence semantics. The return value is
+        the pre-adapter mapping described by the class, or the adapter result
+        when an adapter is configured.
+        """
         anchor, row_ids = self._resolve_window(index)
         rows = self._read_window_rows(row_ids)
         anchor_row = (
@@ -129,6 +140,11 @@ class ContiguousWindowDataset(Dataset):
         return self._sample(anchor, rows, anchor_row)
 
     def __getitems__(self, indices):
+        """Read several Dataset indices while coalescing overlapping row IDs.
+
+        The returned list preserves the requested index order and duplicates.
+        Coalescing affects only physical reads, not logical sample cardinality.
+        """
         windows = [self._resolve_window(index) for index in indices]
         if not windows:
             return []
@@ -196,6 +212,17 @@ class ContiguousWindowDataset(Dataset):
         return sample
 
     def _build_index(self, index):
+        """Validate index rows and return grouped row IDs plus window anchors.
+
+        Args:
+            index: Arrow table containing ``group_key``, ``order_key``, and
+                Paimon's ``_ROW_ID`` for the resolved snapshot.
+
+        Returns:
+            ``(groups, anchors)``. Each group stores its key, ordered positions,
+            and row IDs. Each anchor stores group index, start offset, and the
+            number of real rows available before optional padding.
+        """
         group_values = index.column(self.group_key).to_pylist()
         order_values = index.column(self.order_key).to_pylist()
         row_ids = index.column(SpecialFields.ROW_ID.name).to_pylist()
@@ -264,6 +291,19 @@ class ContiguousWindowDataset(Dataset):
         return self._read_rows(row_ids, self._window_columns)
 
     def _read_rows(self, row_ids, columns=None):
+        """Read projected rows by ID from the pinned snapshot.
+
+        Args:
+            row_ids: Paimon row IDs to read. Their order and duplicates define
+                the returned row order.
+            columns: Projected value columns, or all Dataset columns when
+                omitted.
+
+        Returns:
+            A list of row dictionaries aligned one-for-one with ``row_ids``.
+            The internal ``_ROW_ID`` field is removed, and BLOB descriptors are
+            resolved to their bodies.
+        """
         columns = self.columns if columns is None else columns
         query = ScanQuery(self._table)
         predicate_builder = (
@@ -324,6 +364,7 @@ def _read_window_index(query, group_key, order_key):
 
 
 def _pin_table(table, snapshot_id):
+    """Pin a table copy to ``snapshot_id``, or reuse it when unresolved."""
     if snapshot_id is None:
         return table
     options = {

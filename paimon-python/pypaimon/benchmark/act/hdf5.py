@@ -62,6 +62,11 @@ class Hdf5ACTWindowDataset(Dataset):
         return self.window_count
 
     def __getitem__(self, anchor):
+        """Return the ACT window whose first frame is ``anchor``.
+
+        Negative anchors follow Python sequence semantics. State and images
+        come from the anchor frame, while action contains the complete horizon.
+        """
         if anchor < 0:
             anchor += self.window_count
         if anchor < 0 or anchor >= self.window_count:
