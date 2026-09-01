@@ -272,6 +272,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
         LookupStrategy lookupStrategy = options.lookupStrategy();
+        boolean changelogIgnoreUpdateBefore = options.changelogProducerIgnoreUpdateBefore();
+        boolean changelogIgnoreDelete = options.changelogProducerIgnoreDelete();
         if (changelogProducer.equals(FULL_COMPACTION)) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
@@ -282,7 +284,9 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    logDedupEqualSupplier.get());
+                    logDedupEqualSupplier.get(),
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete);
         } else if (lookupStrategy.needLookup) {
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -350,6 +354,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     mergeSorter,
                     wrapperFactory,
                     lookupStrategy.produceChangelog && !ignorePreviousFiles,
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete,
                     dvMaintainer,
                     options,
                     remoteLookupFileManager);

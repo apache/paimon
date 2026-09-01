@@ -1084,6 +1084,24 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE =
+            key("changelog-producer.ignore-update-before")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore update-before records in the changelog. "
+                                    + "When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. "
+                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_DELETE =
+            key("changelog-producer.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore delete records in the changelog. "
+                                    + "When set to true, DELETE (-D) records will not be written to changelog files. "
+                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
             key("changelog-producer.row-deduplicate")
                     .booleanType()
@@ -3831,6 +3849,14 @@ public class CoreOptions implements Serializable {
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
                 deletionVectorsEnabled(),
                 options.get(FORCE_LOOKUP));
+    }
+
+    public boolean changelogProducerIgnoreUpdateBefore() {
+        return options.get(CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE);
+    }
+
+    public boolean changelogProducerIgnoreDelete() {
+        return options.get(CHANGELOG_PRODUCER_IGNORE_DELETE);
     }
 
     public boolean changelogRowDeduplicate() {
