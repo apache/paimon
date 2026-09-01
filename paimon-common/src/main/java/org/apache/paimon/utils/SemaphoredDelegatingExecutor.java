@@ -26,8 +26,10 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A {@link ForwardingExecutorService} to delegate tasks to limit the number of tasks executed
@@ -81,7 +83,13 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             return Futures.immediateFailedFuture(e);
         }
 
-        return super.submit(new CallableWithPermitRelease(task));
+        CallableWithPermitRelease<T> wrapped = new CallableWithPermitRelease<>(task);
+        try {
+            return super.submit(wrapped);
+        } catch (RejectedExecutionException e) {
+            wrapped.releasePermit();
+            throw e;
+        }
     }
 
     @Override
@@ -93,7 +101,13 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             return Futures.immediateFailedFuture(e);
         }
 
-        return super.submit(new RunnableWithPermitRelease(task), result);
+        RunnableWithPermitRelease wrapped = new RunnableWithPermitRelease(task);
+        try {
+            return super.submit(wrapped, result);
+        } catch (RejectedExecutionException e) {
+            wrapped.releasePermit();
+            throw e;
+        }
     }
 
     @Override
@@ -105,7 +119,13 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             return Futures.immediateFailedFuture(e);
         }
 
-        return super.submit(new RunnableWithPermitRelease(task));
+        RunnableWithPermitRelease wrapped = new RunnableWithPermitRelease(task);
+        try {
+            return super.submit(wrapped);
+        } catch (RejectedExecutionException e) {
+            wrapped.releasePermit();
+            throw e;
+        }
     }
 
     @Override
@@ -114,9 +134,21 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             this.queueingPermits.acquire();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            // A permit was never acquired, so the task must not run: its wrapper would
+            // release a permit on completion and inflate the semaphore beyond permitCount.
+            // Reject rather than drop silently: execute() has no failed-future channel,
+            // and callers waiting on CompletableFuture.join() would hang forever.
+            throw new RejectedExecutionException(
+                    "Interrupted while waiting for a permit to submit the task", e);
         }
 
-        super.execute(new RunnableWithPermitRelease(command));
+        RunnableWithPermitRelease wrapped = new RunnableWithPermitRelease(command);
+        try {
+            super.execute(wrapped);
+        } catch (RejectedExecutionException e) {
+            wrapped.releasePermit();
+            throw e;
+        }
     }
 
     public int getAvailablePermits() {
@@ -146,6 +178,7 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     private class RunnableWithPermitRelease implements Runnable {
 
         private final Runnable delegated;
+        private final AtomicBoolean released = new AtomicBoolean(false);
 
         RunnableWithPermitRelease(Runnable delegated) {
             this.delegated = delegated;
@@ -156,6 +189,18 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             try {
                 this.delegated.run();
             } finally {
+                releasePermit();
+            }
+        }
+
+        /**
+         * Returns the acquired permit, at most once. A delegate that runs the task inline (for
+         * example {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}) may both run
+         * the wrapper and let a {@link RejectedExecutionException} out of the same call, so the
+         * submitting method and {@link #run()} can each reach this.
+         */
+        void releasePermit() {
+            if (this.released.compareAndSet(false, true)) {
                 SemaphoredDelegatingExecutor.this.queueingPermits.release();
             }
         }
@@ -164,6 +209,7 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     private class CallableWithPermitRelease<T> implements Callable<T> {
 
         private final Callable<T> delegated;
+        private final AtomicBoolean released = new AtomicBoolean(false);
 
         CallableWithPermitRelease(Callable<T> delegated) {
             this.delegated = delegated;
@@ -175,10 +221,17 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             try {
                 result = this.delegated.call();
             } finally {
-                SemaphoredDelegatingExecutor.this.queueingPermits.release();
+                releasePermit();
             }
 
             return result;
+        }
+
+        /** Returns the acquired permit, at most once. See {@link RunnableWithPermitRelease}. */
+        void releasePermit() {
+            if (this.released.compareAndSet(false, true)) {
+                SemaphoredDelegatingExecutor.this.queueingPermits.release();
+            }
         }
     }
 }
