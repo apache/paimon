@@ -17,13 +17,12 @@
 """Strict append-only ingestion from seekable HDF5 sources."""
 
 import os
-import re
 import sys
 from contextlib import closing
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Optional
-from urllib.parse import quote, unquote, urlparse, urlunparse
+from urllib.parse import unquote, urlparse
 
 import pyarrow as pa
 import pyarrow.fs as pafs
@@ -31,9 +30,11 @@ import pyarrow.fs as pafs
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import _file_uri_path
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
-from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.source_utils import (
+    _SourceFileIO,
+    _normalize_source_path,
+    _qualified_status_path,
     _source_path_text,
     _validated_source_options,
     _validate_source_kerberos,
@@ -43,6 +44,7 @@ from pypaimon.write.commit_callback import CommitCallback
 
 
 _HDF5_SUFFIXES = (".h5", ".hdf5")
+_Hdf5SourceFileIO = _SourceFileIO
 
 
 @dataclass(frozen=True)
@@ -96,38 +98,6 @@ class _SnapshotRecorder(CommitCallback):
 
     def call(self, context):
         self.snapshot_id = context.snapshot.id
-
-
-class _Hdf5SourceFileIO:
-    """Resolve HDF5 URIs while keeping decoding local to external sources."""
-
-    def __init__(self, options):
-        self._resolver = ResolvingFileIO(options)
-
-    def _resolve(self, path):
-        file_io = self._resolver._get_fileio(path)
-        native_path = file_io.to_filesystem_path(path)
-        if urlparse(path).scheme.lower() != "file":
-            native_path = unquote(native_path)
-        return file_io, native_path
-
-    def get_file_status(self, path):
-        file_io, native_path = self._resolve(path)
-        return file_io.get_file_status(native_path)
-
-    def list_status(self, path):
-        file_io, native_path = self._resolve(path)
-        return file_io.list_status(native_path)
-
-    def new_input_stream(self, path):
-        file_io, native_path = self._resolve(path)
-        return file_io.new_input_stream(native_path)
-
-    def to_filesystem_path(self, path):
-        return self._resolve(path)[1]
-
-    def close(self):
-        self._resolver.close()
 
 
 def load_from_hdf5(
@@ -382,61 +352,6 @@ def _raise_legacy_directory_listing_error(path, error):
         "Recursive HDF5 discovery is unavailable for legacy OSS at %s; "
         "pass explicit HDF5 file paths, use Jindo, or upgrade PyArrow."
         % path) from error
-
-
-def _normalize_source_path(value):
-    path = _source_path_text(value)
-    parsed = urlparse(path)
-    if _is_windows_drive_path(parsed):
-        windows_path = PureWindowsPath(path)
-        if not windows_path.is_absolute():
-            raise ValueError("Windows source paths must be absolute: %s" % path)
-        return "file:///%s" % quote(windows_path.as_posix(), safe="/:")
-    if not parsed.scheme:
-        return Path(path).expanduser().resolve().as_uri()
-    return _quote_uri_path(path)
-
-
-def _quote_uri_path(uri):
-    match = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*://[^/]*)(.*)$", uri)
-    if match is None:
-        return uri
-    return match.group(1) + quote(match.group(2), safe="/:%")
-
-
-def _qualified_status_path(parent_path, status):
-    status_path = str(status.path)
-    status_uri = urlparse(status_path)
-    if status_uri.scheme and not _is_windows_drive_path(status_uri):
-        return _quote_uri_path(status_path)
-
-    parent_uri = urlparse(parent_path)
-    scheme = parent_uri.scheme.lower()
-    if scheme == "file":
-        return _normalize_source_path(status_path)
-    if not scheme or _is_windows_drive_path(parent_uri):
-        return _normalize_source_path(status_path)
-
-    if scheme in ("hdfs", "viewfs"):
-        return urlunparse((
-            scheme,
-            parent_uri.netloc,
-            quote("/" + status_path.lstrip("/"), safe="/:"),
-            "",
-            "",
-            "",
-        ))
-
-    key = status_path.lstrip("/")
-    if parent_uri.netloc and not (
-            key == parent_uri.netloc
-            or key.startswith(parent_uri.netloc + "/")):
-        key = parent_uri.netloc + "/" + key
-    return "%s://%s" % (scheme, quote(key, safe="/:"))
-
-
-def _is_windows_drive_path(parsed):
-    return len(parsed.scheme) == 1 and not parsed.netloc
 
 
 def _hdf5_suffix(path):

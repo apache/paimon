@@ -29,7 +29,7 @@ import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
-from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
+from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
@@ -136,7 +136,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_double_encoded_file_uri_cannot_escape_source(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_uri_"))
-        source_file_io = _Hdf5SourceFileIO(Options({}))
+        source_file_io = _SourceFileIO(Options({}))
         try:
             root = temp_dir / "source"
             root.mkdir()
@@ -163,7 +163,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_hdfs_source_rejects_explicit_keytab_before_resolution(self):
         with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO"
+                "pypaimon.multimodal.lerobot.source._SourceFileIO"
         ) as source_file_io:
             with self.assertRaisesRegex(ValueError, "process-isolated"):
                 load_from_lerobot(
@@ -685,7 +685,7 @@ class LeRobotImportTest(unittest.TestCase):
         source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
 
         with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+                "pypaimon.multimodal.lerobot.source._SourceFileIO",
                 return_value=source_file_io):
             snapshot_id = self.connection.load_from_lerobot(
                 "oss_images",
