@@ -48,6 +48,19 @@ import static org.mockito.Mockito.when;
 class RESTTokenFileIOTest {
 
     @Test
+    void testSetFileIOCacheMaximumSize() {
+        long originalMaximumSize = RESTTokenFileIO.fileIOCacheMaximumSize();
+        try {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(0);
+            assertThat(RESTTokenFileIO.fileIOCacheMaximumSize()).isZero();
+            assertThatThrownBy(() -> RESTTokenFileIO.setFileIOCacheMaximumSize(-1))
+                    .isInstanceOf(IllegalArgumentException.class);
+        } finally {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(originalMaximumSize);
+        }
+    }
+
+    @Test
     void testCreateBlobPresignedUrlRequiresBoundRootAndDelegates() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         BlobDescriptor descriptor =

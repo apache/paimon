@@ -82,6 +82,23 @@ public class RESTTokenFileIO implements FileIO {
 
     private static final Logger LOG = LoggerFactory.getLogger(RESTTokenFileIO.class);
 
+    /** Sets the maximum number of cached FileIO instances. */
+    public static void setFileIOCacheMaximumSize(long maximumSize) {
+        FILE_IO_CACHE
+                .policy()
+                .eviction()
+                .orElseThrow(IllegalStateException::new)
+                .setMaximum(maximumSize);
+    }
+
+    static long fileIOCacheMaximumSize() {
+        return FILE_IO_CACHE
+                .policy()
+                .eviction()
+                .orElseThrow(IllegalStateException::new)
+                .getMaximum();
+    }
+
     private final CatalogContext catalogContext;
     private final Identifier identifier;
     private final Path path;
