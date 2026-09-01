@@ -130,19 +130,19 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
 
     @Override
     public void execute(Runnable command) {
+        boolean acquired = true;
         try {
             this.queueingPermits.acquire();
         } catch (InterruptedException e) {
+            // Semaphore.acquire() throws as soon as the caller carries an interrupt flag, even
+            // when permits are free, and execute() has no channel for reporting that the task
+            // was dropped. Run it anyway, as this class always has, but remember that no permit
+            // backs this task so its wrapper does not hand back one that was never taken.
             Thread.currentThread().interrupt();
-            // A permit was never acquired, so the task must not run: its wrapper would
-            // release a permit on completion and inflate the semaphore beyond permitCount.
-            // Reject rather than drop silently: execute() has no failed-future channel,
-            // and callers waiting on CompletableFuture.join() would hang forever.
-            throw new RejectedExecutionException(
-                    "Interrupted while waiting for a permit to submit the task", e);
+            acquired = false;
         }
 
-        RunnableWithPermitRelease wrapped = new RunnableWithPermitRelease(command);
+        RunnableWithPermitRelease wrapped = new RunnableWithPermitRelease(command, acquired);
         try {
             super.execute(wrapped);
         } catch (RejectedExecutionException e) {
@@ -178,10 +178,15 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     private class RunnableWithPermitRelease implements Runnable {
 
         private final Runnable delegated;
-        private final AtomicBoolean released = new AtomicBoolean(false);
+        private final AtomicBoolean permitHeld;
 
         RunnableWithPermitRelease(Runnable delegated) {
+            this(delegated, true);
+        }
+
+        RunnableWithPermitRelease(Runnable delegated, boolean permitHeld) {
             this.delegated = delegated;
+            this.permitHeld = new AtomicBoolean(permitHeld);
         }
 
         @Override
@@ -194,13 +199,14 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
         }
 
         /**
-         * Returns the acquired permit, at most once. A delegate that runs the task inline (for
-         * example {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}) may both run
-         * the wrapper and let a {@link RejectedExecutionException} out of the same call, so the
-         * submitting method and {@link #run()} can each reach this.
+         * Hands the permit back, at most once, and only if one was acquired for this task. A
+         * delegate that runs the task inline (for example {@link
+         * java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}) may both run the wrapper and
+         * let a {@link RejectedExecutionException} out of the same call, so the submitting method
+         * and {@link #run()} can each reach this.
          */
         void releasePermit() {
-            if (this.released.compareAndSet(false, true)) {
+            if (this.permitHeld.compareAndSet(true, false)) {
                 SemaphoredDelegatingExecutor.this.queueingPermits.release();
             }
         }
@@ -209,7 +215,7 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
     private class CallableWithPermitRelease<T> implements Callable<T> {
 
         private final Callable<T> delegated;
-        private final AtomicBoolean released = new AtomicBoolean(false);
+        private final AtomicBoolean permitHeld = new AtomicBoolean(true);
 
         CallableWithPermitRelease(Callable<T> delegated) {
             this.delegated = delegated;
@@ -227,9 +233,9 @@ public class SemaphoredDelegatingExecutor extends ForwardingExecutorService {
             return result;
         }
 
-        /** Returns the acquired permit, at most once. See {@link RunnableWithPermitRelease}. */
+        /** Hands the permit back, at most once. See {@link RunnableWithPermitRelease}. */
         void releasePermit() {
-            if (this.released.compareAndSet(false, true)) {
+            if (this.permitHeld.compareAndSet(true, false)) {
                 SemaphoredDelegatingExecutor.this.queueingPermits.release();
             }
         }

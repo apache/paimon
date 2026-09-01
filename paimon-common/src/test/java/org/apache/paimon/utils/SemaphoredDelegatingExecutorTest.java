@@ -40,7 +40,7 @@ public class SemaphoredDelegatingExecutorTest {
     private static final long TIMEOUT_SECONDS = 10;
 
     @Test
-    public void testInterruptedExecuteRejectsTaskAndKeepsPermitCount() throws Exception {
+    public void testInterruptedExecuteRunsTaskWithoutInflatingPermits() throws Exception {
         ExecutorService delegate = Executors.newSingleThreadExecutor();
         try {
             SemaphoredDelegatingExecutor executor =
@@ -55,9 +55,9 @@ public class SemaphoredDelegatingExecutorTest {
                             () -> {
                                 try {
                                     executor.execute(() -> ran.set(true));
+                                    interrupted.set(Thread.currentThread().isInterrupted());
                                 } catch (Throwable t) {
                                     thrown.set(t);
-                                    interrupted.set(Thread.currentThread().isInterrupted());
                                 } finally {
                                     finished.countDown();
                                 }
@@ -73,17 +73,58 @@ public class SemaphoredDelegatingExecutorTest {
             submitter.interrupt();
             assertThat(finished.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
-            assertThat(thrown.get())
-                    .isInstanceOf(RejectedExecutionException.class)
-                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(thrown.get()).isNull();
             assertThat(interrupted.get()).isTrue();
 
-            // Drain the delegate before asserting: the original code handed the task to it,
-            // and an assertion taken before that worker ran would pass for the wrong reason.
+            // Drain the delegate: the task is submitted without a permit, so it has to run, and
+            // the count has to stay where it was rather than gain a permit nobody acquired.
             delegate.shutdown();
             assertThat(delegate.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
-            assertThat(ran.get()).isFalse();
+            assertThat(ran.get()).isTrue();
             assertThat(executor.getAvailablePermits()).isZero();
+        } finally {
+            delegate.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testExecuteWithInterruptFlagAlreadySetKeepsPermitCount() throws Exception {
+        ExecutorService delegate = Executors.newSingleThreadExecutor();
+        try {
+            SemaphoredDelegatingExecutor executor =
+                    new SemaphoredDelegatingExecutor(delegate, 2, true);
+            AtomicBoolean ran = new AtomicBoolean(false);
+            AtomicReference<Throwable> thrown = new AtomicReference<>();
+            AtomicBoolean interrupted = new AtomicBoolean(false);
+            CountDownLatch finished = new CountDownLatch(1);
+
+            // Semaphore.acquire() throws the moment the caller carries an interrupt flag, even
+            // with both permits free, which is the state a Flink or Spark task is in while it is
+            // being cancelled. The task still has to run and the count still has to balance.
+            Thread submitter =
+                    new Thread(
+                            () -> {
+                                Thread.currentThread().interrupt();
+                                try {
+                                    executor.execute(() -> ran.set(true));
+                                    interrupted.set(Thread.currentThread().isInterrupted());
+                                } catch (Throwable t) {
+                                    thrown.set(t);
+                                } finally {
+                                    finished.countDown();
+                                }
+                            });
+            submitter.setDaemon(true);
+            submitter.start();
+            assertThat(finished.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(thrown.get()).isNull();
+            assertThat(interrupted.get()).isTrue();
+
+            delegate.shutdown();
+            assertThat(delegate.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+            assertThat(ran.get()).isTrue();
+            assertThat(executor.getAvailablePermits()).isEqualTo(2);
         } finally {
             delegate.shutdownNow();
         }
