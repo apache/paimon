@@ -480,6 +480,52 @@ def test_run_ray_pipeline_rejects_old_ray_before_ingest(monkeypatch):
     ingest.assert_not_called()
 
 
+def test_ray_backfill_rejects_old_ray_before_preparing_table(monkeypatch):
+    ray = pytest.importorskip("ray")
+    prepare = MagicMock(return_value=(MagicMock(), MagicMock()))
+    monkeypatch.setattr(ray, "__version__", "2.49.0")
+    monkeypatch.setattr(agilex, "_prepare_canonical_action_table", prepare)
+
+    with pytest.raises(RuntimeError, match="requires ray>=2.50"):
+        agilex.backfill_canonical_action_ray("warehouse")
+
+    prepare.assert_not_called()
+
+
+def test_run_ray_pipeline_rejects_num_partitions_before_ingest(monkeypatch):
+    ray = pytest.importorskip("ray")
+    ingest = MagicMock()
+    monkeypatch.setattr(ray, "__version__", "2.50.0")
+    monkeypatch.setattr(ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(agilex, "ingest_ray", ingest)
+
+    with pytest.raises(
+            ValueError, match="num_partitions must be a positive int"):
+        agilex.run_ray_pipeline(
+            "input", "warehouse", num_partitions=0)
+
+    ingest.assert_not_called()
+
+
+def test_run_ray_pipeline_rejects_statistics_version_before_ingest(
+        monkeypatch):
+    ray = pytest.importorskip("ray")
+    ingest = MagicMock()
+    monkeypatch.setattr(ray, "__version__", "2.50.0")
+    monkeypatch.setattr(ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(agilex, "ingest_ray", ingest)
+    monkeypatch.setattr(
+        agilex, "_materialize_canonical_action_ray",
+        MagicMock(return_value=(12, 2)))
+
+    with pytest.raises(
+            ValueError, match="statistics_version must be a non-empty string"):
+        agilex.run_ray_pipeline(
+            "input", "warehouse", statistics_version="")
+
+    ingest.assert_not_called()
+
+
 def test_ray_stage_apis_do_not_accept_cluster_addresses():
     assert "ray_address" not in inspect.signature(agilex.ingest_ray).parameters
     assert "ray_address" not in inspect.signature(

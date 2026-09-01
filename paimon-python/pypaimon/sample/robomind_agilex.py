@@ -349,6 +349,15 @@ def run_local_pipeline(
     return LocalPipelineResult(ingest=ingest, backfill=backfill)
 
 
+def _require_ray_250(ray):
+    from packaging.version import parse
+
+    if parse(ray.__version__) < parse("2.50.0"):
+        raise RuntimeError(
+            "RoboMIND Ray backfill requires ray>=2.50; installed ray is %s."
+            % ray.__version__)
+
+
 def run_ray_pipeline(
         input_root,
         warehouse,
@@ -360,16 +369,17 @@ def run_ray_pipeline(
         num_partitions=None,
         ray_address=None):
     """Run Ray ingestion and backfill on one managed Ray cluster."""
+    if num_partitions is not None:
+        num_partitions = _positive_int(num_partitions, "num_partitions")
+    if not isinstance(statistics_version, str) or not statistics_version:
+        raise ValueError("statistics_version must be a non-empty string.")
+
     try:
         import ray
     except ImportError:
         raise ImportError(
             "Ray pipeline requires ray; install pypaimon[ray,hdf5].")
-    from packaging.version import parse
-    if parse(ray.__version__) < parse("2.50.0"):
-        raise RuntimeError(
-            "Ray pipeline requires ray>=2.50; installed ray is %s."
-            % ray.__version__)
+    _require_ray_250(ray)
 
     initialized_here = not ray.is_initialized()
     if initialized_here:
@@ -499,6 +509,13 @@ def backfill_canonical_action_ray(
         statistics_version=DEFAULT_STATISTICS_VERSION,
         num_partitions=None):
     """Run distributed backfill on an already initialized Ray cluster."""
+    try:
+        import ray
+    except ImportError:
+        raise ImportError(
+            "Ray backfill requires ray; install pypaimon[ray].")
+    _require_ray_250(ray)
+
     row_count, frames_snapshot_id = _materialize_canonical_action_ray(
         warehouse,
         database=database,
