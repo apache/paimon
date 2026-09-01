@@ -26,6 +26,17 @@ from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     TableNotExistException,
 )
+from pypaimon.multimodal.lerobot.metadata import (
+    _DEFAULT_DATASET_ID_OPTION,
+    _OWNER_ID_OPTION,
+    _frame_schema,
+    _load_dataset_metadata,
+    _managed_table_options,
+    _new_id,
+    _prepare_metadata_tables,
+    _publish_dataset,
+    _reject_subtasks,
+)
 from pypaimon.multimodal.lerobot.loader import (
     _strict_lerobot_table,
     _write_dataset,
@@ -56,14 +67,16 @@ def load_from_lerobot(
         source,
         *,
         batch_size: int = 1024,
+        dataset_id: Optional[str] = None,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None):
     """Import LeRobot Dataset v3 and return the committed snapshot ID.
 
-    A missing target table is created from LeRobot metadata. An existing table
-    receives the same strict schema validation and append semantics as
-    :meth:`MultimodalConnection.load_from_hdf5`. FileIO URI credentials come
-    only from ``source_options`` and are not inherited from the target Catalog.
+    A missing target table is created from LeRobot metadata. Episode, task, and
+    dataset metadata are stored in companion Paimon tables. ``dataset_id``
+    defaults to the target identifier. FileIO URI
+    credentials come only from ``source_options`` and are not inherited from
+    the target Catalog.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -85,17 +98,38 @@ def load_from_lerobot(
         _schema_from_info(local_info, include_task=False)
         total_frames, _, total_tasks = \
             _validated_counts(local_info, resolved_source.path)
-        if total_frames == 0:
+        if total_frames == 0 and (
+                resolved_source.root is not None
+                or resolved_source.file_io is not None):
             source_schema = _schema_from_info(
                 local_info,
                 include_task=total_tasks > 0,
             )
-            _validated_table(
+            _reject_subtasks(None, resolved_source)
+            table, owner_id = _validated_table(
                 connection,
                 table_name,
                 source_schema,
                 options,
                 resolved_source,
+            )
+            resolved_dataset_id = _resolved_dataset_id(
+                dataset_id, table)
+            metadata = _load_dataset_metadata(
+                None, local_info, resolved_source)
+            tables = _prepare_metadata_tables(
+                connection, table.raw_table, owner_id)
+            metadata_version = _new_id()
+            _publish_dataset(
+                connection,
+                tables,
+                resolved_dataset_id,
+                metadata_version,
+                local_info,
+                resolved_source,
+                metadata,
+                table.identifier,
+                None,
             )
             return None
         LeRobotDataset = _import_lerobot_dataset()
@@ -107,26 +141,60 @@ def load_from_lerobot(
             row_count, _, _ = \
                 _validated_counts(info, resolved_source.path)
 
-            source_schema = _schema_from_info(
+            lerobot_schema = _schema_from_info(
                 info, include_task=_has_tasks(dataset, info))
-            table = _validated_table(
+            _reject_subtasks(dataset, resolved_source)
+            table, owner_id = _validated_table(
                 connection,
                 table_name,
-                source_schema,
+                lerobot_schema,
                 options,
                 resolved_source,
             )
+            resolved_dataset_id = _resolved_dataset_id(
+                dataset_id, table)
+            metadata = _load_dataset_metadata(
+                dataset, info, resolved_source)
+            tables = _prepare_metadata_tables(
+                connection, table.raw_table, owner_id)
+            metadata_version = _new_id()
 
             if row_count == 0:
+                _publish_dataset(
+                    connection,
+                    tables,
+                    resolved_dataset_id,
+                    metadata_version,
+                    info,
+                    resolved_source,
+                    metadata,
+                    table.identifier,
+                    None,
+                )
                 return None
-            return _write_dataset(
+            snapshot_id = _write_dataset(
                 table,
                 dataset,
                 info,
                 resolved_source,
-                source_schema,
+                lerobot_schema,
                 batch_size,
+                resolved_dataset_id,
+                metadata_version,
+                metadata,
             )
+            _publish_dataset(
+                connection,
+                tables,
+                resolved_dataset_id,
+                metadata_version,
+                info,
+                resolved_source,
+                metadata,
+                table.identifier,
+                snapshot_id,
+            )
+            return snapshot_id
         finally:
             close = getattr(dataset, "close", None)
             if callable(close):
@@ -159,10 +227,57 @@ def _required_count(info, name, source):
     return int(value)
 
 
+def _resolved_dataset_id(value, table):
+    if value is not None and (
+            not isinstance(value, str) or not value.strip()):
+        raise ValueError("dataset_id must be a non-empty string.")
+    if value is None:
+        default_id = table.raw_table.table_schema.options.get(
+            _DEFAULT_DATASET_ID_OPTION)
+        if not default_id:
+            raise ValueError(
+                "Self-contained LeRobot table %s has no default dataset_id."
+                % table.identifier)
+        return default_id
+    return value.strip()
+
+
 def _validated_table(
         connection, table_name, source_schema, options, source):
-    table = _get_or_create_table(
-        connection, table_name, source_schema, options)
+    try:
+        table = connection.get_table(table_name)
+    except (DatabaseNotExistException, TableNotExistException):
+        owner_id = _new_id()
+        create_options = dict(options or {})
+        managed_options = _managed_table_options(
+            connection._identifier(table_name), owner_id)
+        reserved_options = set(managed_options).intersection(create_options)
+        if reserved_options:
+            raise ValueError(
+                "%s are managed by load_from_lerobot."
+                % sorted(reserved_options))
+        create_options.update(managed_options)
+        table = connection.create_table(
+            table_name,
+            schema=_frame_schema(source_schema),
+            options=create_options,
+        )
+        _validate_target_schema(table, _frame_schema(source_schema), source)
+        return table, owner_id
+
+    owner_id = table.raw_table.table_schema.options.get(_OWNER_ID_OPTION)
+    if owner_id is None:
+        raise ValueError(
+            "Existing LeRobot target %s is not managed by "
+            "load_from_lerobot; use a new target table." % table.identifier)
+    if table.raw_table.identifier.get_branch_name() is not None:
+        raise ValueError(
+            "Self-contained LeRobot import does not support table branches.")
+    _validate_target_schema(table, _frame_schema(source_schema), source)
+    return table, owner_id
+
+
+def _validate_target_schema(table, source_schema, source):
     target_schema = _target_schema(table.raw_table)
     _validate_lerobot_schema(
         source_schema, target_schema, source.path)
@@ -172,15 +287,3 @@ def _validated_table(
         source,
         0,
     )
-    return table
-
-
-def _get_or_create_table(connection, table_name, schema, options):
-    try:
-        return connection.get_table(table_name)
-    except (DatabaseNotExistException, TableNotExistException):
-        return connection.create_table(
-            table_name,
-            schema=schema,
-            options=options,
-        )

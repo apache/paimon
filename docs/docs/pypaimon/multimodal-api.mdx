@@ -524,7 +524,9 @@ source drift. Calling it again with the same input appends the rows again.
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json`, writes one row per
-frame, and commits once.
+frame, and creates a self-contained LeRobot dataset backed by the frame table,
+`<table>__datasets`, `<table>__episodes`, and `<table>__tasks`. A manifest row is
+marked `READY` only after all component snapshots are committed and tagged.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -554,13 +556,14 @@ snapshot_id = conn.load_from_lerobot(
 )
 ```
 
-Missing tables are created from metadata; existing tables use strict schema
-validation and append semantics. Scalars map to scalar types, vectors to
-`VECTOR`, higher-rank tensors to nested `ARRAY`, and images to `BLOB`. Images
-keep their compressed bytes.
+All four tables share a `dataset_id` (the target identifier by default) and a
+unique `metadata_version` per import. A `READY` manifest is appended only after
+all component snapshots are committed and tagged. Set `dataset_id=` to choose
+a stable ID and select `metadata_version` to read a specific imported version.
+`drop_table()` removes all four tables.
 
-Only v3 is supported. Video features, `uint64`, and language event structures
-are rejected.
+Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
+`ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
 
 ## Overwrite
 

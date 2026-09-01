@@ -26,6 +26,7 @@ from pypaimon.catalog.catalog_exception import (
     TableAlreadyExistException,
     TableNotExistException,
 )
+from pypaimon.common.identifier import Identifier
 from pypaimon.multimodal.table import MultimodalTable, _to_arrow_table
 
 _DEFAULT_OPTIONS = {
@@ -123,6 +124,7 @@ class MultimodalConnection:
             source,
             *,
             batch_size: int = 1024,
+            dataset_id: Optional[str] = None,
             options=None,
             source_options=None):
         """Import LeRobot Dataset v3 and return the committed snapshot ID."""
@@ -132,13 +134,54 @@ class MultimodalConnection:
             table_name,
             source,
             batch_size=batch_size,
+            dataset_id=dataset_id,
             options=options,
             source_options=source_options,
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
+        identifier = self._identifier(name)
+        owner_id = None
+        try:
+            from pypaimon.multimodal.lerobot.metadata import (
+                _DEFAULT_DATASET_ID_OPTION,
+                _OWNER_ID_OPTION,
+            )
+            raw_table = self.catalog.get_table(identifier)
+            table_options = raw_table.table_schema.options
+            if _DEFAULT_DATASET_ID_OPTION in table_options:
+                if Identifier.from_string(
+                        identifier).get_branch_name() is not None:
+                    raise ValueError(
+                        "Dropping a managed LeRobot table branch is not "
+                        "supported; drop the branch through the Catalog.")
+                owner_id = table_options.get(_OWNER_ID_OPTION)
+        except (DatabaseNotExistException, TableNotExistException):
+            pass
+
+        companions = []
+        if owner_id is not None:
+            from pypaimon.multimodal.lerobot.metadata import \
+                _companion_table_identifiers
+            for companion in _companion_table_identifiers(
+                    raw_table).values():
+                try:
+                    table = self.catalog.get_table(companion)
+                except (DatabaseNotExistException, TableNotExistException):
+                    continue
+                actual = table.table_schema.options.get(_OWNER_ID_OPTION)
+                if actual != owner_id:
+                    raise ValueError(
+                        "Refusing to drop %s because it belongs to a "
+                        "different table." % companion)
+                companions.append(companion)
+            for companion in companions:
+                self.catalog.drop_table(
+                    companion,
+                    ignore_if_not_exists=True,
+                )
         self.catalog.drop_table(
-            self._identifier(name),
+            identifier,
             ignore_if_not_exists=ignore_if_not_exists,
         )
 
