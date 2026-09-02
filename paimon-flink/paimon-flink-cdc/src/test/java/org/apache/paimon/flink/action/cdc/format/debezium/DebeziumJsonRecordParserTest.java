@@ -69,6 +69,32 @@ public class DebeziumJsonRecordParserTest {
         assertPrimaryKeys(key, value("[]"), "id");
     }
 
+    @Test
+    public void testPrimaryKeysFromValueWithSchemaEnvelope() throws Exception {
+        // Simulates the exact scenario from issue #8961:
+        // Value has schema+payload envelope (standard Debezium JSON),
+        // and primary keys come from the Kafka message key.
+        JsonNode key =
+                OBJECT_MAPPER.readTree(
+                        "{\"schema\":{\"type\":\"struct\",\"fields\":["
+                                + "{\"type\":\"int64\",\"optional\":false,\"field\":\"id\"}]},"
+                                + "\"payload\":{\"id\":1}}");
+
+        JsonNode value =
+                OBJECT_MAPPER.readTree(
+                        "{\"schema\":{\"type\":\"struct\",\"fields\":["
+                                + "{\"type\":\"struct\",\"fields\":["
+                                + "{\"type\":\"int64\",\"optional\":false,\"field\":\"id\"},"
+                                + "{\"type\":\"string\",\"optional\":true,\"field\":\"name\"}],"
+                                + "\"optional\":true,\"field\":\"after\"}],"
+                                + "\"optional\":false},\"payload\":{\"before\":null,"
+                                + "\"after\":{\"id\":1,\"name\":\"Alice\"},"
+                                + "\"source\":{\"db\":\"test\",\"table\":\"users\"},"
+                                + "\"op\":\"c\"}}");
+
+        assertPrimaryKeys(key, value, "id");
+    }
+
     private static JsonNode value(String primaryKeys) throws Exception {
         String primaryKeyField = primaryKeys == null ? "" : "\"pkNames\":" + primaryKeys + ",";
         return OBJECT_MAPPER.readTree(
