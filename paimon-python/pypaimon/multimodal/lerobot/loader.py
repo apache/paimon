@@ -95,6 +95,7 @@ def _write_dataset(
                 episode_begin,
                 begin,
                 task_indices,
+                metadata["subtask_indices"],
             )
             observed_tasks.setdefault(episode_index, set()).update(
                 seen_tasks)
@@ -176,10 +177,13 @@ def _validate_frame_controls(
         episode_index,
         episode_begin,
         begin,
-        task_indices):
+        task_indices,
+        subtask_indices=None):
     required = [
         "index", "episode_index", "frame_index", "timestamp", "task_index"
     ]
+    if subtask_indices is not None:
+        required.append("subtask_index")
     missing = [name for name in required if name not in batch.column_names]
     if missing:
         raise ValueError(
@@ -231,6 +235,13 @@ def _validate_frame_controls(
                 % (index, task_index, episode_index,
                    sorted(allowed_tasks)))
         seen_tasks.add(task_index)
+        if subtask_indices is not None:
+            subtask_index = _control_integer(
+                values["subtask_index"][offset], "subtask_index", index)
+            if subtask_index not in subtask_indices:
+                raise ValueError(
+                    "LeRobot frame %d has subtask_index %d outside [0, %d)."
+                    % (index, subtask_index, len(subtask_indices)))
     return seen_tasks
 
 

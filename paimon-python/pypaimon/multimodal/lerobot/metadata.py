@@ -80,14 +80,15 @@ def _load_dataset_metadata(dataset, info, source):
     stats = _source_stats(dataset, source)
     tasks_table = _source_tasks(
         dataset, source, int(info["total_tasks"]))
-    _, task_indices = _task_rows(
+    task_indices = _task_indices(
         tasks_table.to_pylist(), int(info["total_tasks"]))
     subtasks_table = _source_subtasks(dataset, source)
+    subtask_indices = _subtask_indices(subtasks_table, info)
     total_episodes = int(info["total_episodes"])
     episode_source = (
         _source_episodes(dataset, source)
         if total_episodes > 0
-        else {"paths": [], "rows": [], "schema": _EMPTY_EPISODES_SCHEMA}
+        else {"tables": [], "rows": [], "schema": _EMPTY_EPISODES_SCHEMA}
     )
     episodes = _episode_rows(
         episode_source["rows"],
@@ -103,10 +104,10 @@ def _load_dataset_metadata(dataset, info, source):
             None if stats is None else _canonical_json(stats)),
         "episodes": episodes,
         "episodes_schema": episode_source["schema"],
-        "episode_paths": episode_source["paths"],
+        "episode_tables": episode_source["tables"],
         "tasks_table": tasks_table,
         "subtasks_table": subtasks_table,
-        "source": source,
+        "subtask_indices": subtask_indices,
     }
 
 
@@ -115,16 +116,28 @@ def _new_owner_id():
 
 
 def _companion_identifier(frames_identifier, suffix):
-    identifier = Identifier.from_string(str(frames_identifier))
+    identifier = (
+        frames_identifier
+        if isinstance(frames_identifier, Identifier)
+        else Identifier.from_string(str(frames_identifier))
+    )
     if identifier.is_system_table():
         raise ValueError(
             "LeRobot target cannot be a Paimon system table: %s"
             % frames_identifier)
-    return Identifier(
+    companion = Identifier(
         identifier.get_database_name(),
         identifier.get_table_name() + suffix,
         branch=identifier.get_branch_name(),
-    ).get_full_name()
+    )
+    return "%s.%s" % (
+        _quote_identifier_part(companion.get_database_name()),
+        _quote_identifier_part(companion.get_object_name()),
+    )
+
+
+def _quote_identifier_part(value):
+    return "`%s`" % value if "." in value else value
 
 
 def _managed_table_options(frames_identifier, owner_id):
@@ -234,7 +247,7 @@ def _publish_dataset(
     _require_initial_snapshot("frames", frames_snapshot_id)
     episodes_snapshot_id = _append_arrow_tables(
         tables["episodes"],
-        _source_episode_tables(metadata),
+        metadata["episode_tables"],
     )
     _require_initial_snapshot("episodes", episodes_snapshot_id)
     tasks_snapshot_id = _append_arrow(
@@ -287,7 +300,7 @@ def _manifest_row(
 def _drop_import_tables(catalog, frames_table, owner_id):
     identifiers = list(
         _companion_table_identifiers(frames_table).values())
-    identifiers.append(frames_table.identifier.get_full_name())
+    identifiers.append(frames_table.identifier)
     for identifier in identifiers:
         try:
             table = catalog.get_table(identifier)
@@ -303,12 +316,14 @@ def _append_arrow(table, data):
 
 def _append_arrow_tables(table, tables):
     builder = table.new_batch_write_builder()
-    table_write = builder.new_write()
-    table_commit = builder.new_commit()
+    table_write = None
+    table_commit = None
     commit_started = False
     recorder = _SnapshotRecorder()
-    table_commit.add_commit_callback(recorder)
     try:
+        table_write = builder.new_write()
+        table_commit = builder.new_commit()
+        table_commit.add_commit_callback(recorder)
         row_count = 0
         target_schema = _target_schema(table)
         for data in tables:
@@ -330,14 +345,16 @@ def _append_arrow_tables(table, tables):
             raise RuntimeError("LeRobot metadata commit has no snapshot id.")
         return recorder.snapshot_id
     except BaseException:
-        if not commit_started:
+        if table_write is not None and not commit_started:
             table_write.abort()
         raise
     finally:
         try:
-            table_write.close()
+            if table_write is not None:
+                table_write.close()
         finally:
-            table_commit.close()
+            if table_commit is not None:
+                table_commit.close()
 
 
 def _create_tag(catalog, identifier, tag_name, snapshot_id):
@@ -415,7 +432,6 @@ def _source_episodes(dataset, source):
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
             _read_remote_parquet,
-            _read_remote_parquet_schema,
             _remote_parquet_files,
             _remote_path,
         )
@@ -426,8 +442,6 @@ def _source_episodes(dataset, source):
             return _read_remote_parquet(
                 source.file_io, path, columns=columns)
 
-        def read_schema(path):
-            return _read_remote_parquet_schema(source.file_io, path)
     else:
         directory = _metadata_root(dataset, source) / "meta" / "episodes"
         paths = sorted(directory.rglob("*.parquet"))
@@ -435,47 +449,28 @@ def _source_episodes(dataset, source):
         def read(path, columns=None):
             return pq.read_table(path, columns=columns)
 
-        read_schema = pq.read_schema
     if not paths:
         return {
-            "paths": [],
+            "tables": [],
             "rows": [],
             "schema": _EMPTY_EPISODES_SCHEMA,
         }
     try:
-        schemas = [read_schema(path) for path in paths]
-        schema = schemas[0]
-        if any(not item.equals(schema, check_metadata=False)
-               for item in schemas[1:]):
+        tables = [read(path) for path in paths]
+        schema = tables[0].schema
+        if any(not table.schema.equals(schema, check_metadata=False)
+               for table in tables[1:]):
             raise ValueError("Episode Parquet schemas are inconsistent.")
-        tables = [read(path, columns=_EPISODE_CONTROL_COLUMNS)
-                  for path in paths]
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot Episode metadata %s: %s"
             % (directory, error)) from error
     rows = []
     for table in tables:
-        rows.extend(table.to_pylist())
+        rows.extend(table.select(_EPISODE_CONTROL_COLUMNS).to_pylist())
     rows.sort(key=lambda row: _integer(
         row.get("episode_index"), "episode_index"))
-    return {"paths": paths, "rows": rows, "schema": schema}
-
-
-def _source_episode_tables(metadata):
-    source = metadata["source"]
-    if source.file_io is not None:
-        from pypaimon.multimodal.lerobot.source import _read_remote_parquet
-        for path in metadata["episode_paths"]:
-            yield _read_remote_parquet(source.file_io, path)
-    else:
-        for path in metadata["episode_paths"]:
-            try:
-                yield pq.read_table(path)
-            except (OSError, ValueError, pa.ArrowException) as error:
-                raise ValueError(
-                    "Cannot read LeRobot Episode metadata %s: %s"
-                    % (path, error)) from error
+    return {"tables": tables, "rows": rows, "schema": schema}
 
 
 def _metadata_root(dataset, source):
@@ -488,8 +483,8 @@ def _metadata_root(dataset, source):
     return Path(root)
 
 
-def _task_rows(records, total_tasks):
-    rows = [None] * total_tasks
+def _task_indices(records, total_tasks):
+    seen = [False] * total_tasks
     by_name = {}
     for record in records:
         index = _integer(record.get("task_index"), "task_index")
@@ -497,25 +492,40 @@ def _task_rows(records, total_tasks):
         if task is None:
             task = record.get("__index_level_0__")
         if index < 0 or index >= total_tasks or task is None \
-                or rows[index] is not None:
+                or seen[index]:
             raise ValueError("LeRobot task metadata is invalid: %s" % record)
         task = str(task)
         if task in by_name:
             raise ValueError("LeRobot task metadata repeats task %r." % task)
         by_name[task] = index
-        extra = dict(record)
-        for key in ("task_index", "task", "name", "__index_level_0__"):
-            extra.pop(key, None)
-        rows[index] = {
-            "task_index": index,
-            "task": task,
-            "task_metadata_json": (
-                _canonical_json(extra) if extra else None),
-        }
-    if any(row is None for row in rows):
+        seen[index] = True
+    if not all(seen):
         raise ValueError(
             "LeRobot task metadata does not cover [0, %d)." % total_tasks)
-    return rows, by_name
+    return by_name
+
+
+def _subtask_indices(subtasks_table, info):
+    has_feature = "subtask_index" in info["features"]
+    if subtasks_table is None:
+        if has_feature:
+            raise ValueError(
+                "LeRobot frames declare subtask_index but "
+                "meta/subtasks.parquet is missing.")
+        return None
+    if not has_feature:
+        raise ValueError(
+            "LeRobot meta/subtasks.parquet requires a subtask_index feature.")
+    if "subtask_index" not in subtasks_table.column_names:
+        raise ValueError(
+            "LeRobot subtask metadata is missing subtask_index.")
+    for expected, value in enumerate(
+            subtasks_table.column("subtask_index").to_pylist()):
+        if _integer(value, "subtask_index") != expected:
+            raise ValueError(
+                "LeRobot subtask metadata must cover [0, %d) in order."
+                % subtasks_table.num_rows)
+    return range(subtasks_table.num_rows)
 
 
 def _episode_rows(records, task_indices, info, total_frames, total_episodes):
@@ -523,7 +533,6 @@ def _episode_rows(records, task_indices, info, total_frames, total_episodes):
         raise ValueError(
             "LeRobot metadata reports %d Episodes but %d were found."
             % (total_episodes, len(records)))
-    splits = _episode_splits(info.get("splits"), total_episodes)
     rows = []
     expected_begin = 0
     for ordinal, record in enumerate(records):
@@ -553,27 +562,12 @@ def _episode_rows(records, task_indices, info, total_frames, total_episodes):
             raise ValueError(
                 "LeRobot Episode %d repeats a task." % ordinal)
 
-        stats = {
-            key[len("stats/"):]: value
-            for key, value in record.items() if key.startswith("stats/")
-        }
-        extra = {
-            key: value for key, value in record.items()
-            if key not in {
-                "episode_index", "dataset_from_index", "dataset_to_index",
-                "length", "tasks"
-            } and not key.startswith("stats/")
-        }
         rows.append({
             "episode_index": index,
             "dataset_from_index": begin,
             "dataset_to_index": end,
             "length": length,
             "task_indices": episode_task_indices,
-            "split": splits[index],
-            "episode_stats_json": (
-                _canonical_json(stats) if stats else None),
-            "episode_metadata_json": _canonical_json(extra),
         })
         expected_begin = end
     if expected_begin != total_frames:
@@ -581,28 +575,6 @@ def _episode_rows(records, task_indices, info, total_frames, total_episodes):
             "LeRobot Episode ranges cover %d frames but metadata reports %d."
             % (expected_begin, total_frames))
     return rows
-
-
-def _episode_splits(value, total_episodes):
-    result = [None] * total_episodes
-    if not isinstance(value, dict):
-        return result
-    for name, bounds in value.items():
-        if not isinstance(bounds, str) or bounds.count(":") != 1:
-            continue
-        begin_text, end_text = bounds.split(":")
-        try:
-            begin, end = int(begin_text), int(end_text)
-        except ValueError:
-            continue
-        if begin < 0 or end < begin or end > total_episodes:
-            continue
-        for index in range(begin, end):
-            if result[index] is None:
-                result[index] = str(name)
-            elif result[index] != str(name):
-                result[index] = None
-    return result
 
 
 def _canonical_json(value):

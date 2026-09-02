@@ -466,17 +466,6 @@ def _read_remote_parquet(source_file_io, path, columns=None):
                 % (path, error)) from error
 
 
-def _read_remote_parquet_schema(source_file_io, path):
-    stream = source_file_io.new_input_stream(path)
-    with closing(stream) as source_stream:
-        try:
-            return pq.read_schema(source_stream)
-        except (OSError, ValueError, pa.ArrowException) as error:
-            raise ValueError(
-                "Cannot read LeRobot Parquet schema %s: %s"
-                % (path, error)) from error
-
-
 def _remote_parquet_files(source_file_io, directory):
     try:
         statuses = source_file_io.list_status(directory)
