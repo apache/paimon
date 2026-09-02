@@ -33,7 +33,6 @@ from pypaimon.multimodal.lerobot.metadata import (
     _new_owner_id,
     _prepare_metadata_tables,
     _publish_dataset,
-    _reject_subtasks,
     _reserve_dataset_version,
 )
 from pypaimon.multimodal.lerobot.loader import _write_dataset
@@ -43,7 +42,6 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
-    _has_tasks,
     _import_lerobot_dataset,
     _load_hub_info,
     _open_resolved_dataset,
@@ -89,17 +87,13 @@ def load_from_lerobot(
             local_info = _load_hub_info(resolved_source)
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
-        _schema_from_info(local_info, include_task=False)
-        total_frames, _, total_tasks = \
+        _schema_from_info(local_info)
+        total_frames, _, _ = \
             _validated_counts(local_info, resolved_source.path)
         if total_frames == 0 and (
                 resolved_source.root is not None
                 or resolved_source.file_io is not None):
-            source_schema = _schema_from_info(
-                local_info,
-                include_task=total_tasks > 0,
-            )
-            _reject_subtasks(None, resolved_source)
+            source_schema = _schema_from_info(local_info)
             metadata = _load_dataset_metadata(
                 None, local_info, resolved_source)
             return _import_dataset(
@@ -121,9 +115,7 @@ def load_from_lerobot(
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
 
-            lerobot_schema = _schema_from_info(
-                info, include_task=_has_tasks(dataset, info))
-            _reject_subtasks(dataset, resolved_source)
+            lerobot_schema = _schema_from_info(info)
             metadata = _load_dataset_metadata(
                 dataset, info, resolved_source)
             return _import_dataset(

@@ -525,8 +525,9 @@ source drift. Calling it again with the same input appends the rows again.
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json`, writes one row per
 frame, and creates a LeRobot dataset backed by the frame table,
-`<table>__versions`, `<table>__episodes`, and `<table>__tasks`. A manifest row is
-reserved as `PENDING` before the component writes and marked `READY` only after
+`<table>__versions`, `<table>__episodes`, `<table>__tasks`, and an optional
+`<table>__subtasks`. Task text remains in the metadata table; frames retain
+`task_index`. A manifest row is reserved as `PENDING` and marked `READY` after
 all components are committed and tagged with the same numeric `version_id`.
 Readers ignore `PENDING`.
 
@@ -542,8 +543,7 @@ version_id = conn.load_from_lerobot(
 print(version_id)
 ```
 
-The returned `version_id` is the common tag name for the frame, Episode, and
-Task tables.
+The returned `version_id` is the common tag name for all dataset components.
 
 For FileIO URIs, pass credentials through `source_options`:
 
@@ -561,9 +561,9 @@ version_id = conn.load_from_lerobot(
 
 The component tables retain the native LeRobot V3 schemas and contain no
 version columns. A READY row in `<table>__versions` identifies a release;
-reading the same tag from the three component tables reconstructs that release.
+reading the same tag from its component tables reconstructs that release.
 The one-time importer requires a new target table. A failed import removes the
-table group so the call can be retried. `drop_table()` removes all four tables;
+table group so the call can be retried. `drop_table()` removes the table group;
 companion tables cannot be dropped separately through `MultimodalConnection`.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested

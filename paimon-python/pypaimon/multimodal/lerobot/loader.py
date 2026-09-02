@@ -77,9 +77,6 @@ def _write_dataset(
     batch_count = 0
     row_count = 0
     episodes = metadata["episodes"]
-    task_names = {
-        row["task_index"]: row["task"] for row in metadata["tasks"]
-    }
     observed_tasks = {}
     snapshot_recorder = _SnapshotRecorder()
 
@@ -90,7 +87,7 @@ def _write_dataset(
         for episode_index, episode_begin, task_indices, begin, end in \
                 _episode_batches(dataset, info, batch_size, episodes):
             batch = _read_batch(
-                dataset, info, begin, end, source_schema, task_names)
+                dataset, info, begin, end, source_schema)
             seen_tasks = _validate_frame_controls(
                 batch,
                 int(info["fps"]),
@@ -213,14 +210,18 @@ def _validate_frame_controls(
             index,
         )
         timestamp = values["timestamp"][offset]
+        expected_timestamp = pa.scalar(
+            frame_index / fps,
+            type=batch.schema.field("timestamp").type,
+        ).as_py()
         if (isinstance(timestamp, bool)
                 or not isinstance(timestamp, numbers.Real)
                 or not math.isclose(
-                    float(timestamp), frame_index / fps,
+                    float(timestamp), float(expected_timestamp),
                     rel_tol=0.0, abs_tol=1e-4)):
             raise ValueError(
                 "LeRobot frame %d has timestamp %r; expected %r."
-                % (index, timestamp, frame_index / fps))
+                % (index, timestamp, expected_timestamp))
         task_index = _control_integer(
             values["task_index"][offset], "task_index", index)
         if task_index not in allowed_tasks:
@@ -262,7 +263,7 @@ def _control_integer(value, name, frame_index):
     return int(value)
 
 
-def _read_batch(dataset, info, begin, end, schema, task_names=None):
+def _read_batch(dataset, info, begin, end, schema):
     read_batch = getattr(dataset, "read_batch", None)
     if callable(read_batch):
         raw = read_batch(begin, end)
@@ -296,14 +297,6 @@ def _read_batch(dataset, info, begin, end, schema, task_names=None):
         arrays.append(_safe_array(values, field, name, dtype))
         fields.append(field)
 
-    if "task" in schema.names:
-        task_indices = raw.column("task_index").to_pylist()
-        tasks = dataset.meta.tasks if task_names is None else task_names
-        arrays.append(pa.array(
-            [_task_name(tasks, value) for value in task_indices],
-            type=pa.string(),
-        ))
-        fields.append(schema.field("task"))
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
 
 
@@ -471,17 +464,3 @@ def _encode_media_frame(value):
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
-
-
-def _task_name(tasks, task_index):
-    index = int(_python_scalar(task_index))
-    if index < 0 or index >= len(tasks):
-        raise ValueError(
-            "LeRobot task_index %d is outside [0, %d)."
-            % (index, len(tasks)))
-    if hasattr(tasks, "iloc"):
-        return str(tasks.iloc[index].name)
-    task = tasks[index]
-    if isinstance(task, dict):
-        return str(task.get("task", task.get("name")))
-    return str(task)

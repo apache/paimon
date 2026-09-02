@@ -41,6 +41,7 @@ _TABLE_SUFFIXES = {
     "versions": "__versions",
     "episodes": "__episodes",
     "tasks": "__tasks",
+    "subtasks": "__subtasks",
 }
 _COMPANION_OPTION_KEYS = {
     name: "pypaimon.lerobot.%s-table" % name
@@ -52,6 +53,7 @@ _VERSIONS_SCHEMA = pa.schema([
     pa.field("status", pa.string(), nullable=False),
     pa.field("info_json", pa.string(), nullable=False),
     pa.field("stats_json", pa.string()),
+    pa.field("has_subtasks", pa.bool_(), nullable=False),
 ])
 _EMPTY_TASKS_SCHEMA = pa.schema([
     pa.field("task_index", pa.int64(), nullable=False),
@@ -78,8 +80,9 @@ def _load_dataset_metadata(dataset, info, source):
     stats = _source_stats(dataset, source)
     tasks_table = _source_tasks(
         dataset, source, int(info["total_tasks"]))
-    tasks, task_indices = _task_rows(
+    _, task_indices = _task_rows(
         tasks_table.to_pylist(), int(info["total_tasks"]))
+    subtasks_table = _source_subtasks(dataset, source)
     total_episodes = int(info["total_episodes"])
     episode_source = (
         _source_episodes(dataset, source)
@@ -99,10 +102,10 @@ def _load_dataset_metadata(dataset, info, source):
         "stats_json": (
             None if stats is None else _canonical_json(stats)),
         "episodes": episodes,
-        "tasks": tasks,
         "episodes_schema": episode_source["schema"],
         "episode_paths": episode_source["paths"],
         "tasks_table": tasks_table,
+        "subtasks_table": subtasks_table,
         "source": source,
     }
 
@@ -160,7 +163,18 @@ def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
         "episodes": metadata["episodes_schema"],
         "tasks": metadata["tasks_table"].schema,
     }
+    if metadata["subtasks_table"] is not None:
+        schemas["subtasks"] = metadata["subtasks_table"].schema
     identifiers = _companion_table_identifiers(frames_table)
+    if metadata["subtasks_table"] is None:
+        try:
+            connection.catalog.get_table(identifiers["subtasks"])
+        except (DatabaseNotExistException, TableNotExistException):
+            pass
+        else:
+            raise ValueError(
+                "LeRobot metadata table %s already exists."
+                % identifiers["subtasks"])
     tables = {}
     for name, schema in schemas.items():
         identifier = identifiers[name]
@@ -226,11 +240,19 @@ def _publish_dataset(
     tasks_snapshot_id = _append_arrow(
         tables["tasks"], metadata["tasks_table"])
     _require_initial_snapshot("tasks", tasks_snapshot_id)
+    component_snapshots = [
+        (frames_identifier, frames_snapshot_id),
+        (tables["episodes"].identifier, episodes_snapshot_id),
+        (tables["tasks"].identifier, tasks_snapshot_id),
+    ]
+    if metadata["subtasks_table"] is not None:
+        subtasks_snapshot_id = _append_arrow(
+            tables["subtasks"], metadata["subtasks_table"])
+        _require_initial_snapshot("subtasks", subtasks_snapshot_id)
+        component_snapshots.append(
+            (tables["subtasks"].identifier, subtasks_snapshot_id))
     tag = str(version_id)
-    for identifier, snapshot_id in (
-            (frames_identifier, frames_snapshot_id),
-            (tables["episodes"].identifier, episodes_snapshot_id),
-            (tables["tasks"].identifier, tasks_snapshot_id)):
+    for identifier, snapshot_id in component_snapshots:
         _create_tag(connection.catalog, identifier, tag, snapshot_id)
 
     manifest = _manifest_row(version_id, "READY", metadata)
@@ -258,6 +280,7 @@ def _manifest_row(
         "status": status,
         "info_json": metadata["info_json"],
         "stats_json": metadata["stats_json"],
+        "has_subtasks": metadata["subtasks_table"] is not None,
     }
 
 
@@ -365,6 +388,29 @@ def _source_tasks(dataset, source, total_tasks):
         ) from error
 
 
+def _source_subtasks(dataset, source):
+    if source.file_io is not None:
+        from pypaimon.multimodal.lerobot.source import (
+            _read_remote_parquet,
+            _remote_path,
+        )
+        path = _remote_path(source.path, "meta/subtasks.parquet")
+        try:
+            source.file_io.get_file_status(path)
+        except FileNotFoundError:
+            return None
+        return _read_remote_parquet(source.file_io, path)
+    path = _metadata_root(dataset, source) / "meta" / "subtasks.parquet"
+    if not path.is_file():
+        return None
+    try:
+        return pq.read_table(path)
+    except (OSError, ValueError, pa.ArrowException) as error:
+        raise ValueError(
+            "Cannot read LeRobot subtask metadata %s: %s" % (path, error)
+        ) from error
+
+
 def _source_episodes(dataset, source):
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
@@ -430,22 +476,6 @@ def _source_episode_tables(metadata):
                 raise ValueError(
                     "Cannot read LeRobot Episode metadata %s: %s"
                     % (path, error)) from error
-
-
-def _reject_subtasks(dataset, source):
-    if source.file_io is not None:
-        from pypaimon.multimodal.lerobot.source import _remote_path
-        path = _remote_path(source.path, "meta/subtasks.parquet")
-        try:
-            source.file_io.get_file_status(path)
-        except FileNotFoundError:
-            return
-    else:
-        path = _metadata_root(dataset, source) / "meta" / "subtasks.parquet"
-        if not path.is_file():
-            return
-    raise ValueError(
-        "LeRobot subtask metadata is not supported yet: %s" % path)
 
 
 def _metadata_root(dataset, source):

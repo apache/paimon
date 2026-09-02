@@ -492,8 +492,3 @@ def _remote_parquet_files(source_file_io, directory):
         elif status.type == pafs.FileType.File and path.endswith(".parquet"):
             paths.append(path)
     return sorted(paths)
-
-
-def _has_tasks(dataset, info):
-    return int(info.get("total_tasks", 0)) > 0 \
-        and getattr(dataset.meta, "tasks", None) is not None
