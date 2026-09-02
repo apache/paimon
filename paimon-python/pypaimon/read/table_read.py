@@ -40,6 +40,40 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
+_RECORD_BATCH_READER_FROM_STREAM = getattr(
+    pyarrow.ipc.RecordBatchReader, "from_stream", None)
+
+
+class _ClosableArrowBatchReader:
+
+    def __init__(self, reader, batch_iterator):
+        self._reader = reader
+        self._batch_iterator = batch_iterator
+
+    def __getattr__(self, name):
+        return getattr(self._reader, name)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self._reader.read_next_batch()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        try:
+            close = getattr(self._batch_iterator, "close", None)
+            if close is not None:
+                close()
+        finally:
+            close = getattr(self._reader, "close", None)
+            if close is not None:
+                close()
 
 
 class _RemainingRows:
@@ -159,10 +193,11 @@ class TableRead:
         batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
         reader = reader_type.from_batches(schema, batch_iterator)
-        if hasattr(reader_type, "from_stream") and hasattr(reader, "close"):
+        if (_RECORD_BATCH_READER_FROM_STREAM is not None
+                and hasattr(reader, "close")):
             # Propagate close to the Python batch iterator.
-            return reader_type.from_stream(reader)
-        return reader
+            return _RECORD_BATCH_READER_FROM_STREAM(reader)
+        return _ClosableArrowBatchReader(reader, batch_iterator)
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:

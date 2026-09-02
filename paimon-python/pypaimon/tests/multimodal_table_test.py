@@ -844,13 +844,12 @@ class MultimodalTableTest(unittest.TestCase):
 
         with patch(
                 "pypaimon.read.table_read.TableRead._arrow_batch_generator",
-                new=batches):
+                new=batches), patch(
+                    "pypaimon.read.table_read."
+                    "_RECORD_BATCH_READER_FROM_STREAM", None):
             reader = users.scan().select("id").to_arrow_batch_reader()
             reader.read_next_batch()
-            if hasattr(reader, "close"):
-                reader.close()
-            else:
-                reader.read_all()
+            reader.close()
         self.assertEqual([True], closed)
 
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
