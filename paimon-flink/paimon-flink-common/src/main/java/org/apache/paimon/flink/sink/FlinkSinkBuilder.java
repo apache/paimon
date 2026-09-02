@@ -40,6 +40,8 @@ import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.SchemaBucketFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.functions.MapFunction;
@@ -365,13 +367,19 @@ public class FlinkSinkBuilder {
         // per-partition mapping from manifests.
         FileStoreTable sinkTable =
                 overwritePartition != null ? new SchemaBucketFileStoreTable(table) : table;
+        PartitionBucketMapping partitionBucketMapping =
+                overwritePartition != null
+                        ? PartitionBucketMapping.defaultBuckets(sinkTable.schema().numBuckets())
+                        : PartitionBucketMapping.loadFromTable(sinkTable);
         DataStream<InternalRow> partitioned =
                 partition(
                         input,
-                        new RowDataChannelComputer(sinkTable.createRowKeyExtractor()),
+                        new RowDataChannelComputer(
+                                new FixedBucketRowKeyExtractor(
+                                        sinkTable.schema(), partitionBucketMapping)),
                         parallelism);
         return configureBlobDescriptorReaderFactory(
-                        new FixedBucketSink(sinkTable, overwritePartition))
+                        new FixedBucketSink(sinkTable, overwritePartition, partitionBucketMapping))
                 .sinkFrom(partitioned);
     }
 

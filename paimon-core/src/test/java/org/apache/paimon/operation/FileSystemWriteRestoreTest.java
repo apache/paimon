@@ -39,6 +39,7 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -232,6 +233,12 @@ public class FileSystemWriteRestoreTest {
         // Writing an in-range bucket (< the partition's 2 buckets) into an empty bucket of the same
         // partition is accepted: per-partition bucket counts are still honored.
         int emptyBucket = findEmptyBucket(rescaledTable, 1, /* totalBuckets */ 2);
+        try (TableWriteImpl<?> write = rescaledTable.newWrite(UUID.randomUUID().toString())) {
+            assertThatThrownBy(() -> write.writeAndReturn(GenericRow.of(1, 2, 2L), emptyBucket, 8))
+                    .hasMessageContaining("new bucket num 8")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+
         String user = UUID.randomUUID().toString();
         long id = rescaledTable.snapshotManager().latestSnapshotId();
         try (InnerTableWrite write = rescaledTable.newWrite(user);

@@ -88,14 +88,34 @@ public class PartitionEntry {
 
         // Use the totalBuckets from the most recently created file. This correctly handles
         // the case where a partition has been overwritten with a different bucket count: the
-        // newer files carry the new totalBuckets, and their creation time is always later.
-        // When timestamps are equal (e.g., two files written in the same millisecond with
-        // different bucket counts), we take the larger totalBuckets value. This makes merge
-        // commutative and associative — a.merge(b) == b.merge(a)
-        int newTotalBuckets =
-                newer.lastFileCreationTime == older.lastFileCreationTime
-                        ? Math.max(newer.totalBuckets, older.totalBuckets)
-                        : newer.totalBuckets;
+        // newer files carry the new totalBuckets. A creation timestamp does not provide an
+        // ordering when the files were created in the same millisecond. In that case, choosing
+        // either bucket count (for example, the larger one) can silently discard a rescale.
+        if (newer.lastFileCreationTime == older.lastFileCreationTime
+                && newer.totalBuckets != older.totalBuckets) {
+            if (newer.totalBuckets > 0 && older.totalBuckets > 0) {
+                throw new IllegalStateException(
+                        String.format(
+                                "Cannot determine the bucket layout for partition %s: files created at %s "
+                                        + "have conflicting bucket counts (%s and %s).",
+                                partition,
+                                newer.lastFileCreationTime,
+                                newer.totalBuckets,
+                                older.totalBuckets));
+            }
+
+            // A non-positive bucket count is a mode marker, not a fixed-bucket layout. For
+            // example, dynamic bucket tables can contain -1 entries while their real buckets
+            // are being created. Preserve the previous deterministic tie-break for these modes.
+            return new PartitionEntry(
+                    partition,
+                    recordCount + entry.recordCount,
+                    fileSizeInBytes + entry.fileSizeInBytes,
+                    fileCount + entry.fileCount,
+                    newer.lastFileCreationTime,
+                    Math.max(newer.totalBuckets, older.totalBuckets));
+        }
+        int newTotalBuckets = newer.totalBuckets;
 
         return new PartitionEntry(
                 partition,

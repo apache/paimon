@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -76,6 +77,34 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             boolean isStreaming,
             MemoryPoolFactory memoryPoolFactory,
             MetricGroup metricGroup) {
+        this(
+                table,
+                commitUser,
+                state,
+                ioManager,
+                ignorePreviousFiles,
+                waitCompaction,
+                deltaCommits,
+                isStreaming,
+                memoryPoolFactory,
+                metricGroup,
+                null,
+                FileStoreTable::newWrite);
+    }
+
+    GlobalFullCompactionSinkWrite(
+            FileStoreTable table,
+            String commitUser,
+            StoreSinkWriteState state,
+            IOManager ioManager,
+            boolean ignorePreviousFiles,
+            boolean waitCompaction,
+            int deltaCommits,
+            boolean isStreaming,
+            MemoryPoolFactory memoryPoolFactory,
+            MetricGroup metricGroup,
+            PartitionBucketMapping partitionBucketMapping,
+            TableWriteFactory tableWriteFactory) {
         super(
                 table,
                 commitUser,
@@ -85,7 +114,9 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 waitCompaction,
                 isStreaming,
                 memoryPoolFactory,
-                metricGroup);
+                metricGroup,
+                partitionBucketMapping,
+                tableWriteFactory);
 
         this.deltaCommits = deltaCommits;
 

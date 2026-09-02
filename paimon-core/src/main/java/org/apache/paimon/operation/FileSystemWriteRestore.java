@@ -37,10 +37,11 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 /** {@link WriteRestore} to restore files directly from file system. */
 public class FileSystemWriteRestore implements WriteRestore {
 
+    private final CoreOptions options;
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
-    private final PartitionBucketMapping partitionBucketMapping;
+    @Nullable private PartitionBucketMapping partitionBucketMapping;
     private final @Nullable Long snapshotId;
 
     public FileSystemWriteRestore(
@@ -66,6 +67,7 @@ public class FileSystemWriteRestore implements WriteRestore {
             FileStoreScan scan,
             IndexFileHandler indexFileHandler,
             @Nullable Long snapshotId) {
+        this.options = options;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFileHandler = indexFileHandler;
@@ -77,8 +79,19 @@ public class FileSystemWriteRestore implements WriteRestore {
         }
         this.partitionBucketMapping =
                 options.bucketPerPartitionCountEnabled()
-                        ? PartitionBucketMapping.loadFromScan(scan, options.bucket())
+                        ? null
                         : PartitionBucketMapping.defaultBuckets(options.bucket());
+    }
+
+    public void withPartitionBucketMapping(PartitionBucketMapping partitionBucketMapping) {
+        this.partitionBucketMapping = partitionBucketMapping;
+    }
+
+    private PartitionBucketMapping partitionBucketMapping() {
+        if (partitionBucketMapping == null) {
+            partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, options.bucket());
+        }
+        return partitionBucketMapping;
     }
 
     @Override
@@ -111,7 +124,7 @@ public class FileSystemWriteRestore implements WriteRestore {
         List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
 
         Integer totalBuckets =
-                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping);
+                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping());
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {
