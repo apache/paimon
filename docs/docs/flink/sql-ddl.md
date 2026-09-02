@@ -108,7 +108,7 @@ You can define any default table options with the prefix `table-default.` for ta
 
 Also, you can create [FlinkGenericCatalog](./quick-start).
 
-> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
+> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false` on the **Hive Metastore server** (in its `hive-site.xml`, then restart HMS). Setting this on the Paimon catalog or via Flink SQL `SET` only configures the client-side HiveConf and is not propagated to the remote HMS over Thrift. See [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
 
 > If you are using Hive3, please disable Hive ACID:
 >
