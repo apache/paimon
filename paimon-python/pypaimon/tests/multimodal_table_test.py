@@ -804,8 +804,14 @@ class MultimodalTableTest(unittest.TestCase):
         with patch.object(
                 self.conn, "get_table", side_effect=delete_once):
             table = self.conn.create_table(
-                "deleted", schema=schema, ignore_if_exists=True)
+                "deleted",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
         self.assertEqual("default.deleted", table.identifier)
+        self.assertEqual(
+            [1, 2, 3], table.scan().to_arrow()["id"].to_pylist())
 
         self.conn.create_table("fallback_deleted", schema=schema)
         deleted[0] = False
@@ -832,6 +838,23 @@ class MultimodalTableTest(unittest.TestCase):
                         options={"data-evolution.enabled": "false"},
                         ignore_if_exists=True,
                     )
+
+    def test_create_table_does_not_add_data_to_concurrent_winner(self):
+        schema = _schema({"id": pa.int32()})
+        winner = self.conn.create_table("winner", schema=schema)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            actual = self.conn.create_table(
+                "winner",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
+
+        self.assertEqual(winner.identifier, actual.identifier)
+        self.assertEqual([], actual.scan().to_arrow().to_pylist())
 
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(

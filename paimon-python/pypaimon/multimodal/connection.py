@@ -90,15 +90,17 @@ class MultimodalConnection:
             raise
 
         self._create_database_for(identifier)
+        created = False
         try:
             self.catalog.create_table(
-                identifier, paimon_schema, ignore_if_exists)
+                identifier, paimon_schema, False)
+            created = True
         except TableAlreadyExistException:
             if not ignore_if_exists:
                 raise
 
         table = self.get_table(name)
-        if data is not None and not already_exists:
+        if data is not None and created:
             table.add(data)
         return table
 
