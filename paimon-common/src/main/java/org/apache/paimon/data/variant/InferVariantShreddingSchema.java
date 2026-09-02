@@ -574,11 +574,11 @@ public class InferVariantShreddingSchema {
             if (current != null && !(current instanceof VariantType)) {
                 combined = current;
             } else if (previousSelected != null) {
-                // This node has no evidence in the current file. A previously selected schema is
-                // not
-                // evidence - its fields carry no counts - so it cannot be run through admission and
-                // retention again; carry it forward unchanged.
-                return previousSelected;
+                // This node has no evidence in the current file. A previously selected schema
+                // is not evidence - its fields carry no counts - so it cannot be run through
+                // admission and retention again; carry it forward as it is, debiting the shared
+                // width budget for what it holds.
+                return retainSelectedSchema(previousSelected, maxFields);
             } else {
                 return DataTypes.VARIANT();
             }
@@ -656,6 +656,37 @@ public class InferVariantShreddingSchema {
 
         maxFields.remaining--;
         return selectScalarType(combined, current, previousSelected);
+    }
+
+    /**
+     * Carries a previously selected schema forward for a node the current file has no evidence for.
+     * The selection is already final, so nothing is re-thresholded, but its nodes still consume the
+     * shared width budget and are dropped once it runs out, on the same terms as the
+     * evidence-driven walk above: one unit per node, VARIANT once the budget is gone.
+     */
+    private DataType retainSelectedSchema(DataType selected, MaxFields maxFields) {
+        if (selected instanceof RowType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : ((RowType) selected).getFields()) {
+                maxFields.remaining--;
+                if (maxFields.remaining <= 0) {
+                    break;
+                }
+                DataType retained = retainSelectedSchema(field.type(), maxFields);
+                fields.add(new DataField(fields.size(), field.name(), retained));
+            }
+            return fields.isEmpty() ? DataTypes.VARIANT() : new RowType(fields);
+        }
+        if (selected instanceof ArrayType) {
+            maxFields.remaining--;
+            if (maxFields.remaining <= 0) {
+                return DataTypes.VARIANT();
+            }
+            return new ArrayType(
+                    retainSelectedSchema(((ArrayType) selected).getElementType(), maxFields));
+        }
+        maxFields.remaining--;
+        return selected;
     }
 
     private DataType selectScalarType(

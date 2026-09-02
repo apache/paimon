@@ -356,6 +356,47 @@ public class InferVariantShreddingSchemaTest {
                                         new String[] {"k", "p"})));
     }
 
+    /**
+     * maxSchemaWidth is one budget shared by every variant column. A schema carried forward for a
+     * node with no evidence still occupies it, so a later column must not get to spend what the
+     * carried-forward schema is holding.
+     */
+    @Test
+    void testRetainedSchemaStillConsumesTheSharedWidthBudget() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 8, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":5}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":{\"x\":1}}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(
+                                        GenericVariant.fromJson("{}"),
+                                        GenericVariant.fromJson("{\"q\":1,\"r\":1}"))));
+
+        // "a" keeps ROW<x BIGINT> under "p", and the budget it holds leaves "r" untyped in "b".
+        assertThat(afterAbsence.getField("b").type().toString())
+                .contains("`q` ROW<`value` BYTES, `typed_value` BIGINT>")
+                .doesNotContain("`r` ROW<`value` BYTES, `typed_value`");
+    }
+
     @Test
     void testInferSchemaWithDeepNesting() {
         // Schema: row<v: variant>
