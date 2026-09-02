@@ -35,6 +35,7 @@ import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
 from pypaimon.multimodal.hdf5 import _Hdf5SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
+import pypaimon.multimodal.lerobot.source as lerobot_source
 from pypaimon.multimodal.lerobot.metadata import (
     _load_dataset_metadata,
     _managed_table_options,
@@ -63,6 +64,13 @@ try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 except ImportError:
     LeRobotDataset = None
+
+
+_SOURCE_FILE_IO = (
+    "_SourceFileIO"
+    if hasattr(lerobot_source, "_SourceFileIO")
+    else "_Hdf5SourceFileIO"
+)
 
 
 def _replaced_contract(field, old, new):
@@ -183,9 +191,8 @@ class LeRobotValidationTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_hdfs_source_rejects_explicit_keytab_before_resolution(self):
-        with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO"
-        ) as source_file_io:
+        with patch.object(
+                lerobot_source, _SOURCE_FILE_IO) as source_file_io:
             with self.assertRaisesRegex(ValueError, "process-isolated"):
                 load_from_lerobot(
                     Mock(),
@@ -1070,8 +1077,9 @@ class LeRobotImportTest(unittest.TestCase):
         source = "oss://source-bucket/robot-images"
         source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
 
-        with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+        with patch.object(
+                lerobot_source,
+                _SOURCE_FILE_IO,
                 return_value=source_file_io):
             version_id = self.connection.load_from_lerobot(
                 "oss_images",
@@ -1117,8 +1125,9 @@ class LeRobotImportTest(unittest.TestCase):
         source = "oss://source-bucket/empty-robot"
         source_file_io = _RemoteLeRobotFileIO(local_source, source)
 
-        with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+        with patch.object(
+                lerobot_source,
+                _SOURCE_FILE_IO,
                 return_value=source_file_io):
             with self.assertRaisesRegex(ValueError, "non-empty"):
                 self.connection.load_from_lerobot("empty_oss", source)
@@ -1250,8 +1259,9 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertLogs(
                 "pypaimon.multimodal.lerobot.source", level="WARNING"):
-            with patch(
-                    "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+            with patch.object(
+                    lerobot_source,
+                    _SOURCE_FILE_IO,
                     return_value=source_file_io):
                 version_id = self.connection.load_from_lerobot(
                     "source_close_failure", source)
