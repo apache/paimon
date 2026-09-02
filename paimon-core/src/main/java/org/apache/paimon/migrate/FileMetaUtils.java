@@ -222,13 +222,6 @@ public class FileMetaUtils {
         RowType rowTypeWithSchemaId =
                 fileStoreTable.schemaManager().schema(schemaId).logicalRowType();
         CoreOptions options = fileStoreTable.coreOptions();
-
-        // Align with the normal write path (RowDataFileWriter): the dense-store option (default
-        // true) must be respected, and toBinary must be used instead of toBinaryAllMode. Only then
-        // will metadata.stats-mode take effect on the migrate path -- for example with
-        // stats-mode=none (and dense-store=true), toBinaryDenseMode skips columns whose stats are
-        // None and produces empty statistics instead of always emitting all min/max/nullCount
-        // arrays.
         SimpleStatsConverter statsArraySerializer =
                 new SimpleStatsConverter(rowTypeWithSchemaId, options.statsDenseStore());
 
