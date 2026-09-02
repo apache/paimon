@@ -139,6 +139,10 @@ jobs:
             fi
             python -m pip install 'h5py>=3,<4'
             python -c "import h5py; print('h5py', h5py.__version__)"
+            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"; then
+              python -m pip install './paimon-python[rosbag]'
+              python -c "import rosbags; print('rosbags installed')"
+            fi
             if [[ "${{ matrix.python-version }}" == "3.10" ]]; then
               python -m pip install './paimon-python[lerobot]'
               python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"

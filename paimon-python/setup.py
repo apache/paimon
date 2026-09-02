@@ -237,6 +237,10 @@ setup(
             # HDF5 loading is explicitly guarded and documented as Python 3.8+.
             'h5py>=3,<4; python_version>="3.8"',
         ],
+        'rosbag': [
+            # rosbags is pure Python and does not require a ROS installation.
+            'rosbags>=0.11.5,<0.12; python_version>="3.10"',
+        ],
         'lerobot': [
             # datasets 4.1+ may select PyArrow 21+, while PyPaimon currently
             # supports PyArrow <20. Pandas 2.2.2+ supports NumPy 2.x selected

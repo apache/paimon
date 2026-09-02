@@ -59,11 +59,13 @@ public class InternalRowPartitionComputer {
         List<String> columnList = rowType.getFieldNames();
         this.partitionFieldGetters = new FieldGetter[partitionColumns.length];
         this.partitionCastExecutors = new CastExecutor[partitionColumns.length];
-        for (String partitionColumn : partitionColumns) {
-            int i = columnList.indexOf(partitionColumn);
+        for (int j = 0; j < partitionColumns.length; j++) {
+            // The getter must be stored at the partition-column position, while the type
+            // comes from the column's position in the full row schema.
+            int i = columnList.indexOf(partitionColumns[j]);
             DataType type = rowType.getTypeAt(i);
-            partitionFieldGetters[i] = createNullCheckingFieldGetter(type, i);
-            partitionCastExecutors[i] = CastExecutors.resolve(type, VarCharType.STRING_TYPE);
+            partitionFieldGetters[j] = createNullCheckingFieldGetter(type, i);
+            partitionCastExecutors[j] = CastExecutors.resolve(type, VarCharType.STRING_TYPE);
         }
     }
 

@@ -71,7 +71,7 @@ class Hdf5RuntimeContractTest(unittest.TestCase):
         resolver._get_fileio.return_value = backend
 
         with patch(
-                "pypaimon.multimodal.hdf5.ResolvingFileIO",
+                "pypaimon.multimodal.source_utils.ResolvingFileIO",
                 return_value=resolver):
             source_io = _Hdf5SourceFileIO(Options({}))
             self.assertEqual(
@@ -501,7 +501,7 @@ class MultimodalHdf5Test(unittest.TestCase):
             yield from self._transform(h5, source)
 
         with patch(
-                "pypaimon.multimodal.hdf5.ResolvingFileIO",
+                "pypaimon.multimodal.source_utils.ResolvingFileIO",
                 return_value=source_file_io) as resolving_file_io:
             result = self._load(
                 table,
@@ -541,7 +541,7 @@ class MultimodalHdf5Test(unittest.TestCase):
         proxy, writer, committer = self._instrument_write(table)
 
         with patch(
-                "pypaimon.multimodal.hdf5.ResolvingFileIO",
+                "pypaimon.multimodal.source_utils.ResolvingFileIO",
                 return_value=source_file_io), patch.object(
                     table.raw_table,
                     "new_batch_write_builder",
@@ -566,7 +566,7 @@ class MultimodalHdf5Test(unittest.TestCase):
         new_builder = Mock()
 
         with patch(
-                "pypaimon.multimodal.hdf5.ResolvingFileIO",
+                "pypaimon.multimodal.source_utils.ResolvingFileIO",
                 return_value=source_file_io), patch.object(
                     table.raw_table,
                     "new_batch_write_builder",
@@ -790,7 +790,7 @@ class MultimodalHdf5Test(unittest.TestCase):
 
         with patch.object(
                 self.conn, "get_table", return_value=table), patch(
-                    "pypaimon.multimodal.hdf5.ResolvingFileIO") as resolving:
+                    "pypaimon.multimodal.source_utils.ResolvingFileIO") as resolving:
             with self.assertRaisesRegex(
                     ValueError, "process-isolated"):
                 self.conn.load_from_hdf5(

@@ -325,6 +325,86 @@ public class BinaryRowTest {
     }
 
     @Test
+    public void testAnyNullWithNonZeroOffset() {
+        BinaryRow rowWithNull = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(rowWithNull);
+        writer.setNullAt(0);
+        writer.complete();
+
+        BinaryRow rowWithoutNull = new BinaryRow(1);
+        writer = new BinaryRowWriter(rowWithoutNull);
+        writer.writeInt(0, 42);
+        writer.complete();
+
+        // A four-byte pad in front, as BinaryRowSerializer leaves when it points a row at the
+        // bytes following a length prefix, so the row offset is not a multiple of eight either.
+        // The leading row is an INSERT row with no nulls, so a read that starts at zero finds
+        // only zero bytes and reports no null.
+        int pad = 4;
+        MemorySegment segment = concat(pad, rowWithoutNull, rowWithNull);
+        int notNullLength = rowWithoutNull.getSizeInBytes();
+
+        BinaryRow atOffset = new BinaryRow(1);
+        atOffset.pointTo(segment, pad + notNullLength, rowWithNull.getSizeInBytes());
+        assertThat(atOffset.isNullAt(0)).isTrue();
+        assertThat(atOffset.anyNull()).isTrue();
+
+        BinaryRow leading = new BinaryRow(1);
+        leading.pointTo(segment, pad, notNullLength);
+        assertThat(leading.anyNull()).isFalse();
+    }
+
+    @Test
+    public void testAnyNullHighFieldWithNonZeroOffset() {
+        // 60 fields push the null-bit set past the first 8-byte word, so the loop in anyNull()
+        // has to honor the offset as well as the header read above it does.
+        int arity = 60;
+        int nullField = 59;
+        BinaryRow rowWithNull = new BinaryRow(arity);
+        BinaryRowWriter writer = new BinaryRowWriter(rowWithNull);
+        writer.setNullAt(nullField);
+        writer.complete();
+
+        BinaryRow rowWithoutNull = new BinaryRow(arity);
+        writer = new BinaryRowWriter(rowWithoutNull);
+        for (int i = 0; i < arity; i++) {
+            writer.writeInt(i, i);
+        }
+        writer.complete();
+
+        MemorySegment segment = concat(0, rowWithoutNull, rowWithNull);
+        int notNullLength = rowWithoutNull.getSizeInBytes();
+
+        BinaryRow atOffset = new BinaryRow(arity);
+        atOffset.pointTo(segment, notNullLength, rowWithNull.getSizeInBytes());
+        assertThat(atOffset.isNullAt(nullField)).isTrue();
+        assertThat(atOffset.anyNull()).isTrue();
+
+        BinaryRow leading = new BinaryRow(arity);
+        leading.pointTo(segment, 0, notNullLength);
+        assertThat(leading.anyNull()).isFalse();
+    }
+
+    /**
+     * Lays the rows out back to back in one segment behind {@code pad} bytes. The row without nulls
+     * goes first, so a read that ignores the row offset lands on it and reports no null.
+     */
+    private static MemorySegment concat(int pad, BinaryRow... rows) {
+        int size = pad;
+        for (BinaryRow row : rows) {
+            size += row.getSizeInBytes();
+        }
+        byte[] bytes = new byte[size];
+        int position = pad;
+        for (BinaryRow row : rows) {
+            byte[] rowBytes = row.toBytes();
+            System.arraycopy(rowBytes, 0, bytes, position, rowBytes.length);
+            position += rowBytes.length;
+        }
+        return MemorySegment.wrap(bytes);
+    }
+
+    @Test
     public void testSingleSegmentBinaryRowHashCode() {
         final Random rnd = new Random(System.currentTimeMillis());
         // test hash stabilization

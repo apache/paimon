@@ -17,8 +17,44 @@
 """Shared validation for external multimodal sources."""
 
 import os
+import re
+from pathlib import Path, PureWindowsPath
 from typing import Mapping
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
+
+from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+
+
+class _SourceFileIO:
+    """Resolve external source URIs without using target warehouse options."""
+
+    def __init__(self, options):
+        self._resolver = ResolvingFileIO(options)
+
+    def _resolve(self, path):
+        file_io = self._resolver._get_fileio(path)
+        native_path = file_io.to_filesystem_path(path)
+        if urlparse(path).scheme.lower() != "file":
+            native_path = unquote(native_path)
+        return file_io, native_path
+
+    def get_file_status(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.get_file_status(native_path)
+
+    def list_status(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.list_status(native_path)
+
+    def new_input_stream(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.new_input_stream(native_path)
+
+    def to_filesystem_path(self, path):
+        return self._resolve(path)[1]
+
+    def close(self):
+        self._resolver.close()
 
 
 def _source_path_text(value):
@@ -30,6 +66,61 @@ def _source_path_text(value):
     if isinstance(path, bytes):
         raise ValueError("paths must contain only filesystem paths or URIs.")
     return path
+
+
+def _normalize_source_path(value):
+    path = _source_path_text(value)
+    parsed = urlparse(path)
+    if _is_windows_drive_path(parsed):
+        windows_path = PureWindowsPath(path)
+        if not windows_path.is_absolute():
+            raise ValueError("Windows source paths must be absolute: %s" % path)
+        return "file:///%s" % quote(windows_path.as_posix(), safe="/:")
+    if not parsed.scheme:
+        return Path(path).expanduser().resolve().as_uri()
+    return _quote_uri_path(path)
+
+
+def _quote_uri_path(uri):
+    match = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*://[^/]*)(.*)$", uri)
+    if match is None:
+        return uri
+    return match.group(1) + quote(match.group(2), safe="/:%")
+
+
+def _qualified_status_path(parent_path, status):
+    status_path = str(status.path)
+    status_uri = urlparse(status_path)
+    if status_uri.scheme and not _is_windows_drive_path(status_uri):
+        return _quote_uri_path(status_path)
+
+    parent_uri = urlparse(parent_path)
+    scheme = parent_uri.scheme.lower()
+    if scheme == "file":
+        return _normalize_source_path(status_path)
+    if not scheme or _is_windows_drive_path(parent_uri):
+        return _normalize_source_path(status_path)
+
+    if scheme in ("hdfs", "viewfs"):
+        return urlunparse((
+            scheme,
+            parent_uri.netloc,
+            quote("/" + status_path.lstrip("/"), safe="/:"),
+            "",
+            "",
+            "",
+        ))
+
+    key = status_path.lstrip("/")
+    if parent_uri.netloc and not (
+            key == parent_uri.netloc
+            or key.startswith(parent_uri.netloc + "/")):
+        key = parent_uri.netloc + "/" + key
+    return "%s://%s" % (scheme, quote(key, safe="/:"))
+
+
+def _is_windows_drive_path(parsed):
+    return len(parsed.scheme) == 1 and not parsed.netloc
 
 
 def _validated_source_options(source_options):

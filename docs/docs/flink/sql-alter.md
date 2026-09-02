@@ -110,10 +110,16 @@ To drop a column in a row type, see [Changing Column Type](#changing-column-type
 
 :::
 
-In hive catalog, you need to ensure:
+:::warning
 
-1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
-2. or set `hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your paimon catalog.
+When using a `hive` catalog, this operation requires `hive.metastore.disallow.incompatible.col.type.changes=false`
+to be set on the **Hive Metastore server** (in its `hive-site.xml`, then restart HMS). Setting this key on the
+Paimon catalog (`WITH (...)`) or via a Flink SQL `SET` only configures the *client-side* `HiveConf`; the value is
+**not** propagated to the remote Hive Metastore service over Thrift, so setting it on the client has no effect.
+
+See [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832) for the historical discussion.
+
+:::
 
 Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
 existing columns in their respective positions`.

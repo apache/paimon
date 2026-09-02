@@ -174,10 +174,17 @@ The following SQL drops a nested column `f2` from a struct type, which is the va
 ALTER TABLE my_table DROP COLUMN v.value.f2;
 ```
 
-In hive catalog, you need to ensure:
+:::warning
 
-1. disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server
-2. or `spark-sql --conf spark.hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` in your spark.
+When using a `hive` catalog, this operation requires `hive.metastore.disallow.incompatible.col.type.changes=false`
+to be set on the **Hive Metastore server** (in its `hive-site.xml`, then restart HMS). Setting this key via
+`--conf spark.hadoop.hive.metastore.disallow.incompatible.col.type.changes=false` only configures the *client-side*
+`HiveConf`; the value is **not** propagated to the remote Hive Metastore service over Thrift, so setting it on
+the client has no effect.
+
+See [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832) for the historical discussion.
+
+:::
 
 Otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the
 existing columns in their respective positions`.

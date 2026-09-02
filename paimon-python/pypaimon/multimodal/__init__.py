@@ -29,6 +29,11 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
+from pypaimon.multimodal.rosbag import (
+    RosbagLoadResult,
+    RosbagSource,
+    RosbagStagingConfig,
+)
 from pypaimon.multimodal.table import (
     MultimodalTable,
     TextRoute,
@@ -56,6 +61,9 @@ __all__ = [
     "NoSuchKey",
     "ObjectInfo",
     "PutObjectResult",
+    "RosbagLoadResult",
+    "RosbagSource",
+    "RosbagStagingConfig",
     "TextRoute",
     "VectorRoute",
     "VideoFrameCollator",

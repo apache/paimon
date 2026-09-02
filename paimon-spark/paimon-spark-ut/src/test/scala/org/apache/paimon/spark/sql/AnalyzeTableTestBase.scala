@@ -326,6 +326,31 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       colStats.get("varchar_col"))
   }
 
+  test("Paimon analyze: timestamp ntz column") {
+    assume(gteqSpark3_4)
+
+    spark.sql("CREATE TABLE T (ts TIMESTAMP_NTZ) USING PAIMON")
+    spark.sql(s"""INSERT INTO T VALUES
+                 |(TIMESTAMP_NTZ '2020-01-01 00:00:00.123456'),
+                 |(TIMESTAMP_NTZ '2020-01-02 00:00:00.654321')
+                 |""".stripMargin)
+
+    spark.sql("ANALYZE TABLE T COMPUTE STATISTICS FOR COLUMNS ts")
+
+    val colStats = loadTable("T").statistics().get().colStats()
+    Assertions.assertEquals(
+      ColStats.newColStats(
+        0,
+        2,
+        DateTimeUtils.parseTimestampData("2020-01-01 00:00:00.123456", 6),
+        DateTimeUtils.parseTimestampData("2020-01-02 00:00:00.654321", 6),
+        0,
+        8,
+        8),
+      colStats.get("ts")
+    )
+  }
+
   test("Paimon analyze: analyze unsupported cols") {
     spark.sql(
       s"""

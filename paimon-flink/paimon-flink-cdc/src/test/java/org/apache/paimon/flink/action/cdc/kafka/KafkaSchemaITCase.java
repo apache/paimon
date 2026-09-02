@@ -69,6 +69,31 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testKafkaSchemaFromNonFirstPartition() throws Exception {
+        final String topic = "test_kafka_schema_from_non_first_partition";
+        createTestTopic(topic, 2, 1);
+        writeRecordsToKafka(topic, 1, "kafka/canal/table/schemaevolution/canal-data-1.txt");
+
+        Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
+        kafkaConfig.setString(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.setString(TOPIC.key(), topic);
+
+        Schema kafkaSchema =
+                MessageQueueSchemaUtils.getSchema(
+                        getKafkaEarliestConsumer(
+                                kafkaConfig, new KafkaDebeziumJsonDeserializationSchema()),
+                        getDataFormat(kafkaConfig),
+                        TypeMapping.defaultMapping());
+
+        assertThat(kafkaSchema.fields())
+                .containsExactly(
+                        new DataField(0, "pt", DataTypes.INT()),
+                        new DataField(1, "_id", DataTypes.INT().notNull()),
+                        new DataField(2, "v1", DataTypes.VARCHAR(10)));
+    }
+
+    @Test
+    @Timeout(60)
     public void testTableOptionsChange() throws Exception {
         final String topic = "test_table_options_change";
         createTestTopic(topic, 1, 1);

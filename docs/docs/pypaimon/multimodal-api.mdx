@@ -520,6 +520,99 @@ HDF5 core itself has no Ray dependency.
 provenance columns, maintain a source ledger, skip prior inputs, or detect
 source drift. Calling it again with the same input appends the rows again.
 
+## Load ROSBag
+
+`MultimodalConnection.load_from_rosbag` imports ROS1 `.bag`, ROS2 SQLite3 or
+MCAP recording directories, and standalone ROS2 `.mcap` files through a user
+Arrow transform. It requires Python 3.10 or newer:
+
+```shell
+pip install 'pypaimon[rosbag]'
+```
+
+```python
+import pyarrow as pa
+
+
+schema = pa.schema([
+    pa.field("source", pa.string(), nullable=False),
+    pa.field("timestamp", pa.int64(), nullable=False),
+    pa.field("value", pa.string(), nullable=False),
+])
+conn.create_table("messages", schema=schema)
+
+
+def transform(reader, source):
+    rows = []
+    for connection, timestamp, rawdata in reader.messages():
+        message = reader.deserialize(rawdata, connection.msgtype)
+        rows.append({
+            "source": source.name,
+            "timestamp": timestamp,
+            "value": message.data,
+        })
+    return pa.Table.from_pylist(rows)
+
+
+result = conn.load_from_rosbag(
+    "messages",
+    "/data/recordings",
+    transform=transform,
+)
+print(result.source_count, result.row_count, result.snapshot_id)
+```
+
+A transform receives an open `rosbags.highlevel.AnyReader` and a
+`RosbagSource`. The source exposes the original normalized `uri`, the temporary
+or original `local_path`, `format`, `name`, `stem`, and `is_remote`. Reader and
+local staging paths are valid only while the transform is running. A transform
+returns an Arrow table, record batch, or an iterable of either.
+
+Directories are searched recursively, but a directory containing
+`metadata.yaml` is one ROS2 logical source and is not searched below that
+point. Standalone `.db3` files are rejected because they may be one split of a
+larger recording. Set `allow_storage_fragment=True` only when importing exactly
+that SQLite storage fragment is intentional; the loader performs a SQLite
+integrity check but cannot prove that other recording splits are absent.
+
+Local paths and `file://`, `oss://`, `s3://`, `hdfs://`, `viewfs://`, and
+`gs://` URIs use PyPaimon FileIO. Pass source credentials through
+`source_options`; target warehouse options are not inherited. Unlike HDF5,
+`rosbags` requires local paths, so remote files are copied in bounded chunks to
+an attempt-scoped temporary directory. ROS2 metadata member paths are checked
+for traversal and normalization collisions before copying.
+
+Before Paimon creates a writer, the loader:
+
+1. validates every source manifest and checks for active or recovery sidecars;
+2. scans every recording to EOF and compares declared and readable messages;
+3. executes each transform once and applies strict target Arrow schema checks;
+4. stores all validated output in a temporary Arrow IPC file.
+
+This front-loaded validation normally reads each recording twice and needs
+temporary disk capacity, but a source, transform, or schema failure does not
+create Paimon data files. Source size, modification time, and ROS2 directory
+members are compared during the call. These checks detect observable changes;
+without a versioned URI they are not a transactional snapshot of an object
+store directory.
+
+Use `RosbagStagingConfig` to choose the local temporary directory, reserve free
+space with `min_free_bytes`, cap serial temporary usage with `max_bytes`, and
+set the remote copy chunk size with `copy_buffer_bytes`. In Ray mode,
+`max_bytes` applies to each worker's raw ROSBag staging; Arrow output capacity
+is controlled by Ray object-store and spill settings.
+
+For Ray, install `pypaimon[ray,rosbag]` and call
+`pypaimon.ray.load_from_rosbag`. The driver discovers manifests, each worker
+materializes and validates complete sources locally, and the transformed Ray
+Dataset is explicitly `materialize()`d before `write_paimon`. Success uses one
+coordinator commit. Ray may retry a transform, so transforms must be
+deterministic and free of non-idempotent external side effects.
+
+Both APIs are append-only and not retry-safe after a commit exception. A
+successful call creates one snapshot; write-stage failures may leave uncommitted
+orphan files for normal Paimon cleanup.
+
 ## Load LeRobot Dataset v3
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
@@ -714,6 +807,15 @@ result = (
     .limit(10)
     .to_pandas()
 )
+```
+
+Use `to_arrow_batch_reader()` to consume an ordinary scan without collecting
+all rows into one Arrow table:
+
+```python
+with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
+    for batch in reader:
+        consume(batch)
 ```
 
 ### Reading BLOB columns
