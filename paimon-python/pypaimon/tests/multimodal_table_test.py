@@ -831,6 +831,28 @@ class MultimodalTableTest(unittest.TestCase):
 
         self.assertEqual([{"id": 2}, {"id": 3}], reader.read_all().to_pylist())
 
+        closed = []
+
+        def batches(*args):
+            try:
+                yield pa.record_batch(
+                    [pa.array([1], type=pa.int32())], names=["id"])
+                yield pa.record_batch(
+                    [pa.array([2], type=pa.int32())], names=["id"])
+            finally:
+                closed.append(True)
+
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            if hasattr(reader, "close"):
+                reader.close()
+            else:
+                reader.read_all()
+        self.assertEqual([True], closed)
+
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
             users.search("thirty", column="id").to_arrow_batch_reader()
 

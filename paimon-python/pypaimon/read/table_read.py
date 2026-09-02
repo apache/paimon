@@ -157,7 +157,12 @@ class TableRead:
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
-        return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
+        reader_type = pyarrow.ipc.RecordBatchReader
+        reader = reader_type.from_batches(schema, batch_iterator)
+        if hasattr(reader_type, "from_stream") and hasattr(reader, "close"):
+            # Propagate close to the Python batch iterator.
+            return reader_type.from_stream(reader)
+        return reader
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
