@@ -263,6 +263,7 @@ public interface StoreSinkWrite {
                     isStreaming,
                     memoryPoolFactory,
                     metricGroup,
+                    null,
                     (t, user, writeId) ->
                             t.newPostponeFixedBucketWriteBuilder().newWrite(user, writeId));
         };

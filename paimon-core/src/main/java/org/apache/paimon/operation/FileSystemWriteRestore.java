@@ -119,12 +119,13 @@ public class FileSystemWriteRestore implements WriteRestore {
             return RestoreFiles.empty();
         }
 
+        // load the mapping before narrowing the mutable scan to a single bucket
+        PartitionBucketMapping bucketMapping = partitionBucketMapping();
         List<ManifestEntry> entries =
                 scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
 
-        Integer totalBuckets =
-                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping());
+        Integer totalBuckets = WriteRestore.extractTotalBuckets(entries, partition, bucketMapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (scanDynamicBucketIndex) {
