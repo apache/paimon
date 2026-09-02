@@ -349,14 +349,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             long schemaId = firstFile.schemaId();
             TableSchema dataSchema = bunchDataSchemas[i];
             RowType partialReadRowType = new RowType(readFields);
-            // cache key must use paths relative to the full schema so that two files reading
-            // different sub-fields of the same struct (e.g. nest.a vs nest.b) do not collide
-            RowType fullRef =
-                    rowTypeWithRowTracking(schemaFetcher.apply(schemaId).logicalRowType());
-            List<String> readFieldNames = partialReadRowType.leafPaths(fullRef);
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
-                            new FormatKey(schemaId, formatIdentifier, readFieldNames),
+                            new FormatKey(schemaId, formatIdentifier, readerCacheKey(readFields)),
                             key ->
                                     formatBuilder.build(
                                             formatIdentifier,
@@ -388,6 +383,39 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         return new DataEvolutionFileReader(
                 plan.rowOffsets, plan.fieldOffsets, fileRecordReaders, plan.nested);
+    }
+
+    /**
+     * A cache key describing the exact (possibly partially nested) fields read from one bunch. It
+     * encodes field ids and nesting structure rather than names, so two bunches reading different
+     * sub-fields of the same struct (e.g. {@code nest.a} vs {@code nest.b}) never collide.
+     *
+     * <p>Deliberately not {@link RowType#leafPaths(RowType)}: that describes a written type
+     * relative to the schema it was written against and therefore enforces the write-side
+     * restrictions (at most one level of partial nesting, no dotted names). A read type is not
+     * bound by those — it may be pruned arbitrarily deep by the engine, and it may be *wider* than
+     * the file's own schema after a nested {@code ADD COLUMN}.
+     */
+    private static List<String> readerCacheKey(List<DataField> readFields) {
+        List<String> key = new ArrayList<>(readFields.size());
+        for (DataField field : readFields) {
+            StringBuilder builder = new StringBuilder();
+            appendFieldKey(field, builder);
+            key.add(builder.toString());
+        }
+        return key;
+    }
+
+    private static void appendFieldKey(DataField field, StringBuilder builder) {
+        builder.append(field.id());
+        if (field.type() instanceof RowType) {
+            builder.append('<');
+            for (DataField sub : ((RowType) field.type()).getFields()) {
+                appendFieldKey(sub, builder);
+                builder.append(',');
+            }
+            builder.append('>');
+        }
     }
 
     private RecordReader<InternalRow> createFieldBunchReader(

@@ -170,4 +170,57 @@ class DataEvolutionReadPlannerTest {
                                         .plan())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    @Test
+    void testDeepAddColumnIsNullFilledInsteadOfRejected() {
+        // read type: id INT, payload ROW<inner ROW<x INT, y INT>>
+        // "y" was added later by ALTER TABLE ADD COLUMN payload.inner.y, so no file has it yet.
+        RowType readType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        DataTypes.ROW(
+                                                new DataField(
+                                                        2,
+                                                        "inner",
+                                                        DataTypes.ROW(
+                                                                new DataField(
+                                                                        3, "x", DataTypes.INT()),
+                                                                new DataField(
+                                                                        4,
+                                                                        "y",
+                                                                        DataTypes.INT())))))));
+        // bunch0 (latest): an unrelated partial update touching only the top-level "id"
+        RowType avail0 =
+                new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
+        // bunch1: the original file, written before the deep ADD COLUMN
+        RowType avail1 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        DataTypes.ROW(
+                                                new DataField(
+                                                        2,
+                                                        "inner",
+                                                        DataTypes.ROW(
+                                                                new DataField(
+                                                                        3,
+                                                                        "x",
+                                                                        DataTypes.INT())))))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(readType, Arrays.asList(avail0, avail1)).plan();
+
+        // id comes whole from the latest partial file
+        assertThat(plan.rowOffsets[0]).isEqualTo(0);
+        // payload.inner is entirely provided by bunch1; the missing leaf "y" must be null-filled
+        // by schema evolution rather than rejected as an unsupported deep split.
+        assertThat(plan.bunchReadFields.get(1)).anySatisfy(f -> assertThat(f.id()).isEqualTo(1));
+    }
 }

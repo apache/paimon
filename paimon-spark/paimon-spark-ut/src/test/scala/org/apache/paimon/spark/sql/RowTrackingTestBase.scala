@@ -193,6 +193,66 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: rebase staged nested sub-field updates after concurrent compact") {
+    withTable("t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'compaction.min.file-num' = '2',
+             |  'commit.max-retries' = '0',
+             |  'data-evolution.row-id-conflict-rewrite.max-size' = '0 B',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
+      sql("INSERT INTO t VALUES (2, named_struct('a', 20, 'b', 'y'))")
+
+      val table = loadTable("t")
+      val readSnapshot = table.latestSnapshot().get()
+      val dataSplits = table
+        .newSnapshotReader()
+        .withSnapshot(readSnapshot)
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .toSeq
+      val firstRowIds = dataSplits
+        .flatMap(_.dataFiles().asScala)
+        .map(_.firstRowId().longValue())
+        .sorted
+      val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+      // a staged sub-field update: the pruned struct carries only "a"
+      val stagedRows =
+        sql("SELECT named_struct('a', nest.a + 1) AS nest, _ROW_ID FROM t WHERE id = 1")
+          .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+          .select("nest", "_FIRST_ROW_ID", "_ROW_ID")
+      val stagedUpdates =
+        DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("nest.a"))
+
+      sql("CALL sys.compact(table => 't')").collect()
+
+      val writer = PaimonSparkWriter(table)
+      writer.rowIdCheckConflict(readSnapshot.id())
+      val targetRelation =
+        PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
+      DataEvolutionRowIdConflictCommitter.commit(
+        spark,
+        table,
+        targetRelation,
+        writer,
+        stagedUpdates,
+        Nil,
+        readSnapshot.id(),
+        Operation.MERGE)
+
+      // nest.a is rebased onto the compacted boundaries and nest.b must survive untouched
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b FROM t ORDER BY id"),
+        Seq(Row(1, 11, "x"), Row(2, 20, "y")))
+    }
+  }
+
   test("Data Evolution: rebase rejects same-column update after concurrent compact") {
     withTable("t") {
       sql(s"""
@@ -331,6 +391,114 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       Await.result(mergeC, 60.seconds)
 
       checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10, 10)))
+    }
+  }
+
+  test("Data Evolution: concurrent merge with disjoint sub-field updates") {
+    withTable("sb", "sc", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, nest STRUCT<b: INT, c: INT>) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'data-evolution.enabled' = 'true',
+                 'data-evolution.nested-field.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, named_struct('b', 0, 'c', 0))")
+      Seq((1, 1)).toDF("id", "b").createOrReplaceTempView("sb")
+      Seq((1, 1)).toDF("id", "c").createOrReplaceTempView("sc")
+
+      // two writers updating disjoint leaves of the SAME struct column; neither may clobber the
+      // other's leaf, so both counters must reach 10
+      val mergeB = Future {
+        for (_ <- 1 to 10) {
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sb
+                                   |ON t.id = sb.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.nest.b = sb.b + t.nest.b
+                                   |""".stripMargin).collect())
+        }
+      }
+
+      val mergeC = Future {
+        for (_ <- 1 to 10) {
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sc
+                                   |ON t.id = sc.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.nest.c = sc.c + t.nest.c
+                                   |""".stripMargin).collect())
+        }
+      }
+
+      Await.result(mergeB, 60.seconds)
+      Await.result(mergeC, 60.seconds)
+
+      checkAnswer(sql("SELECT id, nest.b, nest.c FROM t"), Seq(Row(1, 10, 10)))
+    }
+  }
+
+  test("Data Evolution: rebasing a staged sub-field update keeps a NULL struct null") {
+    withTable("t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'compaction.min.file-num' = '2',
+             |  'commit.max-retries' = '0',
+             |  'data-evolution.row-id-conflict-rewrite.max-size' = '0 B',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
+      // a row whose whole struct is NULL, which the rebase has to carry through untouched
+      sql("INSERT INTO t VALUES (2, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+
+      val table = loadTable("t")
+      val readSnapshot = table.latestSnapshot().get()
+      val dataSplits = table
+        .newSnapshotReader()
+        .withSnapshot(readSnapshot)
+        .read()
+        .splits()
+        .asScala
+        .collect { case split: DataSplit => split }
+        .toSeq
+      val firstRowIds = dataSplits
+        .flatMap(_.dataFiles().asScala)
+        .map(_.firstRowId().longValue())
+        .sorted
+      val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+      // the staged update only covers id = 1; id = 2 is pulled in by the rebase because the
+      // compacted row-id range covers it
+      val stagedRows =
+        sql("SELECT named_struct('a', nest.a + 1) AS nest, _ROW_ID FROM t WHERE id = 1")
+          .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+          .select("nest", "_FIRST_ROW_ID", "_ROW_ID")
+      val stagedUpdates =
+        DataEvolutionPaimonWriter(table, dataSplits).writePartialFields(stagedRows, Seq("nest.a"))
+
+      sql("CALL sys.compact(table => 't')").collect()
+
+      val writer = PaimonSparkWriter(table)
+      writer.rowIdCheckConflict(readSnapshot.id())
+      val targetRelation =
+        PaimonRelation.getPaimonRelation(spark.table("t").queryExecution.analyzed)
+      DataEvolutionRowIdConflictCommitter.commit(
+        spark,
+        table,
+        targetRelation,
+        writer,
+        stagedUpdates,
+        Nil,
+        readSnapshot.id(),
+        Operation.MERGE)
+
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b FROM t ORDER BY id"),
+        Seq(Row(1, 11, "x"), Row(2, null, null)))
+      // the NULL struct must not have been resurrected as a struct of NULL children
+      checkAnswer(sql("SELECT id FROM t WHERE nest IS NULL"), Seq(Row(2)))
     }
   }
 

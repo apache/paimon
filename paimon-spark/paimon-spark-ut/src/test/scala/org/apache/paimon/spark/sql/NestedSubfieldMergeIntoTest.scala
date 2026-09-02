@@ -405,4 +405,71 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
       checkAnswer(sql("SELECT id, nest.a, nest.b FROM t"), Seq(Row(1, 100, "z")))
     }
   }
+
+  test("Data evolution: deep ADD COLUMN plus an unrelated partial update stays readable") {
+    withTable("s", "t") {
+      // NOTE: 'data-evolution.nested-field.enabled' is deliberately NOT set. Every write here is
+      // a whole-column write, so this is a plain data-evolution table.
+      sql(s"""
+             |CREATE TABLE t (id INT, v INT, payload STRUCT<inner: STRUCT<x: INT>>)
+             |TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 5, named_struct('inner', named_struct('x', 10)))")
+
+      // a nested column is added one level deeper than the existing struct
+      sql("ALTER TABLE t ADD COLUMN payload.inner.y INT")
+
+      // an unrelated partial update that only touches the top-level column "v"
+      Seq((1, 6)).toDF("id", "newv").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.v = s.newv
+             |""".stripMargin).collect()
+
+      // the row-id group now holds two files, so the read goes through the union reader:
+      // payload.inner.x comes from the original file and payload.inner.y is null-filled
+      checkAnswer(
+        sql("SELECT id, v, payload.inner.x, payload.inner.y FROM t"),
+        Seq(Row(1, 6, 10, null)))
+
+      // compaction over the same group must work too
+      sql("CALL sys.compact(table => 't')").collect()
+      checkAnswer(
+        sql("SELECT id, v, payload.inner.x, payload.inner.y FROM t"),
+        Seq(Row(1, 6, 10, null)))
+    }
+  }
+
+  test("Data evolution: projecting a single leaf of a two-level struct reads correctly") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, v INT, payload STRUCT<inner: STRUCT<x: INT, y: INT>>)
+             |TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 5, named_struct('inner', named_struct('x', 10, 'y', 20)))")
+
+      // an unrelated partial update, so the read goes through the union reader
+      Seq((1, 6)).toDF("id", "newv").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.v = s.newv
+             |""".stripMargin).collect()
+
+      // the engine prunes the read type down to a single leaf two levels deep; that is a read-side
+      // projection, not a partial write, so it must not hit any write-side nesting restriction
+      checkAnswer(sql("SELECT payload.inner.x FROM t"), Seq(Row(10)))
+      checkAnswer(sql("SELECT id, v, payload.inner.y FROM t"), Seq(Row(1, 6, 20)))
+      checkAnswer(
+        sql("SELECT id, v, payload.inner.x, payload.inner.y FROM t"),
+        Seq(Row(1, 6, 10, 20)))
+    }
+  }
 }

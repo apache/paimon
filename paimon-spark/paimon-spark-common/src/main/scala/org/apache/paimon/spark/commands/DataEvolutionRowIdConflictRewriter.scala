@@ -169,13 +169,19 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     }
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
-    val readOutput = columnNames.map(attribute) :+ rowIdAttribute
+    // columnNames are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
+    // scan is always in terms of the top-level columns, and the projection then prunes each
+    // partially written struct down to the leaves the file actually holds.
+    val fieldNames = table.rowType().getFieldNames.asScala.toSet
+    val topColumns = DataEvolutionPartialColumns.topLevelColumns(columnNames, fieldNames)
+    val projections = DataEvolutionPartialColumns.projections(table, columnNames)
+    val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     def readRows(splits: Seq[DataSplit]) = {
       val relation = createNewScanPlan(splits, targetRelation)
       val readPlan =
         SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
       createDataset(sparkSession, readPlan)
-        .select((columnNames.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+        .select((projections :+ quotedColumn(ROW_ID_NAME)): _*)
     }
 
     val stagedRows = readRows(stagedSplits)
@@ -185,7 +191,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     val mergedRows = currentRows
       .join(stagedRows.select(quotedColumn(ROW_ID_NAME)), Seq(ROW_ID_NAME), "left_anti")
       .unionByName(stagedRows)
-      .select((columnNames.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+      .select((topColumns.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
     val firstRowIdUdf = udf((rowId: Long) => floorBinarySearch(firstRowIds, rowId))
     val rewrittenRows = mergedRows
       .withColumn(FIRST_ROW_ID_NAME, firstRowIdUdf(quotedColumn(ROW_ID_NAME)))

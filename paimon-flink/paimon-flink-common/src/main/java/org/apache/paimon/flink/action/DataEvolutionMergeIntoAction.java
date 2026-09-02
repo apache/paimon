@@ -477,13 +477,66 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     /**
      * Parse a SET target into a path relative to the target table: strip an optional leading
      * table-qualifier segment (the target table name/alias), leaving {@code [topColumn, sub...]}.
+     *
+     * <p>Stripping is not unconditional. When the target table (or its alias) is also the name of a
+     * struct column, both readings can resolve against the schema — with a table named {@code
+     * payload} holding both a struct column {@code payload} with a sub-field {@code a} and a
+     * top-level column {@code a}, the target {@code payload.a} is either the qualified top-level
+     * {@code a} or the nested {@code payload.a}. Resolve both and reject the input instead of
+     * silently updating one of them.
      */
     private List<String> parseTargetPath(String target) {
         List<String> segs = new ArrayList<>(Arrays.asList(target.split("\\.")));
         if (segs.size() > 1 && segs.get(0).equals(targetTableName())) {
-            segs.remove(0);
+            List<String> unqualified = new ArrayList<>(segs.subList(1, segs.size()));
+            boolean asQualified = resolvesAgainstTarget(unqualified);
+            boolean asColumnPath = resolvesAgainstTarget(segs);
+            if (asQualified && asColumnPath) {
+                throw new RuntimeException(
+                        String.format(
+                                "Ambiguous SET target '%s': it addresses both the top-level column "
+                                        + "'%s' of target table '%s' and the sub-field '%s' of the "
+                                        + "struct column '%s'. Write it unambiguously, e.g. '%s' "
+                                        + "for the nested sub-field or '%s' for the top-level "
+                                        + "column.",
+                                target,
+                                String.join(".", unqualified),
+                                targetTableName(),
+                                String.join(".", unqualified),
+                                segs.get(0),
+                                targetTableName() + "." + target,
+                                String.join(".", unqualified)));
+            }
+            if (asQualified || !asColumnPath) {
+                // a genuine qualifier, or invalid either way: keep the historical behaviour so an
+                // unresolvable target still raises the standard "invalid column reference" error
+                return unqualified;
+            }
         }
         return segs;
+    }
+
+    /** Whether {@code path} names an existing (possibly nested) field of the target table. */
+    private boolean resolvesAgainstTarget(List<String> path) {
+        if (path.isEmpty()) {
+            return false;
+        }
+        RowType rowType = table.rowType();
+        if (!rowType.containsField(path.get(0))) {
+            return false;
+        }
+        DataType type = rowType.getField(path.get(0)).type();
+        for (int i = 1; i < path.size(); i++) {
+            if (!(type instanceof RowType)) {
+                return false;
+            }
+            RowType struct = (RowType) type;
+            if (!struct.containsField(path.get(i))) {
+                return false;
+            }
+            type = struct.getField(path.get(i)).type();
+        }
+        return true;
     }
 
     /**

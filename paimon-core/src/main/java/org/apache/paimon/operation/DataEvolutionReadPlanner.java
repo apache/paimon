@@ -107,10 +107,9 @@ class DataEvolutionReadPlanner {
                 continue;
             }
             // Only read a field whole from a single file when that file covers ALL of its leaves.
-            // If a single file provides only some leaves of a struct (the rest absent everywhere),
-            // we must prune to the provided sub-fields so the reader is not asked for sub-fields
-            // the
-            // file does not physically contain; the missing ones stay null via the composite plan.
+            // If a single file provides only some leaves of a struct, go through the composite
+            // plan so the selection is made per direct sub-field: the sub-fields it does provide
+            // are read from it, and the ones absent everywhere stay null.
             boolean allLeavesCovered = leafProvider.size() == leaves.size();
             if (providers.size() == 1 && allLeavesCovered) {
                 int b = providers.iterator().next();
@@ -123,14 +122,11 @@ class DataEvolutionReadPlanner {
                         rf.name());
                 composite[j] = true;
                 for (DataField sub : ((RowType) rf.type()).getFields()) {
-                    List<Integer> subLeaves = leafIdsOf(sub);
                     Set<Integer> subProviders = new HashSet<>();
-                    int coveredSubLeaves = 0;
-                    for (int leaf : subLeaves) {
+                    for (int leaf : leafIdsOf(sub)) {
                         int p = leafProvider.getOrDefault(leaf, -1);
                         if (p >= 0) {
                             subProviders.add(p);
-                            coveredSubLeaves++;
                         }
                     }
                     if (subProviders.size() > 1) {
@@ -143,19 +139,11 @@ class DataEvolutionReadPlanner {
                                         + ") across multiple files.");
                     }
                     if (subProviders.size() == 1) {
-                        if (sub.type() instanceof RowType && coveredSubLeaves < subLeaves.size()) {
-                            // the single provider holds only part of this nested sub-struct;
-                            // reading
-                            // it whole would request leaves it lacks, and one-level composition
-                            // cannot prune deeper than this level yet
-                            throw new UnsupportedOperationException(
-                                    "Sub-field-level data evolution does not yet support reading a "
-                                            + "partially-written nested sub-field ("
-                                            + rf.name()
-                                            + "."
-                                            + sub.name()
-                                            + ") deeper than one level.");
-                        }
+                        // The single provider may hold only part of this nested sub-struct, but
+                        // the leaves it lacks are then absent from EVERY bunch (a cross-provider
+                        // deep split is already rejected above). That is the normal shape after a
+                        // deep ADD COLUMN, so read the sub-field whole from its provider and let
+                        // the schema-evolution mapping null-fill the leaves the file predates.
                         int b = subProviders.iterator().next();
                         bunchSelection
                                 .get(b)

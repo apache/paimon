@@ -271,6 +271,115 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testAmbiguousTargetPathIsRejected() throws Exception {
+        // the target table is named "payload" and the schema holds BOTH a struct column "payload"
+        // and a top-level column "a", so the unqualified nested target "payload.a" is ambiguous:
+        // it can be read as the nested payload.a, or as the qualified form of the top-level "a".
+        sEnv.executeSql(
+                buildDdl(
+                        "payload",
+                        Arrays.asList("id INT", "a INT", "payload ROW<a INT, b STRING>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("payload", "(1, 1, CAST(ROW(10, 'x') AS ROW<a INT, b STRING>))");
+        prepareSubFieldSource();
+
+        assertThatThrownBy(
+                        () ->
+                                builder(warehouse, database, "payload")
+                                        .withMergeCondition("payload.id=S.id")
+                                        .withMatchedUpdateSet("payload.a=S.newa")
+                                        .withSourceTable("S")
+                                        .withSinkParallelism(2)
+                                        .build()
+                                        .run())
+                .hasMessageContaining("mbiguous");
+
+        // and neither interpretation must have been written. Note the alias: Flink SQL itself
+        // reads a bare "payload.a" here as the table-qualified top-level column, which is exactly
+        // the ambiguity the action now refuses to guess at.
+        testBatchRead(
+                "SELECT p.id, p.a, p.payload.a, p.payload.b FROM payload AS p",
+                Collections.singletonList(changelogRow("+I", 1, 1, 10, "x")));
+    }
+
+    @Test
+    public void testAmbiguousTargetPathAcceptsTheExplicitlyQualifiedForm() throws Exception {
+        // the way out of the ambiguity above, as recommended by that error message: qualify the
+        // nested target with the table name so the path is unmistakable.
+        sEnv.executeSql(
+                buildDdl(
+                        "payload",
+                        Arrays.asList("id INT", "a INT", "payload ROW<a INT, b STRING>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("payload", "(1, 1, CAST(ROW(10, 'x') AS ROW<a INT, b STRING>))");
+        prepareSubFieldSource();
+
+        builder(warehouse, database, "payload")
+                .withMergeCondition("payload.id=S.id")
+                .withMatchedUpdateSet("payload.payload.a=S.newa")
+                .withSourceTable("S")
+                .withSinkParallelism(2)
+                .build()
+                .run();
+
+        // the NESTED payload.a moved; the top-level "a" is untouched
+        testBatchRead(
+                "SELECT p.id, p.a, p.payload.a, p.payload.b FROM payload AS p",
+                Collections.singletonList(changelogRow("+I", 1, 1, 100, "x")));
+        assertThat(deltaWriteCols("payload")).contains(Collections.singletonList("payload.a"));
+    }
+
+    @Test
+    public void testUnqualifiedNestedTargetResolvesWhenOnlyOneReadingIsValid() throws Exception {
+        // same table name / struct column name clash, but there is no top-level "a", so stripping
+        // the qualifier yields nothing resolvable and "payload.a" can only be the nested sub-field.
+        sEnv.executeSql(
+                buildDdl(
+                        "payload",
+                        Arrays.asList("id INT", "payload ROW<a INT, b STRING>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("payload", "(1, CAST(ROW(10, 'x') AS ROW<a INT, b STRING>))");
+        prepareSubFieldSource();
+
+        builder(warehouse, database, "payload")
+                .withMergeCondition("payload.id=S.id")
+                .withMatchedUpdateSet("payload.a=S.newa")
+                .withSourceTable("S")
+                .withSinkParallelism(2)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT p.id, p.payload.a, p.payload.b FROM payload AS p",
+                Collections.singletonList(changelogRow("+I", 1, 100, "x")));
+        assertThat(deltaWriteCols("payload")).contains(Collections.singletonList("payload.a"));
+    }
+
+    @Test
     public void testUpdateMultipleSubFieldsWritesOnlyThoseLeaves() throws Exception {
         // a 3-field struct so that updating two sub-fields is a strict subset (stays
         // sub-field-level
