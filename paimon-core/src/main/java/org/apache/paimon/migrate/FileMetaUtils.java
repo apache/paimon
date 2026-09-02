@@ -222,25 +222,26 @@ public class FileMetaUtils {
         RowType rowTypeWithSchemaId =
                 fileStoreTable.schemaManager().schema(schemaId).logicalRowType();
         CoreOptions options = fileStoreTable.coreOptions();
+
         SimpleStatsConverter statsArraySerializer =
                 new SimpleStatsConverter(rowTypeWithSchemaId, options.statsDenseStore());
-
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path, fileSize);
-        SimpleStats stats = statsArraySerializer.toBinary(fileInfo.getLeft()).getRight();
+        Pair<List<String>, SimpleStats> statsPair =
+                statsArraySerializer.toBinary(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
                 fileName,
                 fileSize,
                 fileInfo.getRight().getRowCount(),
-                stats,
+                statsPair.getRight(),
                 0,
                 0,
                 schemaId,
                 Collections.emptyList(),
                 null,
                 FileSource.APPEND,
-                null,
+                statsPair.getLeft(),
                 null,
                 null,
                 null);
