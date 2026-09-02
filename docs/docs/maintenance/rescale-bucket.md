@@ -75,13 +75,8 @@ Please note that
 :::
 
 :::warning
-  Per-partition bucket counts are currently supported by the **Flink** engine only. The **Spark** writer
-  still derives the bucket from the single table-level bucket count, so when partitions have different
-  bucket counts (for example, after changing the table-level `bucket` while existing partitions keep
-  their previous count), Spark may route rows to buckets that do not belong to the partition and corrupt
-  the per-partition layout. Until Spark support is added, use Flink to write to tables that have
-  per-partition bucket counts, or perform a full-table rescale so every partition shares the same bucket
-  count before writing with Spark.
+  Per-partition bucket counts are currently supported by the **Flink** engine only. Spark rejects writes
+  to a table with `'bucket.per-partition-count-enabled' = 'true'`; use Flink to write such a table.
 :::
 - **Unpartitioned tables** require a full rescale before writing. If you change the bucket number and attempt
   to write without reorganizing the data first, a `RuntimeException` will be thrown:

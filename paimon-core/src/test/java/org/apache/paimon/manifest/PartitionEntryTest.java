@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PartitionEntry#merge(PartitionEntry)}. */
 public class PartitionEntryTest {
@@ -103,21 +104,31 @@ public class PartitionEntryTest {
     }
 
     @Test
-    public void testMergeWithEqualCreationTimeIsCommutative() {
-        // When creation times are equal, merge must be commutative: a.merge(b) == b.merge(a).
-        // The tie-break takes the larger totalBuckets so that the parallel, non-deterministic
-        // aggregation in readPartitionEntries() always produces the same result regardless of
-        // manifest processing order.
+    public void testMergeWithEqualCreationTimeAndConflictingBucketsFails() {
+        // Creation time alone cannot order layouts written in the same millisecond. Choosing one
+        // of them (for example, the larger bucket count) can silently retain the old layout when
+        // a partition is downscaled, so reject the ambiguous metadata instead.
         PartitionEntry a = entry(1, 2, 1000L);
         PartitionEntry b = entry(1, 4, 1000L);
 
-        PartitionEntry ab = a.merge(b);
-        PartitionEntry ba = b.merge(a);
+        assertThatThrownBy(() -> a.merge(b))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot determine the bucket layout");
+        assertThatThrownBy(() -> b.merge(a))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot determine the bucket layout");
+    }
 
-        assertThat(ab.totalBuckets()).isEqualTo(4); // max(2, 4) = 4
-        assertThat(ba.totalBuckets()).isEqualTo(4); // max(4, 2) = 4, commutative
-        assertThat(ab.fileCount()).isEqualTo(2);
-        assertThat(ba.fileCount()).isEqualTo(2);
+    @Test
+    public void testMergeWithEqualCreationTimeAndDynamicBucketMarker() {
+        // -1 is a dynamic-bucket mode marker, not a fixed-bucket layout. It can coexist with
+        // newly created real buckets in the same millisecond and must retain the deterministic
+        // tie-break used before per-partition bucket counts were introduced.
+        PartitionEntry dynamic = entry(1, -1, 1000L);
+        PartitionEntry fixed = entry(1, 1, 1000L);
+
+        assertThat(dynamic.merge(fixed).totalBuckets()).isEqualTo(1);
+        assertThat(fixed.merge(dynamic).totalBuckets()).isEqualTo(1);
     }
 
     @Test
