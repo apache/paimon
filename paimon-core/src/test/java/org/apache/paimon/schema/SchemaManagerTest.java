@@ -40,6 +40,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
@@ -1567,6 +1568,61 @@ public class SchemaManagerTest {
                         new DataField(
                                 1, "v", new ArrayType(new MapType(DataTypes.INT(), innerType))));
         assertThat(manager.latest().get().logicalRowType()).isEqualTo(outerType);
+    }
+
+    @Test
+    public void testUpdateMultisetElementType() throws Exception {
+        MultisetType oldType = new MultisetType(DataTypes.INT());
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "items", oldType));
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        MultisetType newType = new MultisetType(DataTypes.BIGINT());
+        List<SchemaChange> changes = new ArrayList<>();
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("items"), oldType, newType, changes);
+        manager.commitChanges(changes);
+
+        assertThat(manager.latest().get().fields().get(1).type()).isEqualTo(newType);
+    }
+
+    @Test
+    public void testUpdateRowTypeInMultiset() throws Exception {
+        RowType oldElementType = RowType.of(new DataField(2, "id", DataTypes.INT()));
+        MultisetType oldType = new MultisetType(oldElementType);
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "k", DataTypes.INT()), new DataField(1, "items", oldType));
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        RowType newElementType =
+                RowType.of(
+                        new DataField(2, "id", DataTypes.BIGINT()),
+                        new DataField(3, "name", DataTypes.STRING()));
+        MultisetType newType = new MultisetType(newElementType);
+        List<SchemaChange> changes = new ArrayList<>();
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("items"), oldType, newType, changes);
+        manager.commitChanges(changes);
+
+        assertThat(manager.latest().get().fields().get(1).type()).isEqualTo(newType);
     }
 
     @Test

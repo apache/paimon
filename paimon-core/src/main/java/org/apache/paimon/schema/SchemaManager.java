@@ -44,6 +44,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
@@ -533,7 +534,7 @@ public class SchemaManager implements Serializable {
                                             "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
                             DataType newFieldType =
-                                    getArrayMapTypeWithTargetTypeRoot(
+                                    getNestedTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
                                             depth,
@@ -572,7 +573,7 @@ public class SchemaManager implements Serializable {
                             return new DataField(
                                     field.id(),
                                     field.name(),
-                                    getArrayMapTypeWithTargetTypeRoot(
+                                    getNestedTypeWithTargetTypeRoot(
                                             field.type(),
                                             sourceRootType,
                                             depth,
@@ -668,6 +669,8 @@ public class SchemaManager implements Serializable {
                 return getRootType(((ArrayType) type).getElementType(), currDepth + 1, maxDepth);
             case MAP:
                 return getRootType(((MapType) type).getValueType(), currDepth + 1, maxDepth);
+            case MULTISET:
+                return getRootType(((MultisetType) type).getElementType(), currDepth + 1, maxDepth);
             default:
                 return type;
         }
@@ -677,7 +680,7 @@ public class SchemaManager implements Serializable {
     // ex: ARRAY<MAP<STRING, ARRAY<INT>>> -> ARRAY<MAP<STRING, ARRAY<BIGINT>>>
     // here we only need to update type of ARRAY<INT> to ARRAY<BIGINT> and rest of the type
     // remains same. This function achieves this.
-    private static DataType getArrayMapTypeWithTargetTypeRoot(
+    private static DataType getNestedTypeWithTargetTypeRoot(
             DataType source, DataType target, int currDepth, int maxDepth) {
         if (currDepth == maxDepth - 1) {
             return target;
@@ -686,7 +689,7 @@ public class SchemaManager implements Serializable {
             case ARRAY:
                 return new ArrayType(
                         source.isNullable(),
-                        getArrayMapTypeWithTargetTypeRoot(
+                        getNestedTypeWithTargetTypeRoot(
                                 ((ArrayType) source).getElementType(),
                                 target,
                                 currDepth + 1,
@@ -695,8 +698,16 @@ public class SchemaManager implements Serializable {
                 return new MapType(
                         source.isNullable(),
                         ((MapType) source).getKeyType(),
-                        getArrayMapTypeWithTargetTypeRoot(
+                        getNestedTypeWithTargetTypeRoot(
                                 ((MapType) source).getValueType(),
+                                target,
+                                currDepth + 1,
+                                maxDepth));
+            case MULTISET:
+                return new MultisetType(
+                        source.isNullable(),
+                        getNestedTypeWithTargetTypeRoot(
+                                ((MultisetType) source).getElementType(),
                                 target,
                                 currDepth + 1,
                                 maxDepth));
@@ -1074,14 +1085,14 @@ public class SchemaManager implements Serializable {
                 updateLastColumn(depth, newFields, updateFieldNames[depth]);
                 return;
             } else if (depth >= updateFieldNames.length) {
-                // to handle the case of ARRAY or MAP type evolution
+                // to handle the case of ARRAY, MAP or MULTISET type evolution
                 // for instance : ARRAY<INT> -> ARRAY<BIGINT>
                 // the updateFieldNames in this case is [v, element] where v is array field name
                 // the depth returned by extractRowDataFields is 2 which will overflow.
                 // So the logic is to go to previous depth and update the column using previous
                 // fields which will have DataFields from prevDepth
-                // The reason for this handling is the addition of element and value for array
-                // and map type in FlinkCatalog as dummy column name
+                // The reason for this handling is the addition of element and value for array,
+                // map and multiset types in FlinkCatalog as dummy column names
                 updateLastColumn(prevDepth, previousFields, updateFieldNames[prevDepth]);
                 return;
             }
@@ -1126,6 +1137,10 @@ public class SchemaManager implements Serializable {
                             + 1;
                 case MAP:
                     return extractRowDataFields(((MapType) type).getValueType(), nestedFields) + 1;
+                case MULTISET:
+                    return extractRowDataFields(
+                                    ((MultisetType) type).getElementType(), nestedFields)
+                            + 1;
                 default:
                     return 1;
             }
@@ -1145,6 +1160,10 @@ public class SchemaManager implements Serializable {
                             type.isNullable(),
                             mapType.getKeyType(),
                             wrapNewRowType(mapType.getValueType(), nestedFields));
+                case MULTISET:
+                    return new MultisetType(
+                            type.isNullable(),
+                            wrapNewRowType(((MultisetType) type).getElementType(), nestedFields));
                 default:
                     return type;
             }
