@@ -55,6 +55,7 @@ import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -84,6 +85,7 @@ public class RESTTokenFileIO implements FileIO {
 
     /** Sets the maximum number of cached FileIO instances. */
     public static void setFileIOCacheMaximumSize(long maximumSize) {
+        checkArgument(maximumSize > 0, "Maximum cache size must be positive.");
         FILE_IO_CACHE
                 .policy()
                 .eviction()

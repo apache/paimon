@@ -51,10 +51,11 @@ class RESTTokenFileIOTest {
     void testSetFileIOCacheMaximumSize() {
         long originalMaximumSize = RESTTokenFileIO.fileIOCacheMaximumSize();
         try {
-            RESTTokenFileIO.setFileIOCacheMaximumSize(0);
-            assertThat(RESTTokenFileIO.fileIOCacheMaximumSize()).isZero();
-            assertThatThrownBy(() -> RESTTokenFileIO.setFileIOCacheMaximumSize(-1))
-                    .isInstanceOf(IllegalArgumentException.class);
+            RESTTokenFileIO.setFileIOCacheMaximumSize(2000);
+            assertThat(RESTTokenFileIO.fileIOCacheMaximumSize()).isEqualTo(2000);
+            assertThatThrownBy(() -> RESTTokenFileIO.setFileIOCacheMaximumSize(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Maximum cache size must be positive.");
         } finally {
             RESTTokenFileIO.setFileIOCacheMaximumSize(originalMaximumSize);
         }
