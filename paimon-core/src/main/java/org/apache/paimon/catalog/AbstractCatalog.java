@@ -37,6 +37,7 @@ import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -81,6 +82,7 @@ import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -530,6 +532,12 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
+        if (targetTableType.equals(TableType.TABLE)
+                || targetTableType.equals(TableType.MATERIALIZED_TABLE)) {
+            // both paths below drop or truncate the table before the schema they write reaches
+            // this validation, and neither is undone once it refuses that schema
+            SchemaValidation.validateTableSchema(TableSchema.create(0, applyDirectives(newSchema)));
+        }
         if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {
             dropAndCreateTable(identifier, newSchema);
             return;

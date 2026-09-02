@@ -20,10 +20,17 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -150,5 +157,44 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(CoreOptions.METASTORE_PARTITIONED_TABLE.key())
                 .hasMessageContaining("REST catalog");
+    }
+
+    @Test
+    public void testReplaceTableKeepsTheDataWhenTheReplacementIsRefused() throws Exception {
+        String database = "replace_refused_db";
+        catalog.createDatabase(database, false);
+        Identifier identifier = Identifier.create(database, "t");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET_KEY.key(), "id")
+                        .build(),
+                false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+        }
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+
+        Schema refused =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payload", DataTypes.VECTOR(4, DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.BUCKET_KEY.key(), "id")
+                        .option(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location")
+                        .build();
+        assertThatThrownBy(() -> catalog.replaceTable(identifier, refused, false))
+                .hasStackTraceContaining("cannot be published as Iceberg metadata");
+
+        FileStoreTable kept = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(kept.snapshotManager().latestSnapshotId()).isEqualTo(snapshotId);
+        assertThat(read(kept, null, null, null, null)).hasSize(1);
     }
 }
