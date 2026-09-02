@@ -28,6 +28,7 @@ import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.options.Options
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
@@ -249,6 +250,32 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private lazy val targetRelation: DataSourceV2Relation = matchedUpdateScanTarget._2
 
+  private lazy val sourceToTargetAttributes: Map[ExprId, AttributeReference] = {
+    val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
+    val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
+    sourceAttrs.flatMap {
+      source =>
+        targetAttrs.find(target => resolver(target.name, source.name)).map(source.exprId -> _)
+    }.toMap
+  }
+
+  private def rewriteSourceToTarget(expression: Expression): Expression = {
+    expression.transform {
+      case attr: AttributeReference if sourceToTargetAttributes.contains(attr.exprId) =>
+        sourceToTargetAttributes(attr.exprId)
+    }
+  }
+
+  private def rewriteToTargetOnly(expression: Expression): Option[Expression] = {
+    val rewritten = rewriteSourceToTarget(expression)
+    val targetExprIds = targetRelation.output.map(_.exprId).toSet
+    if (rewritten.references.forall(attr => targetExprIds.contains(attr.exprId))) {
+      Some(rewritten)
+    } else {
+      None
+    }
+  }
+
   lazy val tableSchema: StructType = targetSparkTable.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -264,7 +291,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     if (readSnapshot != null) {
       snapshotReader.withSnapshot(readSnapshot)
     }
-    pushDownMergePartitionFilter(snapshotReader)
+    pushDownMergeFilters(snapshotReader)
     val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
@@ -379,10 +406,17 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private def pushDownMergePartitionFilter(snapshotReader: SnapshotReader): Unit = {
+  private def pushDownMergeFilters(snapshotReader: SnapshotReader): Unit = {
+    val predicates = Seq(mergePartitionPredicate, selfMergeActionPredicate).flatten
+    if (predicates.nonEmpty) {
+      snapshotReader.withFilter(PredicateBuilder.and(predicates: _*))
+    }
+  }
+
+  private def mergePartitionPredicate: Option[Predicate] = {
     val partitionRowType = table.schema().logicalPartitionType()
     if (partitionRowType.getFieldCount == 0) {
-      return
+      return None
     }
 
     // matchedCondition comes from MergeIntoTable.mergeCondition, which is the MERGE ON condition.
@@ -392,12 +426,42 @@ case class MergeIntoPaimonDataEvolutionTable(
       .getOrElse(Seq.empty)
 
     if (partitionPredicates.nonEmpty) {
-      val filter = convertConditionToPaimonPredicate(
+      convertConditionToPaimonPredicate(
         partitionPredicates.reduce(And),
         targetRelation.output,
         rowType,
         ignorePartialFailure = true)
-      filter.foreach(snapshotReader.withFilter)
+    } else {
+      None
+    }
+  }
+
+  private def selfMergeActionPredicate: Option[Predicate] = {
+    if (
+      !useSelfMergeShortcut ||
+      !table.coreOptions().dataEvolutionMergeIntoFilePruning() ||
+      matchedActions.isEmpty ||
+      matchedActions.exists(_.condition.isEmpty)
+    ) {
+      return None
+    }
+
+    val actionCondition = matchedActions.flatMap(_.condition).reduce(Or)
+    if (!actionCondition.deterministic) {
+      return None
+    }
+
+    rewriteToTargetOnly(actionCondition).flatMap {
+      targetOnlyCondition =>
+        try {
+          convertConditionToPaimonPredicate(
+            targetOnlyCondition,
+            targetRelation.output,
+            rowType,
+            ignorePartialFailure = false)
+        } catch {
+          case NonFatal(_) => None
+        }
     }
   }
 
@@ -433,8 +497,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
     // Self-Merge shortcut:
-    // The snapshot-level partition filter has already removed unrelated partitions. Every row in
-    // the remaining splits may be updated, so the shortcut scans all of them.
+    // Snapshot-level merge filters have already removed unrelated splits. MergeRows preserves
+    // rows in the remaining splits which do not satisfy any matched action condition.
     if (useSelfMergeShortcut) {
       return tableSplits
     }
@@ -688,32 +752,14 @@ case class MergeIntoPaimonDataEvolutionTable(
         targetAttrsDedup.filter(a => neededNames.exists(n => resolver(n, a.name)))
       val readPlan = touchedFileTargetRelation.copy(output = allReadFieldsOnTarget)
 
-      // Build mapping: source exprId -> target attr (matched by column name).
-      val sourceToTarget = {
-        val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
-        val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
-        sourceAttrs.flatMap {
-          s => targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
-        }.toMap
-      }
-
-      def rewriteSourceToTarget(
-          expr: Expression,
-          m: Map[ExprId, AttributeReference]): Expression = {
-        expr.transform {
-          case a: AttributeReference if m.contains(a.exprId) => m(a.exprId)
-        }
-      }
-
       val rewrittenMatchedActions: Seq[MergeAction] = targetMatchedActions.map {
         case action: UpdateAction =>
-          val newCond = action.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
-          val newAssignments = action.assignments.map {
-            a => Assignment(a.key, rewriteSourceToTarget(a.value, sourceToTarget))
-          }
+          val newCond = action.condition.map(rewriteSourceToTarget)
+          val newAssignments =
+            action.assignments.map(a => Assignment(a.key, rewriteSourceToTarget(a.value)))
           action.copy(condition = newCond, assignments = newAssignments)
         case DeleteAction(condition) =>
-          DeleteAction(condition.map(c => rewriteSourceToTarget(c, sourceToTarget)))
+          DeleteAction(condition.map(rewriteSourceToTarget))
         case other =>
           throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
       }
