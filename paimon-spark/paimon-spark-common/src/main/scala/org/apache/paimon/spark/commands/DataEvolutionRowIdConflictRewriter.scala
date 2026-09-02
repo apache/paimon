@@ -170,7 +170,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
     // columnNames are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
-    // scan is always in terms of the top-level columns, and the projection then prunes each
+    // scan is always in terms of the top-level columns, and a projection then prunes each
     // partially written struct down to the leaves the file actually holds.
     val fieldNames = table.rowType().getFieldNames.asScala.toSet
     val topColumns = DataEvolutionPartialColumns.topLevelColumns(columnNames, fieldNames)
@@ -178,8 +178,13 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     def readRows(splits: Seq[DataSplit]) = {
       val relation = createNewScanPlan(splits, targetRelation)
+      // Each relation needs its own expression ids. The staged and the current scan are pruned
+      // independently, so sharing one set of attributes lets nested column pruning rewrite the
+      // struct on one side only and leave two attributes with the same expression id but
+      // different types, which fails Spark's plan validation.
+      val output = readOutput.map(_.newInstance())
       val readPlan =
-        SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
+        SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, output)
       createDataset(sparkSession, readPlan)
         .select((projections :+ quotedColumn(ROW_ID_NAME)): _*)
     }
