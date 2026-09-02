@@ -218,14 +218,23 @@ public class FileMetaUtils {
             Table table,
             long schemaId)
             throws IOException {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         RowType rowTypeWithSchemaId =
-                ((FileStoreTable) table).schemaManager().schema(schemaId).logicalRowType();
+                fileStoreTable.schemaManager().schema(schemaId).logicalRowType();
+        CoreOptions options = fileStoreTable.coreOptions();
 
-        SimpleStatsConverter statsArraySerializer = new SimpleStatsConverter(rowTypeWithSchemaId);
+        // Align with the normal write path (RowDataFileWriter): the dense-store option (default
+        // true) must be respected, and toBinary must be used instead of toBinaryAllMode. Only then
+        // will metadata.stats-mode take effect on the migrate path -- for example with
+        // stats-mode=none (and dense-store=true), toBinaryDenseMode skips columns whose stats are
+        // None and produces empty statistics instead of always emitting all min/max/nullCount
+        // arrays.
+        SimpleStatsConverter statsArraySerializer =
+                new SimpleStatsConverter(rowTypeWithSchemaId, options.statsDenseStore());
 
         Pair<SimpleColStats[], SimpleStatsExtractor.FileInfo> fileInfo =
                 simpleStatsExtractor.extractWithFileInfo(fileIO, path, fileSize);
-        SimpleStats stats = statsArraySerializer.toBinaryAllMode(fileInfo.getLeft());
+        SimpleStats stats = statsArraySerializer.toBinary(fileInfo.getLeft()).getRight();
 
         return DataFileMeta.forAppend(
                 fileName,
