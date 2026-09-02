@@ -2137,6 +2137,98 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("category", calls["pre_filter"].field)
         self.assertEqual(["lake"], calls["pre_filter"].literals)
 
+    def test_searches_infer_vector_column_by_query_dimension(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([
+            {
+                "id": 1,
+                "image_embedding": [1.0, 0.0],
+                "text_embedding": [1.0, 0.0, 0.0],
+            },
+            {
+                "id": 2,
+                "image_embedding": [0.0, 1.0],
+                "text_embedding": [0.0, 1.0, 0.0],
+            },
+        ])
+
+        result = (
+            docs.search([0.0, 1.0, 0.0])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+        batch_result = (
+            docs.search_vectors([[0.0, 1.0, 0.0]])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+
+        self.assertEqual([{"id": 2}], result)
+        self.assertEqual([[{"id": 2}]], batch_result)
+
+    def test_search_reports_vector_column_dimension_errors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"No vector column found with dimension 4;.*"
+                r"image_embedding\(2\).*text_embedding\(3\)"):
+            docs.search([1.0, 0.0, 0.0, 0.0])
+
+        with self.assertRaisesRegex(ValueError, "not found in table schema"):
+            docs.search([1.0, 0.0], column="missing")
+
+        with self.assertRaisesRegex(ValueError, "not a fixed-size vector"):
+            docs.search([1.0, 0.0], column="content")
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Vector dimension 3 does not match column "
+                "'image_embedding' dimension 2"):
+            docs.search([1.0, 0.0, 0.0], column="image_embedding")
+
+        with self.assertRaisesRegex(ValueError, "same dimension"):
+            docs.search_vectors([
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ])
+
+    def test_search_requires_column_for_same_dimension_vectors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "title_embedding": _vector(2),
+                "body_embedding": _vector(2),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"Multiple vector columns found with dimension 2:.*"
+                r"title_embedding.*body_embedding.*pass column"):
+            docs.search([1.0, 0.0])
+
     def test_search_pre_filter_rejects_predicate_object(self):
         docs = self.conn.create_table(
             "docs",
