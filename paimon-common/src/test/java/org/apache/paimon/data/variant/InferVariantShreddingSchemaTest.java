@@ -397,6 +397,40 @@ public class InferVariantShreddingSchemaTest {
                 .doesNotContain("`r` ROW<`value` BYTES, `typed_value`");
     }
 
+    /**
+     * At the last budget unit the evidence-driven walk still keeps the field and downgrades its
+     * child to VARIANT. Retaining a schema has to do the same rather than drop the field, or the
+     * whole retained node collapses.
+     */
+    @Test
+    void testRetainedSchemaKeepsItsFieldsAtTheLastBudgetUnit() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 7, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("1"), GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("1"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"x\":1,\"y\":1}"), null)));
+
+        assertThat(afterAbsence.getField("b").type().toString()).contains("`q`");
+    }
+
     @Test
     void testInferSchemaWithDeepNesting() {
         // Schema: row<v: variant>

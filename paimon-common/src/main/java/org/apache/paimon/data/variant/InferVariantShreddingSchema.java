@@ -661,29 +661,35 @@ public class InferVariantShreddingSchema {
     /**
      * Carries a previously selected schema forward for a node the current file has no evidence for.
      * The selection is already final, so nothing is re-thresholded, but its nodes still consume the
-     * shared width budget and are dropped once it runs out, on the same terms as the
-     * evidence-driven walk above: one unit per node, VARIANT once the budget is gone.
+     * shared width budget. The entry unit for this node has already been spent by the caller, so
+     * this mirrors what finalizeAdaptiveSchema does from that point on: a child is entered only
+     * while budget remains, entering it spends one unit, and a child that exhausts the budget
+     * becomes VARIANT while its field or array container is still kept.
      */
     private DataType retainSelectedSchema(DataType selected, MaxFields maxFields) {
         if (selected instanceof RowType) {
             List<DataField> fields = new ArrayList<>();
             for (DataField field : ((RowType) selected).getFields()) {
-                maxFields.remaining--;
                 if (maxFields.remaining <= 0) {
                     break;
                 }
-                DataType retained = retainSelectedSchema(field.type(), maxFields);
+                maxFields.remaining--;
+                DataType retained =
+                        maxFields.remaining <= 0
+                                ? DataTypes.VARIANT()
+                                : retainSelectedSchema(field.type(), maxFields);
                 fields.add(new DataField(fields.size(), field.name(), retained));
             }
             return fields.isEmpty() ? DataTypes.VARIANT() : new RowType(fields);
         }
         if (selected instanceof ArrayType) {
             maxFields.remaining--;
-            if (maxFields.remaining <= 0) {
-                return DataTypes.VARIANT();
-            }
-            return new ArrayType(
-                    retainSelectedSchema(((ArrayType) selected).getElementType(), maxFields));
+            DataType element =
+                    maxFields.remaining <= 0
+                            ? DataTypes.VARIANT()
+                            : retainSelectedSchema(
+                                    ((ArrayType) selected).getElementType(), maxFields);
+            return new ArrayType(element);
         }
         maxFields.remaining--;
         return selected;
