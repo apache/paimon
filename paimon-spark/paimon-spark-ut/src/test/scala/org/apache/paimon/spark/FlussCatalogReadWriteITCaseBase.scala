@@ -34,6 +34,9 @@ import java.time.Duration
 /** MiniCluster tests for reading and writing Fluss LakeStream tables through Paimon catalog. */
 abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
 
+  private val flussSparkConnectorAvailable =
+    scala.util.Properties.versionNumberString.startsWith("2.12.")
+
   private val flussCatalogName = "fluss_catalog"
   private val flussDatabase = "fluss"
   private val lakeWarehouse: Path =
@@ -49,32 +52,42 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
 
   override protected def sparkConf: SparkConf = {
     val conf = super.sparkConf
-    val bootstrapServers = flussCluster.getBootstrapServers
-    val paimonExtensions = conf.get("spark.sql.extensions")
+    if (flussSparkConnectorAvailable) {
+      val bootstrapServers = flussCluster.getBootstrapServers
+      val paimonExtensions = conf.get("spark.sql.extensions")
 
-    conf
-      .set(s"spark.sql.catalog.$flussCatalogName", "org.apache.fluss.spark.SparkCatalog")
-      .set(s"spark.sql.catalog.$flussCatalogName.bootstrap.servers", bootstrapServers)
-      .set(s"spark.sql.catalog.$flussCatalogName.datalake.format", "paimon")
-      .set(s"spark.sql.catalog.$flussCatalogName.datalake.paimon.metastore", "filesystem")
-      .set(s"spark.sql.catalog.$flussCatalogName.datalake.paimon.warehouse", lakeWarehouse.toString)
-      .set("spark.sql.catalog.paimon.warehouse", lakeWarehouse.toString)
-      .set("spark.sql.catalog.paimon.fluss.bootstrap.servers", bootstrapServers)
-      .set("spark.sql.catalog.paimon.fluss.datalake.format", "paimon")
-      .set("spark.sql.catalog.paimon.fluss.datalake.paimon.metastore", "filesystem")
-      .set("spark.sql.catalog.paimon.fluss.datalake.paimon.warehouse", lakeWarehouse.toString)
-      .set(
-        "spark.sql.extensions",
-        s"$paimonExtensions,org.apache.fluss.spark.FlussSparkSessionExtensions")
+      conf
+        .set(s"spark.sql.catalog.$flussCatalogName", "org.apache.fluss.spark.SparkCatalog")
+        .set(s"spark.sql.catalog.$flussCatalogName.bootstrap.servers", bootstrapServers)
+        .set(s"spark.sql.catalog.$flussCatalogName.datalake.format", "paimon")
+        .set(s"spark.sql.catalog.$flussCatalogName.datalake.paimon.metastore", "filesystem")
+        .set(
+          s"spark.sql.catalog.$flussCatalogName.datalake.paimon.warehouse",
+          lakeWarehouse.toString)
+        .set("spark.sql.catalog.paimon.warehouse", lakeWarehouse.toString)
+        .set("spark.sql.catalog.paimon.fluss.bootstrap.servers", bootstrapServers)
+        .set("spark.sql.catalog.paimon.fluss.datalake.format", "paimon")
+        .set("spark.sql.catalog.paimon.fluss.datalake.paimon.metastore", "filesystem")
+        .set("spark.sql.catalog.paimon.fluss.datalake.paimon.warehouse", lakeWarehouse.toString)
+        .set(
+          "spark.sql.extensions",
+          s"$paimonExtensions,org.apache.fluss.spark.FlussSparkSessionExtensions")
+    } else {
+      conf
+    }
   }
 
   override protected def beforeAll(): Unit = {
-    flussCluster.start()
+    if (flussSparkConnectorAvailable) {
+      flussCluster.start()
+    }
     try {
       super.beforeAll()
     } catch {
       case t: Throwable =>
-        flussCluster.close()
+        if (flussSparkConnectorAvailable) {
+          flussCluster.close()
+        }
         throw t
     }
   }
@@ -84,7 +97,9 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
       super.afterAll()
     } finally {
       try {
-        flussCluster.close()
+        if (flussSparkConnectorAvailable) {
+          flussCluster.close()
+        }
       } finally {
         FileIOUtils.deleteDirectoryQuietly(lakeWarehouse.getParent.toFile)
       }
@@ -92,6 +107,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
   }
 
   test("read and write a Fluss log table through Paimon catalog") {
+    assume(flussSparkConnectorAvailable)
     withFlussTable("log_orders") {
       verifyLakeStreamMarker("log_orders")
 
@@ -108,6 +124,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
   }
 
   test("read and write a Fluss primary-key table through Paimon catalog") {
+    assume(flussSparkConnectorAvailable)
     withFlussTable("pk_orders", primaryKey = true) {
       verifyLakeStreamMarker("pk_orders")
 

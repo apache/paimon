@@ -113,7 +113,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.fluss</groupId>
-            <artifactId>fluss-spark-3.5_${scala.binary.version}</artifactId>
+            <artifactId>fluss-spark-3.5_${fluss.scala.binary.version}</artifactId>
             <version>${fluss.version}</version>
             <scope>test</scope>
         </dependency>
