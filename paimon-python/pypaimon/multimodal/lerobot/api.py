@@ -18,7 +18,6 @@
 
 import numbers
 import sys
-from dataclasses import dataclass
 from typing import Mapping, Optional
 
 from pypaimon.catalog.catalog_exception import (
@@ -57,16 +56,6 @@ from pypaimon.multimodal.source_utils import (
 )
 
 
-@dataclass(frozen=True)
-class LeRobotLoadResult:
-    """Published Paimon state for one imported LeRobot Dataset."""
-
-    version_id: int
-    frames_snapshot_id: Optional[int]
-    episodes_snapshot_id: Optional[int]
-    tasks_snapshot_id: Optional[int]
-
-
 def load_from_lerobot(
         connection,
         table_name: str,
@@ -75,8 +64,8 @@ def load_from_lerobot(
         batch_size: int = 1024,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None,
-) -> LeRobotLoadResult:
-    """Import LeRobot Dataset v3 and return its published Paimon state.
+) -> int:
+    """Import LeRobot Dataset v3 and return its version ID.
 
     A new target table is created from LeRobot metadata. Episode, task, and
     version metadata are stored in companion Paimon tables.
@@ -186,7 +175,7 @@ def _import_dataset(
                 batch_size,
                 metadata,
             )
-        episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
+        _publish_dataset(
             connection,
             tables,
             version_id,
@@ -194,12 +183,7 @@ def _import_dataset(
             table.identifier,
             frames_snapshot_id,
         )
-        return LeRobotLoadResult(
-            version_id=version_id,
-            frames_snapshot_id=frames_snapshot_id,
-            episodes_snapshot_id=episodes_snapshot_id,
-            tasks_snapshot_id=tasks_snapshot_id,
-        )
+        return version_id
     except BaseException as error:
         try:
             _drop_import_tables(

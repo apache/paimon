@@ -44,16 +44,16 @@ pip install 'pypaimon[lerobot]'
 import pypaimon.multimodal as pmm
 
 connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
-result = connection.load_from_lerobot(
+version_id = connection.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(result.version_id, result.frames_snapshot_id)
+print(version_id)
 ```
 
 The schema comes from `meta/info.json`. Each frame becomes one row; media uses
 BLOB columns. The import creates frame, Episode, task, and version tables and
-tags the three component tables with `result.version_id`.
+tags the three component tables with the returned `version_id`.
 
 # HDF5 to multimodal tables
 

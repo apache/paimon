@@ -742,14 +742,10 @@ class LeRobotImportTest(unittest.TestCase):
         dataset.finalize()
 
     def test_import_infers_schema_and_preserves_episodes(self):
-        result = self.connection.load_from_lerobot(
+        version_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
-        self.assertIsInstance(result, pmm.LeRobotLoadResult)
-        self.assertEqual(1, result.frames_snapshot_id)
-        self.assertEqual(1, result.episodes_snapshot_id)
-        self.assertEqual(1, result.tasks_snapshot_id)
-        self.assertEqual(1, result.version_id)
+        self.assertEqual(1, version_id)
 
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
@@ -794,7 +790,7 @@ class LeRobotImportTest(unittest.TestCase):
             row["status"] for row in manifests
         ])
         manifest = manifests[1]
-        self.assertEqual(result.version_id, manifest["version_id"])
+        self.assertEqual(version_id, manifest["version_id"])
         self.assertEqual("v3.0", json.loads(
             manifest["info_json"])["codebase_version"])
         self.assertIsNotNone(manifest["stats_json"])
@@ -803,7 +799,7 @@ class LeRobotImportTest(unittest.TestCase):
             set(manifest))
         tag = str(manifest["version_id"])
         self.assertEqual(
-            result.frames_snapshot_id,
+            1,
             self.connection.catalog.get_tag(
                 table.identifier, tag).snapshot.id,
         )
@@ -857,7 +853,7 @@ class LeRobotImportTest(unittest.TestCase):
             (row["task_index"], row[task_name]) for row in tasks
         ])
         self.assertEqual(
-            result.frames_snapshot_id,
+            1,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
         )
 
@@ -992,13 +988,13 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
                 return_value=source_file_io):
-            result = self.connection.load_from_lerobot(
+            version_id = self.connection.load_from_lerobot(
                 "oss_images",
                 source,
                 batch_size=2,
             )
 
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
         table = self.connection.get_table("oss_images")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task"
@@ -1049,15 +1045,16 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog,
                 "create_tag",
                 side_effect=NotImplementedError):
-            result = self.connection.load_from_lerobot(
+            version_id = self.connection.load_from_lerobot(
                 "tag_fallback", self.image_source)
 
         manifest = _catalog_rows(
             self.connection, "tag_fallback__versions")[1]
         tag = str(manifest["version_id"])
         table = self.connection.get_table("tag_fallback")
+        self.assertEqual(1, version_id)
         self.assertEqual(
-            result.frames_snapshot_id,
+            table.raw_table.snapshot_manager().get_latest_snapshot().id,
             table.raw_table.tag_manager().get(tag).id,
         )
 
@@ -1074,9 +1071,9 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog.get_table(
                     self.connection._identifier("failed_publish" + suffix))
 
-        result = self.connection.load_from_lerobot(
+        version_id = self.connection.load_from_lerobot(
             "failed_publish", self.image_source)
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
 
     def test_invalid_target_options_do_not_leave_table(self):
         with self.assertRaisesRegex(ValueError, "data-evolution.enabled"):
@@ -1089,9 +1086,9 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.catalog.get_table(
                 self.connection._identifier("invalid_options"))
 
-        result = self.connection.load_from_lerobot(
+        version_id = self.connection.load_from_lerobot(
             "invalid_options", self.image_source)
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
 
     def test_target_open_failure_is_cleaned_and_can_retry(self):
         original_get = self.connection.get_table
@@ -1108,10 +1105,10 @@ class LeRobotImportTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "get failed"):
                 self.connection.load_from_lerobot(
                     "failed_open", self.image_source)
-            result = self.connection.load_from_lerobot(
+            version_id = self.connection.load_from_lerobot(
                 "failed_open", self.image_source)
 
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
 
     def test_target_open_failure_does_not_drop_another_owner(self):
         original_create = self.connection.create_table
@@ -1152,10 +1149,10 @@ class LeRobotImportTest(unittest.TestCase):
                     api,
                     "_open_resolved_dataset",
                     side_effect=open_with_failing_close):
-                result = self.connection.load_from_lerobot(
+                version_id = self.connection.load_from_lerobot(
                     "close_failure", self.image_source)
 
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
         self.assertEqual(
             ["PENDING", "READY"],
             [row["status"] for row in _catalog_rows(
@@ -1172,10 +1169,10 @@ class LeRobotImportTest(unittest.TestCase):
             with patch(
                     "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
                     return_value=source_file_io):
-                result = self.connection.load_from_lerobot(
+                version_id = self.connection.load_from_lerobot(
                     "source_close_failure", source)
 
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
         self.assertEqual(
             ["PENDING", "READY"],
             [row["status"] for row in _catalog_rows(
@@ -1224,9 +1221,9 @@ class LeRobotImportTest(unittest.TestCase):
                             "concurrent", self.image_source)
                 finally:
                     release.set()
-                result = future.result(timeout=30)
+                version_id = future.result(timeout=30)
 
-        self.assertEqual(1, result.frames_snapshot_id)
+        self.assertEqual(1, version_id)
         self.assertEqual(
             5,
             self.connection.get_table(

@@ -535,21 +535,20 @@ pip install 'pypaimon[lerobot]'
 ```
 
 ```python
-result = conn.load_from_lerobot(
+version_id = conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(result.version_id)
-print(result.frames_snapshot_id)
+print(version_id)
 ```
 
-The result contains the `version_id` and the frame, Episode, and Task snapshot
-IDs.
+The returned `version_id` is the common tag name for the frame, Episode, and
+Task tables.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
-result = conn.load_from_lerobot(
+version_id = conn.load_from_lerobot(
     "robot_data",
     "oss://source-bucket/lerobot_dataset",
     source_options={

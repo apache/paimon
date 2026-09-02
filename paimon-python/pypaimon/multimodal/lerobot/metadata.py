@@ -240,7 +240,6 @@ def _publish_dataset(
     manifest = _manifest_row(version_id, "READY", metadata)
     _append_arrow(tables["versions"], pa.Table.from_pylist(
         [manifest], schema=_VERSIONS_SCHEMA))
-    return episodes_snapshot_id, tasks_snapshot_id
 
 
 def _manifest_row(
