@@ -31,8 +31,8 @@ import pyarrow.parquet as pq
 
 from pypaimon.common.options import Options
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
-from pypaimon.multimodal.hdf5 import (
-    _Hdf5SourceFileIO,
+from pypaimon.multimodal.source_utils import (
+    _SourceFileIO,
     _normalize_source_path,
     _qualified_status_path,
 )
@@ -80,7 +80,7 @@ def _resolved_source(source, source_options):
         return
 
     source_uri = _normalize_source_path(value).rstrip("/")
-    source_file_io = _Hdf5SourceFileIO(Options(source_options))
+    source_file_io = _SourceFileIO(Options(source_options))
     try:
         try:
             status = source_file_io.get_file_status(source_uri)

@@ -136,6 +136,30 @@ class MultimodalConnection:
             source_options=source_options,
         )
 
+    def load_from_rosbag(
+            self,
+            table_name: str,
+            paths,
+            *,
+            transform,
+            default_typestore=None,
+            typestore_factory=None,
+            source_options=None,
+            staging=None,
+            allow_storage_fragment: bool = False):
+        """Validate and append ROS1/ROS2 transforms in one commit."""
+        from pypaimon.multimodal.rosbag import load_from_rosbag
+        return load_from_rosbag(
+            self.get_table(table_name),
+            paths,
+            transform=transform,
+            default_typestore=default_typestore,
+            typestore_factory=typestore_factory,
+            source_options=source_options,
+            staging=staging,
+            allow_storage_fragment=allow_storage_fragment,
+        )
+
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
         self.catalog.drop_table(
             self._identifier(name),
