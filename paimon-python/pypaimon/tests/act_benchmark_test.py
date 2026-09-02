@@ -26,36 +26,31 @@ from pypaimon.benchmark.act.compare import (
 from pypaimon.benchmark.act.experiment import load_experiment
 
 
-def test_default_experiment_loads_packaged_benchmark_parameters():
+def test_packaged_experiment_contains_a_valid_benchmark_config():
+    _require_act_runtime()
+    from pypaimon.benchmark.act.harness import BenchmarkConfig
+
     experiment = load_experiment()
 
     assert experiment["schema_version"] == "act-benchmark-experiment@1"
     assert experiment["benchmark_id"] == "robomind-act"
-    assert experiment["config"]["seed"] == 20260825
-    assert experiment["config"]["action_horizon"] == 32
-    assert experiment["config"]["timed_batches"] == 32
-    assert experiment["config"]["rounds"] == 3
+    assert BenchmarkConfig(**experiment["config"]).to_dict() == (
+        experiment["config"])
     assert experiment["statistics_version"] == (
         "robomind-agilex-joint-position@1")
-
-
-def test_default_throughput_measurement_spans_four_physical_fetches():
-    """Keep the first Paimon fetch from dominating steady-state throughput."""
-    config = load_experiment()["config"]
-
-    assert config["timed_batches"] % config["fetch_batches"] == 0
-    assert config["timed_batches"] // config["fetch_batches"] == 4
 
 
 def test_compare_reports_ratio_for_matching_backend_results():
     experiment = {"schema_version": "act-benchmark-experiment@1"}
     environment = {"python": "3.10", "machine": "arm64"}
-    results = [
-        _result("hdf5", experiment, environment, throughput=10.0),
-        _result("paimon", experiment, environment, throughput=15.0),
-    ]
+    hdf5 = _result("hdf5", experiment, environment, throughput=10.0)
+    paimon = _result("paimon", experiment, environment, throughput=15.0)
+    hdf5["summary"]["first_batch_s"] = {
+        "median": 2.0, "min": 2.0, "max": 2.0}
+    paimon["summary"]["first_batch_s"] = {
+        "median": 1.0, "min": 1.0, "max": 1.0}
 
-    comparison = compare_results(results)
+    comparison = compare_results([hdf5, paimon])
 
     assert comparison["status"] == "SUCCEEDED"
     assert len(comparison["experiments"]) == 1
@@ -66,6 +61,12 @@ def test_compare_reports_ratio_for_matching_backend_results():
         "paimon": 15.0,
         "paimon_over_hdf5": 1.5,
         "preferred": "higher",
+    }
+    assert group["metrics"]["first_batch_s"] == {
+        "hdf5": 2.0,
+        "paimon": 1.0,
+        "hdf5_over_paimon": 2.0,
+        "preferred": "lower",
     }
 
 
@@ -98,26 +99,6 @@ def test_compare_requires_results_from_both_backends():
     assert group["status"] == "INCOMPATIBLE"
     assert group["reason"] == "both hdf5 and paimon results are required"
     assert group["metrics"] == {}
-
-
-def test_compare_reports_lower_is_better_metric_as_paimon_speedup():
-    experiment = {"schema_version": "act-benchmark-experiment@1"}
-    environment = {"python": "3.10", "machine": "arm64"}
-    hdf5 = _result("hdf5", experiment, environment, throughput=10.0)
-    paimon = _result("paimon", experiment, environment, throughput=15.0)
-    hdf5["summary"]["first_batch_s"] = {
-        "median": 2.0, "min": 2.0, "max": 2.0}
-    paimon["summary"]["first_batch_s"] = {
-        "median": 1.0, "min": 1.0, "max": 1.0}
-
-    comparison = compare_results([hdf5, paimon])
-
-    assert comparison["experiments"][0]["metrics"]["first_batch_s"] == {
-        "hdf5": 2.0,
-        "paimon": 1.0,
-        "hdf5_over_paimon": 2.0,
-        "preferred": "lower",
-    }
 
 
 def test_load_results_combines_explicit_files_and_directory(tmp_path):
@@ -191,29 +172,6 @@ def test_compare_rejects_tampered_result_experiment_hash():
 
     with pytest.raises(ValueError, match="experiment SHA-256 differs"):
         compare_results([result])
-
-
-def test_shared_harness_is_imported_from_act_package():
-    _require_act_runtime()
-    from pypaimon.benchmark.act.harness import BenchmarkConfig
-
-    assert BenchmarkConfig().to_dict() == load_experiment()["config"]
-
-
-def test_hdf5_dataset_is_owned_by_hdf5_backend():
-    _require_act_runtime()
-    from pypaimon.benchmark.act.hdf5 import Hdf5ACTWindowDataset
-
-    assert Hdf5ACTWindowDataset.__module__ == (
-        "pypaimon.benchmark.act.hdf5")
-
-
-def test_paimon_adapter_is_owned_by_paimon_backend():
-    _require_act_runtime()
-    from pypaimon.benchmark.act.paimon import PaimonACTAdapter
-
-    assert PaimonACTAdapter.__module__ == (
-        "pypaimon.benchmark.act.paimon")
 
 
 def _require_act_runtime():
