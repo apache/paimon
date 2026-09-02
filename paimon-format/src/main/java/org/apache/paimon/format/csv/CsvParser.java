@@ -60,6 +60,7 @@ public class CsvParser {
     private final Mode mode;
     private final StringBuilder buffer;
     private final String[] rowValues;
+    private final boolean[] rowQuoted;
 
     public CsvParser(RowType dataSchemaRowType, int[] projectMapping, CsvOptions options) {
         this.dataSchemaRowType = dataSchemaRowType;
@@ -70,6 +71,7 @@ public class CsvParser {
         this.buffer = new StringBuilder(1024);
         int columnCount = Arrays.stream(projectMapping).max().orElse(-1) + 1;
         this.rowValues = new String[columnCount];
+        this.rowQuoted = new boolean[columnCount];
 
         this.separatorChar = options.fieldDelimiter().charAt(0);
         this.quoteChar = options.quoteCharacter().charAt(0);
@@ -91,6 +93,7 @@ public class CsvParser {
     @Nullable
     public GenericRow parse(String line) {
         Arrays.fill(rowValues, null);
+        Arrays.fill(rowQuoted, false);
         buffer.setLength(0);
 
         // empty line results in all null values
@@ -136,6 +139,9 @@ public class CsvParser {
                             buffer.append(c);
                         }
                     }
+                    if (!inQuotes && buffer.length() == 0) {
+                        rowQuoted[columnIndex] = true;
+                    }
                     inQuotes = !inQuotes;
                 }
                 inField = !inField;
@@ -166,7 +172,7 @@ public class CsvParser {
             Exception exception = null;
             String parseValue = rowValues[ordinal];
             try {
-                parseResult = parseField(parseValue, type);
+                parseResult = parseField(parseValue, type, rowQuoted[ordinal]);
             } catch (Exception e) {
                 exception = e;
             }
@@ -203,7 +209,11 @@ public class CsvParser {
 
     @VisibleForTesting
     public Pair<Boolean, Object> parseField(String field, DataType dataType) {
-        if (field == null || field.equals(nullLiteral)) {
+        return parseField(field, dataType, false);
+    }
+
+    private Pair<Boolean, Object> parseField(String field, DataType dataType, boolean quoted) {
+        if (field == null || (!quoted && field.equals(nullLiteral))) {
             return Pair.of(true, null);
         }
 
