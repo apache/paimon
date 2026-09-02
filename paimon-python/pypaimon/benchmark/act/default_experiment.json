@@ -10,7 +10,7 @@
     "optimizer_steps": 2,
     "rounds": 3,
     "seed": 20260825,
-    "timed_batches": 4,
+    "timed_batches": 32,
     "warmup_batches": 1,
     "weight_decay": 0.0001
   },

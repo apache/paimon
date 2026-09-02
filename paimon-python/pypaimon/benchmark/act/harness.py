@@ -58,7 +58,7 @@ class BenchmarkConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     warmup_batches: int = 1
-    timed_batches: int = 4
+    timed_batches: int = 32
     fetch_batches: int = 8
     rounds: int = 3
 

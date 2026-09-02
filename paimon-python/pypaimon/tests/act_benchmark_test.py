@@ -33,9 +33,18 @@ def test_default_experiment_loads_packaged_benchmark_parameters():
     assert experiment["benchmark_id"] == "robomind-act"
     assert experiment["config"]["seed"] == 20260825
     assert experiment["config"]["action_horizon"] == 32
+    assert experiment["config"]["timed_batches"] == 32
     assert experiment["config"]["rounds"] == 3
     assert experiment["statistics_version"] == (
         "robomind-agilex-joint-position@1")
+
+
+def test_default_throughput_measurement_spans_four_physical_fetches():
+    """Keep the first Paimon fetch from dominating steady-state throughput."""
+    config = load_experiment()["config"]
+
+    assert config["timed_batches"] % config["fetch_batches"] == 0
+    assert config["timed_batches"] // config["fetch_batches"] == 4
 
 
 def test_compare_reports_ratio_for_matching_backend_results():
