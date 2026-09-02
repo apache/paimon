@@ -82,7 +82,7 @@ class ScanQuery:
 
         read_builder = self._configured_read_builder()
         splits = read_builder.new_scan().plan().splits()
-        return read_builder.new_read().to_arrow_batch_reader(
+        return read_builder.new_read()._to_managed_arrow_batch_reader(
             splits, blob_parallelism=blob_parallelism)
 
     def _configured_read_builder(self, table=None):

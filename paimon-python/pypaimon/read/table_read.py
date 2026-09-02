@@ -186,6 +186,24 @@ class TableRead:
 
     def to_arrow_batch_reader(self, splits: List[Split],
                               blob_parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
+        reader, _ = self._new_arrow_batch_reader(splits, blob_parallelism)
+        return reader
+
+    def _to_managed_arrow_batch_reader(
+            self,
+            splits: List[Split],
+            blob_parallelism: Optional[int] = None):
+        reader, batch_iterator = self._new_arrow_batch_reader(
+            splits, blob_parallelism)
+        if (_RECORD_BATCH_READER_FROM_STREAM is not None
+                and hasattr(reader, "close")):
+            return _RECORD_BATCH_READER_FROM_STREAM(reader)
+        return _ClosableArrowBatchReader(reader, batch_iterator)
+
+    def _new_arrow_batch_reader(
+            self,
+            splits: List[Split],
+            blob_parallelism: Optional[int] = None):
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
@@ -193,11 +211,7 @@ class TableRead:
         batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
         reader_type = pyarrow.ipc.RecordBatchReader
         reader = reader_type.from_batches(schema, batch_iterator)
-        if (_RECORD_BATCH_READER_FROM_STREAM is not None
-                and hasattr(reader, "close")):
-            # Propagate close to the Python batch iterator.
-            return _RECORD_BATCH_READER_FROM_STREAM(reader)
-        return _ClosableArrowBatchReader(reader, batch_iterator)
+        return reader, batch_iterator
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
