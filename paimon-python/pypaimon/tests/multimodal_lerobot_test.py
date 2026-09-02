@@ -1035,7 +1035,7 @@ class LeRobotImportTest(unittest.TestCase):
         source_file_io = _RemoteLeRobotFileIO(local_source, source)
 
         with patch(
-                "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+                "pypaimon.multimodal.lerobot.source._SourceFileIO",
                 return_value=source_file_io):
             with self.assertRaisesRegex(ValueError, "non-empty"):
                 self.connection.load_from_lerobot("empty_oss", source)
@@ -1167,7 +1167,7 @@ class LeRobotImportTest(unittest.TestCase):
         with self.assertLogs(
                 "pypaimon.multimodal.lerobot.source", level="WARNING"):
             with patch(
-                    "pypaimon.multimodal.lerobot.source._Hdf5SourceFileIO",
+                    "pypaimon.multimodal.lerobot.source._SourceFileIO",
                     return_value=source_file_io):
                 version_id = self.connection.load_from_lerobot(
                     "source_close_failure", source)
@@ -1229,6 +1229,57 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.get_table(
                 "concurrent").scan().to_arrow().num_rows,
         )
+
+    def test_concurrent_append_cannot_enter_published_version(self):
+        from pypaimon.multimodal.lerobot import api
+
+        original_write = api._write_dataset
+
+        def append_then_write(
+                table,
+                dataset,
+                info,
+                source,
+                source_schema,
+                batch_size,
+                metadata):
+            task_names = {
+                row["task_index"]: row["task"]
+                for row in metadata["tasks"]
+            }
+            table.add(_read_batch(
+                dataset,
+                info,
+                0,
+                1,
+                source_schema,
+                task_names,
+            ))
+            return original_write(
+                table,
+                dataset,
+                info,
+                source,
+                source_schema,
+                batch_size,
+                metadata,
+            )
+
+        with patch.object(
+                api, "_write_dataset", side_effect=append_then_write):
+            with self.assertRaisesRegex(RuntimeError, "concurrent writes"):
+                self.connection.load_from_lerobot(
+                    "concurrent_append", self.image_source)
+
+        for name in (
+                "concurrent_append",
+                "concurrent_append__versions",
+                "concurrent_append__episodes",
+                "concurrent_append__tasks"):
+            with self.subTest(name=name):
+                with self.assertRaises(TableNotExistException):
+                    self.connection.catalog.get_table(
+                        self.connection._identifier(name))
 
     def test_drop_table_removes_companion_tables(self):
         self.connection.load_from_lerobot("drop_group", self.image_source)

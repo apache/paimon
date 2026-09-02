@@ -207,8 +207,7 @@ def _reserve_dataset_version(
         versions_table,
         pa.Table.from_pylist([pending], schema=_VERSIONS_SCHEMA),
     )
-    if snapshot_id is None:
-        raise RuntimeError("LeRobot version reservation created no snapshot.")
+    _require_initial_snapshot("versions", snapshot_id)
 
 
 def _publish_dataset(
@@ -218,18 +217,15 @@ def _publish_dataset(
         metadata,
         frames_identifier,
         frames_snapshot_id):
+    _require_initial_snapshot("frames", frames_snapshot_id)
     episodes_snapshot_id = _append_arrow_tables(
         tables["episodes"],
         _source_episode_tables(metadata),
     )
+    _require_initial_snapshot("episodes", episodes_snapshot_id)
     tasks_snapshot_id = _append_arrow(
         tables["tasks"], metadata["tasks_table"])
-
-    if None in (
-            frames_snapshot_id, episodes_snapshot_id, tasks_snapshot_id):
-        raise ValueError(
-            "LeRobot tag-backed import requires non-empty frame, Episode, "
-            "and task components.")
+    _require_initial_snapshot("tasks", tasks_snapshot_id)
     tag = str(version_id)
     for identifier, snapshot_id in (
             (frames_identifier, frames_snapshot_id),
@@ -240,6 +236,17 @@ def _publish_dataset(
     manifest = _manifest_row(version_id, "READY", metadata)
     _append_arrow(tables["versions"], pa.Table.from_pylist(
         [manifest], schema=_VERSIONS_SCHEMA))
+
+
+def _require_initial_snapshot(component, snapshot_id):
+    if snapshot_id is None:
+        raise ValueError(
+            "LeRobot tag-backed import requires a non-empty %s component."
+            % component)
+    if snapshot_id != 1:
+        raise RuntimeError(
+            "LeRobot initial import detected concurrent writes to %s; "
+            "expected snapshot 1, found %d." % (component, snapshot_id))
 
 
 def _manifest_row(
