@@ -14,13 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Metadata tables for imported LeRobot datasets."""
+"""LeRobot component tables and version publication."""
 
-import hashlib
 import json
 import numbers
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pyarrow as pa
@@ -37,12 +35,10 @@ from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.table import _target_schema
 
 
-_DATASET_ID = "dataset_id"
 _VERSION_ID = "version_id"
 _OWNER_ID_OPTION = "pypaimon.lerobot.owner-id"
-_DEFAULT_DATASET_ID_OPTION = "pypaimon.lerobot.dataset-id"
 _TABLE_SUFFIXES = {
-    "datasets": "__datasets",
+    "versions": "__versions",
     "episodes": "__episodes",
     "tasks": "__tasks",
 }
@@ -51,106 +47,67 @@ _COMPANION_OPTION_KEYS = {
     for name in _TABLE_SUFFIXES
 }
 
-_FRAME_ID_FIELDS = [
-    pa.field(_DATASET_ID, pa.string(), nullable=False),
-]
-_DATASETS_SCHEMA = pa.schema([
-    pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field(_VERSION_ID, pa.string(), nullable=False),
-    pa.field("parent_version_id", pa.string()),
+_VERSIONS_SCHEMA = pa.schema([
+    pa.field(_VERSION_ID, pa.int64(), nullable=False),
     pa.field("status", pa.string(), nullable=False),
-    pa.field("published_at", pa.timestamp("us", tz="UTC")),
-    pa.field("format", pa.string(), nullable=False),
-    pa.field("format_version", pa.string(), nullable=False),
-    pa.field("fps", pa.int64(), nullable=False),
-    pa.field("features_json", pa.string(), nullable=False),
     pa.field("info_json", pa.string(), nullable=False),
-    pa.field("global_stats_json", pa.string()),
-    pa.field("total_frames", pa.int64(), nullable=False),
-    pa.field("total_episodes", pa.int64(), nullable=False),
-    pa.field("total_tasks", pa.int64(), nullable=False),
-    pa.field("frames_snapshot_id", pa.int64()),
-    pa.field("episodes_snapshot_id", pa.int64()),
-    pa.field("tasks_snapshot_id", pa.int64()),
-    pa.field("source_uri", pa.string(), nullable=False),
-    pa.field("metadata_checksum", pa.string(), nullable=False),
+    pa.field("stats_json", pa.string()),
 ])
-_EPISODES_SCHEMA = pa.schema([
-    pa.field(_DATASET_ID, pa.string(), nullable=False),
+_EMPTY_TASKS_SCHEMA = pa.schema([
+    pa.field("task_index", pa.int64(), nullable=False),
+    pa.field("task", pa.string(), nullable=False),
+])
+_EMPTY_EPISODES_SCHEMA = pa.schema([
     pa.field("episode_index", pa.int64(), nullable=False),
     pa.field("dataset_from_index", pa.int64(), nullable=False),
     pa.field("dataset_to_index", pa.int64(), nullable=False),
+    pa.field("tasks", pa.list_(pa.string()), nullable=False),
     pa.field("length", pa.int64(), nullable=False),
-    pa.field("task_indices", pa.list_(pa.int64()), nullable=False),
-    pa.field("split", pa.string()),
-    pa.field("episode_stats_json", pa.string()),
-    pa.field("episode_metadata_json", pa.string(), nullable=False),
 ])
-_TASKS_SCHEMA = pa.schema([
-    pa.field(_DATASET_ID, pa.string(), nullable=False),
-    pa.field("task_index", pa.int64(), nullable=False),
-    pa.field("task", pa.string(), nullable=False),
-    pa.field("task_metadata_json", pa.string()),
-])
-
-
-def _frame_schema(source_schema):
-    reserved = [
-        field.name for field in _FRAME_ID_FIELDS
-        if field.name in source_schema.names
-    ]
-    if reserved:
-        raise ValueError(
-            "LeRobot features use reserved Paimon fields: %s" % reserved)
-    return pa.schema(list(source_schema) + _FRAME_ID_FIELDS)
-
-
-def _with_frame_identity(table, dataset_id):
-    size = table.num_rows
-    return pa.Table.from_arrays(
-        list(table.columns) + [
-            pa.array([dataset_id] * size, type=pa.string()),
-        ],
-        schema=pa.schema(list(table.schema) + _FRAME_ID_FIELDS),
-    )
+_EPISODE_CONTROL_COLUMNS = [
+    "episode_index",
+    "dataset_from_index",
+    "dataset_to_index",
+    "tasks",
+    "length",
+]
 
 
 def _load_dataset_metadata(dataset, info, source):
     fps = _positive_integer(info.get("fps"), "fps")
     stats = _source_stats(dataset, source)
-    task_records = _source_tasks(dataset, source, int(info["total_tasks"]))
-    tasks, task_indices = _task_rows(task_records, int(info["total_tasks"]))
+    tasks_table = _source_tasks(
+        dataset, source, int(info["total_tasks"]))
+    tasks, task_indices = _task_rows(
+        tasks_table.to_pylist(), int(info["total_tasks"]))
     total_episodes = int(info["total_episodes"])
-    episode_records = [] if total_episodes == 0 \
-        else _source_episodes(dataset, source)
+    episode_source = (
+        _source_episodes(dataset, source)
+        if total_episodes > 0
+        else {"paths": [], "rows": [], "schema": _EMPTY_EPISODES_SCHEMA}
+    )
     episodes = _episode_rows(
-        episode_records,
+        episode_source["rows"],
         task_indices,
         info,
         int(info["total_frames"]),
         total_episodes,
     )
-    canonical = {
-        "info": info,
-        "stats": stats,
-        "episodes": episodes,
-        "tasks": tasks,
-    }
     return {
         "fps": fps,
-        "features_json": _canonical_json(info["features"]),
         "info_json": _canonical_json(info),
-        "global_stats_json": (
+        "stats_json": (
             None if stats is None else _canonical_json(stats)),
         "episodes": episodes,
         "tasks": tasks,
-        "metadata_checksum": "sha256:" + hashlib.sha256(
-            _canonical_json(canonical).encode("utf-8")
-        ).hexdigest(),
+        "episodes_schema": episode_source["schema"],
+        "episode_paths": episode_source["paths"],
+        "tasks_table": tasks_table,
+        "source": source,
     }
 
 
-def _new_id():
+def _new_owner_id():
     return uuid.uuid4().hex
 
 
@@ -172,14 +129,16 @@ def _managed_table_options(frames_identifier, owner_id):
     if identifier.get_branch_name() is not None:
         raise ValueError(
             "LeRobot import does not support table branches.")
-    result = {
-        _OWNER_ID_OPTION: owner_id,
-        _DEFAULT_DATASET_ID_OPTION: str(frames_identifier),
-    }
+    result = {_OWNER_ID_OPTION: owner_id}
     for name, suffix in _TABLE_SUFFIXES.items():
         result[_COMPANION_OPTION_KEYS[name]] = _companion_identifier(
             frames_identifier, suffix)
     return result
+
+
+def _is_managed_root(options):
+    return _OWNER_ID_OPTION in options and all(
+        key in options for key in _COMPANION_OPTION_KEYS.values())
 
 
 def _companion_table_identifiers(frames_table):
@@ -195,11 +154,11 @@ def _companion_table_identifiers(frames_table):
     return identifiers
 
 
-def _prepare_metadata_tables(connection, frames_table, owner_id):
+def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
     schemas = {
-        "datasets": _DATASETS_SCHEMA,
-        "episodes": _EPISODES_SCHEMA,
-        "tasks": _TASKS_SCHEMA,
+        "versions": _VERSIONS_SCHEMA,
+        "episodes": metadata["episodes_schema"],
+        "tasks": metadata["tasks_table"].schema,
     }
     identifiers = _companion_table_identifiers(frames_table)
     tables = {}
@@ -240,28 +199,13 @@ def _prepare_metadata_tables(connection, frames_table, owner_id):
 
 
 def _reserve_dataset_version(
-        datasets_table,
-        dataset_id,
+        versions_table,
         version_id,
-        info,
-        source,
         metadata):
-    pending = _manifest_row(
-        dataset_id,
-        version_id,
-        None,
-        "PENDING",
-        None,
-        info,
-        source,
-        metadata,
-        None,
-        None,
-        None,
-    )
+    pending = _manifest_row(version_id, "PENDING", metadata)
     snapshot_id = _append_arrow(
-        datasets_table,
-        pa.Table.from_pylist([pending], schema=_DATASETS_SCHEMA),
+        versions_table,
+        pa.Table.from_pylist([pending], schema=_VERSIONS_SCHEMA),
     )
     if snapshot_id is None:
         raise RuntimeError("LeRobot version reservation created no snapshot.")
@@ -270,94 +214,45 @@ def _reserve_dataset_version(
 def _publish_dataset(
         connection,
         tables,
-        dataset_id,
         version_id,
-        info,
-        source,
         metadata,
         frames_identifier,
         frames_snapshot_id):
-    episodes = _dataset_table(
-        metadata["episodes"],
-        _EPISODES_SCHEMA,
-        dataset_id,
+    episodes_snapshot_id = _append_arrow_tables(
+        tables["episodes"],
+        _source_episode_tables(metadata),
     )
-    tasks = _dataset_table(
-        metadata["tasks"],
-        _TASKS_SCHEMA,
-        dataset_id,
-    )
-    episodes_snapshot_id = _append_arrow(tables["episodes"], episodes)
-    tasks_snapshot_id = _append_arrow(tables["tasks"], tasks)
+    tasks_snapshot_id = _append_arrow(
+        tables["tasks"], metadata["tasks_table"])
 
-    tag = "pypaimon-lerobot-%s" % version_id
+    if None in (
+            frames_snapshot_id, episodes_snapshot_id, tasks_snapshot_id):
+        raise ValueError(
+            "LeRobot tag-backed import requires non-empty frame, Episode, "
+            "and task components.")
+    tag = str(version_id)
     for identifier, snapshot_id in (
             (frames_identifier, frames_snapshot_id),
             (tables["episodes"].identifier, episodes_snapshot_id),
             (tables["tasks"].identifier, tasks_snapshot_id)):
-        if snapshot_id is not None:
-            _create_tag(connection.catalog, identifier, tag, snapshot_id)
+        _create_tag(connection.catalog, identifier, tag, snapshot_id)
 
-    manifest = _manifest_row(
-        dataset_id,
-        version_id,
-        None,
-        "READY",
-        datetime.now(timezone.utc),
-        info,
-        source,
-        metadata,
-        frames_snapshot_id,
-        episodes_snapshot_id,
-        tasks_snapshot_id,
-    )
-    _append_arrow(tables["datasets"], pa.Table.from_pylist(
-        [manifest], schema=_DATASETS_SCHEMA))
+    manifest = _manifest_row(version_id, "READY", metadata)
+    _append_arrow(tables["versions"], pa.Table.from_pylist(
+        [manifest], schema=_VERSIONS_SCHEMA))
     return episodes_snapshot_id, tasks_snapshot_id
 
 
 def _manifest_row(
-        dataset_id,
         version_id,
-        parent_version_id,
         status,
-        published_at,
-        info,
-        source,
-        metadata,
-        frames_snapshot_id,
-        episodes_snapshot_id,
-        tasks_snapshot_id):
+        metadata):
     return {
-        _DATASET_ID: dataset_id,
         _VERSION_ID: version_id,
-        "parent_version_id": parent_version_id,
         "status": status,
-        "published_at": published_at,
-        "format": "lerobot",
-        "format_version": str(info["codebase_version"]),
-        "fps": metadata["fps"],
-        "features_json": metadata["features_json"],
         "info_json": metadata["info_json"],
-        "global_stats_json": metadata["global_stats_json"],
-        "total_frames": int(info["total_frames"]),
-        "total_episodes": int(info["total_episodes"]),
-        "total_tasks": int(info["total_tasks"]),
-        "frames_snapshot_id": frames_snapshot_id,
-        "episodes_snapshot_id": episodes_snapshot_id,
-        "tasks_snapshot_id": tasks_snapshot_id,
-        "source_uri": str(source.path),
-        "metadata_checksum": metadata["metadata_checksum"],
+        "stats_json": metadata["stats_json"],
     }
-
-
-def _dataset_table(rows, schema, dataset_id):
-    values = []
-    for row in rows:
-        value = dict(row)
-        value[_DATASET_ID] = dataset_id
-        values.append(value)
-    return pa.Table.from_pylist(values, schema=schema)
 
 
 def _drop_import_tables(catalog, frames_table, owner_id):
@@ -374,8 +269,10 @@ def _drop_import_tables(catalog, frames_table, owner_id):
 
 
 def _append_arrow(table, data):
-    if data.num_rows == 0:
-        return None
+    return _append_arrow_tables(table, [data])
+
+
+def _append_arrow_tables(table, tables):
     builder = table.new_batch_write_builder()
     table_write = builder.new_write()
     table_commit = builder.new_commit()
@@ -383,7 +280,20 @@ def _append_arrow(table, data):
     recorder = _SnapshotRecorder()
     table_commit.add_commit_callback(recorder)
     try:
-        table_write.write_arrow(data)
+        row_count = 0
+        target_schema = _target_schema(table)
+        for data in tables:
+            if data.num_rows == 0:
+                continue
+            if not data.schema.equals(target_schema, check_metadata=False):
+                raise ValueError(
+                    "LeRobot component schema %s does not match target %s."
+                    % (data.schema, target_schema))
+            table_write.write_arrow(data)
+            row_count += data.num_rows
+        if row_count == 0:
+            table_write.abort()
+            return None
         messages = table_write.prepare_commit()
         commit_started = True
         table_commit.commit(messages)
@@ -432,17 +342,17 @@ def _source_stats(dataset, source):
 
 def _source_tasks(dataset, source, total_tasks):
     if total_tasks == 0:
-        return []
+        return pa.Table.from_pylist([], schema=_EMPTY_TASKS_SCHEMA)
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
             _read_remote_parquet,
             _remote_path,
         )
         path = _remote_path(source.path, "meta/tasks.parquet")
-        return _read_remote_parquet(source.file_io, path).to_pylist()
+        return _read_remote_parquet(source.file_io, path)
     path = _metadata_root(dataset, source) / "meta" / "tasks.parquet"
     try:
-        return pq.read_table(path).to_pylist()
+        return pq.read_table(path)
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot task metadata %s: %s" % (path, error)
@@ -453,29 +363,67 @@ def _source_episodes(dataset, source):
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
             _read_remote_parquet,
+            _read_remote_parquet_schema,
             _remote_parquet_files,
             _remote_path,
         )
         directory = _remote_path(source.path, "meta/episodes")
         paths = _remote_parquet_files(source.file_io, directory)
-        tables = [
-            _read_remote_parquet(source.file_io, path) for path in paths
-        ]
+
+        def read(path, columns=None):
+            return _read_remote_parquet(
+                source.file_io, path, columns=columns)
+
+        def read_schema(path):
+            return _read_remote_parquet_schema(source.file_io, path)
     else:
         directory = _metadata_root(dataset, source) / "meta" / "episodes"
         paths = sorted(directory.rglob("*.parquet"))
-        try:
-            tables = [pq.read_table(path) for path in paths]
-        except (OSError, ValueError, pa.ArrowException) as error:
-            raise ValueError(
-                "Cannot read LeRobot Episode metadata %s: %s"
-                % (directory, error)) from error
+
+        def read(path, columns=None):
+            return pq.read_table(path, columns=columns)
+
+        read_schema = pq.read_schema
+    if not paths:
+        return {
+            "paths": [],
+            "rows": [],
+            "schema": _EMPTY_EPISODES_SCHEMA,
+        }
+    try:
+        schemas = [read_schema(path) for path in paths]
+        schema = schemas[0]
+        if any(not item.equals(schema, check_metadata=False)
+               for item in schemas[1:]):
+            raise ValueError("Episode Parquet schemas are inconsistent.")
+        tables = [read(path, columns=_EPISODE_CONTROL_COLUMNS)
+                  for path in paths]
+    except (OSError, ValueError, pa.ArrowException) as error:
+        raise ValueError(
+            "Cannot read LeRobot Episode metadata %s: %s"
+            % (directory, error)) from error
     rows = []
     for table in tables:
         rows.extend(table.to_pylist())
     rows.sort(key=lambda row: _integer(
         row.get("episode_index"), "episode_index"))
-    return rows
+    return {"paths": paths, "rows": rows, "schema": schema}
+
+
+def _source_episode_tables(metadata):
+    source = metadata["source"]
+    if source.file_io is not None:
+        from pypaimon.multimodal.lerobot.source import _read_remote_parquet
+        for path in metadata["episode_paths"]:
+            yield _read_remote_parquet(source.file_io, path)
+    else:
+        for path in metadata["episode_paths"]:
+            try:
+                yield pq.read_table(path)
+            except (OSError, ValueError, pa.ArrowException) as error:
+                raise ValueError(
+                    "Cannot read LeRobot Episode metadata %s: %s"
+                    % (path, error)) from error
 
 
 def _reject_subtasks(dataset, source):

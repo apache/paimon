@@ -25,7 +25,6 @@ import pyarrow as pa
 
 from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.hdf5 import _SnapshotRecorder
-from pypaimon.multimodal.lerobot.metadata import _with_frame_identity
 from pypaimon.multimodal.lerobot.schema import _feature_shape
 from pypaimon.multimodal.table import _target_schema
 
@@ -69,7 +68,6 @@ def _write_dataset(
         source,
         source_schema,
         batch_size,
-        dataset_id,
         metadata):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
@@ -103,7 +101,6 @@ def _write_dataset(
             )
             observed_tasks.setdefault(episode_index, set()).update(
                 seen_tasks)
-            batch = _with_frame_identity(batch, dataset_id)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,

@@ -141,7 +141,6 @@ class MultimodalConnection:
             source,
             *,
             batch_size: int = 1024,
-            dataset_id: Optional[str] = None,
             options=None,
             source_options=None):
         """Import LeRobot Dataset v3 into a new Paimon table group."""
@@ -151,7 +150,6 @@ class MultimodalConnection:
             table_name,
             source,
             batch_size=batch_size,
-            dataset_id=dataset_id,
             options=options,
             source_options=source_options,
         )
@@ -161,17 +159,17 @@ class MultimodalConnection:
         owner_id = None
         try:
             from pypaimon.multimodal.lerobot.metadata import (
-                _DEFAULT_DATASET_ID_OPTION,
                 _OWNER_ID_OPTION,
+                _is_managed_root,
             )
             raw_table = self.catalog.get_table(identifier)
             table_options = raw_table.table_schema.options
-            if (_OWNER_ID_OPTION in table_options
-                    and _DEFAULT_DATASET_ID_OPTION not in table_options):
+            managed_root = _is_managed_root(table_options)
+            if _OWNER_ID_OPTION in table_options and not managed_root:
                 raise ValueError(
                     "%s is a managed LeRobot companion table; drop its "
                     "frame table instead." % identifier)
-            if _DEFAULT_DATASET_ID_OPTION in table_options:
+            if managed_root:
                 if Identifier.from_string(
                         identifier).get_branch_name() is not None:
                     raise ValueError(

@@ -52,7 +52,8 @@ print(result.version_id, result.frames_snapshot_id)
 ```
 
 The schema comes from `meta/info.json`. Each frame becomes one row; media uses
-BLOB columns. Missing tables are created and later calls append.
+BLOB columns. The import creates frame, Episode, task, and version tables and
+tags the three component tables with `result.version_id`.
 
 # HDF5 to multimodal tables
 

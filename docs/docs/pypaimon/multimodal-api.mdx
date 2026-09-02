@@ -525,9 +525,10 @@ source drift. Calling it again with the same input appends the rows again.
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json`, writes one row per
 frame, and creates a LeRobot dataset backed by the frame table,
-`<table>__datasets`, `<table>__episodes`, and `<table>__tasks`. A manifest row is
+`<table>__versions`, `<table>__episodes`, and `<table>__tasks`. A manifest row is
 reserved as `PENDING` before the component writes and marked `READY` only after
-all component snapshots are committed and tagged. Readers ignore `PENDING`.
+all components are committed and tagged with the same numeric `version_id`.
+Readers ignore `PENDING`.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -542,8 +543,8 @@ print(result.version_id)
 print(result.frames_snapshot_id)
 ```
 
-The result contains the `dataset_id`, `version_id`, and the frame, Episode, and
-Task snapshot IDs. Empty components have no snapshot.
+The result contains the `version_id` and the frame, Episode, and Task snapshot
+IDs.
 
 For FileIO URIs, pass credentials through `source_options`:
 
@@ -559,13 +560,12 @@ result = conn.load_from_lerobot(
 )
 ```
 
-Component rows carry `dataset_id` and stable LeRobot indices. `version_id`
-exists only in the Dataset manifest, where it resolves the exact frame,
-Episode, and Task snapshots. These snapshots define the published Dataset
-state; tags retain them. Set `dataset_id=` to choose a stable ID. The one-time
-importer requires a new target table. A failed import removes the table group
-so the call can be retried. `drop_table()` removes all four tables; companion
-tables cannot be dropped separately through `MultimodalConnection`.
+The component tables retain the native LeRobot V3 schemas and contain no
+version columns. A READY row in `<table>__versions` identifies a release;
+reading the same tag from the three component tables reconstructs that release.
+The one-time importer requires a new target table. A failed import removes the
+table group so the call can be retried. `drop_table()` removes all four tables;
+companion tables cannot be dropped separately through `MultimodalConnection`.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.

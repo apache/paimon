@@ -27,13 +27,11 @@ from pypaimon.catalog.catalog_exception import (
     TableNotExistException,
 )
 from pypaimon.multimodal.lerobot.metadata import (
-    _DEFAULT_DATASET_ID_OPTION,
     _OWNER_ID_OPTION,
     _drop_import_tables,
-    _frame_schema,
     _load_dataset_metadata,
     _managed_table_options,
-    _new_id,
+    _new_owner_id,
     _prepare_metadata_tables,
     _publish_dataset,
     _reject_subtasks,
@@ -63,8 +61,7 @@ from pypaimon.multimodal.source_utils import (
 class LeRobotLoadResult:
     """Published Paimon state for one imported LeRobot Dataset."""
 
-    dataset_id: str
-    version_id: str
+    version_id: int
     frames_snapshot_id: Optional[int]
     episodes_snapshot_id: Optional[int]
     tasks_snapshot_id: Optional[int]
@@ -76,17 +73,15 @@ def load_from_lerobot(
         source,
         *,
         batch_size: int = 1024,
-        dataset_id: Optional[str] = None,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None,
 ) -> LeRobotLoadResult:
     """Import LeRobot Dataset v3 and return its published Paimon state.
 
     A new target table is created from LeRobot metadata. Episode, task, and
-    dataset metadata are stored in companion Paimon tables. ``dataset_id``
-    defaults to the target identifier. FileIO URI
-    credentials come only from ``source_options`` and are not inherited from
-    the target Catalog.
+    version metadata are stored in companion Paimon tables.
+    FileIO URI credentials come only from ``source_options`` and are not
+    inherited from the target Catalog.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -126,7 +121,6 @@ def load_from_lerobot(
                 resolved_source,
                 source_schema,
                 batch_size,
-                dataset_id,
                 options,
                 metadata,
             )
@@ -151,7 +145,6 @@ def load_from_lerobot(
                 resolved_source,
                 lerobot_schema,
                 batch_size,
-                dataset_id,
                 options,
                 metadata,
             )
@@ -169,22 +162,17 @@ def _import_dataset(
         source,
         source_schema,
         batch_size,
-        dataset_id,
         options,
         metadata):
     table, owner_id = _create_target_table(
         connection, table_name, source_schema, options)
     try:
-        resolved_dataset_id = _resolved_dataset_id(dataset_id, table)
         tables = _prepare_metadata_tables(
-            connection, table.raw_table, owner_id)
-        version_id = _new_id()
+            connection, table.raw_table, owner_id, metadata)
+        version_id = 1
         _reserve_dataset_version(
-            tables["datasets"],
-            resolved_dataset_id,
+            tables["versions"],
             version_id,
-            info,
-            source,
             metadata,
         )
         frames_snapshot_id = None
@@ -196,22 +184,17 @@ def _import_dataset(
                 source,
                 source_schema,
                 batch_size,
-                resolved_dataset_id,
                 metadata,
             )
         episodes_snapshot_id, tasks_snapshot_id = _publish_dataset(
             connection,
             tables,
-            resolved_dataset_id,
             version_id,
-            info,
-            source,
             metadata,
             table.identifier,
             frames_snapshot_id,
         )
         return LeRobotLoadResult(
-            dataset_id=resolved_dataset_id,
             version_id=version_id,
             frames_snapshot_id=frames_snapshot_id,
             episodes_snapshot_id=episodes_snapshot_id,
@@ -255,24 +238,9 @@ def _required_count(info, name, source):
     return int(value)
 
 
-def _resolved_dataset_id(value, table):
-    if value is not None and (
-            not isinstance(value, str) or not value.strip()):
-        raise ValueError("dataset_id must be a non-empty string.")
-    if value is None:
-        default_id = table.raw_table.table_schema.options.get(
-            _DEFAULT_DATASET_ID_OPTION)
-        if not default_id:
-            raise ValueError(
-                "LeRobot table %s has no default dataset_id."
-                % table.identifier)
-        return default_id
-    return value.strip()
-
-
 def _create_target_table(
         connection, table_name, source_schema, options):
-    owner_id = _new_id()
+    owner_id = _new_owner_id()
     create_options = dict(options or {})
     managed_options = _managed_table_options(
         connection._identifier(table_name), owner_id)
@@ -285,7 +253,7 @@ def _create_target_table(
     try:
         table = connection.create_table(
             table_name,
-            schema=_frame_schema(source_schema),
+            schema=source_schema,
             options=create_options,
         )
     except TableAlreadyExistException as error:
