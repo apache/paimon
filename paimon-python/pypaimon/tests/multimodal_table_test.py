@@ -2225,8 +2225,8 @@ class MultimodalTableTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
                 ValueError,
-                r"Multiple vector columns found with dimension 2:.*"
-                r"title_embedding.*body_embedding.*pass column"):
+                r"Multiple vector columns found with dimension 2: "
+                r"title_embedding, body_embedding; pass column\."):
             docs.search([1.0, 0.0])
 
     def test_search_pre_filter_rejects_predicate_object(self):

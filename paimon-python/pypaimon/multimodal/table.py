@@ -1182,7 +1182,7 @@ def _resolve_vector_column(
             % (dimension, available))
     raise ValueError(
         "Multiple vector columns found with dimension %d: %s; pass column."
-        % (dimension, matches))
+        % (dimension, ", ".join(matches)))
 
 
 def _infer_text_column(schema: pa.Schema, parameter: str = "text_column"):
