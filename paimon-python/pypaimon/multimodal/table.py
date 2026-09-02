@@ -1145,13 +1145,13 @@ def _coerce_full_text_query(query, method, schema, column=None):
 def _resolve_vector_column(
         schema: pa.Schema,
         column: Optional[str],
-        dimension: int):
+        dimension: int) -> str:
     if column is not None:
-        field = next(
-            (field for field in schema if field.name == column), None)
-        if field is None:
+        try:
+            field = schema.field(column)
+        except KeyError as e:
             raise ValueError(
-                "Vector column '%s' not found in table schema." % column)
+                "Vector column '%s' not found in table schema." % column) from e
         if not pa.types.is_fixed_size_list(field.type):
             raise ValueError(
                 "Column '%s' is not a fixed-size vector column." % column)
