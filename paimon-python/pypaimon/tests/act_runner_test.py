@@ -33,9 +33,9 @@ h5py = pytest.importorskip("h5py")
 import pypaimon.multimodal as pmm
 import pypaimon.benchmark.act.harness as act_harness
 import pypaimon.benchmark.act.__main__ as act_cli
+import pypaimon.benchmark.act.runner as act_runner
 from pypaimon.benchmark.act.runner import (
     BenchmarkConfig,
-    _git_head,
     prepare_experiment,
     run_experiment,
 )
@@ -155,6 +155,8 @@ def test_backend_coalesces_timed_batch_fetches():
         rounds=3,
     )
 
+    clock = SimpleNamespace(value=0.0)
+
     class BatchDataset(torch.utils.data.Dataset):
         def __init__(self):
             self.calls = []
@@ -174,14 +176,23 @@ def test_backend_coalesces_timed_batch_fetches():
             }
 
         def __getitems__(self, indices):
+            clock.value += 0.25
             self.calls.append(list(indices))
             return [self[index] for index in indices]
 
     dataset = BatchDataset()
     plan = build_window_plan(len(dataset), len(dataset), config)
 
-    with patch.object(act_harness, "_measure_python_peak", return_value=0):
-        run_backend(
+    def validate(_batch, _config):
+        clock.value += 1.0
+
+    with (
+        patch.object(act_harness, "_measure_python_peak", return_value=0),
+        patch.object(
+            act_harness.time, "monotonic", side_effect=lambda: clock.value),
+        patch.object(act_harness, "validate_act_batch", side_effect=validate),
+    ):
+        result = run_backend(
             "test",
             1,
             lambda: (dataset, dataset),
@@ -197,6 +208,7 @@ def test_backend_coalesces_timed_batch_fetches():
         list(plan.train_indices),
         list(plan.validation_indices),
     ]
+    assert result["batch_fetch_s"] == 0.25
 
 
 def _jpeg(value):
@@ -634,6 +646,13 @@ def test_cli_exposes_prepare_run_and_compare_contracts(capsys):
     assert "--results-dir" in capsys.readouterr().out
 
 
+def test_cli_requires_python_3_10_or_newer():
+    with pytest.raises(RuntimeError, match="Python 3.10 or newer"):
+        act_cli._require_supported_python((3, 9))
+
+    act_cli._require_supported_python((3, 10))
+
+
 def test_automatic_artifact_paths_do_not_overwrite_same_second(tmp_path):
     with patch.object(act_cli, "datetime") as now:
         now.now.return_value.strftime.return_value = "20260901T120000Z"
@@ -646,8 +665,23 @@ def test_automatic_artifact_paths_do_not_overwrite_same_second(tmp_path):
     assert second.parent == tmp_path
 
 
-def test_source_commit_falls_back_outside_git_checkout(tmp_path):
-    with patch(
-            "pypaimon.benchmark.act.runner.subprocess.check_output",
-            side_effect=FileNotFoundError):
-        assert _git_head(tmp_path) == "UNKNOWN"
+def test_runtime_environment_uses_package_identity_outside_git_checkout(
+        tmp_path):
+    with patch.object(act_runner, "_git_head", return_value="UNKNOWN"):
+        environment = act_runner._runtime_environment(tmp_path)
+
+    assert environment["source_commit"] == "UNKNOWN"
+    assert environment["pypaimon_build"] != "UNKNOWN"
+    assert environment["cpu_identity"]
+    assert environment["cpu_count"] > 0
+    assert environment["torch_threads"] > 0
+    assert environment["torch_interop_threads"] > 0
+    assert all(environment[name] for name in (
+        "numpy", "pyarrow", "h5py", "pillow"))
+
+    with (
+        patch.object(act_runner, "_git_head", return_value="UNKNOWN"),
+        patch.object(act_runner.build_info, "full_version", return_value="UNKNOWN"),
+        pytest.raises(RuntimeError, match="source identity"),
+    ):
+        act_runner._runtime_environment(tmp_path)

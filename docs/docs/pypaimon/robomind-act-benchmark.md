@@ -36,6 +36,8 @@ calculates performance ratios.
 
 ## Install
 
+Python 3.10 or newer is required.
+
 ```shell
 pip install 'pypaimon[act,hdf5]'
 ```

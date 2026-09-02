@@ -16,6 +16,19 @@
 
 """Command-line entry point for ACT benchmark preparation, runs, and reports."""
 
+# ruff: noqa: E402
+
+import sys
+
+
+def _require_supported_python(version_info):
+    """Reject runtimes older than the ACT dependencies support."""
+    if tuple(version_info[:2]) < (3, 10):
+        raise RuntimeError("ACT benchmark requires Python 3.10 or newer.")
+
+
+_require_supported_python(sys.version_info)
+
 import argparse
 import copy
 import json

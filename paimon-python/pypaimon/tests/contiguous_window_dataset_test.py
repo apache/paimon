@@ -146,6 +146,56 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             sample["payload"],
         )
 
+    def test_reads_map_blob_payloads_for_map_only_and_mixed_windows(self):
+        schema = pa.schema([
+            pa.field("episode", pa.string(), nullable=False),
+            pa.field("step", pa.int32(), nullable=False),
+            pa.field("payload", pa.large_binary()),
+            pa.field(
+                "attachments",
+                pa.map_(pa.string(), pa.large_binary()),
+            ),
+        ])
+        table = self.conn.create_table(
+            "map_blobs",
+            schema=schema,
+            options=_TABLE_OPTIONS,
+        )
+        table.add(pa.Table.from_pylist([
+            {
+                "episode": "episode-a",
+                "step": 0,
+                "payload": b"scalar-0",
+                "attachments": {
+                    "body": b"map-0", "empty": b"", "null": None},
+            },
+            {
+                "episode": "episode-a",
+                "step": 1,
+                "payload": b"scalar-1",
+                "attachments": None,
+            },
+        ], schema=schema))
+
+        def window(columns):
+            return table.scan().to_contiguous_window_dataset(
+                window_size=2,
+                columns=columns,
+                group_key="episode",
+                order_key="step",
+            )[0]
+
+        map_only = window(["attachments"])
+        mixed = window(["payload", "attachments"])
+
+        self.assertEqual(
+            {"body": b"map-0", "empty": b"", "null": None},
+            dict(map_only["attachments"][0]),
+        )
+        self.assertIsNone(map_only["attachments"][1])
+        self.assertEqual([b"scalar-0", b"scalar-1"], mixed["payload"])
+        self.assertEqual(map_only["attachments"], mixed["attachments"])
+
     def test_anchor_columns_read_only_the_window_anchor(self):
         table = self._table()
         original = ScanQuery._fetch_bodies
@@ -183,6 +233,42 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         self.assertEqual(
             [[b"episode-b-1"], [b"episode-b-0"], [b"episode-b-1"]],
             [sample["payload"] for sample in actual],
+        )
+
+    def test_plural_access_isolates_mutable_cells_between_samples(self):
+        table = self.conn.create_table(
+            "mutable_cells",
+            schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("values", pa.list_(pa.int32()), nullable=False),
+            ]),
+            options=_TABLE_OPTIONS,
+        )
+        table.add([
+            {"episode": "episode-a", "step": step, "values": [step]}
+            for step in range(3)
+        ])
+
+        def mutate(values):
+            for value in values:
+                value.append(99)
+            return values
+
+        dataset = table.scan().to_contiguous_window_dataset(
+            window_size=2,
+            columns=["values"],
+            group_key="episode",
+            order_key="step",
+            column_transforms={"values": mutate},
+        )
+
+        batched = dataset.__getitems__([0, 1, 0])
+        singles = [dataset[index] for index in (0, 1, 0)]
+
+        self.assertEqual(
+            [sample["values"] for sample in singles],
+            [sample["values"] for sample in batched],
         )
 
     def test_pad_tail_repeats_last_row_and_marks_real_padding(self):
@@ -253,6 +339,19 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             snapshot_id, table.raw_table.snapshot_manager().get_latest_snapshot().id)
         self.assertEqual(2, len(dataset))
         self.assertEqual([101, 102, 103], dataset[-1]["value"])
+
+    def test_snapshot_pin_clears_scan_mode_before_on_demand_reads(self):
+        table = self._table()
+        query = ScanQuery(table.raw_table.copy({"scan.mode": "latest-full"}))
+
+        dataset = query.to_contiguous_window_dataset(
+            window_size=3,
+            columns=["value", "payload"],
+            group_key="episode",
+            order_key="step",
+        )
+
+        self.assertEqual([100, 101, 102], dataset[0]["value"])
 
     def test_pickle_round_trip_preserves_snapshot_and_window(self):
         dataset = self._dataset(

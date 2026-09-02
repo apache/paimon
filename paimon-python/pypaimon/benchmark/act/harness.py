@@ -381,13 +381,14 @@ def run_backend(
         logical_batch_size=config.batch_size,
         fetch_batches=config.fetch_batches,
     )
-    batch_fetch_started = time.monotonic()
+    batch_fetch_seconds = 0.0
     batch_fetch_sample_count = 0
     for _ in range(config.timed_batches):
+        batch_fetch_started = time.monotonic()
         batch = next(batch_fetch_iterator)
+        batch_fetch_seconds += time.monotonic() - batch_fetch_started
         validate_act_batch(batch, config)
         batch_fetch_sample_count += len(batch["sample_id"])
-    batch_fetch_seconds = time.monotonic() - batch_fetch_started
 
     _seed_everything(config.seed)
     policy, model = policy_factory(config)

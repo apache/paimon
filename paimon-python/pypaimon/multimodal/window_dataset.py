@@ -27,7 +27,7 @@ from torch.utils.data import Dataset
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.query import ScanQuery
-from pypaimon.schema.data_types import is_blob_type
+from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
 from pypaimon.table.special_fields import SpecialFields
 
@@ -198,9 +198,9 @@ class ContiguousWindowDataset(Dataset):
         }
         for name in self.columns:
             if name in self.anchor_columns:
-                values = [anchor_row[name]]
+                values = [copy.deepcopy(anchor_row[name])]
             else:
-                values = [row[name] for row in rows]
+                values = [copy.deepcopy(row[name]) for row in rows]
             if padding_count and name not in self.anchor_columns:
                 pad_value = self.pad_values.get(name, values[-1])
                 values.extend(
@@ -320,7 +320,8 @@ class ContiguousWindowDataset(Dataset):
 
         blob_columns = [
             field.name for field in self._table.fields
-            if field.name in columns and is_blob_type(field.type)
+            if field.name in columns
+            and (is_blob_type(field.type) or is_map_blob_type(field.type))
         ]
         if blob_columns:
             scalar, blobs = query.read_blobs(
@@ -367,8 +368,15 @@ def _pin_table(table, snapshot_id):
     """Pin a table copy to ``snapshot_id``, or reuse it when unresolved."""
     if snapshot_id is None:
         return table
+    scan_keys = set(SCAN_KEYS)
+    scan_keys.update(option.key() for option in (
+        CoreOptions.SCAN_MODE,
+        CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP,
+        CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
+        CoreOptions.SCAN_CREATION_TIME_MILLIS,
+    ))
     options = {
-        key: None for key in SCAN_KEYS
+        key: None for key in scan_keys
         if table.options.options.contains_key(key)
     }
     options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot_id)

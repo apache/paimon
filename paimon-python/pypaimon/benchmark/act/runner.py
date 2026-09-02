@@ -37,9 +37,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import PIL
+import h5py
 import numpy as np
+import pyarrow as pa
 import torch
 import pypaimon.multimodal as pmm
+from pypaimon import build_info
 from pypaimon.benchmark.act.hdf5 import (
     compute_normalization as compute_hdf5_normalization,
     create_datasets as create_hdf5_datasets,
@@ -264,13 +268,8 @@ def run_experiment(
         "model": runs[0]["model"],
         "runs": runs,
         "summary": _summarize(runs),
-        "environment": {
-            "python": platform.python_version(),
-            "os": platform.platform(),
-            "machine": platform.machine(),
-            "torch": torch.__version__,
-            "source_commit": _git_head(Path(__file__).resolve().parents[4]),
-        },
+        "environment": _runtime_environment(
+            Path(__file__).resolve().parents[4]),
         "command": _command_argv(),
         "timing": {"wall_time_s": time.monotonic() - started},
         "unverified": [
@@ -678,6 +677,55 @@ def _git_head(repository):
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "UNKNOWN"
+
+
+def _runtime_environment(repository):
+    """Return dependency, CPU, thread, and source identity for comparison."""
+    source_commit = _git_head(repository)
+    package_build = build_info.full_version()
+    if source_commit == "UNKNOWN" and package_build == "UNKNOWN":
+        raise RuntimeError(
+            "ACT benchmark cannot determine its source identity.")
+    return {
+        "python": platform.python_version(),
+        "os": platform.platform(),
+        "machine": platform.machine(),
+        "cpu_identity": _cpu_identity(),
+        "cpu_count": os.cpu_count() or 1,
+        "torch_threads": torch.get_num_threads(),
+        "torch_interop_threads": torch.get_num_interop_threads(),
+        "pypaimon_build": package_build,
+        "numpy": np.__version__,
+        "pyarrow": pa.__version__,
+        "h5py": h5py.__version__,
+        "pillow": PIL.__version__,
+        "torch": torch.__version__,
+        "source_commit": source_commit,
+    }
+
+
+def _cpu_identity():
+    """Return the most specific CPU model available from the local OS."""
+    if platform.system() == "Darwin":
+        try:
+            return subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                stderr=subprocess.DEVNULL,
+                universal_newlines=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    identity = platform.processor().strip()
+    if identity:
+        return identity
+    if platform.system() == "Linux":
+        try:
+            for line in Path("/proc/cpuinfo").read_text().splitlines():
+                if line.startswith(("model name", "Hardware")):
+                    return line.partition(":")[2].strip()
+        except OSError:
+            pass
+    return platform.machine()
 
 
 def _command_argv():
