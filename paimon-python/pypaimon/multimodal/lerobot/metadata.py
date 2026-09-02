@@ -88,25 +88,23 @@ def _load_dataset_metadata(dataset, info, source):
     episode_source = (
         _source_episodes(dataset, source)
         if total_episodes > 0
-        else {"tables": [], "rows": [], "schema": _EMPTY_EPISODES_SCHEMA}
-    )
-    episodes = _episode_rows(
-        episode_source["rows"],
-        task_indices,
-        info,
-        int(info["total_frames"]),
-        total_episodes,
+        else {"paths": [], "schema": _EMPTY_EPISODES_SCHEMA}
     )
     return {
         "fps": fps,
         "info_json": _canonical_json(info),
         "stats_json": (
-            None if stats is None else _canonical_json(stats)),
-        "episodes": episodes,
+            None if stats is None else _canonical_json(
+                stats, allow_nan=True)),
+        "episodes": None,
         "episodes_schema": episode_source["schema"],
-        "episode_tables": episode_source["tables"],
+        "episode_paths": episode_source["paths"],
         "tasks_table": tasks_table,
         "subtasks_table": subtasks_table,
+        "source": source,
+        "task_indices": task_indices,
+        "total_frames": int(info["total_frames"]),
+        "total_episodes": total_episodes,
         "subtask_indices": subtask_indices,
     }
 
@@ -243,12 +241,9 @@ def _publish_dataset(
         version_id,
         metadata,
         frames_identifier,
-        frames_snapshot_id):
+        frames_snapshot_id,
+        episodes_snapshot_id):
     _require_initial_snapshot("frames", frames_snapshot_id)
-    episodes_snapshot_id = _append_arrow_tables(
-        tables["episodes"],
-        metadata["episode_tables"],
-    )
     _require_initial_snapshot("episodes", episodes_snapshot_id)
     tasks_snapshot_id = _append_arrow(
         tables["tasks"], metadata["tasks_table"])
@@ -314,8 +309,11 @@ def _append_arrow(table, data):
     return _append_arrow_tables(table, [data])
 
 
-def _append_arrow_tables(table, tables):
-    builder = table.new_batch_write_builder()
+def _append_arrow_tables(table, tables, flush_each=False):
+    builder = (
+        table.new_stream_write_builder()
+        if flush_each else table.new_batch_write_builder()
+    )
     table_write = None
     table_commit = None
     commit_started = False
@@ -325,6 +323,7 @@ def _append_arrow_tables(table, tables):
         table_commit = builder.new_commit()
         table_commit.add_commit_callback(recorder)
         row_count = 0
+        messages = []
         target_schema = _target_schema(table)
         for data in tables:
             if data.num_rows == 0:
@@ -335,12 +334,19 @@ def _append_arrow_tables(table, tables):
                     % (data.schema, target_schema))
             table_write.write_arrow(data)
             row_count += data.num_rows
+            if flush_each:
+                messages = table_write.prepare_commit(0)
+            del data
         if row_count == 0:
             table_write.abort()
             return None
-        messages = table_write.prepare_commit()
+        if not flush_each:
+            messages = table_write.prepare_commit()
         commit_started = True
-        table_commit.commit(messages)
+        if flush_each:
+            table_commit.commit(messages, 0)
+        else:
+            table_commit.commit(messages)
         if recorder.snapshot_id is None:
             raise RuntimeError("LeRobot metadata commit has no snapshot id.")
         return recorder.snapshot_id
@@ -431,46 +437,69 @@ def _source_subtasks(dataset, source):
 def _source_episodes(dataset, source):
     if source.file_io is not None:
         from pypaimon.multimodal.lerobot.source import (
-            _read_remote_parquet,
+            _read_remote_parquet_schema,
             _remote_parquet_files,
             _remote_path,
         )
         directory = _remote_path(source.path, "meta/episodes")
         paths = _remote_parquet_files(source.file_io, directory)
 
-        def read(path, columns=None):
-            return _read_remote_parquet(
-                source.file_io, path, columns=columns)
+        def read_schema(path):
+            return _read_remote_parquet_schema(source.file_io, path)
 
     else:
         directory = _metadata_root(dataset, source) / "meta" / "episodes"
         paths = sorted(directory.rglob("*.parquet"))
-
-        def read(path, columns=None):
-            return pq.read_table(path, columns=columns)
+        read_schema = pq.read_schema
 
     if not paths:
         return {
-            "tables": [],
-            "rows": [],
+            "paths": [],
             "schema": _EMPTY_EPISODES_SCHEMA,
         }
     try:
-        tables = [read(path) for path in paths]
-        schema = tables[0].schema
-        if any(not table.schema.equals(schema, check_metadata=False)
-               for table in tables[1:]):
+        schemas = [read_schema(path) for path in paths]
+        schema = schemas[0]
+        if any(not item.equals(schema, check_metadata=False)
+               for item in schemas[1:]):
             raise ValueError("Episode Parquet schemas are inconsistent.")
     except (OSError, ValueError, pa.ArrowException) as error:
         raise ValueError(
             "Cannot read LeRobot Episode metadata %s: %s"
             % (directory, error)) from error
+    return {"paths": paths, "schema": schema}
+
+
+def _validated_episode_tables(metadata):
     rows = []
-    for table in tables:
+    for table in _source_episode_tables(metadata):
         rows.extend(table.select(_EPISODE_CONTROL_COLUMNS).to_pylist())
+        yield table
+        del table
     rows.sort(key=lambda row: _integer(
         row.get("episode_index"), "episode_index"))
-    return {"tables": tables, "rows": rows, "schema": schema}
+    metadata["episodes"] = _episode_rows(
+        rows,
+        metadata["task_indices"],
+        metadata["total_frames"],
+        metadata["total_episodes"],
+    )
+
+
+def _source_episode_tables(metadata):
+    source = metadata["source"]
+    if source.file_io is not None:
+        from pypaimon.multimodal.lerobot.source import _read_remote_parquet
+        for path in metadata["episode_paths"]:
+            yield _read_remote_parquet(source.file_io, path)
+    else:
+        for path in metadata["episode_paths"]:
+            try:
+                yield pq.read_table(path)
+            except (OSError, ValueError, pa.ArrowException) as error:
+                raise ValueError(
+                    "Cannot read LeRobot Episode metadata %s: %s"
+                    % (path, error)) from error
 
 
 def _metadata_root(dataset, source):
@@ -519,16 +548,21 @@ def _subtask_indices(subtasks_table, info):
     if "subtask_index" not in subtasks_table.column_names:
         raise ValueError(
             "LeRobot subtask metadata is missing subtask_index.")
-    for expected, value in enumerate(
-            subtasks_table.column("subtask_index").to_pylist()):
-        if _integer(value, "subtask_index") != expected:
+    records = subtasks_table.to_pylist()
+    for expected, record in enumerate(records):
+        label = record.get("subtask", record.get("name"))
+        if label is None:
+            label = record.get("__index_level_0__")
+        if _integer(record.get("subtask_index"), "subtask_index") \
+                != expected or not isinstance(label, str) or not label:
             raise ValueError(
-                "LeRobot subtask metadata must cover [0, %d) in order."
+                "LeRobot subtask metadata must provide ordered numeric and "
+                "text mappings for [0, %d)."
                 % subtasks_table.num_rows)
     return range(subtasks_table.num_rows)
 
 
-def _episode_rows(records, task_indices, info, total_frames, total_episodes):
+def _episode_rows(records, task_indices, total_frames, total_episodes):
     if len(records) != total_episodes:
         raise ValueError(
             "LeRobot metadata reports %d Episodes but %d were found."
@@ -577,13 +611,13 @@ def _episode_rows(records, task_indices, info, total_frames, total_episodes):
     return rows
 
 
-def _canonical_json(value):
+def _canonical_json(value, allow_nan=False):
     return json.dumps(
         _json_value(value),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-        allow_nan=False,
+        allow_nan=allow_nan,
     )
 
 

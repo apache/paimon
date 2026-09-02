@@ -23,7 +23,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import call, Mock, patch
 
 import numpy as np
 import pyarrow as pa
@@ -42,6 +42,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _load_dataset_metadata,
     _managed_table_options,
     _subtask_indices,
+    _validated_episode_tables,
     _OWNER_ID_OPTION,
 )
 from pypaimon.multimodal.lerobot.loader import (
@@ -249,6 +250,29 @@ class LeRobotValidationTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "commit init failed"):
             _append_arrow_tables(table, [])
 
+        writer.abort.assert_called_once_with()
+        writer.close.assert_called_once_with()
+
+    def test_episode_shards_are_flushed_incrementally(self):
+        data = pa.table({"episode_index": [0]})
+        table = Mock()
+        builder = table.new_stream_write_builder.return_value
+        writer = builder.new_write.return_value
+        writer.prepare_commit.return_value = [Mock()]
+
+        def shards():
+            yield data
+            yield data
+            raise RuntimeError("stop after two shards")
+
+        with patch(
+                "pypaimon.multimodal.lerobot.metadata._target_schema",
+                return_value=data.schema):
+            with self.assertRaisesRegex(RuntimeError, "two shards"):
+                _append_arrow_tables(table, shards(), flush_each=True)
+
+        self.assertEqual([call(0), call(0)],
+                         writer.prepare_commit.call_args_list)
         writer.abort.assert_called_once_with()
         writer.close.assert_called_once_with()
 
@@ -551,10 +575,14 @@ class LeRobotValidationTest(unittest.TestCase):
         info = {"features": {"subtask_index": {}}}
         with self.assertRaisesRegex(ValueError, "subtasks.parquet is missing"):
             _subtask_indices(None, info)
-        with self.assertRaisesRegex(ValueError, "must cover"):
+        with self.assertRaisesRegex(ValueError, "numeric and text mappings"):
             _subtask_indices(pa.table({
                 "subtask_index": [1, 0],
                 "subtask": ["reach", "grasp"],
+            }), info)
+        with self.assertRaisesRegex(ValueError, "numeric and text mappings"):
+            _subtask_indices(pa.table({
+                "subtask_index": [0],
             }), info)
 
     def test_native_metadata_does_not_require_json_values(self):
@@ -590,6 +618,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 episode_table,
                 source / "meta" / "episodes" / "part.parquet",
             )
+            (source / "meta" / "stats.json").write_text(json.dumps({
+                "mean": float("nan"),
+                "max": float("inf"),
+            }))
             metadata = _load_dataset_metadata(
                 None,
                 info,
@@ -600,7 +632,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 ),
             )
 
-            stored_episode = metadata["episode_tables"][0]
+            self.assertIsNone(metadata["episodes"])
+            self.assertEqual(1, len(metadata["episode_paths"]))
+            stored_episode = list(_validated_episode_tables(metadata))[0]
+            self.assertEqual(1, len(metadata["episodes"]))
             self.assertEqual(
                 b"\xff",
                 stored_episode.column("native_bytes")[0].as_py(),
@@ -611,6 +646,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 b"\xff",
                 metadata["tasks_table"].column("native_bytes")[0].as_py(),
             )
+            stored_stats = json.loads(metadata["stats_json"])
+            self.assertTrue(np.isnan(stored_stats["mean"]))
+            self.assertTrue(np.isinf(stored_stats["max"]))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

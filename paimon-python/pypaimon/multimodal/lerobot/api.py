@@ -27,13 +27,16 @@ from pypaimon.catalog.catalog_exception import (
 )
 from pypaimon.multimodal.lerobot.metadata import (
     _OWNER_ID_OPTION,
+    _append_arrow_tables,
     _drop_import_tables,
     _load_dataset_metadata,
     _managed_table_options,
     _new_owner_id,
     _prepare_metadata_tables,
+    _positive_integer,
     _publish_dataset,
     _reserve_dataset_version,
+    _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.loader import _write_dataset
 from pypaimon.multimodal.lerobot.schema import (
@@ -88,25 +91,8 @@ def load_from_lerobot(
         _require_v3(local_info, resolved_source.path)
         _validate_info_paths(local_info)
         _schema_from_info(local_info)
-        total_frames, _, _ = \
-            _validated_counts(local_info, resolved_source.path)
-        if total_frames == 0 and (
-                resolved_source.root is not None
-                or resolved_source.file_io is not None):
-            source_schema = _schema_from_info(local_info)
-            metadata = _load_dataset_metadata(
-                None, local_info, resolved_source)
-            return _import_dataset(
-                connection,
-                table_name,
-                None,
-                local_info,
-                resolved_source,
-                source_schema,
-                batch_size,
-                options,
-                metadata,
-            )
+        _positive_integer(local_info.get("fps"), "fps")
+        _validated_counts(local_info, resolved_source.path)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -156,6 +142,11 @@ def _import_dataset(
             version_id,
             metadata,
         )
+        episodes_snapshot_id = _append_arrow_tables(
+            tables["episodes"],
+            _validated_episode_tables(metadata),
+            flush_each=True,
+        )
         frames_snapshot_id = None
         if int(info["total_frames"]) > 0:
             frames_snapshot_id = _write_dataset(
@@ -174,6 +165,7 @@ def _import_dataset(
             metadata,
             table.identifier,
             frames_snapshot_id,
+            episodes_snapshot_id,
         )
         return version_id
     except BaseException as error:
@@ -197,6 +189,9 @@ def _validated_counts(info, source):
             "LeRobot metadata %s has inconsistent counts: total_frames=%d "
             "and total_episodes=%d must both be zero or both be positive."
             % (source, total_frames, total_episodes))
+    if total_frames == 0:
+        raise ValueError(
+            "load_from_lerobot requires a non-empty LeRobot Dataset v3.")
     return total_frames, total_episodes, total_tasks
 
 

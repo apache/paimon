@@ -51,9 +51,10 @@ version_id = connection.load_from_lerobot(
 print(version_id)
 ```
 
-The schema comes from `meta/info.json`. Each frame becomes one row; media uses
-BLOB columns. The import creates frame, Episode, task, and version tables and
-tags the three component tables with the returned `version_id`.
+The source dataset must be non-empty. Its schema comes from `meta/info.json`.
+Each frame becomes one row; media uses BLOB columns. The import creates frame,
+Episode, task, and version tables and tags the three component tables with the
+returned `version_id`.
 
 # HDF5 to multimodal tables
 
