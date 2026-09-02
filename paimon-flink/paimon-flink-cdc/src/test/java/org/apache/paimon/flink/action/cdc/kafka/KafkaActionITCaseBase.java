@@ -249,6 +249,19 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                 .forEach(r -> send(topic, r, wait));
     }
 
+    protected void writeRecordsToKafka(
+            String topic, int partition, String resourceDirFormat, Object... args)
+            throws Exception {
+        URL url =
+                KafkaActionITCaseBase.class
+                        .getClassLoader()
+                        .getResource(String.format(resourceDirFormat, args));
+        assert url != null;
+        Files.readAllLines(Paths.get(url.toURI())).stream()
+                .filter(this::isRecordLine)
+                .forEach(r -> send(topic, partition, r));
+    }
+
     protected boolean isRecordLine(String line) {
         try {
             objectMapper.readTree(line);
@@ -266,6 +279,14 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             } catch (InterruptedException | ExecutionException e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    private void send(String topic, int partition, String record) {
+        try {
+            kafkaProducer.send(new ProducerRecord<>(topic, partition, null, record)).get();
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
         }
     }
 
