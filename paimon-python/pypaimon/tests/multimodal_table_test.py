@@ -810,6 +810,69 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_scan_to_arrow_batch_reader(self):
+        users = self.conn.create_table(
+            "batch_users",
+            data=[
+                {"id": 1, "age": 20},
+                {"id": 2, "age": 30},
+                {"id": 3, "age": 40},
+            ],
+            schema=_schema({"id": pa.int32(), "age": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        reader = (
+            users.scan()
+            .where("age >= 30")
+            .select("id")
+            .to_arrow_batch_reader()
+        )
+
+        self.assertEqual([{"id": 2}, {"id": 3}], reader.read_all().to_pylist())
+
+        closed = []
+
+        def batches(*args):
+            try:
+                yield pa.record_batch(
+                    [pa.array([1], type=pa.int32())], names=["id"])
+                yield pa.record_batch(
+                    [pa.array([2], type=pa.int32())], names=["id"])
+            finally:
+                closed.append(True)
+
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches), patch(
+                    "pypaimon.read.table_read."
+                    "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        closed.clear()
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        read_builder = users.raw_table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        with patch(
+                "pypaimon.read.table_read."
+                "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = read_builder.new_read().to_arrow_batch_reader(splits)
+        self.assertIsInstance(reader, pa.RecordBatchReader)
+        reader.close()
+
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            users.search("thirty", column="id").to_arrow_batch_reader()
+
     def test_scan_with_row_id_returns_system_column(self):
         users = self.conn.create_table(
             "users",

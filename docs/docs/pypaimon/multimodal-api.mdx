@@ -802,6 +802,15 @@ result = (
 )
 ```
 
+Use `to_arrow_batch_reader()` to consume an ordinary scan without collecting
+all rows into one Arrow table:
+
+```python
+with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
+    for batch in reader:
+        consume(batch)
+```
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
