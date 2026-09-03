@@ -912,12 +912,31 @@ ds = (
 result_ds = docs.map_with_blobs(ds, blob_cols, process_batch)
 ```
 
+For small inference batches over scattered descriptors, enable URI affinity to
+place adjacent ranges from the same Blob file together. Blob reads are then
+coalesced across several inference batches without exposing the prefetched
+bytes to Ray's object store:
+
+```python
+result_ds = docs.map_with_blobs(
+    ds,
+    blob_cols,
+    process_batch,
+    batch_size=32,
+    blob_uri_affinity=True,
+)
+```
+
 Notes:
 
 - `process_batch` must return a small Ray-compatible batch; return an empty
   `pyarrow.Table` for side-effect-only jobs.
 - Avoid returning raw BLOB bytes, which would materialize payloads in Ray's
   object store.
+- URI affinity performs a distributed sort and may reorder rows. Enable it when
+  reduced object-store request QPS outweighs the shuffle cost. `prefetch_bytes`
+  bounds each worker's payload window (64 MiB by default, except for one
+  oversized inference batch).
 - Tune `to_ray(...)` and `map_with_blobs(...)` parameters only when needed.
 
 ## Row IDs
