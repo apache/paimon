@@ -216,6 +216,43 @@ class ParquetFiltersTest {
     }
 
     @Test
+    public void testStartsWithIsPushedToParquet() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        Collections.singletonList(builder.startsWith(0, "abc")), schema, true);
+        assertThat(filter).isInstanceOf(FilterPredicateCompat.class);
+        FilterPredicate parquetPredicate =
+                ((FilterPredicateCompat) filter).getFilterPredicate();
+        assertThat(parquetPredicate)
+                .isEqualTo(
+                        FilterApi.and(
+                                FilterApi.gtEq(
+                                        FilterApi.binaryColumn("string1"), Binary.fromString("abc")),
+                                FilterApi.lt(
+                                        FilterApi.binaryColumn("string1"), Binary.fromString("abd"))));
+    }
+
+    @Test
+    public void testEndsWithIsNotPushedToParquet() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "string1", new VarCharType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        FilterCompat.Filter filter =
+                ParquetFilters.convert(
+                        Collections.singletonList(builder.endsWith(0, "abc")), schema, true);
+        assertThat(filter).isEqualTo(FilterCompat.NOOP);
+    }
+
+    @Test
     public void testInFilterLong() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "col1", new BigIntType())));
