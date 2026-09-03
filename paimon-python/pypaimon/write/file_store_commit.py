@@ -494,6 +494,13 @@ class FileStoreCommit:
         start_time_ms = int(time.time() * 1000)
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            if retry_result is not None and self._is_duplicate_commit(
+                    retry_result,
+                    latest_snapshot,
+                    commit_identifier,
+                    commit_kind,
+                    notify_callbacks=True):
+                break
             commit_entries = (
                 rewritten_commit_entries
                 if rewritten_commit_entries is not None

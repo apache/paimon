@@ -114,7 +114,7 @@ def _load_dataset_metadata(dataset, info, source):
     tasks_table = _source_tasks(
         dataset, source, int(info["total_tasks"]))
     task_indices = _task_indices(
-        tasks_table.to_pylist(), int(info["total_tasks"]))
+        tasks_table, int(info["total_tasks"]))
     subtasks_table = _source_subtasks(dataset, source)
     subtask_indices = _subtask_indices(subtasks_table, info)
     total_episodes = int(info["total_episodes"])
@@ -363,11 +363,35 @@ def _append_arrow_tables(table, tables):
 
 def _create_tag(catalog, identifier, tag_name, snapshot_id):
     try:
-        catalog.create_tag(
-            identifier, tag_name, snapshot_id=snapshot_id)
+        try:
+            catalog.create_tag(
+                identifier, tag_name, snapshot_id=snapshot_id)
+        except NotImplementedError:
+            catalog.get_table(identifier).create_tag(
+                tag_name, snapshot_id=snapshot_id)
+    except Exception as error:
+        try:
+            actual_snapshot_id = _tag_snapshot_id(
+                catalog, identifier, tag_name)
+        except Exception:
+            raise error
+        if actual_snapshot_id == snapshot_id:
+            return
+        if actual_snapshot_id is not None:
+            raise RuntimeError(
+                "LeRobot tag %s on %s points to snapshot %s; expected %s."
+                % (tag_name, identifier, actual_snapshot_id, snapshot_id)
+            ) from error
+        raise error
+
+
+def _tag_snapshot_id(catalog, identifier, tag_name):
+    try:
+        response = catalog.get_tag(identifier, tag_name)
+        snapshot = response.snapshot
     except NotImplementedError:
-        catalog.get_table(identifier).create_tag(
-            tag_name, snapshot_id=snapshot_id)
+        snapshot = catalog.get_table(identifier).tag_manager().get(tag_name)
+    return None if snapshot is None else snapshot.id
 
 
 def _source_stats(dataset, source):
@@ -555,18 +579,23 @@ def _metadata_root(dataset, source):
     return Path(root)
 
 
-def _task_indices(records, total_tasks):
+def _task_indices(tasks_table, total_tasks):
+    if total_tasks == 0:
+        return {}
+    from pypaimon.multimodal.lerobot.source import _pandas_index_column
+    label_column = _pandas_index_column(tasks_table.schema, "task")
+    records = tasks_table.select([
+        "task_index", label_column
+    ]).to_pylist()
     seen = [False] * total_tasks
     by_name = {}
     for record in records:
         index = _integer(record.get("task_index"), "task_index")
-        task = record.get("task", record.get("name"))
-        if task is None:
-            task = record.get("__index_level_0__")
-        if index < 0 or index >= total_tasks or task is None \
+        task = record[label_column]
+        if index < 0 or index >= total_tasks \
+                or not isinstance(task, str) or not task \
                 or seen[index]:
             raise ValueError("LeRobot task metadata is invalid: %s" % record)
-        task = str(task)
         if task in by_name:
             raise ValueError("LeRobot task metadata repeats task %r." % task)
         by_name[task] = index
@@ -591,11 +620,13 @@ def _subtask_indices(subtasks_table, info):
     if "subtask_index" not in subtasks_table.column_names:
         raise ValueError(
             "LeRobot subtask metadata is missing subtask_index.")
-    records = subtasks_table.to_pylist()
+    from pypaimon.multimodal.lerobot.source import _pandas_index_column
+    label_column = _pandas_index_column(subtasks_table.schema, "subtask")
+    records = subtasks_table.select([
+        "subtask_index", label_column
+    ]).to_pylist()
     for expected, record in enumerate(records):
-        label = record.get("subtask", record.get("name"))
-        if label is None:
-            label = record.get("__index_level_0__")
+        label = record[label_column]
         if _integer(record.get("subtask_index"), "subtask_index") \
                 != expected or not isinstance(label, str) or not label:
             raise ValueError(

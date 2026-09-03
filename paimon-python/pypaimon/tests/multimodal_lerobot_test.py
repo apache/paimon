@@ -570,6 +570,8 @@ class LeRobotValidationTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_optional_subtasks_keep_their_native_schema(self):
+        import pandas as pd
+
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_subtasks_"))
         try:
             source = temp_dir / "source"
@@ -585,10 +587,10 @@ class LeRobotValidationTest(unittest.TestCase):
                     "subtask_index": {"dtype": "int64", "shape": [1]},
                 },
             }))
-            pq.write_table(pa.table({
-                "subtask_index": [0],
-                "subtask": ["reach"],
-            }), source / "meta" / "subtasks.parquet")
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {"subtask_index": [0]},
+                index=pd.Index(["reach"], name="instruction"),
+            )), source / "meta" / "subtasks.parquet")
             source_info = json.loads(
                 (source / "meta" / "info.json").read_text())
             metadata = _load_dataset_metadata(
@@ -608,20 +610,25 @@ class LeRobotValidationTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_subtask_metadata_must_match_frame_feature(self):
+        import pandas as pd
+
         info = {"features": {"subtask_index": {}}}
         with self.assertRaisesRegex(ValueError, "subtasks.parquet is missing"):
             _subtask_indices(None, info)
+        reordered = pa.Table.from_pandas(pd.DataFrame(
+            {"subtask_index": [1, 0]},
+            index=pd.Index(["reach", "grasp"], name="instruction"),
+        ))
         with self.assertRaisesRegex(ValueError, "numeric and text mappings"):
-            _subtask_indices(pa.table({
-                "subtask_index": [1, 0],
-                "subtask": ["reach", "grasp"],
-            }), info)
-        with self.assertRaisesRegex(ValueError, "numeric and text mappings"):
+            _subtask_indices(reordered, info)
+        with self.assertRaisesRegex(ValueError, "Pandas index"):
             _subtask_indices(pa.table({
                 "subtask_index": [0],
             }), info)
 
     def test_native_metadata_does_not_require_json_values(self):
+        import pandas as pd
+
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_native_"))
         try:
             source = temp_dir / "source"
@@ -636,11 +643,13 @@ class LeRobotValidationTest(unittest.TestCase):
                     "index": {"dtype": "int64", "shape": [1]},
                 },
             }
-            pq.write_table(pa.table({
-                "task_index": [0],
-                "task": ["pick"],
-                "native_bytes": [b"\xff"],
-            }), source / "meta" / "tasks.parquet")
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {
+                    "task_index": [0],
+                    "native_bytes": [b"\xff"],
+                },
+                index=pd.Index(["pick"], name="instruction"),
+            )), source / "meta" / "tasks.parquet")
             episode_table = pa.table({
                 "episode_index": [0],
                 "dataset_from_index": [0],
@@ -1153,7 +1162,7 @@ class LeRobotImportTest(unittest.TestCase):
             ), path)
         subtasks = pa.Table.from_pandas(pd.DataFrame(
             {"subtask_index": [0, 1]},
-            index=pd.Index(["reach", "grasp"], name="subtask"),
+            index=pd.Index(["reach", "grasp"], name="instruction"),
         ))
         pq.write_table(subtasks, source / "meta" / "subtasks.parquet")
 
@@ -1387,6 +1396,28 @@ class LeRobotImportTest(unittest.TestCase):
             if "/data/" in path and path.endswith(".parquet")
         ]))
 
+    def test_remote_tasks_use_the_pandas_index_column(self):
+        local_source = self.temp_dir / "custom_task_index"
+        shutil.copytree(self.image_source, local_source)
+        path = local_source / "meta" / "tasks.parquet"
+        tasks = pq.read_table(path).to_pandas().rename_axis("instruction")
+        pq.write_table(pa.Table.from_pandas(tasks), path)
+        source = "oss://source-bucket/custom-task-index"
+        source_file_io = _RemoteLeRobotFileIO(local_source, source)
+
+        with patch(
+                "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                return_value=source_file_io):
+            self.connection.load_from_lerobot(
+                "custom_task_index", source)
+
+        rows = _catalog_rows(
+            self.connection, "custom_task_index__tasks")
+        self.assertEqual(
+            [(0, "pick"), (1, "place")],
+            [(row["task_index"], row["instruction"]) for row in rows],
+        )
+
     def test_empty_oss_source_does_not_require_episode_directory(self):
         local_source = self.temp_dir / "empty_remote"
         (local_source / "meta").mkdir(parents=True)
@@ -1425,6 +1456,32 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
             table.raw_table.tag_manager().get(tag).id,
+        )
+
+    def test_tag_response_loss_is_reconciled(self):
+        create_tag = self.connection.catalog.create_tag
+        lost = [False]
+
+        def create_then_lose_response(*args, **kwargs):
+            result = create_tag(*args, **kwargs)
+            if not lost[0]:
+                lost[0] = True
+                raise TimeoutError("lost tag response")
+            return result
+
+        with patch.object(
+                self.connection.catalog,
+                "create_tag",
+                side_effect=create_then_lose_response):
+            version_id = self.connection.load_from_lerobot(
+                "tag_response_loss", self.image_source)
+
+        self.assertTrue(lost[0])
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            ["PENDING", "READY"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "tag_response_loss__versions")],
         )
 
     def test_failed_publication_remains_pending(self):
