@@ -25,6 +25,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.BlobType
+import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
@@ -45,15 +46,36 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     paimonTable.copy(writeOptions.asJava)
   }
 
+  private val dataEvolutionNestedFieldEnabled =
+    table.coreOptions().dataEvolutionNestedFieldEnabled()
+
+  // Whole top-level column write (kept for callers that only update full columns).
   def writePartialFields(
       data: DataFrame,
       columnNames: Seq[String],
       rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
+    writePartialFields(
+      data,
+      if (dataEvolutionNestedFieldEnabled) {
+        table.rowType().projectByPaths(columnNames.asJava)
+      } else {
+        table.rowType().project(columnNames.asJava)
+      },
+      rawBlobPlaceholderMarkerColumns
+    )
+  }
+
+  // Sub-field-aware write: writeType is already pruned to the written top-level columns and
+  // (possibly) nested sub-fields via dotted paths.
+  def writePartialFields(
+      data: DataFrame,
+      writeType: RowType,
+      rawBlobPlaceholderMarkerColumns: Map[String, String]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
-    assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
-    val writeType = table.rowType().project(columnNames.asJava)
+    assert(
+      data.columns.length == writeType.getFieldCount + 2 + rawBlobPlaceholderMarkerColumns.size)
 
     val options = new CoreOptions(table.schema().options())
     val blobInlineFields = options.blobInlineField().asScala.toSeq

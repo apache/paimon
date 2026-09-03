@@ -291,8 +291,11 @@ class FileStoreCommit:
                 if msg.check_from_snapshot == -1:
                     continue
                 for f in msg.new_files:
-                    if f.write_cols:
-                        updated_cols.update(f.write_cols)
+                    write_cols = self.table.table_schema.partial_file_write_cols(
+                        f.write_cols
+                    )
+                    if write_cols:
+                        updated_cols.update(write_cols)
                         written_partitions.add(msg.partition)
             if updated_cols:
                 snapshot = self.snapshot_manager.get_latest_snapshot()

@@ -34,6 +34,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -337,7 +338,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -404,7 +405,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v1", DataTypes.BIGINT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -534,7 +535,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        schemaManager = new SchemaManager(table1.fileIO(), table1.location());
+        schemaManager = new FileSystemSchemaManager(table1.fileIO(), table1.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -553,7 +554,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        schemaManager = new SchemaManager(table2.fileIO(), table2.location());
+        schemaManager = new FileSystemSchemaManager(table2.fileIO(), table2.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v1", DataTypes.BIGINT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -574,7 +575,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        schemaManager = new SchemaManager(table2.fileIO(), table2.location());
+        schemaManager = new FileSystemSchemaManager(table2.fileIO(), table2.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v2", DataTypes.DOUBLE()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -594,7 +595,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        schemaManager = new SchemaManager(table2.fileIO(), table2.location());
+        schemaManager = new FileSystemSchemaManager(table2.fileIO(), table2.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v3", DataTypes.VARCHAR(10)));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);

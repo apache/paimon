@@ -21,10 +21,11 @@ package org.apache.paimon.spark.format
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.format.csv.CsvOptions
 import org.apache.paimon.fs.Path
+import org.apache.paimon.partition.Partition
 import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder}
 import org.apache.paimon.spark.write.{BaseV2WriteBuilder, PaimonWriteRequirement}
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.format.FormatTablePartitionManager
+import org.apache.paimon.table.format.{FormatTablePartitionManager, FormatTablePartitionPathResolver, FormatTablePartitionRegistryValidator}
 import org.apache.paimon.table.sink.BatchTableCommit
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{PartitionPathUtils, StringUtils}
@@ -47,7 +48,8 @@ import java.util
 import java.util.{Collections, Locale, Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.{ArrayBuffer, HashSet}
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 case class PaimonFormatTable(table: FormatTable)
   extends BaseTable
@@ -59,6 +61,8 @@ case class PaimonFormatTable(table: FormatTable)
   // manager; tables using filesystem partition discovery return null and rely on the directory
   // layout instead.
   private[spark] def partitionManager: FormatTablePartitionManager = table.partitionManager()
+
+  private val partitionPathOption = CoreOptions.PATH.key()
 
   /**
    * A Format Table uses catalog-managed partitions exactly when the catalog gave it a partition
@@ -204,8 +208,22 @@ case class PaimonFormatTable(table: FormatTable)
     val requested =
       rows.zip(partitionNames).map { case (row, names) => toPaimonPartition(row, names.toSeq) }
     val registered = requirePartitionManager().listPartitionsByNames(requested.toSeq.asJava)
-    val registeredSpecs = registered.asScala.map(_.spec().asScala.toMap).toSet
-    requested.map(spec => registeredSpecs.contains(spec.asScala.toMap))
+    val pathsBySpec = mutable.LinkedHashMap.empty[Map[String, String], String]
+    registered.asScala.foreach {
+      partition =>
+        val spec = validateCatalogRegisteredPartition(partition.spec()).asScala.toMap
+        val path = customPartitionPath(partition)
+        pathsBySpec.get(spec).foreach {
+          previousPath =>
+            if (!Objects.equals(previousPath, path)) {
+              throw new IllegalStateException(
+                s"Catalog returned conflicting locations for partition $spec of Format Table " +
+                  s"${table.fullName()}.")
+            }
+        }
+        pathsBySpec.put(spec, path)
+    }
+    requested.map(spec => pathsBySpec.contains(spec.asScala.toMap))
   }
 
   /**
@@ -241,19 +259,67 @@ case class PaimonFormatTable(table: FormatTable)
       rows: Array[InternalRow],
       maps: Array[JMap[String, String]],
       ignoreIfExists: Boolean): Unit = {
-    if (maps.exists(_.keySet().asScala.exists(_.equalsIgnoreCase("location")))) {
-      throw new UnsupportedOperationException(
-        s"ADD PARTITION with LOCATION is not supported for Format Table ${table.fullName()}.")
-    }
+    require(
+      rows.length == maps.length,
+      s"Expected one option map per partition, but found ${rows.length} partitions and " +
+        s"${maps.length} option maps.")
     val onlyValueInPath =
       CoreOptions.fromMap(table.options()).formatTablePartitionOnlyValueInPath()
     val partitionKeys = table.partitionKeys().asScala.toSeq
     rows.foreach(row => requireNameablePartitionValues("ADD PARTITION", row, partitionKeys))
-    val specs = rows.map(row => toPaimonPartition(row, partitionKeys.take(row.numFields))).toSeq
-    // Resolve (and path-safety validate) every directory before mutating anything.
+    val partitions = rows
+      .zip(maps)
+      .map {
+        case (row, properties) =>
+          val spec = toPaimonPartition(row, partitionKeys.take(row.numFields))
+          require(properties != null, s"Partition options must not be null for $spec.")
+          require(
+            properties
+              .entrySet()
+              .asScala
+              .forall(entry => entry.getKey != null && entry.getValue != null),
+            s"Partition options must not contain null keys or values for $spec."
+          )
+          val options = new util.LinkedHashMap[String, String](properties)
+          val locationKeys =
+            options.keySet().asScala.filter(TableCatalog.PROP_LOCATION.equalsIgnoreCase).toSeq
+          require(
+            locationKeys.size <= 1,
+            s"Partition options contain multiple location keys for $spec: " +
+              locationKeys.mkString("[", ", ", "]"))
+          require(
+            locationKeys.isEmpty || !options.containsKey(partitionPathOption),
+            s"Partition options must not contain both ${TableCatalog.PROP_LOCATION} and " +
+              s"$partitionPathOption for $spec."
+          )
+          locationKeys.headOption.foreach {
+            key => options.put(partitionPathOption, options.remove(key))
+          }
+          if (options.containsKey(partitionPathOption)) {
+            options.put(
+              partitionPathOption,
+              normalizeCustomPartitionLocation(
+                options.get(partitionPathOption),
+                spec,
+                onlyValueInPath))
+          }
+          spec -> options
+      }
+      .toSeq
+    val specs = partitions.map(_._1)
+    // Resolve (and path-safety validate) every default directory before mutating anything.
     val partitionPaths =
-      specs.map(spec => resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
-    requirePartitionManager().createPartitions(specs.asJava, ignoreIfExists)
+      partitions.collect {
+        case (spec, options) if customPartitionPath(options, spec) == null =>
+          resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath)
+      }
+    val partitionOptions: Seq[JMap[String, String]] = partitions.map(_._2)
+    if (partitionOptions.forall(_.isEmpty)) {
+      requirePartitionManager().createPartitions(specs.asJava, ignoreIfExists)
+    } else {
+      requirePartitionManager()
+        .createPartitions(specs.asJava, ignoreIfExists, null, false, partitionOptions.asJava)
+    }
     // Create the partition directories client-side (symmetric with DROP deleting them), so an
     // added partition exists on the filesystem and a subsequent scan returns an empty partition
     // rather than depending on lazy directory creation, matching Hive ADD PARTITION semantics.
@@ -261,81 +327,143 @@ case class PaimonFormatTable(table: FormatTable)
     partitionPaths.foreach(partitionPath => fileIO.mkdirs(partitionPath))
   }
 
+  private def normalizeCustomPartitionLocation(
+      location: String,
+      spec: JMap[String, String],
+      onlyValueInPath: Boolean): String = {
+    try {
+      FormatTablePartitionPathResolver
+        .resolveCustomLocation(
+          new Path(table.location()),
+          orderedSpec(spec),
+          onlyValueInPath,
+          location,
+          table.catalogContext())
+        .toString
+    } catch {
+      case error: IllegalArgumentException =>
+        throw new IllegalArgumentException(
+          s"ADD PARTITION ... LOCATION is invalid for partition $spec of Format Table " +
+            s"${table.fullName()}.",
+          error)
+    }
+  }
+
   /**
-   * Drops the given partitions: complete specs are unregistered and their directories deleted
-   * as-is, partial specs are expanded to the registered leaf partitions they cover. Callers are
-   * responsible for resolving which complete specs are actually registered first (see
-   * [[formatTablePartitionsRegistered]]), so unregistered data directories are never deleted.
+   * Drops the registered partitions covered by the given specs. Complete specs that are not
+   * registered are ignored; partial specs are expanded to the registered leaf partitions they
+   * cover.
    */
   private[spark] def dropFormatTablePartitions(
       partitionNames: Array[Array[String]],
       rows: Array[InternalRow]): Boolean = {
+    val (_, partitions) = resolveFormatTablePartitionsForDrop(partitionNames, rows)
+    dropCatalogRegisteredPartitions(partitions)
+  }
+
+  /**
+   * Resolves DROP requests from one validated view of the catalog registry. The boolean array is
+   * aligned with the requests and tells callers which complete specs are registered; partial-spec
+   * entries are not used for existence reporting. The returned partitions are the deduplicated
+   * registered leaves covered by all requests.
+   */
+  private[spark] def resolveFormatTablePartitionsForDrop(
+      partitionNames: Array[Array[String]],
+      rows: Array[InternalRow]): (Array[Boolean], Seq[Partition]) = {
+    if (rows.isEmpty) {
+      return (Array.empty[Boolean], Seq.empty)
+    }
     val partitionKeyCount = table.partitionKeys().size()
     rows.zip(partitionNames).foreach {
       case (row, names) => requireNameablePartitionValues("DROP PARTITION", row, names.toSeq)
     }
     val requested =
       rows.zip(partitionNames).map { case (row, names) => toPaimonPartition(row, names.toSeq) }
-    val partitions = ArrayBuffer.empty[JMap[String, String]]
-    val seenPartitions = HashSet.empty[Map[String, String]]
+    val onlyValueInPath =
+      CoreOptions.fromMap(table.options()).formatTablePartitionOnlyValueInPath()
+    // Reject invalid specs even when the catalog has no matching partition.
+    requested.foreach(spec => resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
+    val manager = requirePartitionManager()
+    val registry = manager.listPartitions(Collections.emptyMap[String, String](), null)
+    FormatTablePartitionRegistryValidator.validatePartitionLocations(
+      registry,
+      table.partitionKeys(),
+      new Path(table.location()),
+      table.fullName(),
+      onlyValueInPath,
+      table.catalogContext())
 
-    def addPartition(partition: JMap[String, String]): Unit = {
-      if (seenPartitions.add(partition.asScala.toMap)) {
-        partitions += partition
-      }
-    }
-
-    // Preserve exact requests as-is and let discovery add only missing complete leaves.
-    requested.filter(_.size() == partitionKeyCount).foreach(addPartition)
-    val partialSpecs = requested.filter(_.size() < partitionKeyCount).toSeq.distinct
-    if (partialSpecs.nonEmpty) {
-      def matchesRequestedPartial(partition: JMap[String, String]): Boolean = {
-        partialSpecs.exists(_.asScala.forall {
-          case (key, value) => Objects.equals(value, partition.get(key))
-        })
-      }
-
-      // One unfiltered traversal resolves every partial spec; the requested constraints are
-      // enforced client-side.
-      requirePartitionManager()
-        .listPartitions(Collections.emptyMap[String, String](), null)
-        .asScala
-        .foreach {
-          partition =>
-            val validated = validateCatalogRegisteredPartition(partition.spec())
-            if (matchesRequestedPartial(validated)) {
-              addPartition(validated)
-            }
+    val bySpec = mutable.LinkedHashMap.empty[Map[String, String], Partition]
+    registry.asScala.foreach {
+      partition =>
+        val spec = validateCatalogRegisteredPartition(partition.spec()).asScala.toMap
+        bySpec.get(spec) match {
+          case Some(previous)
+              if !Objects.equals(customPartitionPath(previous), customPartitionPath(partition)) =>
+            throw new IllegalStateException(
+              s"Catalog returned conflicting locations for partition $spec of Format Table " +
+                s"${table.fullName()}.")
+          case Some(_) =>
+          case None => bySpec.put(spec, partition)
         }
     }
-    dropCatalogRegisteredPartitions(partitions.toSeq)
+
+    val registered =
+      requested.map(spec => spec.size() == partitionKeyCount && bySpec.contains(spec.asScala.toMap))
+    val partitions = ArrayBuffer.empty[Partition]
+    val requestedMaps = requested.map(_.asScala.toMap)
+    // Requests with the same column set share one hash index. This keeps the common batch of
+    // complete specs O(requests + registry), while preserving direct partial DROP support for
+    // arbitrary column subsets without testing every request against every registered partition.
+    val requestedByColumns = requestedMaps
+      .groupBy(_.keySet)
+      .map { case (columns, specs) => columns -> specs.toSet }
+    bySpec.foreach {
+      case (registeredSpec, partition) if requestedByColumns.exists {
+            case (columns, specs) =>
+              specs.contains(registeredSpec.filter { case (key, _) => columns.contains(key) })
+          } =>
+        partitions += partition
+      case _ =>
+    }
+    (registered, partitions.toSeq)
   }
 
-  private def dropCatalogRegisteredPartitions(partitions: Seq[JMap[String, String]]): Boolean = {
-    // Unregister first so new queries stop seeing the partition, then delete the data directory
-    // with the table FileIO (client-side; the server never deletes data). A deletion failure leaves
-    // the possibly incomplete directory invisible; it must not be registered again automatically.
+  private[spark] def dropCatalogRegisteredPartitions(partitions: Seq[Partition]): Boolean = {
     if (partitions.isEmpty) {
       return true
     }
 
     val onlyValueInPath =
       CoreOptions.fromMap(table.options()).formatTablePartitionOnlyValueInPath()
-    // Resolve (and path-safety validate) every partition directory before any mutation, so a
-    // traversal attempt ('.'/'..') fails the whole DROP before unregistering anything.
-    val partitionPaths =
-      partitions.map(spec => resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
-    logInfo("Try to drop catalog-registered partitions: " + partitions.mkString(","))
-    requirePartitionManager().dropPartitions(partitions.asJava)
     val fileIO = table.fileIO()
-    partitionPaths.foreach {
-      partitionPath =>
-        val deleted = fileIO.delete(partitionPath, true)
-        if (!deleted && fileIO.exists(partitionPath)) {
-          throw new java.io.IOException(
-            s"FileIO reported that partition directory $partitionPath was not deleted.")
+    val resolved = partitions.map {
+      partition =>
+        val spec = validateCatalogRegisteredPartition(partition.spec())
+        val defaultPath = if (customPartitionPath(partition) == null) {
+          Some(resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
+        } else {
+          None
         }
+        (spec, defaultPath)
     }
+
+    val specs = resolved.map(_._1)
+    logInfo("Try to drop catalog-registered partitions: " + specs.mkString(","))
+    requirePartitionManager().dropPartitions(specs.asJava)
+    // Default-location partitions keep the existing unregister-then-delete ordering. A deletion
+    // failure leaves the incomplete directory invisible. Custom locations are never probed or
+    // deleted.
+    resolved
+      .flatMap(_._2)
+      .foreach {
+        partitionPath =>
+          val deleted = fileIO.delete(partitionPath, true)
+          if (!deleted && fileIO.exists(partitionPath)) {
+            throw new java.io.IOException(
+              s"FileIO reported that partition directory $partitionPath was not deleted.")
+          }
+      }
     true
   }
 
@@ -352,6 +480,25 @@ case class PaimonFormatTable(table: FormatTable)
     val ordered = new util.LinkedHashMap[String, String]()
     partitionKeys.foreach(key => ordered.put(key, partition.get(key)))
     ordered
+  }
+
+  private def customPartitionPath(partition: Partition): String =
+    customPartitionPath(partition.options(), partition.spec())
+
+  private def customPartitionPath(
+      options: JMap[String, String],
+      spec: JMap[String, String]): String = {
+    if (options == null || !options.containsKey(partitionPathOption)) {
+      null
+    } else {
+      val path = options.get(partitionPathOption)
+      if (path == null) {
+        throw new IllegalStateException(
+          s"Catalog returned a null $partitionPathOption option for partition $spec of " +
+            s"Format Table ${table.fullName()}.")
+      }
+      path
+    }
   }
 
   private def orderedSpec(spec: JMap[String, String]): util.LinkedHashMap[String, String] = {

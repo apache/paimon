@@ -148,7 +148,8 @@ public class DedicatedFormatRollingFileWriter
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean statsDenseStore,
-            @Nullable BlobFileContext context) {
+            @Nullable BlobFileContext context,
+            boolean omitAllNonDedicatedWriteCols) {
         // Initialize basic fields
         Preconditions.checkArgument(
                 targetFileRowNum > 0,
@@ -196,7 +197,8 @@ public class DedicatedFormatRollingFileWriter
                             fileIndexOptions,
                             fileSource,
                             asyncFileWrite,
-                            statsDenseStore);
+                            statsDenseStore,
+                            omitAllNonDedicatedWriteCols);
         }
 
         if (context != null) {
@@ -260,7 +262,8 @@ public class DedicatedFormatRollingFileWriter
                     FileIndexOptions fileIndexOptions,
                     FileSource fileSource,
                     boolean asyncFileWrite,
-                    boolean statsDenseStore) {
+                    boolean statsDenseStore,
+                    boolean omitAllNonDedicatedWriteCols) {
         RowType normalRowType = new RowType(fieldsInNormalFile);
         List<String> normalColumnNames = normalRowType.getFieldNames();
         int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
@@ -283,7 +286,7 @@ public class DedicatedFormatRollingFileWriter
                             asyncFileWrite,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
-                            normalColumnNames,
+                            omitAllNonDedicatedWriteCols ? null : normalColumnNames,
                             null,
                             null);
             return new ProjectedFileWriter<>(rowDataFileWriter, projectionNormalFields);

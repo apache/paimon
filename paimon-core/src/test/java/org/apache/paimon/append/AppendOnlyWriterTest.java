@@ -1092,7 +1092,9 @@ public class AppendOnlyWriterTest {
                 false,
                 context.options.dataEvolutionEnabled(),
                 null,
-                blobContext);
+                blobContext,
+                FileSource.APPEND,
+                false);
     }
 
     private DataFileMeta writeSharedShreddingFile(AppendOnlyWriter writer, InternalRow... rows)
@@ -1305,7 +1307,9 @@ public class AppendOnlyWriterTest {
                         false,
                         options.dataEvolutionEnabled(),
                         null,
-                        BlobFileContext.create(writeSchema, options));
+                        BlobFileContext.create(writeSchema, options),
+                        FileSource.APPEND,
+                        false);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

@@ -24,6 +24,7 @@ import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -64,8 +65,9 @@ public class FileStoreSourceMetricsTest {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(path.toString());
         Path fixBucketTablePath = new Path(path.toString(), "fix_bucket");
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
-        SchemaManager fixBucketSchemaManager = new SchemaManager(fileIO, fixBucketTablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
+        SchemaManager fixBucketSchemaManager =
+                new FileSystemSchemaManager(fileIO, fixBucketTablePath);
         TableSchema tableSchema =
                 schemaManager.createTable(
                         Schema.newBuilder()

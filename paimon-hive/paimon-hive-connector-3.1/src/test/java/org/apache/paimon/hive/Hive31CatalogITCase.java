@@ -19,7 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
@@ -136,7 +136,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`test_db`.`hive_table`");
         assertThat(
-                        new SchemaManager(
+                        new FileSystemSchemaManager(
                                         LocalFileIO.create(),
                                         new org.apache.paimon.fs.Path(
                                                 path, "test_db.db/hive_table"))
@@ -170,7 +170,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 "Could not execute AlterTable in path `my_alter_hive`.`test_db`.`alter_failed_table`"));
 
         assertThat(
-                        new SchemaManager(
+                        new FileSystemSchemaManager(
                                         LocalFileIO.create(),
                                         new org.apache.paimon.fs.Path(
                                                 path, "test_db.db/alter_failed_table"))

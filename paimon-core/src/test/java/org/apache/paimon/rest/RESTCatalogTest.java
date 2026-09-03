@@ -77,6 +77,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1579,7 +1580,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         List<Map<String, String>> partitionSpecs =
                 Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
         CreatePartitionsResponse response =
-                restCatalog.api().createPartitions(identifier, partitionSpecs, true, null, false);
+                restCatalog
+                        .api()
+                        .createPartitions(identifier, partitionSpecs, true, null, false, null);
 
         assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
         assertThat(response.getExisted()).isEmpty();
@@ -1594,7 +1597,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 restCatalog
                                         .api()
                                         .createPartitions(
-                                                identifier, conflictingSpecs, false, null, false))
+                                                identifier,
+                                                conflictingSpecs,
+                                                false,
+                                                null,
+                                                false,
+                                                null))
                 .isInstanceOf(AlreadyExistsException.class)
                 .hasMessageContaining("dt=20260714");
 
@@ -2378,7 +2386,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // get initial schema id
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         long firstSchemaId = schemaManager.latest().get().id();
 
         // evolve schema
@@ -2404,7 +2412,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // get initial schema id
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         long firstSchemaId = schemaManager.latest().get().id();
 
         // evolve schema
@@ -2429,7 +2437,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         long firstSchemaId = schemaManager.latest().get().id();
 
         // write data to create a snapshot referencing firstSchemaId
@@ -6296,7 +6304,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         }
 
         // Create schema file in the external table directory
-        SchemaManager schemaManager = new SchemaManager(fileIO, externalTablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, externalTablePath);
         schemaManager.createTable(schema, true); // true indicates external table
     }
 }

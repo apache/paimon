@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
@@ -35,6 +36,42 @@ import scala.collection.JavaConverters._
  * the session's case sensitivity.
  */
 class CatalogManagedPartitionDdlParityTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("ADD PARTITION LOCATION reads external data without creating the default directory") {
+    val tableName = "ddl_add_location"
+    withTable(tableName) {
+      createTable(tableName)
+      withTempDir {
+        externalDir =>
+          val table = formatTable(tableName)
+          val externalLocation = new Path(externalDir.toURI.toString).toString
+          table
+            .fileIO()
+            .writeFile(new Path(externalLocation, "part-00001.csv"), "1,a\n", false)
+
+          sql(
+            s"ALTER TABLE ${qualified(tableName)} ADD " +
+              s"PARTITION (dt = '20260101', hour = '00') " +
+              s"LOCATION '$externalLocation'")
+
+          val partitions =
+            paimonCatalog
+              .listPartitions(Identifier.create(dbName0, tableName))
+              .asScala
+          assert(partitions.size == 1)
+          assert(partitions.head.options().get(CoreOptions.PATH.key()) == externalLocation)
+          assert(
+            !table
+              .fileIO()
+              .exists(new Path(table.location(), "dt=20260101/hour=00")))
+          checkAnswer(
+            sql(
+              s"SELECT id, payload, dt, hour FROM ${qualified(tableName)} " +
+                s"WHERE dt = '20260101' AND hour = '00'"),
+            Seq(Row(1, "a", "20260101", "00")))
+      }
+    }
+  }
 
   test("ADD PARTITION IF NOT EXISTS is a repeatable no-op, a strict repeat is an error") {
     val tableName = "ddl_add_if_not_exists"

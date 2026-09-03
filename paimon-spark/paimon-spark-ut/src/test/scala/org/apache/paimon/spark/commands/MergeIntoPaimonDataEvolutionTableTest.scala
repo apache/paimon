@@ -19,9 +19,9 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GetStructField, Literal}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, GetStructField, If, IsNull, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
-import org.apache.spark.sql.types.{BinaryType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{BinaryType, IntegerType, StringType, StructField, StructType}
 
 class MergeIntoPaimonDataEvolutionTableTest extends SparkFunSuite {
 
@@ -55,5 +55,52 @@ class MergeIntoPaimonDataEvolutionTableTest extends SparkFunSuite {
       MergeIntoPaimonDataEvolutionTable.assignmentKeyAttribute(
         Assignment(nestedKey, Literal("new-name")))
     }
+  }
+
+  // JingsongLi's review on apache/paimon#8334 found that prunedStructType / buildPrunedStruct
+  // lay out fields in table-schema order while the action-ordered path list was used verbatim for
+  // writePaths, so a reversed SET clause order could make the persisted writeType disagree with
+  // the physical column order. The fix canonicalizes the path list to schema order before it's
+  // used for either the output struct or writePaths.
+  test("pruned struct type uses canonical schema order regardless of input path order") {
+    val nestType =
+      StructType(
+        Seq(
+          StructField("a", IntegerType),
+          StructField("b", IntegerType),
+          StructField("c", IntegerType)))
+
+    // MATCHED clause 1 sets c, clause 2 sets a: action order is [c, a].
+    val actionOrderedPaths: Seq[Seq[String]] = Seq(Seq("c"), Seq("a"))
+    val fieldOrder = nestType.fieldNames.zipWithIndex.toMap
+    val canonicalPaths = actionOrderedPaths.sortBy(p => fieldOrder(p.head))
+
+    assert(canonicalPaths.map(_.mkString(".")) == Seq("a", "c"))
+    val outputStructType =
+      MergeIntoPaimonDataEvolutionTable.prunedStructType(nestType, canonicalPaths)
+    assert(outputStructType.fieldNames.toSeq == Seq("a", "c"))
+    assert(canonicalPaths.map(_.mkString(".")) == outputStructType.fieldNames.toSeq)
+  }
+
+  // JingsongLi's review also found that buildPrunedStruct has no null-guard, so copying a NULL
+  // struct through the pruned path silently turned it into a non-null struct of null leaves. The
+  // call sites now wrap the built expression with If(IsNull(attr), Literal(null, ...), built).
+  test("guarding buildPrunedStruct with IsNull preserves a NULL source struct") {
+    val nestType =
+      StructType(Seq(StructField("a", IntegerType), StructField("b", IntegerType)))
+    val prunedType = StructType(Seq(StructField("b", IntegerType)))
+    val nullNest = Literal(null, nestType)
+
+    val built = MergeIntoPaimonDataEvolutionTable.buildPrunedStruct(
+      nestType,
+      Nil,
+      Seq(Seq("b")),
+      p => MergeIntoPaimonDataEvolutionTable.passthroughExpr(nullNest, nestType, p))
+
+    // Unguarded, this still reproduces the bug: a non-null struct from a NULL source.
+    assert(built.eval() != null)
+
+    val guarded = If(IsNull(nullNest), Literal(null, prunedType), built)
+    assert(guarded.eval() == null)
   }
 }
