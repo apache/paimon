@@ -363,12 +363,12 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<SimpleFileEntry> deltaEntries,
             List<IndexManifestEntry> deltaIndexEntries,
             @Nullable RowIdConflictChecker conflictChecker) {
-        if (rowIdCheckFromSnapshot == null
-                || conflictChecker == null
-                || conflictChecker.isEmpty()) {
+        if (rowIdCheckFromSnapshot == null) {
             return Optional.empty();
         }
 
+        // Run lineage validation BEFORE empty checker check so that DV-only and
+        // index-only commits are also protected against rollback/ABA.
         // Fail closed when the latest snapshot ID is less than the base snapshot ID.
         // This indicates a rollback has deleted newer snapshots, and the staged update
         // is based on a snapshot lineage that no longer exists.
@@ -382,8 +382,14 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         // A rollback can delete a snapshot and a new commit can reuse the same numeric ID.
         // If the base snapshot UUID differs from the current snapshot UUID at that ID,
         // the staged update is based on a different snapshot lineage.
-        Snapshot baseSnapshot = snapshotManager.snapshot(rowIdCheckFromSnapshot);
-        if (baseSnapshot == null) {
+        // Invalidate cache before reading to avoid stale entries after rollback.
+        Snapshot baseSnapshot;
+        try {
+            snapshotManager.invalidateCache();
+            baseSnapshot = snapshotManager.snapshot(rowIdCheckFromSnapshot);
+        } catch (RuntimeException e) {
+            // snapshotManager.snapshot() throws RuntimeException when file is missing
+            // (e.g., snapshot was deleted by rollback or expiration).
             return Optional.of(
                     new RuntimeException(
                             ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE));
@@ -392,6 +398,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return Optional.of(
                     new RuntimeException(
                             ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE));
+        }
+
+        if (conflictChecker == null || conflictChecker.isEmpty()) {
+            return Optional.empty();
         }
 
         List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
