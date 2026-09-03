@@ -42,7 +42,6 @@ from pypaimon.multimodal.table import (
     vector_route,
 )
 from pypaimon.multimodal.temporal import (
-    AlignedScan,
     join_asof,
 )
 from pypaimon.multimodal.video import VideoFrameCollator
@@ -58,7 +57,6 @@ __all__ = [
     "BlobDescriptor",
     "BlobObject",
     "BlobStore",
-    "AlignedScan",
     "Hdf5File",
     "Hdf5LoadResult",
     "MultimodalConnection",
