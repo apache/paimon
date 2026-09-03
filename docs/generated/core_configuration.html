@@ -561,6 +561,12 @@ under the License.
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to omit write columns from data file metadata when a data evolution file contains all non-dedicated columns. Readers always support the omitted metadata, but writing it is disabled by default for compatibility with older readers.</td>
+        </tr>
+        <tr>
             <td><h5>data-file.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
