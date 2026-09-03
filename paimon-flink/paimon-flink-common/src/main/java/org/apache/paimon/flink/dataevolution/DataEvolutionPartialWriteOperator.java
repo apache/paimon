@@ -70,6 +70,7 @@ public class DataEvolutionPartialWriteOperator
 
     private final FileStoreTable table;
     private final Long baseSnapshotId;
+    private final boolean nestedFieldEnabled;
 
     // dataType
     private final RowType dataType;
@@ -106,8 +107,9 @@ public class DataEvolutionPartialWriteOperator
             Long baseSnapshotId) {
         this.table = table.copy(dataEvolutionWriteOptions());
         this.baseSnapshotId = baseSnapshotId;
+        this.nestedFieldEnabled = this.table.coreOptions().dataEvolutionNestedFieldEnabled();
         this.writeType =
-                table.coreOptions().dataEvolutionNestedFieldEnabled()
+                nestedFieldEnabled
                         ? table.rowType().projectByPaths(writePaths)
                         : table.rowType().project(writePaths);
         // sourceType is already pruned to the written columns (with partial nested structs) and

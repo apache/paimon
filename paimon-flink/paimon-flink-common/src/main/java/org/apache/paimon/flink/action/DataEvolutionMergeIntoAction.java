@@ -105,6 +105,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionMergeIntoAction.class);
 
     private final CoreOptions coreOptions;
+    private final boolean nestedFieldEnabled;
 
     // field names of target table
     private final List<String> targetFieldNames;
@@ -165,6 +166,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                 latestSnapshotId.toString()));
 
         this.coreOptions = ((FileStoreTable) table).coreOptions();
+        this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
 
         if (!coreOptions.dataEvolutionEnabled()) {
             throw new UnsupportedOperationException(
@@ -315,7 +317,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         checkSchema(source);
 
         RowType sourceType;
-        if (updateAll || !coreOptions.dataEvolutionNestedFieldEnabled()) {
+        if (updateAll || !nestedFieldEnabled) {
             List<String> columnNames = source.getResolvedSchema().getColumnNames();
             sourceType = SpecialFields.rowTypeWithRowId(table.rowType()).project(columnNames);
             writePaths =
@@ -345,7 +347,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Also sets {@link #writePaths}.
      */
     private List<String> buildExplicitProject() {
-        if (!coreOptions.dataEvolutionNestedFieldEnabled()) {
+        if (!nestedFieldEnabled) {
             return buildTopLevelExplicitProject();
         }
 
@@ -378,7 +380,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 wholeCols.put(topCol, entry.getValue());
             } else {
                 // nested sub-field update
-                if (!coreOptions.dataEvolutionNestedFieldEnabled()) {
+                if (!nestedFieldEnabled) {
                     throw new UnsupportedOperationException(
                             "Updating a nested sub-field ('"
                                     + entry.getKey()
@@ -864,7 +866,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 // source must fully cover the target struct, so a narrower source is rejected
                 // instead of being written as an incomplete whole-struct file.
                 boolean structCompatible = false;
-                if (coreOptions.dataEvolutionNestedFieldEnabled()
+                if (nestedFieldEnabled
                         && paimonType instanceof RowType
                         && targetField.type() instanceof RowType) {
                     RowType sourceStruct = (RowType) paimonType;
@@ -948,7 +950,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Whether the given top-level column is written through dotted sub-field paths (e.g. nest.a).
      */
     private boolean isSubFieldWrite(String topColumn) {
-        if (!coreOptions.dataEvolutionNestedFieldEnabled() || writePaths == null) {
+        if (!nestedFieldEnabled || writePaths == null) {
             return false;
         }
         String prefix = topColumn + ".";

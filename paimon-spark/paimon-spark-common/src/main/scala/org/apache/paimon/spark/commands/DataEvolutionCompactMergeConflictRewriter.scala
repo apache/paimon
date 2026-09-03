@@ -55,6 +55,7 @@ class DataEvolutionCompactMergeConflictRewriter(
   import DataEvolutionCompactMergeConflictRewriter._
 
   private val partialColumns = new DataEvolutionPartialColumns(table)
+  private val nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled()
 
   def rewrite(
       sparkSession: SparkSession,
@@ -165,7 +166,7 @@ class DataEvolutionCompactMergeConflictRewriter(
    * are grouped by it and it becomes the physical layout of the rebased file.
    */
   private def updatedWritePaths(writePaths: Set[String]): Seq[String] = {
-    if (!table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+    if (!nestedFieldEnabled) {
       return table
         .rowType()
         .getFieldNames

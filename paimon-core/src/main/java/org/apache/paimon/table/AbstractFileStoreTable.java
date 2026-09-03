@@ -331,21 +331,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     if (!Objects.equals(oldValue, newValue)
                             && !SchemaManager.isUnchangedNormalizedKey(
                                     k, oldValue, newValue, tableSchema)) {
-                        if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(k)) {
-                            boolean oldEnabled =
-                                    oldValue == null
-                                            ? CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED
-                                                    .defaultValue()
-                                            : Boolean.parseBoolean(oldValue);
-                            boolean newEnabled = Boolean.parseBoolean(newValue);
-                            if (oldEnabled != newEnabled) {
-                                throw new UnsupportedOperationException(
-                                        String.format(
-                                                "Table option '%s' cannot be overridden dynamically; "
-                                                        + "persist it with ALTER TABLE instead.",
-                                                k));
-                            }
-                        }
                         SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });
