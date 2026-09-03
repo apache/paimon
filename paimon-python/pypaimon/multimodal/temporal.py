@@ -17,11 +17,9 @@
 """Temporal alignment for multimodal table scans."""
 
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass
 from datetime import timedelta
 import math
 from numbers import Integral, Real
-from typing import Optional
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -41,15 +39,6 @@ from pypaimon.utils.range import Range
 
 _ROW_ID = SpecialFields.ROW_ID.name
 _MAX_INT64 = (1 << 63) - 1
-
-
-@dataclass(frozen=True)
-class _JoinSpec:
-    query: ScanQuery
-    direction: str
-    tolerance: object = None
-    right_on: Optional[str] = None
-    suffix: str = "_right"
 
 
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
@@ -98,10 +87,16 @@ class AlignedScan:
         """Append a right-side as-of join without materializing this scan."""
         position = len(self._sources) + 1
         label = "right source %d" % position
-        spec = _join_spec(
-            right, direction, tolerance, right_on, suffix, label)
         source = _PinnedSource(
-            label, _pin_join_spec(spec), self._on, self._by)
+            label,
+            right,
+            self._on,
+            self._by,
+            direction,
+            tolerance,
+            right_on,
+            suffix,
+        )
 
         result = object.__new__(AlignedScan)
         result._anchor = self._anchor
@@ -126,7 +121,7 @@ class AlignedScan:
         source_fetchers = []
         for source in self._sources:
             source.plan()
-            source_fetchers.append(_RowIdFetcher(source.spec.query))
+            source_fetchers.append(_RowIdFetcher(source.query))
 
         def batches():
             for start in range(0, len(anchor_metadata), batch_size):
@@ -184,11 +179,11 @@ class AlignedScan:
             for field in source.payload_schema:
                 output_name = field.name
                 if output_name in names:
-                    output_name += source.spec.suffix
+                    output_name += source.suffix
                 if output_name in names:
                     raise ValueError(
                         "%s column %r conflicts after applying suffix %r."
-                        % (source.label, field.name, source.spec.suffix)
+                        % (source.label, field.name, source.suffix)
                     )
                 output = pa.field(output_name, field.type, nullable=True)
                 fields.append(output)
@@ -222,19 +217,24 @@ class AlignedScan:
 
 class _PinnedSource:
 
-    def __init__(self, label, spec, anchor_on, by):
+    def __init__(self, label, query, anchor_on, by, direction, tolerance,
+                 right_on, suffix):
+        _validate_join_options(direction, tolerance, right_on, suffix)
         self.label = label
-        self.spec = spec
+        self.query = _pin_scan(_require_scan(query, label))
+        self.direction = direction
+        self.tolerance = tolerance
+        self.suffix = suffix
         self.anchor_on = anchor_on
-        self.on = anchor_on if spec.right_on is None else spec.right_on
+        self.on = anchor_on if right_on is None else right_on
         self.by = by
-        self.table_schema = _table_schema(spec.query)
+        self.table_schema = _table_schema(self.query)
         _require_columns(
             self.table_schema, by + (self.on,), label)
         self.time_type = self.table_schema.field(self.on).type
         _delta_type(self.time_type)
-        _validate_tolerance(spec.tolerance, self.time_type)
-        schema = _query_schema(spec.query)
+        _validate_tolerance(tolerance, self.time_type)
+        schema = _query_schema(self.query)
         self.payload_schema = pa.schema([
             field for field in schema
             if field.name not in set(by + (self.on,))
@@ -242,7 +242,7 @@ class _PinnedSource:
         self._index = None
 
     def plan(self):
-        metadata = _metadata_table(self.spec.query, self.on, self.by)
+        metadata = _metadata_table(self.query, self.on, self.by)
         self._times = metadata[self.on].combine_chunks()
         self._time_keys = _time_search_keys(self._times, self.time_type)
         self._row_ids = metadata[_ROW_ID].combine_chunks()
@@ -274,19 +274,17 @@ class _PinnedSource:
         target = anchor_row[self.anchor_on]
         target_key = _time_search_key(target, self.time_type)
         index = _match_index(
-            self._time_keys, target_key, self.spec.direction, *bounds)
+            self._time_keys, target_key, self.direction, *bounds)
         if index is None:
             return None
         matched_time = self._times[index].as_py()
         delta = matched_time - target
-        if (self.spec.tolerance is not None
-                and abs(delta) > self.spec.tolerance):
+        if self.tolerance is not None and abs(delta) > self.tolerance:
             return None
         return self._row_ids[index].as_py()
 
 
-def _join_spec(query, direction, tolerance, right_on, suffix, label):
-    _require_scan(query, label)
+def _validate_join_options(direction, tolerance, right_on, suffix):
     if direction not in ("backward", "forward", "nearest"):
         raise ValueError(
             "direction must be 'backward', 'forward', or 'nearest'.")
@@ -306,17 +304,6 @@ def _join_spec(query, direction, tolerance, right_on, suffix, label):
         zero = timedelta(0) if isinstance(tolerance, timedelta) else 0
         if tolerance < zero:
             raise ValueError("tolerance must be non-negative.")
-    return _JoinSpec(query, direction, tolerance, right_on, suffix)
-
-
-def _pin_join_spec(spec):
-    return _JoinSpec(
-        _pin_scan(spec.query),
-        spec.direction,
-        spec.tolerance,
-        spec.right_on,
-        spec.suffix,
-    )
 
 
 def _require_scan(query, label):
