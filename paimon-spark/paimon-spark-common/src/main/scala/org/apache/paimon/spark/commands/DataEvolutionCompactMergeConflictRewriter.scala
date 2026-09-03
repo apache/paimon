@@ -29,6 +29,7 @@ import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.{RowType => PaimonRowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.{Range, RowRangeIndex}
 
@@ -121,12 +122,10 @@ class DataEvolutionCompactMergeConflictRewriter(
       target =>
         val files = additionsByTarget.get(target).map(_.toSeq).getOrElse(Seq.empty)
         if (files.nonEmpty) {
-          val updatedFields = table
-            .rowType()
-            .getFieldNames
-            .asScala
-            .filter(name => files.exists(_.file.writeCols().contains(name)))
-            .toSeq
+          // write columns may be dotted sub-field paths (e.g. "nest.a"), so they cannot be matched
+          // against top-level field names; collect their union instead, ordered by the schema.
+          val updatedFields =
+            updatedWritePaths(files.flatMap(_.file.writeCols().asScala).distinct.toSet)
           if (updatedFields.isEmpty) {
             return JOptional.empty()
           }
@@ -155,6 +154,35 @@ class DataEvolutionCompactMergeConflictRewriter(
       }
 
     JOptional.of((messageImpls ++ rewrittenMessages).map(_.asInstanceOf[CommitMessage]).asJava)
+  }
+
+  /**
+   * The write paths covered by the staged MERGE files, laid out in schema order: a top-level column
+   * written whole by any file is taken whole, otherwise its written sub-fields are listed in the
+   * struct's declaration order. Ordering here has to be deterministic because [[TargetRewrite]]s
+   * are grouped by it and it becomes the physical layout of the rebased file.
+   */
+  private def updatedWritePaths(writePaths: Set[String]): Seq[String] = {
+    val fieldNames = table.rowType().getFieldNames.asScala.toSet
+    table.rowType().getFields.asScala.toSeq.flatMap {
+      field =>
+        val forField = writePaths.filter(
+          path => DataEvolutionPartialColumns.topLevelOf(path, fieldNames) == field.name)
+        if (forField.isEmpty) {
+          Seq.empty[String]
+        } else if (forField.contains(field.name)) {
+          // some file wrote the whole column, which subsumes any sub-field write of it
+          Seq(field.name)
+        } else {
+          field.`type`() match {
+            case struct: PaimonRowType =>
+              struct.getFields.asScala.toSeq
+                .map(sub => field.name + "." + sub.name)
+                .filter(forField.contains)
+            case _ => Seq(field.name)
+          }
+        }
+    }
   }
 
   private def targetReader(snapshot: Snapshot, targetScan: TargetScan): SnapshotReader = {
@@ -236,7 +264,13 @@ class DataEvolutionCompactMergeConflictRewriter(
     }
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
-    val readOutput = updatedFields.map(attribute) :+ rowIdAttribute
+    // updatedFields are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
+    // scan is in terms of top-level columns and the projection prunes each partially written
+    // struct, so the rebased file carries exactly the leaves the staged MERGE files carried.
+    val fieldNames = table.rowType().getFieldNames.asScala.toSet
+    val topColumns = DataEvolutionPartialColumns.topLevelColumns(updatedFields, fieldNames)
+    val projections = DataEvolutionPartialColumns.projections(table, updatedFields)
+    val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     val relation = createNewScanPlan(relevantSplits, targetRelation)
     val readPlan =
       SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
@@ -244,7 +278,7 @@ class DataEvolutionCompactMergeConflictRewriter(
     val rangeIndex = new CompactRowIdRangeIndex(targetRanges)
     val firstRowId = udf((rowId: Long) => rangeIndex.firstRowId(rowId))
     val rewrittenRows = createDataset(sparkSession, readPlan)
-      .select((updatedFields.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+      .select((projections :+ quotedColumn(ROW_ID_NAME)): _*)
       .withColumn(FIRST_ROW_ID_NAME, firstRowId(quotedColumn(ROW_ID_NAME)))
       .filter(quotedColumn(FIRST_ROW_ID_NAME).isNotNull)
       .repartition(col(FIRST_ROW_ID_NAME))
