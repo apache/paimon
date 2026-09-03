@@ -148,45 +148,6 @@ public class DedicatedFormatRollingFileWriter
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean statsDenseStore,
-            @Nullable BlobFileContext context) {
-        this(
-                fileIO,
-                schemaId,
-                fileFormat,
-                vectorFileFormat,
-                targetFileSize,
-                blobTargetFileSize,
-                vectorTargetFileSize,
-                targetFileRowNum,
-                writeSchema,
-                pathFactory,
-                seqNumCounterSupplier,
-                fileCompression,
-                statsCollectorFactories,
-                fileIndexOptions,
-                fileSource,
-                statsDenseStore,
-                context,
-                false);
-    }
-
-    public DedicatedFormatRollingFileWriter(
-            FileIO fileIO,
-            long schemaId,
-            FileFormat fileFormat,
-            @Nullable FileFormat vectorFileFormat,
-            long targetFileSize,
-            long blobTargetFileSize,
-            long vectorTargetFileSize,
-            long targetFileRowNum,
-            RowType writeSchema,
-            DataFilePathFactory pathFactory,
-            Supplier<LongCounter> seqNumCounterSupplier,
-            String fileCompression,
-            StatsCollectorFactories statsCollectorFactories,
-            FileIndexOptions fileIndexOptions,
-            FileSource fileSource,
-            boolean statsDenseStore,
             @Nullable BlobFileContext context,
             boolean omitAllNonDedicatedWriteCols) {
         // Initialize basic fields
