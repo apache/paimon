@@ -213,6 +213,8 @@ partitions and Spark supports the standard partition DDL:
 
 ```sql
 ALTER TABLE my_table ADD PARTITION (dt='2025-01-01');
+ALTER TABLE my_table ADD PARTITION (dt='2024-12-31')
+    LOCATION 'oss://archive-bucket/events/dt=2024-12-31';
 ALTER TABLE my_table DROP PARTITION (dt='2025-01-01');
 MSCK REPAIR TABLE my_table;
 SHOW PARTITIONS my_table;
@@ -225,6 +227,10 @@ On a Format Table whose partitions are discovered from the filesystem, `ADD PART
 `ADD PARTITION` creates the partition directory and registers the partition; querying a newly
 added partition before any data is written returns no rows. `DROP PARTITION` unregisters the
 partition and deletes its directory.
+
+`ADD PARTITION ... LOCATION` registers a custom absolute URI without moving data and requires a
+compatible REST catalog. Paimon can read the partition but does not write, delete, or analyze its
+data. `DROP PARTITION` only unregisters it, and `MSCK REPAIR TABLE` leaves it unchanged.
 
 A partition value that is empty or all whitespace is rejected by `ADD PARTITION`, `DROP PARTITION`
 and `TRUNCATE PARTITION`. Such a value is written to the partition named by

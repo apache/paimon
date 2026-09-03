@@ -735,6 +735,18 @@ class CoreOptions:
         .with_description("Whether to enable data evolution.")
     )
 
+    DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("data-evolution.write-cols-optimization.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to omit write columns from data file metadata when a "
+            "data evolution file contains all non-dedicated columns. Readers "
+            "always support the omitted metadata, but writing it is disabled "
+            "by default for compatibility with older readers."
+        )
+    )
+
     DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("data-evolution.row-id-conflict-rewrite.max-size")
         .memory_type()
@@ -1238,6 +1250,14 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
+        # Do not treat blob.stored-descriptor-fields as a layout switch.
+        # Python master ignored that key and wrote dedicated .blob payloads;
+        # a global fallback would mis-parse those files during a rolling
+        # upgrade. The cost is that Java tables which only set the fallback
+        # key store inline descriptors, and Python returns those bytes
+        # instead of fetching payload. Migrate explicitly to
+        # blob-descriptor-field (column directives already copy the legacy
+        # key onto the canonical option).
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
@@ -1399,6 +1419,12 @@ class CoreOptions:
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def data_evolution_write_cols_optimization_enabled(self, default=None):
+        return self.options.get(
+            CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED,
+            default,
+        )
 
     def data_evolution_row_id_conflict_rewrite_max_size(self, default=None):
         value = self.options.get(

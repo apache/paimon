@@ -29,7 +29,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.connector.catalog.SupportsAtomicPartitionManagement
+import org.apache.spark.sql.connector.catalog.{SupportsAtomicPartitionManagement, TableCatalog}
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap, Objects}
@@ -175,16 +175,33 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement with L
           val partitions = partitionManager.listPartitionsByNames(Seq(partitionSpec).asJava)
           if (!partitions.isEmpty) {
             val partition = partitions.get(0)
-            Map(
-              PartitionStatistics.FIELD_RECORD_COUNT -> partition.recordCount().toString,
-              PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> partition
-                .fileSizeInBytes()
-                .toString,
-              PartitionStatistics.FIELD_FILE_COUNT -> partition.fileCount().toString,
-              PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> partition
-                .lastFileCreationTime()
-                .toString
-            ).asJava
+            val metadata = new java.util.HashMap[String, String]()
+            Option(partition.options()).foreach(metadata.putAll)
+            metadata
+              .keySet()
+              .asScala
+              .filter(TableCatalog.PROP_LOCATION.equalsIgnoreCase)
+              .toSeq
+              .foreach(metadata.remove)
+            val pathOption = CoreOptions.PATH.key()
+            if (metadata.containsKey(pathOption)) {
+              val path = metadata.remove(pathOption)
+              if (path == null) {
+                throw new IllegalStateException(
+                  s"Catalog returned a null $pathOption option for partition ${partition.spec()} " +
+                    s"of Format Table ${formatTable.fullName()}.")
+              }
+              metadata.put(TableCatalog.PROP_LOCATION, path)
+            }
+            metadata.put(PartitionStatistics.FIELD_RECORD_COUNT, partition.recordCount().toString)
+            metadata.put(
+              PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES,
+              partition.fileSizeInBytes().toString)
+            metadata.put(PartitionStatistics.FIELD_FILE_COUNT, partition.fileCount().toString)
+            metadata.put(
+              PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME,
+              partition.lastFileCreationTime().toString)
+            metadata
           } else {
             Map.empty[String, String].asJava
           }

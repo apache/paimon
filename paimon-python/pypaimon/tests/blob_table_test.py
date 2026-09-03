@@ -136,6 +136,103 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
+    def test_omit_write_cols_for_all_non_dedicated_columns(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'data-evolution.write-cols-optimization.enabled': 'true',
+                'metadata.stats-mode': 'full',
+            },
+        )
+        self.catalog.create_table(
+            'test_db.optimized_write_cols', schema, False)
+        table = self.catalog.get_table('test_db.optimized_write_cols')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'blob_data': [b'blob_data'],
+        }, schema=pa_schema))
+        commit_messages = writer.prepare_commit()
+        all_files = [
+            file for message in commit_messages for file in message.new_files
+        ]
+        normal_files = [
+            file for file in all_files if file.file_name.endswith('.parquet')
+        ]
+        blob_files = [
+            file for file in all_files if file.file_name.endswith('.blob')
+        ]
+        self.assertEqual(1, len(normal_files))
+        self.assertIsNone(normal_files[0].write_cols)
+        self.assertEqual([['blob_data']], [file.write_cols for file in blob_files])
+
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        manifests = ManifestListManager(table).read_all(snapshot)
+        committed_files = ManifestFileManager(table).read_entries_parallel(
+            manifests, drop_stats=False)
+        committed_normal = next(
+            entry.file for entry in committed_files
+            if entry.file.file_name.endswith('.parquet')
+        )
+        self.assertEqual(
+            ['id', 'name'],
+            [field.name for field in committed_normal.value_stats.min_values.fields],
+        )
+        self.assertEqual(
+            'Alice', committed_normal.value_stats.min_values.get_field(1)
+        )
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual([1], result.column('id').to_pylist())
+        self.assertEqual(['Alice'], result.column('name').to_pylist())
+        self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['id', 'name'])
+        update_messages = table_update.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({
+                '_ROW_ID': pa.array([0], type=pa.int64()),
+                'id': pa.array([2], type=pa.int32()),
+                'name': pa.array(['Bob'], type=pa.string()),
+            }))
+        update_files = [
+            file
+            for message in update_messages
+            for file in message.new_files
+        ]
+        self.assertTrue(update_files)
+        self.assertTrue(all(
+            file.file_name.endswith('.parquet')
+            and file.write_cols is None
+            for file in update_files
+        ))
+        update_builder.new_commit().commit(update_messages)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual([2], result.column('id').to_pylist())
+        self.assertEqual(['Bob'], result.column('name').to_pylist())
+        self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
+
     def test_split_data_with_pyarrow_6_record_batch_api(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
@@ -5246,6 +5343,52 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
         self.assertEqual(result['id'], list(range(2000)))
         self.assertEqual(result['name'], ['updated'] * 2000)
+
+    def test_legacy_stored_descriptor_fields_keeps_dedicated_blob_layout(self):
+        """blob.stored-descriptor-fields must not switch Python to inline descriptors.
+
+        Master ignored that key and wrote dedicated .blob payloads. Head write
+        with the same option must keep that layout so old readers still see
+        payloads, and head read must not fail-fast on those bytes.
+        """
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.stored-descriptor-fields': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.legacy_stored_descriptor_fields', schema, False)
+        table = self.catalog.get_table('test_db.legacy_stored_descriptor_fields')
+
+        payload = b'legacy-dedicated-blob-payload'
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'picture': [payload],
+        }, schema=pa_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertGreaterEqual(len(blob_files), 1)
+        self.assertTrue(all(f.write_cols == ['picture'] for f in blob_files))
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('picture').to_pylist()[0], payload)
 
 
 class GetBlobTest(unittest.TestCase):

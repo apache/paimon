@@ -52,8 +52,8 @@ import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
@@ -2037,7 +2037,7 @@ public class FileStoreCommitTest {
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 store.fileIO(),
-                new SchemaManager(store.fileIO(), store.options().path()),
+                new FileSystemSchemaManager(store.fileIO(), store.options().path()),
                 tableName,
                 commitUser,
                 store.partitionType(),
@@ -2062,6 +2062,7 @@ public class FileStoreCommitTest {
                                 store.bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 dataEvolutionEnabled,
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
@@ -2369,7 +2370,7 @@ public class FileStoreCommitTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(new LocalFileIO(), path),
+                        new FileSystemSchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),

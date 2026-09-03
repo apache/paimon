@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -42,10 +43,6 @@ import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /** Test for {@link DataEvolutionUtils}. */
 public class DataEvolutionUtilsTest {
@@ -66,24 +63,26 @@ public class DataEvolutionUtilsTest {
 
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema,
+                                schema.fields(),
                                 dataFile(
                                         "mixed.parquet",
                                         1,
                                         Arrays.asList(
                                                 SpecialFields.ROW_ID.name(),
                                                 "indexed",
-                                                SpecialFields.SEQUENCE_NUMBER.name()))))
+                                                SpecialFields.SEQUENCE_NUMBER.name())),
+                                false))
                 .containsExactly(1);
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema,
+                                schema.fields(),
                                 dataFile(
                                         "system-only.parquet",
                                         1,
                                         Arrays.asList(
                                                 SpecialFields.ROW_ID.name(),
-                                                SpecialFields.SEQUENCE_NUMBER.name()))))
+                                                SpecialFields.SEQUENCE_NUMBER.name())),
+                                false))
                 .isEmpty();
     }
 
@@ -103,29 +102,76 @@ public class DataEvolutionUtilsTest {
 
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema, dataFile("full.parquet", 1, null)))
+                                schema.fields(), dataFile("full.parquet", 1, null), false))
                 .containsExactlyInAnyOrder(1, 2);
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema,
-                                dataFile("empty.parquet", 1, Collections.emptyList())))
+                                schema.fields(),
+                                dataFile("empty.parquet", 1, Collections.emptyList()),
+                                false))
                 .isEmpty();
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema,
+                                schema.fields(),
                                 dataFile(
-                                        "unrelated.parquet",
-                                        1,
-                                        Collections.singletonList("other"))))
+                                        "unrelated.parquet", 1, Collections.singletonList("other")),
+                                false))
                 .containsExactly(2);
         assertThat(
                         DataEvolutionUtils.fileFieldIds(
-                                ignored -> schema,
+                                schema.fields(),
                                 dataFile(
-                                        "unknown.parquet",
-                                        1,
-                                        Collections.singletonList("unknown"))))
+                                        "unknown.parquet", 1, Collections.singletonList("unknown")),
+                                false))
                 .isEmpty();
+    }
+
+    @Test
+    public void testNestedWriteColumnResolutionRequiresEnabledOption() {
+        DataField nested =
+                new DataField(
+                        1,
+                        "nest",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.INT()),
+                                new DataField(3, "b", DataTypes.INT())));
+        TableSchema disabled = tableSchema(1L, Collections.emptyMap(), nested);
+        DataFileMeta nestedFile =
+                dataFile("nested.parquet", 1L, Collections.singletonList("nest.a"));
+
+        assertThat(DataEvolutionUtils.fileFieldIds(disabled.fields(), nestedFile, false)).isEmpty();
+        assertThat(collectWrittenColumnIds(ignored -> disabled, nestedFile)).isEmpty();
+
+        Map<String, String> enabledOptions = new HashMap<>();
+        enabledOptions.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        TableSchema enabled = tableSchema(1L, enabledOptions, nested);
+        assertThat(DataEvolutionUtils.fileFieldIds(enabled.fields(), nestedFile, true))
+                .containsExactly(1);
+        assertThat(collectWrittenColumnIds(ignored -> enabled, nestedFile))
+                .hasValue(Collections.singletonList(1));
+    }
+
+    @Test
+    public void testDottedTopLevelWriteColumnWinsOverNestedPath() {
+        TableSchema schema =
+                tableSchema(
+                        1L,
+                        Collections.emptyMap(),
+                        new DataField(1, "nest.a", DataTypes.INT()),
+                        new DataField(
+                                2, "nest", DataTypes.ROW(new DataField(3, "a", DataTypes.INT()))));
+        DataFileMeta file = dataFile("dotted.parquet", 1L, Collections.singletonList("nest.a"));
+
+        assertThat(DataEvolutionUtils.fileFieldIds(schema.fields(), file, false))
+                .containsExactly(1);
+        assertThat(DataEvolutionUtils.fileFields(schema.fields(), file, false))
+                .extracting(DataField::id)
+                .containsExactly(1);
+        assertThat(DataEvolutionUtils.fileFields(schema.fields(), file, true))
+                .extracting(DataField::id)
+                .containsExactly(1);
+        assertThat(collectWrittenColumnIds(ignored -> schema, file))
+                .hasValue(Collections.singletonList(1));
     }
 
     @Test
@@ -149,6 +195,30 @@ public class DataEvolutionUtilsTest {
 
         assertThat(collectWrittenColumnIds(schemas::get, oldSchemaFile, newSchemaFile))
                 .hasValue(Arrays.asList(1, 2, 3));
+    }
+
+    @Test
+    public void testCollectWrittenColumnIdsUsesNestedOptionOfEachSchema() {
+        Map<Long, TableSchema> schemas = new HashMap<>();
+        schemas.put(
+                0L,
+                tableSchema(
+                        0L, Collections.emptyMap(), new DataField(1, "nest.a", DataTypes.INT())));
+        Map<String, String> nestedOptions = new HashMap<>();
+        nestedOptions.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        schemas.put(
+                1L,
+                tableSchema(
+                        1L,
+                        nestedOptions,
+                        new DataField(
+                                2, "nest", DataTypes.ROW(new DataField(3, "b", DataTypes.INT())))));
+
+        DataFileMeta dottedTopLevelFile = dataFile(0L, Collections.singletonList("nest.a"));
+        DataFileMeta nestedFile = dataFile(1L, Collections.singletonList("nest.b"));
+
+        assertThat(collectWrittenColumnIds(schemas::get, dottedTopLevelFile, nestedFile))
+                .hasValue(Arrays.asList(1, 2));
     }
 
     @Test
@@ -203,30 +273,31 @@ public class DataEvolutionUtilsTest {
     @Test
     public void testCollectWrittenColumnIdsCachesSchemaAcrossProjections() {
         TableSchema schema =
-                spy(
-                        tableSchema(
-                                1L,
-                                new DataField(1, "a", DataTypes.INT()),
-                                new DataField(2, "b", DataTypes.STRING())));
+                tableSchema(
+                        1L,
+                        new DataField(1, "a", DataTypes.INT()),
+                        new DataField(2, "b", DataTypes.STRING()));
         DataFileMeta first = dataFile(1L, Collections.singletonList("a"));
         DataFileMeta second = dataFile(1L, Collections.singletonList("b"));
         DataFileMeta repeated = dataFile(1L, Collections.singletonList("a"));
-        AtomicInteger schemaLoads = new AtomicInteger();
+        AtomicInteger schemaFieldLoads = new AtomicInteger();
+        AtomicInteger nestedOptionLoads = new AtomicInteger();
 
         Optional<List<Integer>> result =
-                collectWrittenColumnIds(
+                DataEvolutionUtils.collectWrittenColumnIds(
+                        Collections.singletonList(dataSplit(first, second, repeated)),
                         ignored -> {
-                            schemaLoads.incrementAndGet();
-                            return schema;
+                            schemaFieldLoads.incrementAndGet();
+                            return schema.fields();
                         },
-                        first,
-                        second,
-                        repeated);
+                        ignored -> {
+                            nestedOptionLoads.incrementAndGet();
+                            return false;
+                        });
 
         assertThat(result.get()).containsExactly(1, 2);
-        assertThat(schemaLoads).hasValue(1);
-        verify(schema).fields();
-        verify(repeated).writeCols();
+        assertThat(schemaFieldLoads).hasValue(1);
+        assertThat(nestedOptionLoads).hasValue(1);
     }
 
     @Test
@@ -258,14 +329,38 @@ public class DataEvolutionUtilsTest {
 
         assertThat(
                         DataEvolutionUtils.fileFields(
-                                ignored -> schema,
+                                schema.fields(),
                                 dataFile(
                                         "reordered.parquet",
                                         1,
                                         Arrays.asList(
-                                                "other", SpecialFields.ROW_ID.name(), "indexed"))))
+                                                "other", SpecialFields.ROW_ID.name(), "indexed")),
+                                false))
                 .extracting(DataField::id)
                 .containsExactly(2, 1);
+    }
+
+    @Test
+    public void testFileFieldsProjectsNestedPathsOnlyWhenEnabled() {
+        DataField nested =
+                new DataField(
+                        1,
+                        "nest",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.INT()),
+                                new DataField(3, "b", DataTypes.INT())));
+        DataFileMeta file = dataFile("nested.parquet", 1, Arrays.asList("nest.b", "nest.a"));
+
+        TableSchema disabled = tableSchema(1L, Collections.emptyMap(), nested);
+        assertThat(DataEvolutionUtils.fileFields(disabled.fields(), file, false)).isEmpty();
+
+        Map<String, String> enabledOptions = new HashMap<>();
+        enabledOptions.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        TableSchema enabled = tableSchema(1L, enabledOptions, nested);
+        List<DataField> fields = DataEvolutionUtils.fileFields(enabled.fields(), file, true);
+        assertThat(fields).extracting(DataField::name).containsExactly("nest");
+        assertThat(((org.apache.paimon.types.RowType) fields.get(0).type()).getFieldNames())
+                .containsExactly("b", "a");
     }
 
     @Test
@@ -357,10 +452,21 @@ public class DataEvolutionUtilsTest {
     }
 
     private static DataFileMeta dataFile(long schemaId, java.util.List<String> writeCols) {
-        DataFileMeta file = mock(DataFileMeta.class);
-        when(file.schemaId()).thenReturn(schemaId);
-        when(file.writeCols()).thenReturn(writeCols);
-        return file;
+        return DataFileMeta.forAppend(
+                "schema-" + schemaId + ".parquet",
+                1L,
+                1L,
+                SimpleStats.EMPTY_STATS,
+                1L,
+                1L,
+                schemaId,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                0L,
+                writeCols);
     }
 
     private static DataSplit dataSplit(DataFileMeta... files) {
@@ -375,18 +481,33 @@ public class DataEvolutionUtilsTest {
 
     private static Optional<List<Integer>> collectWrittenColumnIds(
             Function<Long, TableSchema> schemaLoader, DataFileMeta... files) {
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        Function<Long, TableSchema> cachedSchemaLoader =
+                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaLoader);
         return DataEvolutionUtils.collectWrittenColumnIds(
-                Collections.singletonList(dataSplit(files)), schemaLoader);
+                Collections.singletonList(dataSplit(files)),
+                schemaId -> {
+                    TableSchema schema = cachedSchemaLoader.apply(schemaId);
+                    return schema == null ? null : schema.fields();
+                },
+                schemaId ->
+                        new CoreOptions(cachedSchemaLoader.apply(schemaId).options())
+                                .dataEvolutionNestedFieldEnabled());
     }
 
     private static TableSchema tableSchema(long id, DataField... fields) {
+        return tableSchema(id, Collections.emptyMap(), fields);
+    }
+
+    private static TableSchema tableSchema(
+            long id, Map<String, String> options, DataField... fields) {
         return TableSchema.create(
                 id,
                 new Schema(
                         Arrays.asList(fields),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.emptyMap(),
+                        options,
                         null));
     }
 }

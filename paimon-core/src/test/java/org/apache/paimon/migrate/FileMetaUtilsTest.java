@@ -26,8 +26,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -178,7 +178,7 @@ class FileMetaUtilsTest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),

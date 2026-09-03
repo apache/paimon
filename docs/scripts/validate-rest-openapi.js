@@ -237,6 +237,48 @@ function validateCatalogOpenApi() {
     'dropTable',
   ].forEach(contract.requireOperation);
 
+  const createOperation = contract.requireOperation('createPartitions');
+  const createRequestRef =
+    createOperation.requestBody.content['application/json'].schema.$ref;
+  contract.checkSpec(
+    createRequestRef === '#/components/schemas/CreatePartitionsRequest',
+    'createPartitions must use CreatePartitionsRequest',
+  );
+  contract.checkSpec(
+    !contract.operations.has('createPartitionsWithOptions'),
+    'partition options must use the existing createPartitions operation',
+  );
+  const createResponseRef =
+    createOperation.responses['200'].content['application/json'].schema.$ref;
+  contract.checkSpec(
+    createResponseRef === '#/components/schemas/CreatePartitionsResponse',
+    'createPartitions must use CreatePartitionsResponse',
+  );
+  contract.checkSpec(
+    createOperation.responses['400'] && createOperation.responses['501'],
+    'createPartitions must declare invalid and unsupported option responses',
+  );
+  const createRequestProperties = contract.requireProperties('CreatePartitionsRequest', [
+    'partitionSpecs',
+    'partitionOptions',
+  ]);
+  const requestOptions = createRequestProperties.partitionOptions;
+  contract.checkSpec(
+    Array.isArray(requestOptions.type) &&
+      requestOptions.type.includes('array') &&
+      requestOptions.type.includes('null') &&
+      requestOptions.items.type === 'object' &&
+      requestOptions.items.additionalProperties.type === 'string',
+    'CreatePartitionsRequest.partitionOptions must be a nullable array of string maps',
+  );
+  contract.checkSpec(
+    requestOptions.description.includes('partitionSpecs') &&
+      requestOptions.description.toLowerCase().includes('position') &&
+      requestOptions.description.toLowerCase().includes('same length') &&
+      requestOptions.description.toLowerCase().includes('empty object'),
+    'CreatePartitionsRequest.partitionOptions must document positional alignment and empty options',
+  );
+  contract.requireProperties('Partition', ['options']);
   contract.requireProperties('ConfigResponse', ['defaults', 'overrides']);
   contract.requireProperties('CreateDatabaseRequest', ['name', 'options']);
   contract.requireProperties('AlterDatabaseRequest', ['removals', 'updates']);

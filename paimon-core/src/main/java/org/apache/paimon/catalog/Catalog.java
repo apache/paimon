@@ -1072,35 +1072,29 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
-     * Create partitions of the specify table, with explicit existence semantics and optionally
-     * reporting statistics for them in the same call.
-     *
-     * <p>The statistics are matched to {@code partitions} by {@link PartitionStatistics#spec()}, so
-     * they may cover only some of them, and {@code replaceStatistics} says whether they replace
-     * what the catalog already holds or add to it. What decides whether they survive is whether a
-     * catalog overrides this method: one that does not registers the partitions exactly as {@link
-     * #createPartitions(Identifier, List)} does and drops the report, however much of it the
-     * catalog could have stored, and for a catalog that keeps no partitions at all that means it
-     * does nothing.
-     *
-     * @param identifier path of the table to create partitions
-     * @param partitions partitions to be created
-     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
-     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
-     * @param statistics statistics to report, or null to report none
-     * @param replaceStatistics whether the report replaces the stored values rather than adding to
-     *     them; ignored when {@code statistics} is null
-     * @throws TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if {@code ignoreIfExists} is false and the catalog does
-     *     not implement strict creation, which is what the default here does
+     * Create partitions atomically unless existing entries are ignored, with optional statistics
+     * and position-aligned options.
      */
     default void createPartitions(
             Identifier identifier,
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics)
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
+        if (partitionOptions != null) {
+            if (partitionOptions.size() != partitions.size() || partitionOptions.contains(null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must contain one non-null map per partition.");
+            }
+            if (partitionOptions.stream().anyMatch(options -> !options.isEmpty())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s does not support partition options.",
+                                getClass().getName()));
+            }
+        }
         if (!ignoreIfExists) {
             throw new UnsupportedOperationException(
                     String.format(

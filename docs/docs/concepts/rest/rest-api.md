@@ -25,6 +25,11 @@ under the License.
 The OpenAPI 3.1 document below defines the language-neutral wire contract for REST Catalog
 servers and clients. It can also be used to generate or validate SDK models in other languages.
 
+Partition options use the existing `POST .../partitions` request. `partitionOptions` follows the
+order of `partitionSpecs`; use `{}` when a partition has no options. Custom locations use the
+`path` option. Before registering custom locations, ensure that the REST server supports partition
+options and all readers support custom locations.
+
 <body>
     <iframe src="/docs/master/rest-catalog-open-api.yaml" width="100%" height="800px" />
 </body>
