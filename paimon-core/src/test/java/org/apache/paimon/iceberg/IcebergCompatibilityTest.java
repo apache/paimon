@@ -47,6 +47,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -535,7 +536,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -587,7 +588,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -637,7 +638,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -691,7 +692,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.dropColumn("w"));
 
@@ -737,7 +738,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -796,7 +797,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -839,7 +840,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -894,7 +895,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.addColumn("y", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
@@ -950,7 +951,7 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write.close();
@@ -1752,7 +1753,7 @@ public class IcebergCompatibilityTest {
         }
 
         Path tablePath = new Path(warehouse, "mydb.db/t");
-        TableSchema latest = new SchemaManager(fileIO, tablePath).latest().get();
+        TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
         Map<String, String> upgraded = new HashMap<>(latest.options());
         upgraded.put(
                 IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
@@ -1791,7 +1792,7 @@ public class IcebergCompatibilityTest {
         }
 
         table.branchManager().createBranch("b1");
-        new SchemaManager(table.fileIO(), table.location(), "b1")
+        new FileSystemSchemaManager(table.fileIO(), table.location(), "b1")
                 .commitChanges(SchemaChange.addColumn("branch_only", DataTypes.INT()));
 
         FileStoreTable branchTable = table.switchToBranch("b1");

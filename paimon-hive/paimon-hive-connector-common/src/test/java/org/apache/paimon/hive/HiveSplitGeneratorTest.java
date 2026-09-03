@@ -30,6 +30,7 @@ import org.apache.paimon.hive.utils.HiveSplitGenerator;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -207,7 +208,7 @@ public class HiveSplitGeneratorTest {
     }
 
     private FileStoreTable createFileStoreTable(TableSchema tableSchema) throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.commit(tableSchema);
 
         return new AppendOnlyFileStoreTable(

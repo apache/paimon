@@ -47,8 +47,8 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
@@ -273,7 +273,7 @@ public class MergeTreeCompactManagerTest {
         // 1) Build a minimal TestFileStore with primary key and one bucket.
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(new LocalFileIO(), new Path(tempDir.toUri())),
+                        new FileSystemSchemaManager(new LocalFileIO(), new Path(tempDir.toUri())),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),

@@ -28,9 +28,9 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.ReadBatchSizer;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -142,7 +142,7 @@ public class BinlogTableTest extends TableTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath), schemaBuilder.build());
+                        new FileSystemSchemaManager(fileIO, tablePath), schemaBuilder.build());
         FileStoreTable table =
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 

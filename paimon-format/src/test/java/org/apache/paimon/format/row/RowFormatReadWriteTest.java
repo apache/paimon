@@ -606,6 +606,58 @@ public class RowFormatReadWriteTest {
     }
 
     @Test
+    public void testInterleavedReadersDoNotShareProjectedRow() throws IOException {
+        RowType fullType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new VarCharType(100))));
+        // The projection has to drop a column: for an identical schema
+        // NestedProjectedRow.create returns null and no wrapper is involved.
+        RowType projectedType = new RowType(Arrays.asList(new DataField(0, "a", new IntType())));
+
+        Path pathA = new Path(tempDir.toUri().toString(), "interleaved_a.row");
+        Path pathB = new Path(tempDir.toUri().toString(), "interleaved_b.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+        writeRows(
+                format,
+                fullType,
+                pathA,
+                Arrays.asList(GenericRow.of(1, BinaryString.fromString("A"))));
+        writeRows(
+                format,
+                fullType,
+                pathB,
+                Arrays.asList(GenericRow.of(2, BinaryString.fromString("B"))));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(fullType, projectedType, new ArrayList<>());
+        try (FileRecordReader<InternalRow> readerA =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, pathA, fileIO.getFileSize(pathA), null, null));
+                FileRecordReader<InternalRow> readerB =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, pathB, fileIO.getFileSize(pathB), null, null))) {
+            FileRecordIterator<InternalRow> batchA = readerA.readBatch();
+            assertThat(batchA).isNotNull();
+            InternalRow rowA = batchA.next();
+            assertThat(rowA.getInt(0)).isEqualTo(1);
+
+            FileRecordIterator<InternalRow> batchB = readerB.readBatch();
+            assertThat(batchB).isNotNull();
+            InternalRow rowB = batchB.next();
+            assertThat(rowB.getInt(0)).isEqualTo(2);
+
+            // Reading from B must leave the row A handed out alone.
+            assertThat(rowA).isNotSameAs(rowB);
+            assertThat(rowA.getInt(0)).isEqualTo(1);
+        }
+    }
+
+    @Test
     public void testProjectionMultipleColumns() throws IOException {
         RowType fullType =
                 new RowType(

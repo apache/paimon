@@ -25,6 +25,7 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.ObjectStreamClass;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,6 +47,7 @@ public class FormatDataSplitTest {
         assertThat(deserialized).isEqualTo(split);
         assertThat(deserialized.files()).isEqualTo(split.files());
         assertThat(deserialized.partition()).isEqualTo(split.partition());
+        assertThat(deserialized.useCatalogContextFileIO()).isFalse();
         assertThat(deserialized.fileCount()).isEqualTo(2);
         // readSize: whole file -> fileSize (1024), range -> length (512).
         assertThat(deserialized.totalSize()).isEqualTo(1024L + 512L);
@@ -62,5 +64,29 @@ public class FormatDataSplitTest {
         assertThat(f1.offset()).isEqualTo(100L);
         assertThat(f1.length()).isEqualTo(512L);
         assertThat(f1.readSize()).isEqualTo(512L);
+    }
+
+    @Test
+    public void testCatalogContextFileIORouteSurvivesSerialization()
+            throws IOException, ClassNotFoundException {
+        FormatDataSplit split =
+                new FormatDataSplit(
+                        Arrays.asList(new FileMeta(new Path("oss://archive/data.csv"), 10L)),
+                        null,
+                        true);
+
+        FormatDataSplit deserialized =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(split), getClass().getClassLoader());
+
+        assertThat(deserialized).isEqualTo(split);
+        assertThat(deserialized.useCatalogContextFileIO()).isTrue();
+    }
+
+    @Test
+    public void testSerialVersionUIDsStayCompatible() {
+        assertThat(ObjectStreamClass.lookup(FormatDataSplit.class).getSerialVersionUID())
+                .isEqualTo(3L);
+        assertThat(ObjectStreamClass.lookup(FileMeta.class).getSerialVersionUID()).isEqualTo(1L);
     }
 }

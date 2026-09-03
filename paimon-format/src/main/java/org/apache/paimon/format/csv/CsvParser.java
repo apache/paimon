@@ -180,7 +180,8 @@ public class CsvParser {
                 row.setField(i, parseResult.getValue());
             } else if (mode == PERMISSIVE
                     && (parseResult == null || !parseResult.getLeft() || exception != null)) {
-                break;
+                // Only this field is malformed, so keep parsing the rest of the row.
+                row.setField(i, null);
             } else if (mode == DROPMALFORMED
                     && (parseResult == null || !parseResult.getLeft() || exception != null)) {
                 return null;

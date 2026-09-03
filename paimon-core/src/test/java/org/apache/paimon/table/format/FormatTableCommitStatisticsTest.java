@@ -19,6 +19,7 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
@@ -67,6 +68,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -309,9 +311,9 @@ class FormatTableCommitStatisticsTest {
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         // Red line: emptying a partition zeroes its statistics, it never unregisters it.
         verify(partitionManager, never()).dropPartitions(anyList());
-        // One catalog request for the complete specs, not one per partition.
-        verify(partitionManager).listPartitionsByNames(anyList());
-        verify(partitionManager, never()).listPartitions(any(), any());
+        // One authoritative request for the complete registry, then local selection.
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
         // Statistics route by the spec they carry, so every partition needs its own.
         assertThat(reported.statistics)
                 .extracting(PartitionStatistics::spec)
@@ -384,7 +386,7 @@ class FormatTableCommitStatisticsTest {
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         Map<String, String> prefix = Collections.singletonMap("year", "2025");
-        when(partitionManager.listPartitions(prefix, null))
+        when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Arrays.asList(
                                 partition(spec("2025", "10")), partition(spec("2025", "11"))));
@@ -474,7 +476,7 @@ class FormatTableCommitStatisticsTest {
         // A refused deletion is not a concurrent one: the rows are still readable, so reporting
         // the partition as holding nothing would hide them.
         verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean(), any());
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data.csv"))).isTrue();
     }
 
@@ -486,7 +488,7 @@ class FormatTableCommitStatisticsTest {
         registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
         doThrow(new RuntimeException("the catalog is unreachable"))
                 .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean(), any());
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
         writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
 
@@ -775,7 +777,8 @@ class FormatTableCommitStatisticsTest {
                         specs.capture(),
                         eq(true),
                         statistics.capture(),
-                        replaceStatistics.capture());
+                        replaceStatistics.capture(),
+                        isNull());
         return new Reported(
                 new ArrayList<>(specs.getValue()),
                 new ArrayList<>(statistics.getValue()),
@@ -878,7 +881,8 @@ class FormatTableCommitStatisticsTest {
                 List<Map<String, String>> partitions,
                 boolean ignoreIfExists,
                 @Nullable List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             createPartitions(partitions, ignoreIfExists);
             if (statistics == null) {
                 return;
@@ -912,12 +916,28 @@ class FormatTableCommitStatisticsTest {
         @Override
         public List<Partition> listPartitions(
                 Map<String, String> prefix, @Nullable Predicate filter) {
-            throw new UnsupportedOperationException();
+            List<Partition> found = new ArrayList<>();
+            for (Map<String, String> partitionSpec : registered) {
+                if (prefix.entrySet().stream()
+                        .allMatch(
+                                entry ->
+                                        entry.getValue()
+                                                .equals(partitionSpec.get(entry.getKey())))) {
+                    found.add(partition(partitionSpec));
+                }
+            }
+            return found;
         }
 
         @Override
         public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
-            throw new UnsupportedOperationException();
+            List<Partition> found = new ArrayList<>();
+            for (Map<String, String> partitionSpec : partitions) {
+                if (registered.contains(partitionSpec)) {
+                    found.add(partition(partitionSpec));
+                }
+            }
+            return found;
         }
 
         @Override
@@ -1014,7 +1034,7 @@ class FormatTableCommitStatisticsTest {
 
         verify(partitionManager).createPartitions(Collections.singletonList(staticPartition), true);
         verify(partitionManager, never())
-                .createPartitions(anyList(), eq(true), any(), anyBoolean());
+                .createPartitions(anyList(), eq(true), any(), anyBoolean(), any());
     }
 
     @Test
@@ -1027,6 +1047,10 @@ class FormatTableCommitStatisticsTest {
         AtomicInteger requests = new AtomicInteger();
         List<Map<String, String>> registered = new ArrayList<>();
         List<PartitionStatistics> appliedStatistics = new ArrayList<>();
+        when(catalog.listPartitionsPaged(TABLE, 1000, null, null))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+        when(catalog.listPartitionsByNames(eq(TABLE), anyList()))
+                .thenReturn(Collections.emptyList());
         doAnswer(
                         invocation -> {
                             @SuppressWarnings("unchecked")
@@ -1045,7 +1069,7 @@ class FormatTableCommitStatisticsTest {
                             return null;
                         })
                 .when(catalog)
-                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
         FormatTablePartitionManager partitionManager =
                 FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, () -> catalog);
         List<CommitMessage> messages = new ArrayList<>();
@@ -1105,7 +1129,7 @@ class FormatTableCommitStatisticsTest {
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         doThrow(new RuntimeException("catalog says 429"))
                 .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), any());
         writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
         Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
@@ -1142,7 +1166,8 @@ class FormatTableCommitStatisticsTest {
                 List<Map<String, String>> partitions,
                 boolean ignoreIfExists,
                 @Nullable List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             if (statistics == null) {
                 calls.add("registration");
                 return;
@@ -1159,12 +1184,12 @@ class FormatTableCommitStatisticsTest {
         @Override
         public List<Partition> listPartitions(
                 Map<String, String> prefix, @Nullable Predicate filter) {
-            throw new UnsupportedOperationException();
+            return Collections.emptyList();
         }
 
         @Override
         public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
-            throw new UnsupportedOperationException();
+            return Collections.emptyList();
         }
 
         @Override

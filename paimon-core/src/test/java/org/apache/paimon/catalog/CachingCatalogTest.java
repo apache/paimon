@@ -364,7 +364,7 @@ class CachingCatalogTest extends CatalogTestBase {
         when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
 
         assertThat(catalog.listPartitions(identifier)).isEmpty();
-        catalog.createPartitions(identifier, singletonList(spec), false, null, false);
+        catalog.createPartitions(identifier, singletonList(spec), false, null, false, null);
 
         assertThat(catalog.listPartitions(identifier)).containsExactly(created);
     }
@@ -383,12 +383,37 @@ class CachingCatalogTest extends CatalogTestBase {
         when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
 
         assertThat(catalog.listPartitions(identifier)).isEmpty();
-        catalog.createPartitions(identifier, singletonList(spec), true, statistics, false);
+        catalog.createPartitions(identifier, singletonList(spec), true, statistics, false, null);
 
         // Dropping the forward would leave the statistics unreported and nothing else would say so.
         Mockito.verify(wrapped)
-                .createPartitions(identifier, singletonList(spec), true, statistics, false);
+                .createPartitions(identifier, singletonList(spec), true, statistics, false, null);
         // A report changes what a partition holds, so the cached listing is stale after it.
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithOptionsForwardsAndInvalidatesPartitionCache()
+            throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), "file:/archive/dt=20260717");
+        options.put("owner", "data-platform");
+        List<Map<String, String>> partitionOptions = singletonList(options);
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(
+                identifier, singletonList(spec), true, null, false, partitionOptions);
+
+        Mockito.verify(wrapped)
+                .createPartitions(
+                        identifier, singletonList(spec), true, null, false, partitionOptions);
         assertThat(catalog.listPartitions(identifier)).containsExactly(created);
     }
 
