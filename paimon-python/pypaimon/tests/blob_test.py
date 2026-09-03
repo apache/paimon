@@ -28,7 +28,7 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
@@ -1561,6 +1561,51 @@ class BlobEndToEndTest(unittest.TestCase):
                 [b"value"], reader.read_arrow_batch().column(0).to_pylist())
         finally:
             reader.close()
+
+    def test_blob_readers_reuse_index_by_path(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-index.blob")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        self._write_single_blob(path, field, b"cached-value")
+        _BLOB_INDEX_CACHE.clear()
+        input_streams = []
+        new_input_stream = file_io.new_input_stream
+
+        def counting_input_stream(file_path):
+            stream = Mock(wraps=new_input_stream(file_path))
+            input_streams.append(stream)
+            return stream
+
+        try:
+            with patch.object(
+                    file_io,
+                    "new_input_stream",
+                    side_effect=counting_input_stream,
+            ), patch.object(
+                    DeltaVarintCompressor,
+                    "decompress",
+                    wraps=DeltaVarintCompressor.decompress,
+            ) as decompress:
+                for _ in range(2):
+                    reader = FormatBlobReader(
+                        file_io,
+                        path,
+                        [field.name],
+                        [field],
+                        None,
+                        True,
+                    )
+                    reader.close()
+
+                self.assertEqual(1, decompress.call_count)
+                self.assertEqual(
+                    [2, 0],
+                    [stream.read.call_count for stream in input_streams],
+                )
+        finally:
+            _BLOB_INDEX_CACHE.clear()
 
     def test_blob_reader_falls_back_to_file_size_lookup(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))

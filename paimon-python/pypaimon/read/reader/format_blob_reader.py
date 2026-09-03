@@ -16,10 +16,12 @@
 # under the License.
 
 import struct
+from threading import Lock
 from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
 import pyarrow.dataset as ds
+from cachetools import LRUCache
 from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
@@ -41,6 +43,24 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+
+
+_BLOB_INDEX_CACHE = LRUCache(maxsize=16)
+_BLOB_INDEX_CACHE_LOCK = Lock()
+
+
+def _decode_blob_index(index_bytes):
+    """Decode BLOB lengths and their relative file offsets."""
+    blob_lengths = tuple(DeltaVarintCompressor.decompress(index_bytes))
+    blob_offsets = []
+    offset = 0
+    for length in blob_lengths:
+        if length < 0:
+            blob_offsets.append(-1)
+        else:
+            blob_offsets.append(offset)
+            offset += length
+    return blob_lengths, tuple(blob_offsets)
 
 
 class FormatBlobReader(RecordBatchReader):
@@ -350,6 +370,14 @@ class FormatBlobReader(RecordBatchReader):
             )
             return
 
+        with _BLOB_INDEX_CACHE_LOCK:
+            cached_index = _BLOB_INDEX_CACHE.get(self.file_path)
+        if cached_index is not None:
+            blob_lengths, blob_offsets = cached_index
+            self.blob_lengths = list(blob_lengths)
+            self.blob_offsets = list(blob_offsets)
+            return
+
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -373,18 +401,11 @@ class FormatBlobReader(RecordBatchReader):
         if len(index_bytes) != index_length:
             raise IOError("Invalid blob file: cannot read index")
 
-        # Decompress blob lengths and compute offsets
-        blob_lengths = DeltaVarintCompressor.decompress(index_bytes)
-        blob_offsets = []
-        offset = 0
-        for length in blob_lengths:
-            if length < 0:
-                blob_offsets.append(-1)
-            else:
-                blob_offsets.append(offset)
-                offset += length
-        self.blob_lengths = blob_lengths
-        self.blob_offsets = blob_offsets
+        blob_lengths, blob_offsets = _decode_blob_index(index_bytes)
+        with _BLOB_INDEX_CACHE_LOCK:
+            _BLOB_INDEX_CACHE[self.file_path] = blob_lengths, blob_offsets
+        self.blob_lengths = list(blob_lengths)
+        self.blob_offsets = list(blob_offsets)
 
     def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
         if row_indices is None:
