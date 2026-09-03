@@ -85,6 +85,13 @@ class TableWrite:
                     sub_table = pa.compute.take(data, row_indices)
             self._write_partition_bucket_batch(partition, bucket, sub_table)
 
+    def begin_video_episode(self, row_count: int):
+        """Keep the next video Episode within one aligned normal file."""
+        if isinstance(row_count, bool) or not isinstance(row_count, int) \
+                or row_count <= 0:
+            raise ValueError("Video Episode row count must be a positive integer.")
+        self.file_store_write.begin_video_episode(row_count)
+
     def _write_partition_bucket_batch(self, partition, bucket, data):
         self.file_store_write.write(partition, bucket, data)
 
@@ -224,6 +231,15 @@ class TableWrite:
                 "with_blob_consumer must be called before any write operation."
             )
         self.file_store_write.blob_consumer = blob_consumer
+        return self
+
+    def with_blob_uri_reader_factory(self, uri_reader_factory):
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "with_blob_uri_reader_factory must be called before any "
+                "write operation."
+            )
+        self.file_store_write.blob_uri_reader_factory = uri_reader_factory
         return self
 
     def write_ray(

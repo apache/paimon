@@ -36,15 +36,40 @@ class VectorWriter(AppendOnlyDataWriter):
     """
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int,
-                 vector_columns: List[str], vector_file_format: str, options: CoreOptions = None):
+                 vector_columns: List[str], vector_file_format: str,
+                 options: CoreOptions = None,
+                 rolling_managed_by_parent: bool = False):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols=vector_columns)
         self.vector_columns = vector_columns
         self.vector_file_format = vector_file_format
         self.file_format = vector_file_format
         self.target_file_size = options.vector_target_file_size()
+        # Video tables close normal and sidecar files at one Episode boundary.
+        self.rolling_managed_by_parent = rolling_managed_by_parent
         self.file_uuid = str(uuid.uuid4())
         self.file_count = 0
+
+    def _check_and_roll_if_needed(self):
+        if not self.rolling_managed_by_parent:
+            super()._check_and_roll_if_needed()
+
+    def rolling_file(self) -> bool:
+        return (
+            self._buffer.num_rows >= self.target_file_row_num
+            or self._buffer.nbytes > self.target_file_size
+        )
+
+    def should_roll_before_video_episode(self, row_count: int) -> bool:
+        return (
+            self.rolling_managed_by_parent
+            and self._buffer.num_rows > 0
+            and (
+                self.rolling_file()
+                or self._buffer.num_rows + row_count
+                > self.target_file_row_num
+            )
+        )
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
