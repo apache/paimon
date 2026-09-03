@@ -43,8 +43,7 @@ public class SparkCatalogOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, creating table in default database is not allowed "
-                                    + "and the default database will not be automatically created during catalog initialization.");
+                            "If true, creating table in default database is not allowed. Default is false.");
 
     public static final ConfigOption<Boolean> V1FUNCTION_ENABLED =
             key("v1Function.enabled")
