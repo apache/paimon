@@ -683,6 +683,28 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     Assertions.assertTrue(qe1.optimizedPlan.containsPattern(LIMIT))
   }
 
+  test("Paimon pushDown: TopN for append-only tables after dropping a column") {
+    assume(gteqSpark3_3)
+    spark.sql("""
+                |CREATE TABLE T (pt INT, dropped INT, id INT, price BIGINT) PARTITIONED BY (pt)
+                |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
+                |""".stripMargin)
+    spark.sql("INSERT INTO T VALUES (1, 0, 10, 100L), (2, 0, 20, 200L), (3, 0, 30, 300L)")
+    spark.sql("INSERT INTO T VALUES (4, 0, 40, 400L), (5, 0, 50, 500L)")
+    spark.sql("INSERT INTO T VALUES (6, 0, 60, 600L), (7, 0, 70, 700L)")
+
+    // dropping a column does not reassign the remaining field ids, so from here on the field id
+    // and the field index of id and price no longer agree
+    spark.sql("ALTER TABLE T DROP COLUMN dropped")
+
+    checkAnswer(
+      spark.sql("SELECT id FROM T ORDER BY id ASC LIMIT 5"),
+      Row(10) :: Row(20) :: Row(30) :: Row(40) :: Row(50) :: Nil)
+    checkAnswer(
+      spark.sql("SELECT price FROM T ORDER BY price DESC LIMIT 3"),
+      Row(700L) :: Row(600L) :: Row(500L) :: Nil)
+  }
+
   test("Paimon pushDown: multi TopN for append-only tables") {
     assume(gteqSpark3_3)
     spark.sql("""
