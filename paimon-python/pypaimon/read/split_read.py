@@ -407,7 +407,7 @@ class SplitRead(ABC):
                 row_full_fields = self._create_key_value_fields(
                     file_schema.fields)
             else:
-                row_full_fields = file_schema.fields
+                row_full_fields = file_schema.data_file_fields(None)
             format_reader = FormatRowReader(
                 self.table.file_io, file_path, read_file_fields,
                 row_full_fields,
@@ -1363,7 +1363,10 @@ class DataEvolutionSplitRead(SplitRead):
                 # the file's schema version, not the current table schema.
                 # The file only contains columns from when it was written.
                 file_schema = self._resolve_schema(first_file.schema_id)
-                field_ids = [field.id for field in file_schema.fields]
+                field_ids = [
+                    field.id
+                    for field in file_schema.data_file_fields(None)
+                ]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
 

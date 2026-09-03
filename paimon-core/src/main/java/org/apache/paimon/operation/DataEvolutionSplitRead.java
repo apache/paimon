@@ -324,7 +324,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         List<RowType> bunchAvailTypes = new ArrayList<>(numBunches);
         for (int i = 0; i < numBunches; i++) {
             DataFileMeta first = fieldsFiles.get(i).files().get(0);
-            bunchDataSchemas[i] = schemaFetcher.apply(first.schemaId()).project(first.writeCols());
+            bunchDataSchemas[i] =
+                    schemaFetcher.apply(first.schemaId()).dataFileSchema(first.writeCols());
             bunchAvailTypes.add(rowTypeWithRowTracking(bunchDataSchemas[i].logicalRowType()));
         }
         DataEvolutionReadPlanner.DataEvolutionReadPlan plan =
@@ -724,7 +725,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 continue;
             }
 
-            TableSchema dataSchema = schemaFetcher.apply(file.schemaId()).project(file.writeCols());
+            TableSchema dataSchema =
+                    schemaFetcher.apply(file.schemaId()).dataFileSchema(file.writeCols());
             // columns this file wrote but a newer file already won: their values here are stale
             Set<String> overwrittenCols = new HashSet<>();
             for (DataField field : dataSchema.fields()) {
@@ -777,7 +779,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         Set<Integer> fileFieldIds = new HashSet<>();
         for (DataField field :
-                schemaFetcher.apply(file.schemaId()).project(file.writeCols()).fields()) {
+                schemaFetcher.apply(file.schemaId()).dataFileSchema(file.writeCols()).fields()) {
             fileFieldIds.add(field.id());
         }
         Set<String> written = new HashSet<>();

@@ -2521,6 +2521,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED =
+            key("data-evolution.write-cols-optimization.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to omit write columns from data file metadata when a data "
+                                    + "evolution file contains all non-dedicated columns. Readers "
+                                    + "always support the omitted metadata, but writing it is "
+                                    + "disabled by default for compatibility with older readers.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_NESTED_FIELD_ENABLED =
             key("data-evolution.nested-field.enabled")
                     .booleanType()
@@ -4405,6 +4415,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionWriteColsOptimizationEnabled() {
+        return options.get(DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED);
     }
 
     public boolean dataEvolutionNestedFieldEnabled() {

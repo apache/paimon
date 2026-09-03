@@ -143,10 +143,10 @@ class ManifestFileManager:
 
             schema_id = file_dict['_SCHEMA_ID']
             if schema_id == self.table.table_schema.id:
-                schema_fields = self.table.table_schema.fields
+                file_schema = self.table.table_schema
             else:
-                schema_fields = self.table.schema_manager.get_schema(schema_id).fields
-            fields = self._get_value_stats_fields(file_dict, schema_fields)
+                file_schema = self.table.schema_manager.get_schema(schema_id)
+            fields = self._get_value_stats_fields(file_dict, file_schema)
             value_dict = dict(file_dict['_VALUE_STATS'])
             value_stats = SimpleStats(
                 min_values=BinaryRow(value_dict['_MIN_VALUES'], fields),
@@ -208,11 +208,23 @@ class ManifestFileManager:
             entries.append(entry)
         return entries
 
-    def _get_value_stats_fields(self, file_dict: dict, schema_fields: list) -> List:
+    def _get_value_stats_fields(self, file_dict: dict, file_schema) -> List:
+        # Keep accepting a field list for the focused unit tests and older
+        # internal callers. Manifest reads pass TableSchema so compact
+        # write-column metadata can be resolved from the historical schema.
+        schema_fields = (
+            file_schema.fields
+            if hasattr(file_schema, 'fields')
+            else file_schema
+        )
         if file_dict['_VALUE_STATS_COLS'] is None:
             if '_WRITE_COLS' in file_dict:
                 if file_dict['_WRITE_COLS'] is None:
-                    fields = schema_fields
+                    fields = (
+                        file_schema.data_file_fields(None)
+                        if hasattr(file_schema, 'data_file_fields')
+                        else schema_fields
+                    )
                 else:
                     read_fields = file_dict['_WRITE_COLS']
                     # writeCols may contain metadata fields (e.g. _ROW_ID, _SEQUENCE_NUMBER)

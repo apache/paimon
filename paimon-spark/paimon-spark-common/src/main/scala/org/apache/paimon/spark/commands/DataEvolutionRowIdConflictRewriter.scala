@@ -23,12 +23,13 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{DataFileMeta, DataIncrement}
 import org.apache.paimon.operation.commit.RowIdExistenceConflictException
+import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.{ExceptionUtils, Range, RetryWaiter}
+import org.apache.paimon.utils.{DataEvolutionUtils, ExceptionUtils, Range, RetryWaiter}
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
+import scala.collection.mutable
 
 /** Rebase staged partial-column files onto current row-id file boundaries. */
 private[spark] class DataEvolutionRowIdConflictRewriter(
@@ -51,6 +53,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
   import DataEvolutionRowIdConflictRewriter._
 
   private val partialColumns = new DataEvolutionPartialColumns(table)
+  private val fileSchemaCache = mutable.HashMap.empty[Long, TableSchema]
 
   def rewrite(
       sparkSession: SparkSession,
@@ -109,7 +112,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     }
 
     val rewrittenMessages = candidates
-      .groupBy(staged => staged.file.writeCols().asScala.toSeq)
+      .groupBy(staged => partialFileWriteCols(staged.file).get)
       .toSeq
       .flatMap {
         case (columnNames, files) =>
@@ -226,6 +229,22 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
       })
   }
 
+  private def isRewriteCandidate(file: DataFileMeta, nextRowId: Long): Boolean = {
+    isNormalRowIdFile(file) &&
+    file.firstRowId() < nextRowId &&
+    partialFileWriteCols(file).exists(
+      columns => columns.nonEmpty && columns.forall(column => !SpecialFields.isSystemField(column)))
+  }
+
+  private def partialFileWriteCols(file: DataFileMeta): Option[Seq[String]] = {
+    val fileSchema = fileSchemaCache.getOrElseUpdate(
+      file.schemaId(),
+      if (file.schemaId() == table.schema().id()) table.schema()
+      else table.schemaManager().schema(file.schemaId()))
+    val columns = DataEvolutionUtils.partialFileWriteCols(fileSchema, file)
+    if (columns.isPresent) Some(columns.get().asScala.toSeq) else None
+  }
+
   private def withoutCandidates(
       message: CommitMessageImpl,
       candidates: Set[FileKey]): Option[CommitMessage] = {
@@ -267,14 +286,6 @@ private[spark] object DataEvolutionRowIdConflictRewriter {
   private case class RangeKey(partition: BinaryRow, bucket: Int, firstRowId: Long, rowCount: Long)
 
   case class RewriteResult(commitMessages: Seq[CommitMessage], rewrittenFileCount: Int)
-
-  private def isRewriteCandidate(file: DataFileMeta, nextRowId: Long): Boolean = {
-    isNormalRowIdFile(file) &&
-    file.firstRowId() < nextRowId &&
-    Option(file.writeCols()).exists(
-      columns =>
-        !columns.isEmpty && columns.asScala.forall(column => !SpecialFields.isSystemField(column)))
-  }
 
   private def isNormalRowIdFile(file: DataFileMeta): Boolean = {
     file.firstRowId() != null && !isDedicatedFile(file)

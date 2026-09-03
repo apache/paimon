@@ -25,6 +25,7 @@ from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit.conflict_detection import (
     ConflictDetection,
@@ -510,6 +511,44 @@ class TestRowIdColumnConflictChecker(unittest.TestCase):
         committed = _make_file("c1", row_count=100, first_row_id=0,
                                write_cols=["col_b"])
         self.assertTrue(checker.conflicts_with(committed))
+
+    def test_null_write_cols_excludes_dedicated_fields(self):
+        schema = TableSchema(
+            id=1,
+            fields=[
+                DataField(1, "value", AtomicType("INT")),
+                DataField(2, "blob", AtomicType("BLOB")),
+            ],
+            highest_field_id=2,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'data-evolution.write-cols-optimization.enabled': 'true',
+            },
+        )
+        checker = self._make_checker([
+            _make_file(
+                "normal.parquet",
+                row_count=100,
+                first_row_id=0,
+                schema_id=1,
+                write_cols=None,
+            ),
+        ], schema)
+        self.assertFalse(checker.conflicts_with(_make_file(
+            "blob.blob",
+            row_count=100,
+            first_row_id=0,
+            schema_id=1,
+            write_cols=["blob"],
+        )))
+        self.assertTrue(checker.conflicts_with(_make_file(
+            "value.parquet",
+            row_count=100,
+            first_row_id=0,
+            schema_id=1,
+            write_cols=["value"],
+        )))
 
     def test_no_conflict_committed_file_no_row_id(self):
         delta_files = [

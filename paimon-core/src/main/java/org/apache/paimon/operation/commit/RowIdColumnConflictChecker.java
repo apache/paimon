@@ -183,9 +183,10 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
     private boolean containsAnyWriteField(Set<Integer> fieldIds, DataFileMeta file) {
         List<String> writeCols = file.writeCols();
-        // If write cols == null, it's a full-schema write
         if (writeCols == null) {
-            return true;
+            Set<Integer> nullWriteFieldIds = new HashSet<>();
+            fieldIdResolver.addAllFieldIds(file.schemaId(), nullWriteFieldIds);
+            return !Collections.disjoint(fieldIds, nullWriteFieldIds);
         }
 
         for (String writeCol : writeCols) {
@@ -239,6 +240,7 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
         private final SchemaManager schemaManager;
         private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
+        private final Map<Long, List<Integer>> allFieldIdsCache = new HashMap<>();
 
         private TopLevelFieldIdResolver(SchemaManager schemaManager) {
             this.schemaManager = schemaManager;
@@ -246,7 +248,13 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
         @Override
         public void addAllFieldIds(long schemaId, Set<Integer> fieldIds) {
-            fieldIds.addAll(fieldIdByName(schemaId).values());
+            fieldIds.addAll(
+                    allFieldIdsCache.computeIfAbsent(
+                            schemaId,
+                            id ->
+                                    schemaManager.schema(id).dataFileSchema(null).fields().stream()
+                                            .map(DataField::id)
+                                            .collect(Collectors.toList())));
         }
 
         @Override
@@ -271,6 +279,7 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
         private final SchemaManager schemaManager;
         private final Map<Long, RowType> rowTypeCache = new HashMap<>();
+        private final Map<Long, List<Integer>> allFieldIdsCache = new HashMap<>();
 
         private NestedFieldIdResolver(SchemaManager schemaManager) {
             this.schemaManager = schemaManager;
@@ -278,9 +287,16 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
         @Override
         public void addAllFieldIds(long schemaId, Set<Integer> fieldIds) {
-            // A full-schema write touches every leaf field when nested data evolution is in use, so
-            // it conflicts with any partial sub-field write.
-            collectLeafIds(rowType(schemaId).getFields(), fieldIds);
+            fieldIds.addAll(
+                    allFieldIdsCache.computeIfAbsent(
+                            schemaId,
+                            id -> {
+                                List<Integer> ids = new ArrayList<>();
+                                collectLeafIds(
+                                        schemaManager.schema(id).dataFileSchema(null).fields(),
+                                        ids);
+                                return ids;
+                            }));
         }
 
         @Override

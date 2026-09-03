@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
@@ -31,7 +32,7 @@ import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.types.{RowType => PaimonRowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.{Range, RowRangeIndex}
+import org.apache.paimon.utils.{DataEvolutionUtils, Range, RowRangeIndex}
 
 import org.apache.spark.sql.{functions, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -56,6 +57,7 @@ class DataEvolutionCompactMergeConflictRewriter(
 
   private val partialColumns = new DataEvolutionPartialColumns(table)
   private val nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled()
+  private val fileSchemaCache = mutable.HashMap.empty[Long, TableSchema]
 
   def rewrite(
       sparkSession: SparkSession,
@@ -128,7 +130,8 @@ class DataEvolutionCompactMergeConflictRewriter(
           // write columns may be dotted sub-field paths (e.g. "nest.a"), so they cannot be matched
           // against top-level field names; collect their union instead, ordered by the schema.
           val updatedFields =
-            updatedWritePaths(files.flatMap(_.file.writeCols().asScala).distinct.toSet)
+            updatedWritePaths(
+              files.flatMap(file => partialFileWriteCols(file.file).get).distinct.toSet)
           if (updatedFields.isEmpty) {
             return JOptional.empty()
           }
@@ -351,6 +354,22 @@ class DataEvolutionCompactMergeConflictRewriter(
     }
   }
 
+  private def isRegularPartialFile(file: DataFileMeta): Boolean = {
+    isNormalRowIdFile(file) &&
+    file.fileSource().orElse(null) == FileSource.APPEND &&
+    partialFileWriteCols(file).exists(
+      columns => columns.nonEmpty && columns.forall(column => !SpecialFields.isSystemField(column)))
+  }
+
+  private def partialFileWriteCols(file: DataFileMeta): Option[Seq[String]] = {
+    val fileSchema = fileSchemaCache.getOrElseUpdate(
+      file.schemaId(),
+      if (file.schemaId() == table.schema().id()) table.schema()
+      else table.schemaManager().schema(file.schemaId()))
+    val columns = DataEvolutionUtils.partialFileWriteCols(fileSchema, file)
+    if (columns.isPresent) Some(columns.get().asScala.toSeq) else None
+  }
+
 }
 
 private object DataEvolutionCompactMergeConflictRewriter {
@@ -457,14 +476,6 @@ private object DataEvolutionCompactMergeConflictRewriter {
 
   private def isNormalRowIdFile(file: DataFileMeta): Boolean = {
     file.firstRowId() != null && !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())
-  }
-
-  private def isRegularPartialFile(file: DataFileMeta): Boolean = {
-    isNormalRowIdFile(file) &&
-    file.fileSource().orElse(null) == FileSource.APPEND &&
-    file.writeCols() != null &&
-    !file.writeCols().isEmpty &&
-    file.writeCols().asScala.forall(column => !SpecialFields.isSystemField(column))
   }
 
   private def quotedColumn(name: String) = {

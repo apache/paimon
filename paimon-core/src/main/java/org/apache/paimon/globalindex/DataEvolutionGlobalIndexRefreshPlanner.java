@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
@@ -254,10 +253,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                         Pair.of(file.schemaId(), file.writeCols()),
                         key -> {
                             TableSchema fileSchema = schemaLoader.apply(file.schemaId());
-                            boolean nestedFieldEnabled =
-                                    new CoreOptions(fileSchema.options())
-                                            .dataEvolutionNestedFieldEnabled();
-                            return fileFields(fileSchema.fields(), file, nestedFieldEnabled);
+                            return fileFields(fileSchema, file);
                         });
         long[] columnSequences = file.columnMaxSequenceNumbers();
         long indexedMaxSequence = Long.MIN_VALUE;
