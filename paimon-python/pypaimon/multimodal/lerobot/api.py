@@ -28,7 +28,6 @@ from pypaimon.multimodal.lerobot.metadata import (
     _prepare_metadata_tables,
     _positive_integer,
     _publish_dataset,
-    _reserve_dataset_version,
     _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.loader import _write_dataset
@@ -132,11 +131,6 @@ def _import_dataset(
     tables = _prepare_metadata_tables(
         connection, table.raw_table, metadata)
     version_id = 1
-    _reserve_dataset_version(
-        tables["versions"],
-        version_id,
-        metadata,
-    )
     episodes_snapshot_id = _append_arrow_tables(
         tables["episodes"],
         _validated_episode_tables(metadata),

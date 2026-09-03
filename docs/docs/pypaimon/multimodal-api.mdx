@@ -620,9 +620,9 @@ repository. It derives the schema from `meta/info.json`, writes one row per
 frame, and creates a LeRobot dataset backed by the frame table,
 `<table>__versions`, `<table>__episodes`, `<table>__tasks`, and an optional
 `<table>__subtasks`. Task text remains in the metadata table; frames retain
-`task_index`. A manifest row is reserved as `PENDING` and marked `READY` after
-all components are committed and tagged with the same numeric `version_id`.
-Readers ignore `PENDING`.
+`task_index`. After all components are committed and tagged with the same
+numeric `version_id`, one row is appended to `<table>__versions` to publish the
+version.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -652,8 +652,10 @@ version_id = conn.load_from_lerobot(
 )
 ```
 
-A READY row in `<table>__versions` identifies a release; reading the same tag
-from its component tables reconstructs that release.
+A row in `<table>__versions` identifies a published release. Readers must first
+resolve that row, then read every required component through its matching tag;
+a missing tag is an error and must not fall back to the latest snapshot.
+The component tags are immutable and must be retained or deleted together.
 The one-time importer requires a new target table.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested

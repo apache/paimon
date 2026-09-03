@@ -50,7 +50,6 @@ _COMPANION_OPTION_KEYS = {
 
 _VERSIONS_SCHEMA = pa.schema([
     pa.field(_VERSION_ID, pa.int64(), nullable=False),
-    pa.field("status", pa.string(), nullable=False),
     pa.field("info_json", pa.string(), nullable=False),
     pa.field("stats_json", pa.string()),
     pa.field("has_subtasks", pa.bool_(), nullable=False),
@@ -244,18 +243,6 @@ def _restore_pandas_metadata(table, data):
     return data.replace_schema_metadata(metadata)
 
 
-def _reserve_dataset_version(
-        versions_table,
-        version_id,
-        metadata):
-    pending = _manifest_row(version_id, "PENDING", metadata)
-    snapshot_id = _append_arrow(
-        versions_table,
-        pa.Table.from_pylist([pending], schema=_VERSIONS_SCHEMA),
-    )
-    _require_initial_snapshot("versions", snapshot_id)
-
-
 def _publish_dataset(
         connection,
         tables,
@@ -284,7 +271,7 @@ def _publish_dataset(
     for identifier, snapshot_id in component_snapshots:
         _create_tag(connection.catalog, identifier, tag, snapshot_id)
 
-    manifest = _manifest_row(version_id, "READY", metadata)
+    manifest = _manifest_row(version_id, metadata)
     _append_arrow(tables["versions"], pa.Table.from_pylist(
         [manifest], schema=_VERSIONS_SCHEMA))
 
@@ -302,11 +289,9 @@ def _require_initial_snapshot(component, snapshot_id):
 
 def _manifest_row(
         version_id,
-        status,
         metadata):
     return {
         _VERSION_ID: version_id,
-        "status": status,
         "info_json": metadata["info_json"],
         "stats_json": metadata["stats_json"],
         "has_subtasks": metadata["subtasks_table"] is not None,
