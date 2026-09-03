@@ -1438,6 +1438,38 @@ class LeRobotImportTest(unittest.TestCase):
             "failed_publish", self.image_source)
         self.assertEqual(1, version_id)
 
+    def test_lost_commit_response_does_not_fail_import(self):
+        from pypaimon.snapshot.renaming_snapshot_commit import (
+            RenamingSnapshotCommit,
+        )
+
+        real_commit = RenamingSnapshotCommit.commit
+        lost = [False]
+
+        def commit_then_lose_response(
+                snapshot_commit, base_snapshot_uuid, snapshot, statistics):
+            result = real_commit(
+                snapshot_commit, base_snapshot_uuid, snapshot, statistics)
+            if result and not lost[0]:
+                lost[0] = True
+                raise TimeoutError("lost snapshot commit response")
+            return result
+
+        with patch.object(
+                RenamingSnapshotCommit,
+                "commit",
+                new=commit_then_lose_response):
+            version_id = self.connection.load_from_lerobot(
+                "lost_commit_response", self.image_source)
+
+        self.assertTrue(lost[0])
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            ["PENDING", "READY"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "lost_commit_response__versions")],
+        )
+
     def test_stale_companion_does_not_block_retry(self):
         self.connection.load_from_lerobot(
             "other_group", self.image_source)

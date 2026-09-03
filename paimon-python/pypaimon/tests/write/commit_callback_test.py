@@ -115,6 +115,51 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_callback_invoked_after_lost_commit_response(self):
+        table = self._create_table(
+            'test_callback_response_loss',
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        callback = RecordingCallback()
+        table_commit.add_commit_callback(callback)
+        real_commit = table_commit.file_store_commit.snapshot_commit.commit
+        attempts = []
+
+        def commit_then_lose_response(base_snapshot_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            self.assertTrue(real_commit(
+                base_snapshot_uuid, snapshot, statistics))
+            raise TimeoutError('lost snapshot commit response')
+
+        table_commit.file_store_commit.snapshot_commit.commit = (
+            commit_then_lose_response)
+        table_commit.file_store_commit._commit_retry_wait = lambda _: None
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+            'dt': ['p1', 'p1'],
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+
+        self.assertEqual([1], attempts)
+        self.assertEqual(1, len(callback.contexts))
+        self.assertEqual(1, callback.contexts[0].snapshot.id)
+        self.assertGreater(len(callback.contexts[0].commit_entries), 0)
+        for entry in callback.contexts[0].commit_entries:
+            self.assertIsNotNone(entry.file.first_row_id)
+
+        table_write.close()
+        table_commit.close()
+
     def test_multiple_callbacks(self):
         table = self._create_table('test_multi_callbacks')
         write_builder = table.new_batch_write_builder()
