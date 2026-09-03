@@ -131,10 +131,9 @@ both representations without a read option. Before enabling it, upgrade every
 reader and maintenance job that accesses the table to a version that supports
 the compact representation, because older readers interpret a missing
 `writeCols` value as all table columns. Persist the option with `ALTER TABLE` (or
-set it when creating the table); enabling it only as a dynamic job option is
-rejected because data files must reference a schema version which records the
-compact representation. Before rolling readers back to an older version,
-rewrite files produced with this option or keep those readers upgraded.
+set it when creating the table) so that file schema versions record the compact
+representation. Before rolling readers back to an older version, rewrite files
+produced with this option or keep those readers upgraded.
 
 ## Partial Updates
 

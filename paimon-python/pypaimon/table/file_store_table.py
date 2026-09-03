@@ -525,63 +525,6 @@ class FileStoreTable(Table):
             else:
                 new_options[k] = v
 
-        optimization_key = (
-            CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key()
-        )
-        layout_keys = {
-            CoreOptions.VECTOR_FILE_FORMAT.key(),
-            CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
-            CoreOptions.BLOB_VIEW_FIELD.key(),
-        }
-        current_optimization = (
-            self.options.data_evolution_write_cols_optimization_enabled(False)
-        )
-        if (
-            current_optimization
-            or optimization_key in options
-            or any(key in options for key in layout_keys)
-        ):
-            persisted_schema = self.schema_manager.get_schema(
-                self.table_schema.id
-            )
-            if persisted_schema is None:
-                raise ValueError(
-                    f"Schema {self.table_schema.id} not found"
-                )
-            persisted_options = CoreOptions.from_dict(
-                persisted_schema.options
-            )
-            effective_options = CoreOptions.from_dict(new_options)
-            persisted_optimization = (
-                persisted_options
-                .data_evolution_write_cols_optimization_enabled(False)
-            )
-            effective_optimization = (
-                effective_options
-                .data_evolution_write_cols_optimization_enabled(False)
-            )
-            if effective_optimization != persisted_optimization:
-                raise ValueError(
-                    "Dynamic option '{}' cannot differ from its persisted "
-                    "value; persist it with ALTER TABLE first."
-                    .format(optimization_key)
-                )
-            if persisted_optimization and (
-                effective_options.data_evolution_enabled(False)
-                != persisted_options.data_evolution_enabled(False)
-                or effective_options.with_vector_format()
-                != persisted_options.with_vector_format()
-                or effective_options.blob_descriptor_fields()
-                != persisted_options.blob_descriptor_fields()
-                or effective_options.blob_view_fields()
-                != persisted_options.blob_view_fields()
-            ):
-                raise ValueError(
-                    "Data-evolution or dedicated-file layout cannot be "
-                    "changed dynamically while '{}=true'."
-                    .format(optimization_key)
-                )
-
         new_table_schema = self.table_schema.copy(new_options=new_options)
 
         if resolve_time_travel:

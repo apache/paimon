@@ -154,12 +154,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.catalog.create_table(
             'test_db.optimized_write_cols', schema, False)
         table = self.catalog.get_table('test_db.optimized_write_cols')
-        with self.assertRaisesRegex(ValueError, 'persist it with ALTER TABLE'):
-            table.copy({
-                'data-evolution.write-cols-optimization.enabled': 'false',
-            })
-        with self.assertRaisesRegex(ValueError, 'cannot be changed dynamically'):
-            table.copy({'data-evolution.enabled': 'false'})
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
@@ -238,28 +232,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual([2], result.column('id').to_pylist())
         self.assertEqual(['Bob'], result.column('name').to_pylist())
         self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
-
-    def test_reject_dynamic_write_cols_optimization_enablement(self):
-        pa_schema = pa.schema([
-            ('id', pa.int32()),
-            ('blob_data', pa.large_binary()),
-        ])
-        schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            options={
-                'row-tracking.enabled': 'true',
-                'data-evolution.enabled': 'true',
-            },
-        )
-        self.catalog.create_table(
-            'test_db.dynamic_optimized_write_cols', schema, False)
-        table = self.catalog.get_table(
-            'test_db.dynamic_optimized_write_cols')
-
-        with self.assertRaisesRegex(ValueError, 'persist it with ALTER TABLE'):
-            table.copy({
-                'data-evolution.write-cols-optimization.enabled': 'true',
-            })
 
     def test_split_data_with_pyarrow_6_record_batch_api(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter

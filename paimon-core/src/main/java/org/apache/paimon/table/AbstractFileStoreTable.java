@@ -323,7 +323,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private void checkImmutability(Map<String, String> dynamicOptions) {
-        checkWriteColsOptimizationDynamicOptions(dynamicOptions);
         Map<String, String> oldOptions = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
@@ -335,52 +334,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });
-    }
-
-    private void checkWriteColsOptimizationDynamicOptions(Map<String, String> dynamicOptions) {
-        String optimizationKey = CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key();
-        String vectorFormatKey = CoreOptions.VECTOR_FILE_FORMAT.key();
-        CoreOptions currentOptions = new CoreOptions(tableSchema.options());
-        if (!currentOptions.dataEvolutionWriteColsOptimizationEnabled()
-                && !Boolean.parseBoolean(dynamicOptions.get(optimizationKey))
-                && !dynamicOptions.containsKey(vectorFormatKey)) {
-            return;
-        }
-
-        SchemaManager schemaManager = schemaManager();
-        // Table validation also creates a temporary table instance before schema-0 is committed.
-        // There are no dynamic options to compare with persisted options in that case.
-        if (!schemaManager.schemaExists(tableSchema.id())) {
-            return;
-        }
-
-        TableSchema persistedSchema = schemaManager.schema(tableSchema.id());
-        CoreOptions persistedOptions = new CoreOptions(persistedSchema.options());
-        Map<String, String> effectiveOptions = new HashMap<>(tableSchema.options());
-        dynamicOptions.forEach(
-                (key, value) -> {
-                    if (value == null) {
-                        effectiveOptions.remove(key);
-                    } else {
-                        effectiveOptions.put(key, value);
-                    }
-                });
-        CoreOptions effectiveCoreOptions = CoreOptions.fromMap(effectiveOptions);
-
-        if (effectiveCoreOptions.dataEvolutionWriteColsOptimizationEnabled()
-                != persistedOptions.dataEvolutionWriteColsOptimizationEnabled()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Dynamic option '%s' cannot differ from its persisted value; persist it with ALTER TABLE first.",
-                            optimizationKey));
-        }
-        if (persistedOptions.dataEvolutionWriteColsOptimizationEnabled()
-                && effectiveCoreOptions.withVectorFormat() != persistedOptions.withVectorFormat()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Cannot dynamically add or remove '%s' while '%s=true'.",
-                            vectorFormatKey, optimizationKey));
-        }
     }
 
     protected FileStoreTable copyInternal(
