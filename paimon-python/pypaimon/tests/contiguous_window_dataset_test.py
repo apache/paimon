@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
 import pickle
 import shutil
@@ -26,8 +27,11 @@ import pyarrow as pa
 import torch
 
 import pypaimon.multimodal as pmm
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+from pypaimon.multimodal import window_dataset
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+from pypaimon.read.table_scan import TableScan
 
 
 _TABLE_OPTIONS = {
@@ -132,8 +136,9 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
 
     def test_reads_blob_payloads_only_when_a_window_is_requested(self):
         table = self._table()
-        original = ScanQuery._fetch_bodies
-        with patch.object(ScanQuery, "_fetch_bodies", side_effect=original) as fetch:
+        with patch(
+                "pypaimon.multimodal.window_dataset.fetch_blob_bodies",
+                side_effect=window_dataset.fetch_blob_bodies) as fetch:
             dataset = self._dataset(table)
             self.assertEqual(0, fetch.call_count)
 
@@ -198,8 +203,9 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
 
     def test_anchor_columns_read_only_the_window_anchor(self):
         table = self._table()
-        original = ScanQuery._fetch_bodies
-        with patch.object(ScanQuery, "_fetch_bodies", side_effect=original) as fetch:
+        with patch(
+                "pypaimon.multimodal.window_dataset.fetch_blob_bodies",
+                side_effect=window_dataset.fetch_blob_bodies) as fetch:
             dataset = self._dataset(table, anchor_columns=["payload"])
 
             sample = dataset[0]
@@ -411,24 +417,138 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
         table = self.conn.create_table(
             "default_keys",
             schema=pa.schema([
-                pa.field("episode_id", pa.string(), nullable=False),
-                pa.field("step_idx", pa.int32(), nullable=False),
+                pa.field("episode_index", pa.string(), nullable=False),
+                pa.field("frame_index", pa.int32(), nullable=False),
                 pa.field("value", pa.int32(), nullable=False),
             ]),
             options=_TABLE_OPTIONS,
         )
         table.add([
-            {"episode_id": "episode-a", "step_idx": 0, "value": 10},
-            {"episode_id": "episode-a", "step_idx": 1, "value": 11},
+            {"episode_index": "episode-a", "frame_index": 0, "value": 10},
+            {"episode_index": "episode-a", "frame_index": 1, "value": 11},
         ])
 
         dataset = ContiguousWindowDataset.from_query(
             table.scan().select(["value"]), window_size=2)
 
         self.assertEqual(1, len(dataset))
-        self.assertEqual("episode-a", dataset[0]["episode_id"])
-        self.assertEqual(0, dataset[0]["step_idx"])
+        self.assertEqual("episode-a", dataset[0]["episode_index"])
+        self.assertEqual(0, dataset[0]["frame_index"])
         self.assertEqual([10, 11], dataset[0]["value"])
+
+    def test_rejects_scan_and_batch_vector_search_queries(self):
+        table = self.conn.create_table(
+            "vectors",
+            schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("embedding", pa.list_(pa.float32(), 2)),
+            ]),
+            options=_TABLE_OPTIONS,
+        )
+        table.add([
+            {"episode": "episode-a", "step": 0, "embedding": [1.0, 0.0]},
+            {"episode": "episode-a", "step": 1, "embedding": [0.0, 1.0]},
+        ])
+        kwargs = {
+            "window_size": 2,
+            "columns": ["embedding"],
+            "group_key": "episode",
+            "order_key": "step",
+        }
+
+        for query in (table.search([1.0, 0.0]),
+                      table.search_vectors([[1.0, 0.0]])):
+            with self.subTest(query=type(query).__name__):
+                with self.assertRaisesRegex(TypeError, "only supported on scan"):
+                    query.to_contiguous_window_dataset(**kwargs)
+                with self.assertRaisesRegex(TypeError, "only supported on scan"):
+                    ContiguousWindowDataset.from_query(query, **kwargs)
+
+    def test_reads_a_pinned_tag_after_its_snapshot_file_is_removed(self):
+        table = self._table()
+        table.raw_table.create_tag("v1")
+
+        dataset = table.scan(tag_name="v1").to_contiguous_window_dataset(
+            window_size=3, columns=["value"],
+            group_key="episode", order_key="step")
+
+        raw_table = table.raw_table
+        raw_table.file_io.delete_quietly(
+            raw_table.snapshot_manager().get_snapshot_path(dataset.snapshot_id))
+
+        self.assertEqual("v1", dataset._table.options.scan_tag_name())
+        self.assertIsNone(dataset._table.options.scan_snapshot_id())
+        self.assertEqual([100, 101, 102], dataset[0]["value"])
+
+    def test_plans_the_pinned_snapshot_once_per_projection(self):
+        dataset = self._dataset(self._table(), anchor_columns=["payload"])
+
+        with patch.object(
+                TableScan, "plan", autospec=True,
+                side_effect=TableScan.plan) as plan:
+            samples = [dataset[index] for index in range(len(dataset))]
+            samples.extend(dataset.__getitems__(list(range(len(dataset)))))
+
+        self.assertEqual(2, plan.call_count)
+        self.assertEqual(
+            [[100, 101, 102], [101, 102, 103]] * 2,
+            [sample["value"] for sample in samples])
+        self.assertEqual(
+            [[b"episode-b-0"], [b"episode-b-1"]] * 2,
+            [sample["payload"] for sample in samples])
+
+    def test_rejects_query_authorization_that_masks_row_ids(self):
+        table = self._table()
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"_ROW_ID": json.dumps({"name": "NULL"})},
+        )
+        table.raw_table.catalog_environment.table_query_auth = (
+            lambda options, table_identifier: lambda select: auth)
+
+        with self.assertRaisesRegex(ValueError, "masks _ROW_ID"):
+            self._dataset(table)
+
+    def test_rejects_nan_group_keys_that_never_compare_equal(self):
+        table = self.conn.create_table(
+            "nan_groups",
+            schema=pa.schema([
+                pa.field("episode", pa.float64()),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("value", pa.int32(), nullable=False),
+            ]),
+            options=_TABLE_OPTIONS,
+        )
+        table.add([
+            {"episode": float("nan"), "step": 0, "value": 0},
+            {"episode": float("nan"), "step": 1, "value": 1},
+        ])
+
+        with self.assertRaisesRegex(ValueError, "episode must not contain NaN"):
+            table.scan().to_contiguous_window_dataset(
+                window_size=2, columns=["value"],
+                group_key="episode", order_key="step")
+
+    def test_rejects_video_frame_columns_that_would_lose_frame_metadata(self):
+        table = self.conn.create_table(
+            "videos",
+            schema=pa.schema([
+                pa.field("episode", pa.string(), nullable=False),
+                pa.field("step", pa.int32(), nullable=False),
+                pa.field("video", pa.large_binary()),
+            ]),
+            options=dict(_TABLE_OPTIONS, **{
+                "video-frame-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+
+        with self.assertRaisesRegex(
+                ValueError, "video frame columns.*frame_index"):
+            table.scan().to_contiguous_window_dataset(
+                window_size=2, columns=["video"],
+                group_key="episode", order_key="step")
 
     def test_validates_configuration_and_scan_only_contract(self):
         table = self._table()

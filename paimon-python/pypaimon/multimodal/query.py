@@ -170,8 +170,8 @@ class ScanQuery:
             window_size,
             columns=None,
             anchor_columns=None,
-            group_key="episode_id",
-            order_key="step_idx",
+            group_key="episode_index",
+            order_key="frame_index",
             stride=1,
             tail="drop",
             column_transforms=None,
@@ -208,10 +208,6 @@ class ScanQuery:
             A snapshot-pinned ``ContiguousWindowDataset``. See that class for
             padding, mask, transform, and adapter result semantics.
         """
-        if self._result_factory is not None:
-            raise TypeError(
-                "to_contiguous_window_dataset is only supported on scan(), "
-                "not search queries.")
         from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
         return ContiguousWindowDataset(
             self,
@@ -479,6 +475,12 @@ class _PreFilterQuery(ScanQuery):
     def to_arrow_batch_reader(self, *args, **kwargs):
         raise TypeError(
             "to_arrow_batch_reader is only supported on scan(), "
+            "not search queries."
+        )
+
+    def to_contiguous_window_dataset(self, *args, **kwargs):
+        raise TypeError(
+            "to_contiguous_window_dataset is only supported on scan(), "
             "not search queries."
         )
 

@@ -174,8 +174,8 @@ dataset = (
         window_size=16,
         columns=["state", "image"],
         anchor_columns=["image"],
-        group_key="episode_id",
-        order_key="step_idx",
+        group_key="episode_index",
+        order_key="frame_index",
         tail="pad",
     )
 )
@@ -200,6 +200,10 @@ be integers which increase by exactly one; duplicates and missing steps are
 rejected, and windows never cross groups. The resolved Paimon
 snapshot is pinned for the lifetime of the dataset, so later commits cannot
 change its index or sample contents.
+
+Columns configured by `video-frame-field` are rejected: a window read would drop
+the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
+values. Read those columns with `to_torch()` instead.
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

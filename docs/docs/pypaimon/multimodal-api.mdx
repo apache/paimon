@@ -875,7 +875,7 @@ column, and Paimon row IDs. Each `__getitem__` call fetches only that window fro
 the snapshot recorded in `dataset.snapshot_id`.
 
 ```shell
-pip install pypaimon[torch]
+pip install 'pypaimon[torch]'
 ```
 
 ```python
@@ -892,8 +892,8 @@ windows = (
     .to_contiguous_window_dataset(
         window_size=16,
         columns=["state", "action"],
-        group_key="episode_id",
-        order_key="step_idx",
+        group_key="episode_index",
+        order_key="frame_index",
         tail="pad",
         column_transforms={
             "state": float32_window,
@@ -923,6 +923,10 @@ know model field names, image formats, or normalization rules. Top-level
 functions and callable classes are recommended for transforms and adapters so
 the Dataset remains picklable by multi-worker `torch.utils.data.DataLoader`
 instances.
+
+Columns configured by `video-frame-field` are rejected: a window read would drop
+the `frame_index` and other metadata carried by their `VideoFrameDescriptor`
+values. Read those columns with `to_torch()` instead.
 
 ### Distributed BLOB processing with Ray
 
