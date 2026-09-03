@@ -45,11 +45,70 @@ class MultimodalTemporalTest(unittest.TestCase):
             "value": pa.int32(),
         })
         with self.assertRaisesRegex(ValueError, "grouping column"):
-            pmm.align(
+            pmm.join_asof(
+                table.scan(),
                 table.scan(),
                 on="event_time",
                 by=(),
-                sources={"value": pmm.exact(table.scan())},
+                direction="nearest",
+                tolerance=0,
+            )
+
+    def test_alignment_preserves_payload_names(self):
+        anchors = self._table("audit_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("audit_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "valid": pa.bool_(),
+            "matched_time": pa.int64(),
+            "time_delta": pa.int64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 100}])
+        samples.add([{
+            "episode_id": 1,
+            "event_time": 100,
+            "valid": False,
+            "matched_time": 7,
+            "time_delta": 8,
+        }])
+
+        row = pmm.join_asof(
+            anchors.scan(),
+            samples.scan().select([
+                "valid", "matched_time", "time_delta"
+            ]),
+            on="event_time",
+            by="episode_id",
+            direction="nearest",
+            tolerance=0,
+        ).to_list()[0]
+
+        self.assertFalse(row["valid"])
+        self.assertEqual(7, row["matched_time"])
+        self.assertEqual(8, row["time_delta"])
+
+    def test_alignment_rejects_nested_group_keys(self):
+        group_type = pa.struct([pa.field("part", pa.int32())])
+        anchors = self._table("nested_group_anchors", {
+            "group": group_type,
+            "event_time": pa.int64(),
+        })
+        samples = self._table("nested_group_samples", {
+            "group": group_type,
+            "event_time": pa.int64(),
+        })
+
+        with self.assertRaisesRegex(TypeError, "must have a scalar type"):
+            pmm.join_asof(
+                anchors.scan(),
+                samples.scan(),
+                on="event_time",
+                by="group",
+                direction="nearest",
+                tolerance=0,
             )
 
     def test_aligns_named_sources_in_episode_local_batches(self):
@@ -103,21 +162,26 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": "ep-2", "event_time": 100, "command": "hold"},
         ])
 
-        aligned = pmm.align(
+        aligned = pmm.join_asof(
             actions.scan().select(["episode_id", "event_time", "action"]),
+            images.scan().where("camera = 'left'").select("image"),
             on="event_time",
             by="episode_id",
-            sources={
-                "camera": pmm.nearest(
-                    images.scan().where("camera = 'left'").select("image"),
-                    tolerance=20,
-                ),
-                "state": pmm.backward(
-                    states.scan().select("state"), tolerance=25),
-                "command": pmm.exact(commands.scan().select("command")),
-                "next_command": pmm.forward(
-                    commands.scan().select("command"), tolerance=25),
-            },
+            direction="nearest",
+            tolerance=20,
+        ).join_asof(
+            states.scan().select("state"),
+            direction="backward",
+            tolerance=25,
+        ).join_asof(
+            commands.scan().select("command"),
+            direction="nearest",
+            tolerance=0,
+        ).join_asof(
+            commands.scan().select("command"),
+            direction="forward",
+            tolerance=25,
+            suffix="_next",
         )
         reader = aligned.to_arrow_batch_reader(batch_size=2)
         batches = list(reader)
@@ -131,22 +195,16 @@ class MultimodalTemporalTest(unittest.TestCase):
         # Equal-distance nearest ties select the earlier row.
         self.assertEqual(
             ["early", "middle", None, "other"],
-            [row["camera__image"] for row in rows],
+            [row["image"] for row in rows],
         )
-        self.assertEqual([-10, 15, None, -1], [
-            row["camera__time_delta"] for row in rows
-        ])
         self.assertEqual([8, 19, None, 95], [
-            row["state__state"] for row in rows
+            row["state"] for row in rows
         ])
         self.assertEqual(["open", None, None, "hold"], [
-            row["command__command"] for row in rows
+            row["command"] for row in rows
         ])
         self.assertEqual(["open", "close", None, "hold"], [
-            row["next_command__command"] for row in rows
-        ])
-        self.assertEqual([True, True, False, True], [
-            row["camera__valid"] for row in rows
+            row["command_next"] for row in rows
         ])
 
     def test_alignment_pins_each_scan_snapshot(self):
@@ -164,13 +222,14 @@ class MultimodalTemporalTest(unittest.TestCase):
         secondary.add([
             {"episode_id": 1, "event_time": 90, "value": "old-match"}
         ])
-        aligned = pmm.align(
+        aligned = pmm.join_asof(
             anchors.scan(),
+            secondary.scan(),
             on="event_time",
             by="episode_id",
-            sources={
-                "secondary": pmm.nearest(secondary.scan(), tolerance=20),
-            },
+            direction="nearest",
+            tolerance=20,
+            suffix="_secondary",
         )
 
         anchors.add([{"episode_id": 1, "event_time": 200, "value": "new"}])
@@ -182,10 +241,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": 1,
             "event_time": 100,
             "value": "old",
-            "secondary__value": "old-match",
-            "secondary__valid": True,
-            "secondary__matched_time": 90,
-            "secondary__time_delta": -10,
+            "value_secondary": "old-match",
         }], aligned.to_list())
 
     def test_alignment_resolves_tags_before_execution(self):
@@ -205,12 +261,13 @@ class MultimodalTemporalTest(unittest.TestCase):
         ])
         anchors.raw_table.create_tag("v1")
         secondary.raw_table.create_tag("v1")
-        aligned = pmm.align(
+        aligned = pmm.join_asof(
             anchors.scan(tag_name="v1"),
+            secondary.scan(tag_name="v1"),
             on="event_time",
             by="episode_id",
-            sources={"secondary": pmm.exact(
-                secondary.scan(tag_name="v1"))},
+            direction="nearest",
+            tolerance=0,
         )
 
         anchors.add([{"episode_id": 1, "event_time": 200, "value": "new"}])
@@ -245,14 +302,16 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": 100, "value": 7}
         ])
 
-        row = pmm.align(
+        row = pmm.join_asof(
             anchors.scan(),
+            secondary.scan(),
             on="event_time",
             by="episode_id",
-            sources={"secondary": pmm.exact(secondary.scan())},
+            direction="nearest",
+            tolerance=0,
         ).to_list()[0]
 
-        self.assertEqual(7, row["secondary__value"])
+        self.assertEqual(7, row["value"])
 
     def test_alignment_rejects_non_finite_temporal_values(self):
         for value in (float("nan"), float("inf"), float("-inf")):
@@ -270,12 +329,13 @@ class MultimodalTemporalTest(unittest.TestCase):
                 secondary.add([
                     {"episode_id": 1, "event_time": value, "value": 7}
                 ])
-                aligned = pmm.align(
+                aligned = pmm.join_asof(
                     anchors.scan(),
+                    secondary.scan(),
                     on="event_time",
                     by="episode_id",
-                    sources={"secondary": pmm.nearest(
-                        secondary.scan(), tolerance=1.0)},
+                    direction="nearest",
+                    tolerance=1.0,
                 )
                 with self.assertRaisesRegex(ValueError, "must be finite"):
                     aligned.to_list()
@@ -289,18 +349,28 @@ class MultimodalTemporalTest(unittest.TestCase):
         for tolerance in (float("nan"), float("inf"), -1):
             with self.subTest(tolerance=tolerance):
                 with self.assertRaises((TypeError, ValueError)):
-                    pmm.nearest(table.scan(), tolerance=tolerance)
+                    pmm.join_asof(
+                        table.scan(), table.scan(),
+                        on="event_time", by="episode_id",
+                        direction="nearest", tolerance=tolerance,
+                    )
         with self.assertRaisesRegex(TypeError, "Numeric alignment"):
-            pmm.align(
-                table.scan(), on="event_time", by="episode_id",
-                sources={"source": pmm.nearest(
-                    table.scan(), tolerance=timedelta(milliseconds=1))},
+            pmm.join_asof(
+                table.scan(), table.scan(),
+                on="event_time", by="episode_id",
+                direction="nearest",
+                tolerance=timedelta(milliseconds=1),
             )
         with self.assertRaisesRegex(ValueError, "int64 maximum"):
-            pmm.align(
-                table.scan(), on="event_time", by="episode_id",
-                sources={"source": pmm.nearest(
-                    table.scan(), tolerance=1 << 63)},
+            pmm.join_asof(
+                table.scan(), table.scan(),
+                on="event_time", by="episode_id",
+                direction="nearest", tolerance=1 << 63,
+            )
+        with self.assertRaisesRegex(ValueError, "direction"):
+            pmm.join_asof(
+                table.scan(), table.scan(),
+                on="event_time", by="episode_id", direction="exact",
             )
 
     def test_alignment_rejects_masked_row_ids(self):
@@ -323,9 +393,10 @@ class MultimodalTemporalTest(unittest.TestCase):
             lambda options, identifier: lambda select: auth
         )
 
-        aligned = pmm.align(
-            anchors.scan(), on="event_time", by="episode_id",
-            sources={"source": pmm.exact(source.scan())},
+        aligned = pmm.join_asof(
+            anchors.scan(), source.scan(),
+            on="event_time", by="episode_id",
+            direction="nearest", tolerance=0,
         )
         with self.assertRaisesRegex(ValueError, "masks _ROW_ID"):
             aligned.to_list()
@@ -351,18 +422,19 @@ class MultimodalTemporalTest(unittest.TestCase):
              "payload": {"value": 7}},
         ])
 
-        rows = pmm.align(
+        rows = pmm.join_asof(
             anchors.scan().select([
                 "episode_id", "event_time", "metadata.value"]),
+            secondary.scan().select("payload.value"),
             on="event_time",
             by="episode_id",
-            sources={"secondary": pmm.exact(
-                secondary.scan().select("payload.value"))},
+            direction="nearest",
+            tolerance=0,
         ).to_list()
 
         self.assertEqual([1, None], [row["metadata_value"] for row in rows])
         self.assertEqual(
-            [7, None], [row["secondary__payload_value"] for row in rows])
+            [7, None], [row["payload_value"] for row in rows])
 
     def test_alignment_reuses_payload_scan_plans_across_batches(self):
         anchors = self._table("planned_anchors", {
@@ -382,9 +454,10 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": value, "value": value}
             for value in range(8)
         ])
-        aligned = pmm.align(
-            anchors.scan(), on="event_time", by="episode_id",
-            sources={"secondary": pmm.exact(secondary.scan())},
+        aligned = pmm.join_asof(
+            anchors.scan(), secondary.scan(),
+            on="event_time", by="episode_id",
+            direction="nearest", tolerance=0,
         )
         original_scan = FileScanner.scan
 
@@ -413,16 +486,16 @@ class MultimodalTemporalTest(unittest.TestCase):
             "image": b"encoded-image",
         }])
 
-        row = pmm.align(
+        row = pmm.join_asof(
             anchors.scan(),
+            images.scan().select("image"),
             on="event_time",
             by="episode_id",
-            sources={
-                "camera": pmm.exact(images.scan().select("image")),
-            },
+            direction="nearest",
+            tolerance=0,
         ).to_list()[0]
 
-        descriptor = pmm.BlobDescriptor.deserialize(row["camera__image"])
+        descriptor = pmm.BlobDescriptor.deserialize(row["image"])
         self.assertTrue(descriptor.uri.endswith(".blob"))
         self.assertEqual(len(b"encoded-image"), descriptor.length)
 
@@ -445,23 +518,17 @@ class MultimodalTemporalTest(unittest.TestCase):
             "value": 7,
         }])
 
-        row = pmm.align(
+        row = pmm.join_asof(
             anchors.scan(),
+            samples.scan().select("value"),
             on="event_time",
             by="episode_id",
-            sources={
-                "sample": pmm.nearest(
-                    samples.scan().select("value"),
-                    on="captured_at",
-                    tolerance=timedelta(milliseconds=10),
-                ),
-            },
+            direction="nearest",
+            right_on="captured_at",
+            tolerance=timedelta(milliseconds=10),
         ).to_list()[0]
 
-        self.assertEqual(7, row["sample__value"])
-        self.assertEqual(sample_time, row["sample__matched_time"])
-        self.assertEqual(
-            timedelta(milliseconds=-5), row["sample__time_delta"])
+        self.assertEqual(7, row["value"])
 
     def _table(self, name, fields):
         return self.conn.create_table(name, schema=pa.schema([

@@ -17,7 +17,6 @@
 """Temporal alignment for multimodal table scans."""
 
 from bisect import bisect_left, bisect_right
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 import math
@@ -45,40 +44,17 @@ _MAX_INT64 = (1 << 63) - 1
 
 
 @dataclass(frozen=True)
-class _MatchSpec:
+class _JoinSpec:
     query: ScanQuery
-    method: str
+    direction: str
     tolerance: object = None
-    on: Optional[str] = None
+    right_on: Optional[str] = None
+    suffix: str = "_right"
 
 
-def exact(query, *, on=None):
-    """Match a secondary scan at exactly the anchor timestamp."""
-    return _match_spec(query, "exact", None, on)
-
-
-def backward(query, *, tolerance, on=None):
-    """Match the latest secondary row at or before the anchor timestamp."""
-    return _match_spec(query, "backward", tolerance, on)
-
-
-def forward(query, *, tolerance, on=None):
-    """Match the earliest secondary row at or after the anchor timestamp."""
-    return _match_spec(query, "forward", tolerance, on)
-
-
-def nearest(query, *, tolerance, on=None):
-    """Match the closest secondary row; equal-distance ties choose earlier."""
-    return _match_spec(query, "nearest", tolerance, on)
-
-
-def align(anchor, *, on, by, sources):
-    """Build an episode-local temporal alignment with batched payload reads.
-
-    The anchor scan defines output rows. Each named secondary source
-    contributes at most one row according to its match policy. All scans are
-    pinned to their current snapshots when this object is constructed.
-    """
+def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
+              right_on=None, suffix="_right"):
+    """Join each left row with at most one time-aligned right row."""
     if not isinstance(on, str) or not on:
         raise ValueError("on must be a non-empty column name.")
     if isinstance(by, str):
@@ -90,32 +66,53 @@ def align(anchor, *, on, by, sources):
             raise ValueError(
                 "by must be a column name or sequence.") from error
     if not by:
-        raise ValueError("align requires at least one grouping column in by.")
+        raise ValueError(
+            "join_asof requires at least one grouping column in by.")
     if (any(not isinstance(name, str) or not name for name in by)
             or len(set(by)) != len(by)):
         raise ValueError("by must contain unique, non-empty column names.")
-    if not isinstance(sources, Mapping):
-        raise TypeError("sources must be a mapping of names to match specs.")
-    if not sources:
-        raise ValueError("align requires at least one named secondary source.")
-    return AlignedScan(anchor, on, by, sources)
+    return AlignedScan(left, on, by).join_asof(
+        right,
+        direction=direction,
+        tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
 
 
 class AlignedScan:
-    """Executable result of :func:`align`."""
+    """Lazy, chainable result of :func:`join_asof`."""
 
-    def __init__(self, anchor, on, by, sources):
-        self._anchor = _pin_scan(_require_scan(anchor, "anchor"))
+    def __init__(self, left, on, by):
+        self._anchor = _pin_scan(_require_scan(left, "left"))
         self._on = on
         self._by = by
-        self._sources = {
-            name: _PinnedSource(name, _pin_match_spec(spec, name), on, by)
-            for name, spec in sources.items()
-        }
+        self._sources = ()
         self._anchor_schema = _query_schema(self._anchor)
         self._anchor_table_schema = _table_schema(self._anchor)
         self._validate_anchor()
         self.schema = self._output_schema()
+
+    def join_asof(self, right, *, direction="backward", tolerance=None,
+                  right_on=None, suffix="_right"):
+        """Append a right-side as-of join without materializing this scan."""
+        position = len(self._sources) + 1
+        label = "right source %d" % position
+        spec = _join_spec(
+            right, direction, tolerance, right_on, suffix, label)
+        source = _PinnedSource(
+            label, _pin_join_spec(spec), self._on, self._by)
+
+        result = object.__new__(AlignedScan)
+        result._anchor = self._anchor
+        result._on = self._on
+        result._by = self._by
+        result._sources = self._sources + (source,)
+        result._anchor_schema = self._anchor_schema
+        result._anchor_table_schema = self._anchor_table_schema
+        result._validate_anchor()
+        result.schema = result._output_schema()
+        return result
 
     def to_arrow_batch_reader(self, *, batch_size=1024):
         """Plan scalar timestamps once, then fetch selected rows in batches."""
@@ -126,10 +123,10 @@ class AlignedScan:
 
         anchor_metadata = _metadata_table(self._anchor, self._on, self._by)
         anchor_fetcher = _RowIdFetcher(self._anchor)
-        source_fetchers = {}
-        for source in self._sources.values():
+        source_fetchers = []
+        for source in self._sources:
             source.plan()
-            source_fetchers[source.name] = _RowIdFetcher(source.spec.query)
+            source_fetchers.append(_RowIdFetcher(source.spec.query))
 
         def batches():
             for start in range(0, len(anchor_metadata), batch_size):
@@ -159,57 +156,43 @@ class AlignedScan:
             self._anchor_table_schema, self._by + (self._on,), "anchor")
         anchor_type = self._anchor_table_schema.field(self._on).type
         _delta_type(anchor_type)
-        for source in self._sources.values():
+        for name in self._by:
+            _validate_group_type(
+                name, self._anchor_table_schema.field(name).type)
+        for source in self._sources:
             if source.time_type != anchor_type:
                 raise TypeError(
-                    "Anchor and source %r temporal columns must have the same "
+                    "Left and %s temporal columns must have the same "
                     "type; got %s and %s."
-                    % (source.name, anchor_type, source.time_type)
+                    % (source.label, anchor_type, source.time_type)
                 )
             for name in self._by:
                 anchor_group_type = self._anchor_table_schema.field(name).type
                 source_group_type = source.table_schema.field(name).type
                 if source_group_type != anchor_group_type:
                     raise TypeError(
-                        "Anchor and source %r grouping column %r must have "
+                        "Left and %s grouping column %r must have "
                         "the same type; got %s and %s."
-                        % (source.name, name, anchor_group_type,
+                        % (source.label, name, anchor_group_type,
                            source_group_type)
                     )
 
     def _output_schema(self):
         fields = list(self._anchor_schema)
         names = set(self._anchor_schema.names)
-        anchor_time_type = self._anchor_table_schema.field(self._on).type
-        for source in self._sources.values():
+        for source in self._sources:
             for field in source.payload_schema:
-                output = pa.field(
-                    source.output_name(field.name), field.type, nullable=True)
-                if output.name in names:
+                output_name = field.name
+                if output_name in names:
+                    output_name += source.spec.suffix
+                if output_name in names:
                     raise ValueError(
-                        "Duplicate aligned column %r." % output.name)
+                        "%s column %r conflicts after applying suffix %r."
+                        % (source.label, field.name, source.spec.suffix)
+                    )
+                output = pa.field(output_name, field.type, nullable=True)
                 fields.append(output)
                 names.add(output.name)
-            audit = [
-                pa.field(
-                    source.output_name("valid"), pa.bool_(), nullable=False),
-                pa.field(
-                    source.output_name("matched_time"),
-                    source.time_type,
-                    nullable=True,
-                ),
-                pa.field(
-                    source.output_name("time_delta"),
-                    _delta_type(anchor_time_type),
-                    nullable=True,
-                ),
-            ]
-            for field in audit:
-                if field.name in names:
-                    raise ValueError(
-                        "Duplicate aligned column %r." % field.name)
-                fields.append(field)
-                names.add(field.name)
         return pa.schema(fields)
 
     def _build_batch(self, anchor_rows, anchor_fetcher, source_fetchers):
@@ -217,34 +200,20 @@ class AlignedScan:
         anchor = anchor_fetcher.fetch(anchor_ids)
         arrays = [anchor[name] for name in self._anchor_schema.names]
 
-        for source in self._sources.values():
+        for source, fetcher in zip(self._sources, source_fetchers):
             matches = [source.match(row) for row in anchor_rows]
-            matched_ids = [match[0] for match in matches if match is not None]
+            matched_ids = [match for match in matches if match is not None]
             unique_ids = list(dict.fromkeys(matched_ids))
-            values = source_fetchers[source.name].fetch(unique_ids)
+            values = fetcher.fetch(unique_ids)
             positions = {
                 row_id: index for index, row_id in enumerate(unique_ids)
             }
             take = pa.array([
-                None if match is None else positions[match[0]]
+                None if match is None else positions[match]
                 for match in matches
             ], type=pa.int64())
             for field in source.payload_schema:
                 arrays.append(pc.take(values[field.name], take))
-
-            arrays.extend([
-                pa.array(
-                    [match is not None for match in matches], type=pa.bool_()),
-                pa.array(
-                    [None if match is None else match[1] for match in matches],
-                    type=source.time_type,
-                ),
-                pa.array(
-                    [None if match is None else match[2] for match in matches],
-                    type=_delta_type(
-                        self._anchor_table_schema.field(self._on).type),
-                ),
-            ])
 
         table = pa.Table.from_arrays(
             arrays, schema=self.schema).combine_chunks()
@@ -253,19 +222,15 @@ class AlignedScan:
 
 class _PinnedSource:
 
-    def __init__(self, name, spec, anchor_on, by):
-        if (not isinstance(name, str) or not name or "__" in name):
-            raise ValueError(
-                "Aligned source names must be non-empty and cannot contain "
-                "'__'.")
-        self.name = name
+    def __init__(self, label, spec, anchor_on, by):
+        self.label = label
         self.spec = spec
         self.anchor_on = anchor_on
-        self.on = anchor_on if spec.on is None else spec.on
+        self.on = anchor_on if spec.right_on is None else spec.right_on
         self.by = by
         self.table_schema = _table_schema(spec.query)
         _require_columns(
-            self.table_schema, by + (self.on,), "source %r" % name)
+            self.table_schema, by + (self.on,), label)
         self.time_type = self.table_schema.field(self.on).type
         _delta_type(self.time_type)
         _validate_tolerance(spec.tolerance, self.time_type)
@@ -275,9 +240,6 @@ class _PinnedSource:
             if field.name not in set(by + (self.on,))
         ])
         self._index = None
-
-    def output_name(self, field):
-        return "%s__%s" % (self.name, field)
 
     def plan(self):
         metadata = _metadata_table(self.spec.query, self.on, self.by)
@@ -297,8 +259,8 @@ class _PinnedSource:
                     and self._time_keys[position]
                     == self._time_keys[position - 1]):
                 raise ValueError(
-                    "Source %r has duplicate timestamps within group %r."
-                    % (self.name, key)
+                    "%s has duplicate timestamps within group %r."
+                    % (self.label, key)
                 )
             previous = key
         if len(metadata):
@@ -312,7 +274,7 @@ class _PinnedSource:
         target = anchor_row[self.anchor_on]
         target_key = _time_search_key(target, self.time_type)
         index = _match_index(
-            self._time_keys, target_key, self.spec.method, *bounds)
+            self._time_keys, target_key, self.spec.direction, *bounds)
         if index is None:
             return None
         matched_time = self._times[index].as_py()
@@ -320,15 +282,19 @@ class _PinnedSource:
         if (self.spec.tolerance is not None
                 and abs(delta) > self.spec.tolerance):
             return None
-        return self._row_ids[index].as_py(), matched_time, delta
+        return self._row_ids[index].as_py()
 
 
-def _match_spec(query, method, tolerance, on):
-    _require_scan(query, method)
-    if on is not None and (not isinstance(on, str) or not on):
-        raise ValueError("on must be a non-empty column name.")
-    if method != "exact" and tolerance is None:
-        raise ValueError("%s requires a non-null tolerance." % method)
+def _join_spec(query, direction, tolerance, right_on, suffix, label):
+    _require_scan(query, label)
+    if direction not in ("backward", "forward", "nearest"):
+        raise ValueError(
+            "direction must be 'backward', 'forward', or 'nearest'.")
+    if right_on is not None and (
+            not isinstance(right_on, str) or not right_on):
+        raise ValueError("right_on must be a non-empty column name.")
+    if not isinstance(suffix, str):
+        raise TypeError("suffix must be a string.")
     if tolerance is not None:
         if isinstance(tolerance, bool) or not isinstance(
                 tolerance, (Real, timedelta)):
@@ -340,17 +306,17 @@ def _match_spec(query, method, tolerance, on):
         zero = timedelta(0) if isinstance(tolerance, timedelta) else 0
         if tolerance < zero:
             raise ValueError("tolerance must be non-negative.")
-    return _MatchSpec(query, method, tolerance, on)
+    return _JoinSpec(query, direction, tolerance, right_on, suffix)
 
 
-def _pin_match_spec(spec, name):
-    if not isinstance(spec, _MatchSpec):
-        raise TypeError(
-            "Source %r must use exact(), backward(), forward(), or nearest()."
-            % name
-        )
-    return _MatchSpec(
-        _pin_scan(spec.query), spec.method, spec.tolerance, spec.on)
+def _pin_join_spec(spec):
+    return _JoinSpec(
+        _pin_scan(spec.query),
+        spec.direction,
+        spec.tolerance,
+        spec.right_on,
+        spec.suffix,
+    )
 
 
 def _require_scan(query, label):
@@ -364,7 +330,8 @@ def _pin_scan(query):
     table = query._table
     options = table.options
     if not options.row_tracking_enabled(False):
-        raise ValueError("align requires 'row-tracking.enabled' = 'true'.")
+        raise ValueError(
+            "join_asof requires 'row-tracking.enabled' = 'true'.")
     snapshot = TimeTravelUtil.try_travel_to_snapshot(
         options.options, table.tag_manager(), table.snapshot_manager())
     if snapshot is None:
@@ -589,10 +556,6 @@ def _match_index(times, target, method, start=0, end=None):
     if start >= end:
         return None
     position = bisect_left(times, target, start, end)
-    if method == "exact":
-        if position < end and times[position] == target:
-            return position
-        return None
     if method == "backward":
         if position < end and times[position] == target:
             return position
@@ -657,6 +620,14 @@ def _delta_type(data_type):
         "got %s."
         % data_type
     )
+
+
+def _validate_group_type(name, data_type):
+    if pa.types.is_nested(data_type) or pa.types.is_null(data_type):
+        raise TypeError(
+            "Grouping column %r must have a scalar type; got %s."
+            % (name, data_type)
+        )
 
 
 def _require_columns(schema, columns, label):

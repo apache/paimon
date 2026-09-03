@@ -43,11 +43,7 @@ from pypaimon.multimodal.table import (
 )
 from pypaimon.multimodal.temporal import (
     AlignedScan,
-    align,
-    backward,
-    exact,
-    forward,
-    nearest,
+    join_asof,
 )
 from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
@@ -78,12 +74,8 @@ __all__ = [
     "VideoFrameCollator",
     "VideoFrameDescriptor",
     "connect",
-    "align",
-    "backward",
-    "exact",
-    "forward",
+    "join_asof",
     "lit",
-    "nearest",
     "source_col",
     "target_col",
     "text_route",
