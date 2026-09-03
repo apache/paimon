@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
 
@@ -31,9 +32,21 @@ case class PaimonBatch(
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
   extends Batch {
 
+  private var uriReaderFactory: UriReaderFactory = null
+
+  def this(
+      inputPartitions: Seq[PaimonInputPartition],
+      readBuilder: ReadBuilder,
+      blobAsDescriptor: Boolean,
+      metadataColumns: Seq[PaimonMetadataColumn],
+      uriReaderFactory: UriReaderFactory) = {
+    this(inputPartitions, readBuilder, blobAsDescriptor, metadataColumns)
+    this.uriReaderFactory = uriReaderFactory
+  }
+
   override def planInputPartitions(): Array[InputPartition] =
     inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
 
   override def createReaderFactory(): PartitionReaderFactory =
-    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
+    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor, uriReaderFactory)
 }

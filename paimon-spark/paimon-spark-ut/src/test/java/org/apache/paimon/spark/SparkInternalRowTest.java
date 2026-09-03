@@ -27,11 +27,14 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.data.SparkInternalRow;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BlobDescriptorResolvingRow;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
@@ -41,6 +44,7 @@ import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -162,6 +166,32 @@ public class SparkInternalRowTest {
                         .replace(new GenericInternalRow(new Object[] {descriptor}));
 
         assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testBlobDescriptorResolvingRowReattachesReader() throws Exception {
+        byte[] bytes = new byte[] {1, 2, 3};
+        java.nio.file.Path blobFile = tempPath.resolve("resolved-blob");
+        Files.write(blobFile, bytes);
+        BlobDescriptor descriptor =
+                new BlobDescriptor(blobFile.toUri().toString(), 0, bytes.length);
+        UriReader failingReader =
+                new UriReader() {
+                    @Override
+                    public SeekableInputStream newInputStream(String uri) throws IOException {
+                        throw new IOException("Should use reattached reader.");
+                    }
+                };
+
+        InternalRow row = GenericRow.of(Blob.fromDescriptor(failingReader, descriptor));
+        BlobDescriptorResolvingRow resolvingRow =
+                new BlobDescriptorResolvingRow(
+                        row, UriReaderFactory.fromFileIO(LocalFileIO.create()));
+
+        assertThatThrownBy(() -> row.getBlob(0).toData())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Should use reattached reader.");
+        assertThat(resolvingRow.getBlob(0).toData()).isEqualTo(bytes);
     }
 
     @Test

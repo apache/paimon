@@ -373,6 +373,32 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: read blob descriptor field data") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_descriptor_field_blob"
+      writeFile(fileIO, uri, blobData)
+      val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
+
+      sql(
+        "CREATE TABLE t (id INT, picture BINARY) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-descriptor-field'='picture')")
+      sql(s"INSERT INTO t VALUES (1, X'${bytesToHex(blobDescriptor.serialize())}')")
+
+      checkAnswer(sql("SELECT picture FROM t WHERE id = 1"), Seq(Row(blobData)))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='true')")
+      val descriptorBytes =
+        sql("SELECT picture FROM t WHERE id = 1").collect()(0).get(0).asInstanceOf[Array[Byte]]
+      val actualDescriptor = BlobDescriptor.deserialize(descriptorBytes)
+      assert(actualDescriptor.equals(blobDescriptor))
+    }
+  }
+
   test("Blob: materialize descriptor with source table FileIO") {
     withTable("blob_source", "blob_target") {
       sql(
