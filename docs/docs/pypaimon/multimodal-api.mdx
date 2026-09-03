@@ -652,9 +652,8 @@ version_id = conn.load_from_lerobot(
 )
 ```
 
-The component tables retain the native LeRobot V3 schemas and contain no
-version columns. A READY row in `<table>__versions` identifies a release;
-reading the same tag from its component tables reconstructs that release.
+A READY row in `<table>__versions` identifies a release; reading the same tag
+from its component tables reconstructs that release.
 The one-time importer requires a new target table. A failed import removes the
 table group so the call can be retried. `drop_table()` removes the table group;
 companion tables cannot be dropped separately through `MultimodalConnection`.
