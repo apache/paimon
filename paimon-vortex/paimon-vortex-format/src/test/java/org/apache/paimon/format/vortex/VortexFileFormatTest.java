@@ -18,13 +18,19 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,6 +68,33 @@ public class VortexFileFormatTest {
                         new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
         assertDoesNotThrow(() -> format.createWriterFactory(rowType));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testWriterFactoryHonorsWriteBatchMemory(boolean limitMemory) {
+        int writeBatchSize = 1024;
+        FileFormatFactory.FormatContext formatContext =
+                limitMemory
+                        ? new FileFormatFactory.FormatContext(
+                                new Options(), 1024, writeBatchSize, MemorySize.parse("1 kb"))
+                        : new FileFormatFactory.FormatContext(new Options(), 1024, writeBatchSize);
+        VortexFileFormat format = new VortexFileFormat(formatContext);
+        RowType rowType = RowType.of(DataTypes.BYTES(), DataTypes.BYTES());
+        VortexWriterFactory factory = (VortexWriterFactory) format.createWriterFactory(rowType);
+
+        GenericRow row = new GenericRow(2);
+        row.setField(0, new byte[1024]);
+        row.setField(1, new byte[1024]);
+
+        try (ArrowFormatCWriter writer = factory.cWriterSupplier().get()) {
+            // the memory limit is only re-checked every 32 rows
+            for (int i = 0; i < 32; i++) {
+                assertThat(writer.write(row)).isTrue();
+            }
+            // this row is still far below write-batch-size, so only the memory limit can reject it
+            assertThat(writer.write(row)).isEqualTo(!limitMemory);
+        }
     }
 
     @Test
