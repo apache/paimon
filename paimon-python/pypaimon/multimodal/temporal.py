@@ -87,7 +87,7 @@ class _AsOfJoin:
         """Append a right-side as-of join without materializing this scan."""
         position = len(self._sources) + 1
         label = "right source %d" % position
-        source = _PinnedSource(
+        source = _AsOfJoinRight(
             label,
             right,
             self._on,
@@ -215,7 +215,7 @@ class _AsOfJoin:
         return table.to_batches(max_chunksize=len(anchor_rows))[0]
 
 
-class _PinnedSource:
+class _AsOfJoinRight:
 
     def __init__(self, label, query, anchor_on, by, direction, tolerance,
                  right_on, suffix):
