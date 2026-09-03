@@ -351,8 +351,11 @@ def run_backend(
     Returns:
         A JSON-compatible metrics dictionary covering dataset construction,
         first batch, timed batch fetch, fixed optimizer steps, validation loss,
-        and a separate ``tracemalloc`` peak replay. OS page cache is not
-        controlled and native Arrow/Torch allocations are outside tracemalloc.
+        and a separate ``tracemalloc`` peak replay. ``fixed_steps_s`` includes
+        dataset fetch, while each ``train_trace.step_time_s`` starts after its
+        batch is fetched and covers conversion, forward/backward, and optimizer
+        update. OS page cache is not controlled and native Arrow/Torch
+        allocations are outside tracemalloc.
     """
     _seed_everything(config.seed)
     policy_factory = policy_factory or build_act_policy

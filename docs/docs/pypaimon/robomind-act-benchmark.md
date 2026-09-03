@@ -58,8 +58,9 @@ snapshot, and materializes deterministic measurement, training, and validation
 window indices.
 
 Without `--experiment`, preparation starts from the packaged
-`default_experiment.json`. A custom JSON file can change the defaults, and
-individual values can be overridden on the command line:
+`default_experiment.json`. `--experiment` replaces that definition, so a
+custom JSON file must contain every required field. Command-line options then
+override individual values:
 
 ```shell
 python -m pypaimon.benchmark.act prepare \
@@ -154,7 +155,8 @@ Every backend repeat records:
 - dataset construction time;
 - first-batch latency after construction;
 - batch-fetch samples per second after warm-up;
-- fixed ACT optimizer-step time and per-step loss trace;
+- end-to-end fixed ACT optimizer-step time, including dataset fetch;
+- per-step loss and compute time after each training batch has been fetched;
 - validation loss;
 - total measured wall time;
 - Python peak allocation from a separate dataset-first-batch replay.
