@@ -497,6 +497,13 @@ class FileStoreCommit:
         start_time_ms = int(time.time() * 1000)
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            if retry_result is not None and self._is_duplicate_commit(
+                    retry_result,
+                    latest_snapshot,
+                    commit_identifier,
+                    commit_kind,
+                    notify_callbacks=True):
+                break
             commit_entries = (
                 rewritten_commit_entries
                 if rewritten_commit_entries is not None
@@ -602,7 +609,11 @@ class FileStoreCommit:
                          commit_result_may_be_uncertain: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
-                retry_result, latest_snapshot, commit_identifier, commit_kind):
+                retry_result,
+                latest_snapshot,
+                commit_identifier,
+                commit_kind,
+                notify_callbacks=True):
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
@@ -865,14 +876,8 @@ class FileStoreCommit:
             commit_kind,
         )
 
-        if self.commit_callbacks:
-            context = CommitCallbackContext(
-                snapshot=snapshot_data,
-                commit_entries=commit_entries,
-                identifier=commit_identifier,
-            )
-            for callback in self.commit_callbacks:
-                callback.call(context)
+        self._notify_commit_callbacks(
+            snapshot_data, commit_entries, commit_identifier)
 
         return SuccessResult()
 
@@ -930,7 +935,8 @@ class FileStoreCommit:
             retry_result,
             latest_snapshot,
             commit_identifier,
-            commit_kind) -> bool:
+            commit_kind,
+            notify_callbacks=False) -> bool:
         if (isinstance(retry_result, CommitFailRetryResult)
                 and latest_snapshot is not None):
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
@@ -956,8 +962,38 @@ class FileStoreCommit:
                         f"Commit already completed (snapshot {snapshot_id}), "
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
+                    if notify_callbacks and self.commit_callbacks:
+                        entries = []
+                        for manifest in self.manifest_list_manager.read_delta(
+                                snapshot):
+                            entries.extend(self.manifest_file_manager.read(
+                                manifest.file_name, drop_stats=False))
+                        path_factory = self.table.path_factory()
+                        for entry in entries:
+                            file = entry.file
+                            file.file_path = file.external_path or "%s/%s" % (
+                                path_factory.bucket_path(
+                                    tuple(entry.partition.values),
+                                    entry.bucket,
+                                ).rstrip("/"),
+                                file.file_name,
+                            )
+                        self._notify_commit_callbacks(
+                            snapshot, entries, commit_identifier)
                     return True
         return False
+
+    def _notify_commit_callbacks(
+            self, snapshot, commit_entries, commit_identifier):
+        if not self.commit_callbacks:
+            return
+        context = CommitCallbackContext(
+            snapshot=snapshot,
+            commit_entries=commit_entries,
+            identifier=commit_identifier,
+        )
+        for callback in self.commit_callbacks:
+            callback.call(context)
 
     def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
         """Build a partition filter from the unique partitions present in commit_messages."""
