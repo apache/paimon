@@ -39,6 +39,7 @@ from pypaimon.multimodal.table import _target_schema
 _VERSION_ID = "version_id"
 _OWNER_ID_OPTION = "pypaimon.lerobot.owner-id"
 _PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
+_MISSING = object()
 _TABLE_SUFFIXES = {
     "versions": "__versions",
     "episodes": "__episodes",
@@ -355,31 +356,19 @@ def _drop_import_tables(
                 if isinstance(identifier, Identifier)
                 else Identifier.from_string(str(identifier))
             )
-            if owned_only:
-                try:
-                    table = catalog.get_table(source)
-                except (DatabaseNotExistException, TableNotExistException):
-                    continue
-                if table.table_schema.options.get(
-                        _OWNER_ID_OPTION) != owner_id:
-                    continue
+            expected_owner = _table_owner(catalog, source)
+            if expected_owner is _MISSING:
+                continue
+            if owned_only and expected_owner != owner_id:
+                continue
             quarantine = Identifier(
                 source.get_database_name(),
                 "__pypaimon_drop_%s" % uuid.uuid4().hex,
             )
-            try:
-                catalog.rename_table(source, quarantine)
-            except (DatabaseNotExistException, TableNotExistException):
-                continue
-            quarantined.append((source, quarantine))
-
-        owned = []
-        foreign = []
-        for source, quarantine in quarantined:
-            table = catalog.get_table(quarantine)
-            actual_owner = table.table_schema.options.get(_OWNER_ID_OPTION)
-            target = owned if actual_owner == owner_id else foreign
-            target.append((source, quarantine))
+            entry = [source, quarantine, expected_owner]
+            quarantined.append(entry)
+            if not _move_to_quarantine(catalog, entry):
+                quarantined.pop()
     except BaseException as error:
         failures = _restore_quarantined(catalog, quarantined)
         if failures:
@@ -388,6 +377,8 @@ def _drop_import_tables(
                 % ", ".join(failures)) from error
         raise
 
+    owned = [entry for entry in quarantined if entry[2] == owner_id]
+    foreign = [entry for entry in quarantined if entry[2] != owner_id]
     if foreign and not owned_only:
         error = ValueError(
             "Refusing to drop %s because it belongs to a different table."
@@ -408,50 +399,116 @@ def _drop_import_tables(
         raise RuntimeError(
             "LeRobot cleanup left quarantined tables: %s"
             % ", ".join(restore_failures + [
-                str(quarantine) for _, quarantine in drop_failures
+                str(quarantine) for _, quarantine, _ in drop_failures
             ]))
+
+
+def _move_to_quarantine(catalog, entry):
+    source, quarantine, expected_owner = entry
+    error = None
+    rename_attempted = False
+    for _ in range(2):
+        try:
+            source_owner = _table_owner(catalog, source)
+            quarantine_owner = _table_owner(catalog, quarantine)
+            if quarantine_owner == expected_owner \
+                    and source_owner != expected_owner:
+                return True
+            if rename_attempted and quarantine_owner is not _MISSING \
+                    and source_owner != expected_owner:
+                entry[2] = quarantine_owner
+                return True
+            if source_owner is _MISSING and quarantine_owner is _MISSING:
+                return False
+            if source_owner != expected_owner \
+                    or quarantine_owner is not _MISSING:
+                raise RuntimeError(
+                    "LeRobot table generation changed while quarantining %s."
+                    % source)
+            rename_attempted = True
+            catalog.rename_table(source, quarantine)
+        except BaseException as current_error:
+            error = current_error
+    source_owner = _table_owner(catalog, source)
+    quarantine_owner = _table_owner(catalog, quarantine)
+    if quarantine_owner == expected_owner \
+            and source_owner != expected_owner:
+        return True
+    if rename_attempted and quarantine_owner is not _MISSING \
+            and source_owner != expected_owner:
+        entry[2] = quarantine_owner
+        return True
+    if source_owner is _MISSING and quarantine_owner is _MISSING:
+        return False
+    raise RuntimeError(
+        "Cannot determine the result of quarantining LeRobot table %s."
+        % source) from error
 
 
 def _restore_quarantined(catalog, tables):
     failures = []
-    for source, quarantine in reversed(tables):
-        for attempt in range(2):
+    for source, quarantine, expected_owner in reversed(tables):
+        restored = False
+        for _ in range(2):
             try:
-                if not _table_exists(catalog, quarantine):
+                source_owner = _table_owner(catalog, source)
+                quarantine_owner = _table_owner(catalog, quarantine)
+                if source_owner == expected_owner \
+                        and quarantine_owner is _MISSING:
+                    restored = True
                     break
-                if _table_exists(catalog, source):
-                    failures.append(str(quarantine))
+                if source_owner is not _MISSING \
+                        or quarantine_owner != expected_owner:
                     break
                 catalog.rename_table(quarantine, source)
-                break
             except BaseException:
-                if attempt == 1:
-                    failures.append(str(quarantine))
+                pass
+        if not restored:
+            try:
+                restored = _table_owner(catalog, source) == expected_owner \
+                    and _table_owner(catalog, quarantine) is _MISSING
+            except BaseException:
+                pass
+        if not restored:
+            failures.append(str(quarantine))
     return failures
 
 
 def _drop_quarantined(catalog, tables, owner_id):
     failures = []
-    for source, quarantine in tables:
-        try:
-            table = catalog.get_table(quarantine)
-            if table.table_schema.options.get(_OWNER_ID_OPTION) != owner_id:
-                failures.append((source, quarantine))
-                continue
-            catalog.drop_table(quarantine)
-        except (DatabaseNotExistException, TableNotExistException):
-            pass
-        except BaseException:
-            failures.append((source, quarantine))
+    for entry in tables:
+        source, quarantine, expected_owner = entry
+        dropped = False
+        for _ in range(2):
+            try:
+                source_owner = _table_owner(catalog, source)
+                quarantine_owner = _table_owner(catalog, quarantine)
+                if quarantine_owner is _MISSING:
+                    dropped = source_owner != expected_owner
+                    break
+                if quarantine_owner != expected_owner \
+                        or expected_owner != owner_id:
+                    break
+                catalog.drop_table(quarantine)
+            except BaseException:
+                pass
+        if not dropped:
+            try:
+                dropped = _table_owner(catalog, quarantine) is _MISSING \
+                    and _table_owner(catalog, source) != expected_owner
+            except BaseException:
+                pass
+        if not dropped:
+            failures.append(entry)
     return failures
 
 
-def _table_exists(catalog, identifier):
+def _table_owner(catalog, identifier):
     try:
-        catalog.get_table(identifier)
-        return True
+        table = catalog.get_table(identifier)
+        return table.table_schema.options.get(_OWNER_ID_OPTION)
     except (DatabaseNotExistException, TableNotExistException):
-        return False
+        return _MISSING
 
 
 def _append_arrow(table, data):

@@ -1720,6 +1720,40 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog.get_table(
                     self.connection._identifier(name))
 
+    def test_quarantine_rename_unknown_result_is_reconciled(self):
+        for suffix, error_type in (
+                ("runtime", RuntimeError),
+                ("missing", TableNotExistException)):
+            name = "rename_lost_%s" % suffix
+            self.connection.load_from_lerobot(name, self.image_source)
+            source = Identifier.from_string(self.connection._identifier(
+                "%s__episodes" % name))
+            original_rename = self.connection.catalog.rename_table
+            injected = [False]
+
+            def rename_then_lose_response(rename_source, target):
+                result = original_rename(rename_source, target)
+                if rename_source == source and not injected[0]:
+                    injected[0] = True
+                    if error_type is TableNotExistException:
+                        raise error_type(rename_source)
+                    raise error_type("response lost")
+                return result
+
+            with patch.object(
+                    self.connection.catalog,
+                    "rename_table",
+                    side_effect=rename_then_lose_response):
+                self.connection.drop_table(name)
+
+            self.assertTrue(injected[0])
+            for table_name in (
+                    name, "%s__versions" % name,
+                    "%s__episodes" % name, "%s__tasks" % name):
+                with self.assertRaises(TableNotExistException):
+                    self.connection.catalog.get_table(
+                        self.connection._identifier(table_name))
+
     def test_drop_retry_does_not_delete_reused_quarantine(self):
         self.connection.load_from_lerobot(
             "reused_quarantine", self.image_source)
@@ -1833,6 +1867,51 @@ class LeRobotImportTest(unittest.TestCase):
                 "mixed_owner__episodes", "mixed_owner__tasks"):
             self.connection.catalog.get_table(
                 self.connection._identifier(name))
+
+    def test_restore_rejects_replaced_canonical_generation(self):
+        self.connection.load_from_lerobot(
+            "restore_replaced", self.image_source)
+        tasks = self.connection._identifier("restore_replaced__tasks")
+        tasks_schema = self.connection.catalog.get_table(
+            tasks).table_schema.to_schema()
+        tasks_schema.options = dict(tasks_schema.options)
+        tasks_schema.options[_OWNER_ID_OPTION] = "foreign-owner"
+        self.connection.catalog.drop_table(tasks)
+        self.connection.catalog.create_table(tasks, tasks_schema, False)
+
+        versions = Identifier.from_string(
+            self.connection._identifier("restore_replaced__versions"))
+        versions_schema = self.connection.catalog.get_table(
+            versions).table_schema.to_schema()
+        versions_schema.options = dict(versions_schema.options)
+        versions_schema.options[_OWNER_ID_OPTION] = "replacement-owner"
+        original_drop = self.connection.catalog.drop_table
+        original_rename = self.connection.catalog.rename_table
+        injected = [False]
+
+        def replace_before_restore(source, target):
+            if source.get_table_name().startswith("__pypaimon_drop_") \
+                    and target == versions and not injected[0]:
+                injected[0] = True
+                original_drop(source)
+                self.connection.catalog.create_table(
+                    target, versions_schema, False)
+                raise TableNotExistException(source)
+            return original_rename(source, target)
+
+        with patch.object(
+                self.connection.catalog,
+                "rename_table",
+                side_effect=replace_before_restore):
+            with self.assertRaisesRegex(
+                    RuntimeError, "Failed to restore quarantined"):
+                self.connection.drop_table("restore_replaced")
+
+        replacement = self.connection.catalog.get_table(versions)
+        self.assertEqual(
+            "replacement-owner",
+            replacement.table_schema.options[_OWNER_ID_OPTION],
+        )
 
     def test_companion_table_cannot_be_dropped_directly(self):
         self.connection.load_from_lerobot(
