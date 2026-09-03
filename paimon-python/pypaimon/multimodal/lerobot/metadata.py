@@ -38,6 +38,7 @@ from pypaimon.multimodal.table import _target_schema
 
 _VERSION_ID = "version_id"
 _OWNER_ID_OPTION = "pypaimon.lerobot.owner-id"
+_PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
 _TABLE_SUFFIXES = {
     "versions": "__versions",
     "episodes": "__episodes",
@@ -226,12 +227,17 @@ def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
         try:
             table = connection.catalog.get_table(identifier)
         except (DatabaseNotExistException, TableNotExistException):
+            options = {
+                "bucket": "-1",
+                _OWNER_ID_OPTION: owner_id,
+            }
+            pandas_metadata = (schema.metadata or {}).get(b"pandas")
+            if pandas_metadata is not None:
+                options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(
+                    "utf-8")
             paimon_schema = PaimonSchema.from_pyarrow_schema(
                 schema,
-                options={
-                    "bucket": "-1",
-                    _OWNER_ID_OPTION: owner_id,
-                },
+                options=options,
             )
             try:
                 connection.catalog.create_table(
@@ -255,6 +261,16 @@ def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
                 % identifier)
         tables[name] = table
     return tables
+
+
+def _restore_pandas_metadata(table, data):
+    pandas_metadata = table.table_schema.options.get(
+        _PANDAS_METADATA_OPTION)
+    if pandas_metadata is None:
+        return data
+    metadata = dict(data.schema.metadata or {})
+    metadata[b"pandas"] = pandas_metadata.encode("utf-8")
+    return data.replace_schema_metadata(metadata)
 
 
 def _reserve_dataset_version(

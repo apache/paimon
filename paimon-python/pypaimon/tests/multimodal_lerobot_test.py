@@ -41,6 +41,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _companion_identifier,
     _load_dataset_metadata,
     _managed_table_options,
+    _restore_pandas_metadata,
     _subtask_indices,
     _validated_episode_tables,
     _OWNER_ID_OPTION,
@@ -85,6 +86,13 @@ def _catalog_rows(connection, name):
     builder = table.new_read_builder()
     plan = builder.new_scan().plan()
     return builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+
+def _catalog_arrow(connection, name):
+    table = connection.catalog.get_table(connection._identifier(name))
+    builder = table.new_read_builder()
+    plan = builder.new_scan().plan()
+    return table, builder.new_read().to_arrow(plan.splits())
 
 
 class LeRobotValidationTest(unittest.TestCase):
@@ -931,6 +939,8 @@ class LeRobotImportTest(unittest.TestCase):
         dataset.finalize()
 
     def test_import_infers_schema_and_preserves_episodes(self):
+        import pandas as pd
+
         version_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
@@ -1043,6 +1053,14 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([(0, "pick"), (1, "place")], [
             (row["task_index"], row[task_name]) for row in tasks
         ])
+        tasks_table, tasks_arrow = _catalog_arrow(
+            self.connection, "robot_data__tasks")
+        pd.testing.assert_frame_equal(
+            pq.read_table(
+                self.image_source / "meta" / "tasks.parquet").to_pandas(),
+            _restore_pandas_metadata(
+                tasks_table, tasks_arrow).to_pandas(),
+        )
         self.assertEqual(
             1,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
@@ -1140,6 +1158,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(
             subtasks.to_pylist(),
             _catalog_rows(self.connection, "with_subtasks__subtasks"),
+        )
+        _, subtasks_arrow = _catalog_arrow(
+            self.connection, "with_subtasks__subtasks")
+        pd.testing.assert_frame_equal(
+            subtasks.to_pandas(),
+            _restore_pandas_metadata(
+                subtasks_table, subtasks_arrow).to_pandas(),
         )
         self.assertTrue(_catalog_rows(
             self.connection, "with_subtasks__versions")[1]["has_subtasks"])
