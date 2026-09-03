@@ -33,6 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -486,7 +487,7 @@ public abstract class SchemaEvolutionTableTestBase {
     }
 
     /** {@link SchemaManager} subclass for testing. */
-    public static class TestingSchemaManager extends SchemaManager {
+    public static class TestingSchemaManager extends FileSystemSchemaManager {
         private final Map<Long, TableSchema> tableSchemas;
 
         public TestingSchemaManager(Path tableRoot, Map<Long, TableSchema> tableSchemas) {

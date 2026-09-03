@@ -37,6 +37,7 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -609,7 +610,7 @@ public class MergeFileSplitReadTest {
             Map<String, String> options)
             throws Exception {
         Path path = new Path(tempDir.toUri());
-        SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(FileIOFinder.find(path), path);
         boolean valueCountMode = mfFactory.create() instanceof TestValueCountMergeFunction;
         Schema schema =
                 new Schema(

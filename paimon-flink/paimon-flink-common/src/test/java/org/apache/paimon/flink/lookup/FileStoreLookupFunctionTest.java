@@ -28,6 +28,7 @@ import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExe
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -139,7 +140,7 @@ public class FileStoreLookupFunctionTest {
             boolean refreshAsync,
             Integer fullLoadThreshold)
             throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
         conf.set(CoreOptions.BUCKET, 2);
@@ -469,7 +470,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     private FileStoreTable createStringFileStoreTable() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));

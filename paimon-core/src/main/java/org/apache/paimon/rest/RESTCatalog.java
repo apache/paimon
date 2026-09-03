@@ -59,6 +59,7 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1429,7 +1430,7 @@ public class RESTCatalog implements Catalog {
         if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
             Path externalPath = new Path(externalLocation);
             SchemaManager schemaManager =
-                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+                    new FileSystemSchemaManager(fileIOFromOptions(externalPath), externalPath);
             Optional<TableSchema> latest = schemaManager.latest();
             if (latest.isPresent()) {
                 // Note we just validate schema here, will not create a new table

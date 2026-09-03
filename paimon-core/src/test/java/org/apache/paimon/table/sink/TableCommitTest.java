@@ -34,8 +34,8 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -127,7 +127,7 @@ public class TableCommitTest {
                 testId);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -219,7 +219,7 @@ public class TableCommitTest {
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -282,7 +282,7 @@ public class TableCommitTest {
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -338,7 +338,7 @@ public class TableCommitTest {
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -402,7 +402,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -475,7 +475,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -562,7 +562,7 @@ public class TableCommitTest {
         options.set(CoreOptions.DATA_EVOLUTION_ENABLED, dataEvolutionEnabled);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -648,7 +648,7 @@ public class TableCommitTest {
         options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -723,7 +723,7 @@ public class TableCommitTest {
         options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -825,7 +825,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -934,7 +934,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -1011,7 +1011,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1067,7 +1067,7 @@ public class TableCommitTest {
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1155,7 +1155,7 @@ public class TableCommitTest {
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1206,7 +1206,7 @@ public class TableCommitTest {
         options.set(CoreOptions.BUCKET, 3);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1379,7 +1379,7 @@ public class TableCommitTest {
         options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new FileSystemSchemaManager(LocalFileIO.create(), new Path(path)),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
