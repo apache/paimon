@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.InternalArray;
@@ -257,7 +258,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
         return fileFieldIdsCache.computeIfAbsent(
                 Pair.of(entry.file().schemaId(), entry.file().writeCols()),
-                pair -> fileFieldIds(this::scanTableSchema, entry.file()));
+                pair -> {
+                    TableSchema fileSchema = scanTableSchema(entry.file().schemaId());
+                    boolean nestedFieldEnabled =
+                            new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled();
+                    return fileFieldIds(fileSchema.fields(), entry.file(), nestedFieldEnabled);
+                });
     }
 
     @VisibleForTesting

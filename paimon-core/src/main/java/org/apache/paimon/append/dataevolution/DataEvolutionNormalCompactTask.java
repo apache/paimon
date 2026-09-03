@@ -55,7 +55,6 @@ import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -196,5 +195,14 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                             outputFields.get(outputPosition).id(), fallbackSequence);
         }
         return result;
+    }
+
+    private static List<DataField> fileFields(
+            Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
+        TableSchema fileSchema = schemaLoader.apply(file.schemaId());
+        boolean nestedFieldEnabled =
+                new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled();
+        return org.apache.paimon.utils.DataEvolutionUtils.fileFields(
+                fileSchema.fields(), file, nestedFieldEnabled);
     }
 }

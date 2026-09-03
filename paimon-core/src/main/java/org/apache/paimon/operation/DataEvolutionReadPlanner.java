@@ -33,33 +33,86 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Pure (no-IO) planner for sub-field-level data evolution reads. Given the requested read row type
- * and, for each column-group file ("bunch"), the row type it physically provides (its written
- * columns, already wrapped with row-tracking fields), it decides for every read field whether it is
- * taken whole from a single file or composed sub-field by sub-field across several files (latest
- * file wins per leaf), and produces the offset maps and the per-field {@link
- * DataEvolutionRow.NestedField} assembly plans.
+ * Pure (no-IO) planner for data evolution reads. Given the requested read row type and, for each
+ * column-group file ("bunch"), the row type it physically provides (its written columns, already
+ * wrapped with row-tracking fields), it produces the source offsets and per-bunch physical read
+ * fields.
  *
- * <p>Separating this from {@link DataEvolutionSplitRead} keeps the reader-building (IO) thin and
- * lets the layout logic be unit-tested directly. Only one level of nested composition is supported;
- * deeper or cross-file splits of a sub-struct throw {@link UnsupportedOperationException}.
+ * <p>With nested-field evolution disabled, fields are matched only by top-level id. With it
+ * enabled, the planner selects the latest provider per leaf and composes nested fields split across
+ * bunches. Only one level of nested composition is supported; deeper or cross-file splits of a
+ * sub-struct throw {@link UnsupportedOperationException}.
+ *
+ * <p>Separating this from {@link DataEvolutionSplitRead} keeps schema resolution and reader
+ * creation out of the layout logic and lets both planning modes be unit-tested directly.
  */
 class DataEvolutionReadPlanner {
 
     private final RowType readRowType;
     // for each bunch, the (row-tracked) row type it physically provides
     private final List<RowType> bunchAvailTypes;
+    private final boolean nestedFieldEnabled;
 
-    DataEvolutionReadPlanner(RowType readRowType, List<RowType> bunchAvailTypes) {
+    DataEvolutionReadPlanner(
+            RowType readRowType, List<RowType> bunchAvailTypes, boolean nestedFieldEnabled) {
         this.readRowType = readRowType;
         this.bunchAvailTypes = bunchAvailTypes;
+        this.nestedFieldEnabled = nestedFieldEnabled;
     }
 
     DataEvolutionReadPlan plan() {
+        DataEvolutionReadPlan plan = nestedFieldEnabled ? planNested() : planTopLevel();
+        List<DataField> readFields = readRowType.getFields();
+        for (int i = 0; i < readFields.size(); i++) {
+            if (plan.rowOffsets[i] == -1 && plan.nested[i] == null) {
+                checkArgument(
+                        readFields.get(i).type().isNullable(),
+                        "Field %s is not null but can't find any file contains it.",
+                        readFields.get(i));
+            }
+        }
+        return plan;
+    }
+
+    private DataEvolutionReadPlan planTopLevel() {
+        List<DataField> allReadFields = readRowType.getFields();
+        int numFields = allReadFields.size();
+        int[] readFieldIds = allReadFields.stream().mapToInt(DataField::id).toArray();
+        int[] rowOffsets = new int[numFields];
+        int[] fieldOffsets = new int[numFields];
+        Arrays.fill(rowOffsets, -1);
+        Arrays.fill(fieldOffsets, -1);
+
+        List<List<DataField>> bunchReadFields = new ArrayList<>();
+        for (int i = 0; i < bunchAvailTypes.size(); i++) {
+            Set<Integer> availableFieldIds =
+                    bunchAvailTypes.get(i).getFields().stream()
+                            .map(DataField::id)
+                            .collect(Collectors.toSet());
+            List<DataField> readFields = new ArrayList<>();
+            for (int j = 0; j < readFieldIds.length; j++) {
+                if (rowOffsets[j] == -1 && availableFieldIds.contains(readFieldIds[j])) {
+                    rowOffsets[j] = i;
+                    fieldOffsets[j] = readFields.size();
+                    readFields.add(allReadFields.get(j));
+                }
+            }
+            bunchReadFields.add(readFields);
+        }
+
+        return new DataEvolutionReadPlan(
+                rowOffsets,
+                fieldOffsets,
+                new DataEvolutionRow.NestedField[numFields],
+                bunchReadFields);
+    }
+
+    private DataEvolutionReadPlan planNested() {
         List<DataField> allReadFields = readRowType.getFields();
         int numFields = allReadFields.size();
         int numBunches = bunchAvailTypes.size();
