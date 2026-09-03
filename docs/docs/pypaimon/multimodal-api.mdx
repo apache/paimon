@@ -811,6 +811,49 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
         consume(batch)
 ```
 
+### Temporal alignment
+
+Use `align` to assemble a bounded training timeline from independently sampled
+tables. The anchor scan defines one output row per step. Named secondary scans
+match within the same episode (or other `by` keys) by exact, backward, forward,
+or nearest timestamp.
+
+```python
+from datetime import timedelta
+from pypaimon.multimodal import align, backward, nearest
+
+steps = align(
+    actions.scan().select(["episode_id", "event_time", "action"]),
+    on="event_time",
+    by="episode_id",
+    sources={
+        "camera_left": nearest(
+            images.scan().where("camera = 'left'").select("image"),
+            tolerance=timedelta(milliseconds=20),
+        ),
+        "robot_state": backward(
+            topics.scan().where("topic = '/robot/state'").select("value"),
+            tolerance=timedelta(milliseconds=50),
+        ),
+    },
+)
+
+for batch in steps.to_arrow_batch_reader(batch_size=128):
+    train(batch)
+```
+
+Temporal keys are injected into the internal metadata scan, so secondary
+queries may select only their payload columns. Output payload columns are named
+`<source>__<column>`. Every source also emits `<source>__valid`,
+`<source>__matched_time`, and signed `<source>__time_delta` audit columns.
+Tolerance is inclusive, and nearest ties choose the earlier row.
+
+Planning reads only grouping keys, timestamps, and row IDs. Selected payload
+rows are then fetched in batches from the same pinned snapshots. BLOB values
+remain descriptors, allowing the existing BLOB and video readers to fetch or
+decode only selected samples. This bounded API does not interpolate values or
+build training windows; those operations remain explicit downstream steps.
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
