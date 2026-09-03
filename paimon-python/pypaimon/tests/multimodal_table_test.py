@@ -856,43 +856,33 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(winner.identifier, actual.identifier)
         self.assertEqual([], actual.scan().to_arrow().to_pylist())
 
-    def test_create_table_reconciles_untyped_create_race(self):
+    def test_create_table_preserves_unknown_create_error(self):
         schema = _schema({"id": pa.int32()})
-        winner = self.conn.create_table("untyped_winner", schema=schema)
+        create = self.conn.catalog.create_table
+        create_error = TimeoutError("create response lost")
 
-        with patch(
-                "pypaimon.multimodal.connection._table_exists",
-                return_value=False):
-            with patch.object(
-                    self.conn.catalog,
-                    "create_table",
-                    side_effect=RuntimeError("schema creation raced")):
-                actual = self.conn.create_table(
-                    "untyped_winner",
+        def create_then_lose_response(*args, **kwargs):
+            create(*args, **kwargs)
+            raise create_error
+
+        with patch.object(
+                self.conn.catalog,
+                "create_table",
+                side_effect=create_then_lose_response):
+            with self.assertRaises(TimeoutError) as context:
+                self.conn.create_table(
+                    "failed_create",
                     data=pa.table({"id": [1, 2, 3]}),
                     schema=schema,
                     ignore_if_exists=True,
                 )
 
-        self.assertEqual(winner.identifier, actual.identifier)
-        self.assertEqual([], actual.scan().to_arrow().to_pylist())
-
-    def test_create_table_preserves_unreconciled_create_error(self):
-        schema = _schema({"id": pa.int32()})
-        create_error = RuntimeError("schema creation failed")
-
-        with patch.object(
-                self.conn.catalog,
-                "create_table",
-                side_effect=create_error):
-            with self.assertRaises(RuntimeError) as context:
-                self.conn.create_table(
-                    "failed_create",
-                    schema=schema,
-                    ignore_if_exists=True,
-                )
-
         self.assertIs(create_error, context.exception)
+        self.assertEqual(
+            [],
+            self.conn.get_table("failed_create")
+            .scan().to_arrow().to_pylist(),
+        )
 
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(

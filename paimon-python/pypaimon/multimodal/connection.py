@@ -23,6 +23,7 @@ from pypaimon import CatalogFactory, Schema as PaimonSchema
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
+    TableAlreadyExistException,
     TableNotExistException,
 )
 from pypaimon.multimodal.table import MultimodalTable, _to_arrow_table
@@ -93,14 +94,9 @@ class MultimodalConnection:
             self.catalog.create_table(
                 identifier, paimon_schema, False)
             created = True
-        except Exception as create_error:
+        except TableAlreadyExistException:
             if not ignore_if_exists:
                 raise
-            try:
-                return self.get_table(name)
-            except (DatabaseNotExistException, TableNotExistException) \
-                    as lookup_error:
-                raise create_error from lookup_error
 
         table = self.get_table(name)
         if data is not None and created:
