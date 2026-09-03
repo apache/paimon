@@ -54,6 +54,8 @@ class DataEvolutionCompactMergeConflictRewriter(
 
   import DataEvolutionCompactMergeConflictRewriter._
 
+  private val partialColumns = new DataEvolutionPartialColumns(table)
+
   def rewrite(
       sparkSession: SparkSession,
       baseSnapshot: Snapshot,
@@ -173,8 +175,7 @@ class DataEvolutionCompactMergeConflictRewriter(
     }
     table.rowType().getFields.asScala.toSeq.flatMap {
       field =>
-        val forField = writePaths.filter(
-          path => DataEvolutionPartialColumns.topLevelOf(table, path) == field.name)
+        val forField = writePaths.filter(path => partialColumns.topLevelOf(path) == field.name)
         if (forField.isEmpty) {
           Seq.empty[String]
         } else if (forField.contains(field.name)) {
@@ -274,8 +275,8 @@ class DataEvolutionCompactMergeConflictRewriter(
     // updatedFields are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
     // scan is in terms of top-level columns and the projection prunes each partially written
     // struct, so the rebased file carries exactly the leaves the staged MERGE files carried.
-    val topColumns = DataEvolutionPartialColumns.topLevelColumns(table, updatedFields)
-    val projections = DataEvolutionPartialColumns.projections(table, updatedFields)
+    val topColumns = partialColumns.topLevelColumns(updatedFields)
+    val projections = partialColumns.projections(updatedFields)
     val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     val relation = createNewScanPlan(relevantSplits, targetRelation)
     val readPlan =

@@ -33,37 +33,41 @@ import scala.collection.JavaConverters._
  * columns may be dotted paths addressing a single leaf of a struct (e.g. `Seq("value", "nest.a")`)
  * rather than plain top-level names.
  */
-private[spark] object DataEvolutionPartialColumns {
+private[spark] class DataEvolutionPartialColumns(table: FileStoreTable) {
+
+  private val dataEvolutionNestedFieldEnabled =
+    table.coreOptions().dataEvolutionNestedFieldEnabled()
+
+  private lazy val fieldNames = table.rowType().getFieldNames.asScala.toSet
 
   /**
    * The top-level column a write path addresses. A path that names a field exactly is that field
    * even when its own name contains a dot, mirroring `RowType#projectByPaths`.
    */
-  def topLevelOf(table: FileStoreTable, path: String): String = {
-    if (!table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+  def topLevelOf(path: String): String = {
+    if (!dataEvolutionNestedFieldEnabled) {
       return path
     }
-    val fieldNames = table.rowType().getFieldNames.asScala.toSet
     val dot = path.indexOf('.')
     if (dot < 0 || fieldNames.contains(path)) path else path.substring(0, dot)
   }
 
   /** Distinct top-level column names addressed by `paths`, in first-seen order. */
-  def topLevelColumns(table: FileStoreTable, paths: Seq[String]): Seq[String] =
-    paths.map(path => topLevelOf(table, path)).distinct
+  def topLevelColumns(paths: Seq[String]): Seq[String] =
+    paths.map(topLevelOf).distinct
 
   /** Whether any path addresses a sub-field rather than a whole top-level column. */
-  def hasNestedPaths(table: FileStoreTable, paths: Seq[String]): Boolean =
-    paths.exists(path => topLevelOf(table, path) != path)
+  def hasNestedPaths(paths: Seq[String]): Boolean =
+    paths.exists(path => topLevelOf(path) != path)
 
   /**
    * The Spark type of the row a file with these write paths physically holds, i.e. the Spark view
    * of `table.rowType().projectByPaths(paths)`. Its fields are in write-path order, which is the
    * order [[DataEvolutionPaimonWriter.writePartialFields]] expects the data frame to be in.
    */
-  def writeStructType(table: FileStoreTable, paths: Seq[String]): StructType = {
+  def writeStructType(paths: Seq[String]): StructType = {
     val writeType =
-      if (table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+      if (dataEvolutionNestedFieldEnabled) {
         table.rowType().projectByPaths(paths.asJava)
       } else {
         table.rowType().project(paths.asJava)
@@ -77,9 +81,9 @@ private[spark] object DataEvolutionPartialColumns {
    * leaves, so re-writing the file leaves its untouched siblings alone instead of overwriting them
    * with nulls.
    */
-  def projections(table: FileStoreTable, paths: Seq[String]): Seq[Column] = {
-    val topCols = topLevelColumns(table, paths)
-    val writeType = writeStructType(table, paths)
+  def projections(paths: Seq[String]): Seq[Column] = {
+    val topCols = topLevelColumns(paths)
+    val writeType = writeStructType(paths)
     topCols.zip(writeType.fields).map {
       case (name, field) =>
         val column = quotedColumn(name)
