@@ -85,6 +85,26 @@ class TableSchemaTest {
         assertThat(optimized.dataFileSchema(null).fieldNames()).containsExactly("id", "name");
     }
 
+    @Test
+    void testBucketKeyTrimsWhitespaceAroundSeparator() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET_KEY.key(), " id , name ");
+        assertThat(bucketKeySchema(options).bucketKeys()).containsExactly("id", "name");
+    }
+
+    private static TableSchema bucketKeySchema(Map<String, String> options) {
+        return new TableSchema(
+                1L,
+                Arrays.asList(
+                        new DataField(1, "id", DataTypes.INT()),
+                        new DataField(2, "name", DataTypes.STRING())),
+                2,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
     private static TableSchema nestedSchema(Map<String, String> options) {
         return new TableSchema(
                 1L,
