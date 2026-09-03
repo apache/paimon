@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import builtins
+from array import array
 import json
 import shutil
 import sys
@@ -451,13 +452,15 @@ class LeRobotValidationTest(unittest.TestCase):
                 "pypaimon.multimodal.lerobot.source._read_remote_parquet",
                 return_value=episode_table,
             ) as read_parquet:
-                _RemoteLeRobotDataset(source, info)
+                dataset = _RemoteLeRobotDataset(source, info)
 
         read_parquet.assert_called_once_with(
             source.file_io,
             "oss://bucket/robot/meta/episodes/file.parquet",
             columns=_RemoteLeRobotDataset._EPISODE_COLUMNS,
         )
+        self.assertIsInstance(dataset._episode_starts, array)
+        self.assertNotIsInstance(dataset.meta.episodes, list)
 
     def test_empty_local_dataset_is_rejected_before_opening_lerobot(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_empty_"))
@@ -1086,6 +1089,20 @@ class LeRobotImportTest(unittest.TestCase):
                 "robot_data", self.image_source, batch_size=4)
         self.assertEqual(5, table.scan().to_arrow().num_rows)
 
+    def test_episode_tasks_are_validated_incrementally(self):
+        from pypaimon.multimodal.lerobot import loader
+
+        with patch.object(
+                loader,
+                "_validate_episode_tasks",
+                wraps=loader._validate_episode_tasks) as validate:
+            self.connection.load_from_lerobot(
+                "incremental_tasks", self.image_source, batch_size=1)
+
+        self.assertEqual([0, 1], [
+            call.args[0] for call in validate.call_args_list
+        ])
+
     def test_episode_source_shards_share_paimon_files(self):
         source = self.temp_dir / "episode_shards"
         shutil.copytree(self.image_source, source)
@@ -1706,6 +1723,26 @@ class LeRobotImportTest(unittest.TestCase):
             replacement.table_schema.options[_OWNER_ID_OPTION],
         )
         self.connection.get_table("drop_race")
+
+    def test_drop_table_validates_group_before_deleting(self):
+        self.connection.load_from_lerobot(
+            "mixed_owner", self.image_source)
+        identifier = self.connection._identifier("mixed_owner__tasks")
+        table = self.connection.catalog.get_table(identifier)
+        schema = table.table_schema.to_schema()
+        schema.options = dict(schema.options)
+        schema.options[_OWNER_ID_OPTION] = "other-owner"
+        self.connection.catalog.drop_table(identifier)
+        self.connection.catalog.create_table(identifier, schema, False)
+
+        with self.assertRaisesRegex(ValueError, "different table"):
+            self.connection.drop_table("mixed_owner")
+
+        for name in (
+                "mixed_owner", "mixed_owner__versions",
+                "mixed_owner__episodes", "mixed_owner__tasks"):
+            self.connection.catalog.get_table(
+                self.connection._identifier(name))
 
     def test_companion_table_cannot_be_dropped_directly(self):
         self.connection.load_from_lerobot(

@@ -346,40 +346,41 @@ def _drop_import_tables(catalog, frames_table, owner_id):
     identifiers = list(
         _companion_table_identifiers(frames_table).values())
     identifiers.append(frames_table.identifier)
-    for identifier in identifiers:
-        _drop_owned_table(catalog, identifier, owner_id)
-
-
-def _drop_owned_table(catalog, identifier, owner_id):
-    """Move a table aside before checking ownership and deleting it."""
-    source = (
-        identifier
-        if isinstance(identifier, Identifier)
-        else Identifier.from_string(str(identifier))
-    )
-    quarantine = Identifier(
-        source.get_database_name(),
-        "__pypaimon_drop_%s" % uuid.uuid4().hex,
-    )
+    quarantined = []
     try:
-        catalog.rename_table(source, quarantine)
-    except (DatabaseNotExistException, TableNotExistException):
-        return
+        for identifier in identifiers:
+            source = (
+                identifier
+                if isinstance(identifier, Identifier)
+                else Identifier.from_string(str(identifier))
+            )
+            quarantine = Identifier(
+                source.get_database_name(),
+                "__pypaimon_drop_%s" % uuid.uuid4().hex,
+            )
+            try:
+                catalog.rename_table(source, quarantine)
+            except (DatabaseNotExistException, TableNotExistException):
+                continue
+            quarantined.append((source, quarantine))
 
-    try:
-        table = catalog.get_table(quarantine)
-        actual_owner = table.table_schema.options.get(_OWNER_ID_OPTION)
-        if actual_owner != owner_id:
-            raise ValueError(
-                "Refusing to drop %s because it belongs to a different "
-                "table." % source)
-        catalog.drop_table(quarantine)
+        for source, quarantine in quarantined:
+            table = catalog.get_table(quarantine)
+            actual_owner = table.table_schema.options.get(_OWNER_ID_OPTION)
+            if actual_owner != owner_id:
+                raise ValueError(
+                    "Refusing to drop %s because it belongs to a different "
+                    "table." % source)
+
+        for _, quarantine in quarantined:
+            catalog.drop_table(quarantine)
     except BaseException:
-        try:
-            catalog.rename_table(quarantine, source)
-        except (DatabaseNotExistException, TableAlreadyExistException,
-                TableNotExistException):
-            pass
+        for source, quarantine in reversed(quarantined):
+            try:
+                catalog.rename_table(quarantine, source)
+            except (DatabaseNotExistException, TableAlreadyExistException,
+                    TableNotExistException):
+                pass
         raise
 
 

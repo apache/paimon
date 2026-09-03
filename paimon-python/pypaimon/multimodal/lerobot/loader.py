@@ -77,7 +77,9 @@ def _write_dataset(
     batch_count = 0
     row_count = 0
     episodes = metadata["episodes"]
-    observed_tasks = {}
+    current_episode = None
+    expected_tasks = set()
+    observed_tasks = set()
     snapshot_recorder = _SnapshotRecorder()
 
     try:
@@ -86,6 +88,13 @@ def _write_dataset(
         table_commit.add_commit_callback(snapshot_recorder)
         for episode_index, episode_begin, task_indices, begin, end in \
                 _episode_batches(dataset, info, batch_size, episodes):
+            if episode_index != current_episode:
+                if current_episode is not None:
+                    _validate_episode_tasks(
+                        current_episode, expected_tasks, observed_tasks)
+                current_episode = episode_index
+                expected_tasks = set(task_indices)
+                observed_tasks = set()
             batch = _read_batch(
                 dataset, info, begin, end, source_schema)
             seen_tasks = _validate_frame_controls(
@@ -97,8 +106,7 @@ def _write_dataset(
                 task_indices,
                 metadata["subtask_indices"],
             )
-            observed_tasks.setdefault(episode_index, set()).update(
-                seen_tasks)
+            observed_tasks.update(seen_tasks)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -109,7 +117,9 @@ def _write_dataset(
             batch_count += 1
             row_count += batch.num_rows
 
-        _validate_episode_tasks(episodes, observed_tasks)
+        if current_episode is not None:
+            _validate_episode_tasks(
+                current_episode, expected_tasks, observed_tasks)
 
         expected_rows = int(info.get("total_frames", len(dataset)))
         if row_count != expected_rows:
@@ -245,16 +255,12 @@ def _validate_frame_controls(
     return seen_tasks
 
 
-def _validate_episode_tasks(episodes, observed_tasks):
-    for episode in episodes:
-        episode_index = episode["episode_index"]
-        expected = set(episode["task_indices"])
-        actual = observed_tasks.get(episode_index, set())
-        if actual != expected:
-            raise ValueError(
-                "LeRobot Episode %d declares task indices %s but its "
-                "frames use %s."
-                % (episode_index, sorted(expected), sorted(actual)))
+def _validate_episode_tasks(episode_index, expected, actual):
+    if actual != expected:
+        raise ValueError(
+            "LeRobot Episode %d declares task indices %s but its "
+            "frames use %s."
+            % (episode_index, sorted(expected), sorted(actual)))
 
 
 def _require_control_integer(value, name, expected, frame_index):
