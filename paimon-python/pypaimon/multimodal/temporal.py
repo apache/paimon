@@ -408,7 +408,18 @@ class _RowIdFetcher:
         self._splits = _plan_with_visible_row_ids(builder)
         self._split_ranges = [
             self._row_ranges(split) for split in self._splits]
-        self._range_index = _SplitRangeIndex(self._split_ranges)
+        self._range_intervals = sorted(
+            (row_range.from_, row_range.to, split_index)
+            for split_index, ranges in enumerate(self._split_ranges)
+            for row_range in ranges
+        )
+        self._range_starts = [
+            interval[0] for interval in self._range_intervals]
+        self._range_max_ends = []
+        max_end = -1
+        for _, end, _ in self._range_intervals:
+            max_end = max(max_end, end)
+            self._range_max_ends.append(max_end)
 
     @staticmethod
     def _row_ranges(split):
@@ -434,7 +445,7 @@ class _RowIdFetcher:
         wanted = Range.sort_and_merge_overlap(
             [Range(row_id, row_id) for row_id in set(row_ids)], True)
         selected_splits = []
-        for split_index in self._range_index.find(wanted):
+        for split_index in self._find_splits(wanted):
             original = self._splits[split_index]
             auth_result = None
             split = original
@@ -473,6 +484,18 @@ class _RowIdFetcher:
             [positions[row_id] for row_id in row_ids], type=pa.int64())
         return arrow.select(self._schema.names).take(take)
 
+    def _find_splits(self, ranges):
+        split_indices = set()
+        for row_range in ranges:
+            right = bisect_right(self._range_starts, row_range.to)
+            left = bisect_left(
+                self._range_max_ends, row_range.from_, 0, right)
+            for position in range(left, right):
+                _, end, split_index = self._range_intervals[position]
+                if end >= row_range.from_:
+                    split_indices.add(split_index)
+        return sorted(split_indices)
+
     def _project_fetch(self, arrow):
         if self._name_paths is None:
             return arrow
@@ -486,34 +509,6 @@ class _RowIdFetcher:
                 array = array.flatten()[index]
             arrays.append(array)
         return pa.Table.from_arrays(arrays, schema=self._fetch_schema)
-
-
-class _SplitRangeIndex:
-
-    def __init__(self, ranges_by_split):
-        self._intervals = sorted(
-            (row_range.from_, row_range.to, split_index)
-            for split_index, ranges in enumerate(ranges_by_split)
-            for row_range in ranges
-        )
-        self._starts = [interval[0] for interval in self._intervals]
-        self._max_ends = []
-        max_end = -1
-        for _, end, _ in self._intervals:
-            max_end = max(max_end, end)
-            self._max_ends.append(max_end)
-
-    def find(self, ranges):
-        split_indices = set()
-        for row_range in ranges:
-            right = bisect_right(self._starts, row_range.to)
-            left = bisect_left(
-                self._max_ends, row_range.from_, 0, right)
-            for position in range(left, right):
-                _, end, split_index = self._intervals[position]
-                if end >= row_range.from_:
-                    split_indices.add(split_index)
-        return sorted(split_indices)
 
 
 def _arrow_rows(table):
