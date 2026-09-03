@@ -33,6 +33,8 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * Request for creating partitions.
  *
@@ -47,6 +49,7 @@ public class CreatePartitionsRequest implements RESTRequest {
     private static final String FIELD_IGNORE_IF_EXISTS = "ignoreIfExists";
     private static final String FIELD_PARTITION_STATISTICS = "partitionStatistics";
     private static final String FIELD_REPLACE_STATISTICS = "replaceStatistics";
+    private static final String FIELD_PARTITION_OPTIONS = "partitionOptions";
 
     @JsonProperty(FIELD_PARTITION_SPECS)
     private final List<Map<String, String>> partitionSpecs;
@@ -64,13 +67,26 @@ public class CreatePartitionsRequest implements RESTRequest {
     @Nullable
     private final Boolean replaceStatistics;
 
+    @JsonProperty(FIELD_PARTITION_OPTIONS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    private final List<Map<String, String>> partitionOptions;
+
     public CreatePartitionsRequest(List<Map<String, String>> partitionSpecs) {
         this(partitionSpecs, true);
     }
 
     public CreatePartitionsRequest(
             List<Map<String, String>> partitionSpecs, @Nullable Boolean ignoreIfExists) {
-        this(partitionSpecs, ignoreIfExists, null, null);
+        this(partitionSpecs, ignoreIfExists, null, null, null);
+    }
+
+    public CreatePartitionsRequest(
+            List<Map<String, String>> partitionSpecs,
+            @Nullable Boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> partitionStatistics,
+            @Nullable Boolean replaceStatistics) {
+        this(partitionSpecs, ignoreIfExists, partitionStatistics, replaceStatistics, null);
     }
 
     @JsonCreator
@@ -79,11 +95,30 @@ public class CreatePartitionsRequest implements RESTRequest {
             @JsonProperty(FIELD_IGNORE_IF_EXISTS) @Nullable Boolean ignoreIfExists,
             @JsonProperty(FIELD_PARTITION_STATISTICS) @Nullable
                     List<PartitionStatistics> partitionStatistics,
-            @JsonProperty(FIELD_REPLACE_STATISTICS) @Nullable Boolean replaceStatistics) {
+            @JsonProperty(FIELD_REPLACE_STATISTICS) @Nullable Boolean replaceStatistics,
+            @JsonProperty(FIELD_PARTITION_OPTIONS) @Nullable
+                    List<Map<String, String>> partitionOptions) {
+        checkArgument(
+                partitionOptions == null
+                        || (partitionSpecs != null
+                                && partitionOptions.size() == partitionSpecs.size()),
+                "partitionOptions must be null or have the same size as partitionSpecs.");
+        checkArgument(
+                partitionOptions == null || !partitionOptions.contains(null),
+                "partitionOptions must not contain null maps.");
+        checkArgument(
+                partitionOptions == null
+                        || partitionOptions.stream()
+                                .flatMap(options -> options.entrySet().stream())
+                                .noneMatch(
+                                        entry ->
+                                                entry.getKey() == null || entry.getValue() == null),
+                "partitionOptions must not contain null keys or values.");
         this.partitionSpecs = partitionSpecs;
         this.ignoreIfExists = ignoreIfExists == null || ignoreIfExists;
         this.partitionStatistics = partitionStatistics;
         this.replaceStatistics = replaceStatistics;
+        this.partitionOptions = partitionOptions;
     }
 
     @JsonGetter(FIELD_PARTITION_SPECS)
@@ -111,6 +146,13 @@ public class CreatePartitionsRequest implements RESTRequest {
     @Nullable
     public Boolean replaceStatistics() {
         return replaceStatistics;
+    }
+
+    /** Options aligned with partition specs; a null list omits the field. */
+    @JsonGetter(FIELD_PARTITION_OPTIONS)
+    @Nullable
+    public List<Map<String, String>> getPartitionOptions() {
+        return partitionOptions;
     }
 
     /**

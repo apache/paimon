@@ -68,6 +68,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTablePartitionPathResolver;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -85,6 +86,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -761,7 +763,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        createPartitions(identifier, partitions, true, null, false);
+        createPartitions(identifier, partitions, true, null, false, null);
     }
 
     @Override
@@ -770,11 +772,19 @@ public class RESTCatalog implements Catalog {
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics)
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
+        List<Map<String, String>> canonicalOptions =
+                canonicalizePartitionOptions(identifier, partitions, partitionOptions);
         try {
             api.createPartitions(
-                    identifier, partitions, ignoreIfExists, statistics, replaceStatistics);
+                    identifier,
+                    partitions,
+                    ignoreIfExists,
+                    statistics,
+                    replaceStatistics,
+                    canonicalOptions);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -787,7 +797,78 @@ public class RESTCatalog implements Catalog {
                             identifier, e.getMessage()));
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (NotImplementedException e) {
+            if (canonicalOptions == null) {
+                throw e;
+            }
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "REST Catalog server does not support partition options for table %s.",
+                            identifier.getFullName()),
+                    e);
         }
+    }
+
+    @Nullable
+    private List<Map<String, String>> canonicalizePartitionOptions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            @Nullable List<Map<String, String>> requested) {
+        if (requested == null) {
+            return null;
+        }
+        if (requested.size() != partitions.size()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition options for table %s must align with all %d partition specs, but found %d.",
+                            identifier.getFullName(), partitions.size(), requested.size()));
+        }
+        Set<Map<String, String>> uniquePartitions = new HashSet<>();
+        List<Map<String, String>> canonical = new ArrayList<>(requested.size());
+        boolean hasOptions = false;
+        for (int i = 0; i < requested.size(); i++) {
+            Map<String, String> partition = partitions.get(i);
+            if (partition == null || !uniquePartitions.add(partition)) {
+                throw new IllegalArgumentException(
+                        "Partition specs must be non-null and unique when partition options are provided.");
+            }
+            Map<String, String> options = requested.get(i);
+            if (options == null) {
+                throw new IllegalArgumentException("Partition options must not contain null maps.");
+            }
+            if (options.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must not contain null keys or values.");
+            }
+            Map<String, String> copied = new HashMap<>(options);
+            String location = copied.get(PATH.key());
+            if (location != null) {
+                try {
+                    copied.put(
+                            PATH.key(),
+                            FormatTablePartitionPathResolver.canonicalizeCustomLocation(
+                                            location, context)
+                                    .toString());
+                } catch (IllegalArgumentException e) {
+                    throw invalidPartitionLocation(identifier, partition, e);
+                }
+            }
+            hasOptions |= !copied.isEmpty();
+            canonical.add(copied);
+        }
+        return hasOptions ? canonical : null;
+    }
+
+    private static IllegalArgumentException invalidPartitionLocation(
+            Identifier identifier,
+            @Nullable Map<String, String> partition,
+            IllegalArgumentException cause) {
+        String message =
+                String.format(
+                        "Invalid custom partition location for partition %s of table %s.",
+                        partition, identifier.getFullName());
+        return new IllegalArgumentException(message, cause);
     }
 
     @Override

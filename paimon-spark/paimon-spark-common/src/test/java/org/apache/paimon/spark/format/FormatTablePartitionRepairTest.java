@@ -172,6 +172,65 @@ class FormatTablePartitionRepairTest {
     }
 
     @Test
+    void dropRepairNeverUnregistersACustomLocation() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerAtLocation(
+                spec("dt", "20260714"), tempDir.resolve("external").toUri().toString());
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        // Its absence below the table root says nothing about a custom-located partition.
+        assertThat(applied).isZero();
+        assertThat(catalog.droppedPartitions).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void unrelatedPartitionOptionDoesNotMakeTheLocationCustom() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerWithOptions(
+                spec("dt", "20260714"), Collections.singletonMap("owner", "spark"));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.droppedPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260714")));
+    }
+
+    @Test
+    void nullPathOptionFailsClosed() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(CoreOptions.PATH.key(), null);
+        catalog.registerWithOptions(spec("dt", "20260714"), options);
+
+        assertThatThrownBy(
+                        () ->
+                                FormatTablePartitionRepair.apply(
+                                        catalog,
+                                        Collections.emptyList(),
+                                        Collections.singletonList("dt"),
+                                        false,
+                                        true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("path option must not be null");
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
     void addOnlyNeverDropsStaleCatalogPartitions() {
         RecordingPartitionManager catalog = new RecordingPartitionManager();
         catalog.register(Collections.singletonList(spec("dt", "20260714")));
@@ -515,6 +574,34 @@ class FormatTablePartitionRepairTest {
     }
 
     @Test
+    void repairNeverMeasuresACustomLocationFromTheDefaultDirectory() throws Exception {
+        java.nio.file.Path defaultDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260701"));
+        Files.write(
+                defaultDirectory.resolve("stale.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerAtLocation(
+                spec("dt", "20260701"), tempDir.resolve("external").toUri().toString());
+        FormatTable table = formatTable(tempDir.toUri().toString(), catalog);
+
+        int applied =
+                FormatTablePartitionRepair.repair(
+                        new PaimonFormatTable(table),
+                        true,
+                        true,
+                        new FormatTablePartitionStatsCollector(table, 1));
+
+        // The directory below the table root is residue, not the custom partition's data.
+        assertThat(applied).isZero();
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.reportedStatistics).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
     void repairWritesNothingWhenMeasuringAPartitionFailsToList() throws Exception {
         Files.write(
                 Files.createDirectories(tempDir.resolve("dt=20260701")).resolve("data.csv"),
@@ -747,6 +834,8 @@ class FormatTablePartitionRepairTest {
         private static final long serialVersionUID = 1L;
 
         private final List<Map<String, String>> registered = new ArrayList<>();
+        private final Map<Map<String, String>, Map<String, String>> partitionOptions =
+                new LinkedHashMap<>();
         private final List<Map<String, String>> requestedPrefixes = new ArrayList<>();
         private final List<List<Map<String, String>>> createdPartitions = new ArrayList<>();
         private final List<Boolean> createIgnoreFlags = new ArrayList<>();
@@ -758,12 +847,24 @@ class FormatTablePartitionRepairTest {
             registered.addAll(partitions);
         }
 
+        private void registerAtLocation(Map<String, String> partition, String location) {
+            registerWithOptions(
+                    partition, Collections.singletonMap(CoreOptions.PATH.key(), location));
+        }
+
+        private void registerWithOptions(
+                Map<String, String> partition, Map<String, String> options) {
+            registered.add(partition);
+            partitionOptions.put(partition, options);
+        }
+
         @Override
         public void createPartitions(
                 List<Map<String, String>> partitions,
                 boolean ignoreIfExists,
                 @Nullable List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             createdPartitions.add(new ArrayList<>(partitions));
             createIgnoreFlags.add(ignoreIfExists);
             reportedStatistics.add(statistics == null ? null : new ArrayList<>(statistics));
@@ -786,7 +887,20 @@ class FormatTablePartitionRepairTest {
             requestedPrefixes.add(prefix);
             List<Partition> partitions = new ArrayList<>(registered.size());
             for (Map<String, String> spec : registered) {
-                partitions.add(new Partition(spec, 0L, 0L, 0L, 0L, 0, false));
+                partitions.add(
+                        new Partition(
+                                spec,
+                                0L,
+                                0L,
+                                0L,
+                                0L,
+                                0,
+                                false,
+                                null,
+                                null,
+                                null,
+                                null,
+                                partitionOptions.get(spec)));
             }
             return partitions;
         }
