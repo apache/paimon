@@ -297,23 +297,48 @@ def _drop_import_tables(catalog, frames_table, owner_id):
         _companion_table_identifiers(frames_table).values())
     identifiers.append(frames_table.identifier)
     for identifier in identifiers:
+        _drop_owned_table(catalog, identifier, owner_id)
+
+
+def _drop_owned_table(catalog, identifier, owner_id):
+    """Move a table aside before checking ownership and deleting it."""
+    source = (
+        identifier
+        if isinstance(identifier, Identifier)
+        else Identifier.from_string(str(identifier))
+    )
+    quarantine = Identifier(
+        source.get_database_name(),
+        "__pypaimon_drop_%s" % uuid.uuid4().hex,
+    )
+    try:
+        catalog.rename_table(source, quarantine)
+    except (DatabaseNotExistException, TableNotExistException):
+        return
+
+    try:
+        table = catalog.get_table(quarantine)
+        actual_owner = table.table_schema.options.get(_OWNER_ID_OPTION)
+        if actual_owner != owner_id:
+            raise ValueError(
+                "Refusing to drop %s because it belongs to a different "
+                "table." % source)
+        catalog.drop_table(quarantine)
+    except BaseException:
         try:
-            table = catalog.get_table(identifier)
-        except (DatabaseNotExistException, TableNotExistException):
-            continue
-        if table.table_schema.options.get(_OWNER_ID_OPTION) == owner_id:
-            catalog.drop_table(identifier, ignore_if_not_exists=True)
+            catalog.rename_table(quarantine, source)
+        except (DatabaseNotExistException, TableAlreadyExistException,
+                TableNotExistException):
+            pass
+        raise
 
 
 def _append_arrow(table, data):
     return _append_arrow_tables(table, [data])
 
 
-def _append_arrow_tables(table, tables, flush_each=False):
-    builder = (
-        table.new_stream_write_builder()
-        if flush_each else table.new_batch_write_builder()
-    )
+def _append_arrow_tables(table, tables):
+    builder = table.new_batch_write_builder()
     table_write = None
     table_commit = None
     commit_started = False
@@ -323,7 +348,6 @@ def _append_arrow_tables(table, tables, flush_each=False):
         table_commit = builder.new_commit()
         table_commit.add_commit_callback(recorder)
         row_count = 0
-        messages = []
         target_schema = _target_schema(table)
         for data in tables:
             if data.num_rows == 0:
@@ -334,19 +358,13 @@ def _append_arrow_tables(table, tables, flush_each=False):
                     % (data.schema, target_schema))
             table_write.write_arrow(data)
             row_count += data.num_rows
-            if flush_each:
-                messages = table_write.prepare_commit(0)
             del data
         if row_count == 0:
             table_write.abort()
             return None
-        if not flush_each:
-            messages = table_write.prepare_commit()
+        messages = table_write.prepare_commit()
         commit_started = True
-        if flush_each:
-            table_commit.commit(messages, 0)
-        else:
-            table_commit.commit(messages)
+        table_commit.commit(messages)
         if recorder.snapshot_id is None:
             raise RuntimeError("LeRobot metadata commit has no snapshot id.")
         return recorder.snapshot_id

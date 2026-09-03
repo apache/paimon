@@ -23,7 +23,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import call, Mock, patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pyarrow as pa
@@ -253,12 +253,11 @@ class LeRobotValidationTest(unittest.TestCase):
         writer.abort.assert_called_once_with()
         writer.close.assert_called_once_with()
 
-    def test_episode_shards_are_flushed_incrementally(self):
+    def test_episode_shards_use_normal_batch_rolling(self):
         data = pa.table({"episode_index": [0]})
         table = Mock()
-        builder = table.new_stream_write_builder.return_value
+        builder = table.new_batch_write_builder.return_value
         writer = builder.new_write.return_value
-        writer.prepare_commit.return_value = [Mock()]
 
         def shards():
             yield data
@@ -269,10 +268,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 "pypaimon.multimodal.lerobot.metadata._target_schema",
                 return_value=data.schema):
             with self.assertRaisesRegex(RuntimeError, "two shards"):
-                _append_arrow_tables(table, shards(), flush_each=True)
+                _append_arrow_tables(table, shards())
 
-        self.assertEqual([call(0), call(0)],
-                         writer.prepare_commit.call_args_list)
+        self.assertEqual(2, writer.write_arrow.call_count)
+        writer.prepare_commit.assert_not_called()
         writer.abort.assert_called_once_with()
         writer.close.assert_called_once_with()
 
@@ -1042,6 +1041,29 @@ class LeRobotImportTest(unittest.TestCase):
                 "robot_data", self.image_source, batch_size=4)
         self.assertEqual(5, table.scan().to_arrow().num_rows)
 
+    def test_episode_source_shards_share_paimon_files(self):
+        source = self.temp_dir / "episode_shards"
+        shutil.copytree(self.image_source, source)
+        episode_path = next(
+            (source / "meta" / "episodes").rglob("*.parquet"))
+        episodes = pq.read_table(episode_path)
+        episode_path.unlink()
+        for index in range(episodes.num_rows):
+            pq.write_table(
+                episodes.slice(index, 1),
+                episode_path.parent / ("part-%d.parquet" % index),
+            )
+
+        self.connection.load_from_lerobot("sharded_episodes", source)
+        table = self.connection.catalog.get_table(
+            self.connection._identifier("sharded_episodes__episodes"))
+        files = {
+            file.file_name
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        }
+        self.assertEqual(1, len(files))
+
     def test_import_publishes_optional_subtasks(self):
         import pandas as pd
 
@@ -1566,18 +1588,27 @@ class LeRobotImportTest(unittest.TestCase):
         self.connection.load_from_lerobot(
             "retry_drop", self.image_source)
         original_drop = self.connection.catalog.drop_table
+        original_rename = self.connection.catalog.rename_table
         failed = [False]
+        episode_quarantine = [None]
+
+        def track_rename(source, target):
+            if source.get_table_name().endswith("__episodes"):
+                episode_quarantine[0] = target.get_full_name()
+            return original_rename(source, target)
 
         def flaky_drop(identifier, ignore_if_not_exists=False):
-            if str(identifier).endswith("__episodes") and not failed[0]:
+            if identifier.get_full_name() == episode_quarantine[0] \
+                    and not failed[0]:
                 failed[0] = True
                 raise RuntimeError("injected drop failure")
             return original_drop(identifier, ignore_if_not_exists)
 
-        with patch.object(
-                self.connection.catalog,
-                "drop_table",
-                side_effect=flaky_drop):
+        with patch.object(self.connection.catalog, "rename_table",
+                          side_effect=track_rename), patch.object(
+                              self.connection.catalog,
+                              "drop_table",
+                              side_effect=flaky_drop):
             with self.assertRaisesRegex(RuntimeError, "injected"):
                 self.connection.drop_table("retry_drop")
         self.connection.get_table("retry_drop")
@@ -1590,6 +1621,39 @@ class LeRobotImportTest(unittest.TestCase):
             with self.assertRaises(TableNotExistException):
                 self.connection.catalog.get_table(
                     self.connection._identifier(name))
+
+    def test_drop_table_does_not_delete_recreated_companion(self):
+        self.connection.load_from_lerobot(
+            "drop_race", self.image_source)
+        identifier = self.connection._identifier("drop_race__versions")
+        old_table = self.connection.catalog.get_table(identifier)
+        replacement_schema = old_table.table_schema.to_schema()
+        replacement_schema.options = dict(replacement_schema.options)
+        replacement_schema.options[_OWNER_ID_OPTION] = "other-owner"
+        original_rename = self.connection.catalog.rename_table
+        replaced = [False]
+
+        def replace_before_rename(source, target):
+            if source.get_full_name() == identifier and not replaced[0]:
+                replaced[0] = True
+                self.connection.catalog.drop_table(source)
+                self.connection.catalog.create_table(
+                    source, replacement_schema, False)
+            return original_rename(source, target)
+
+        with patch.object(
+                self.connection.catalog,
+                "rename_table",
+                side_effect=replace_before_rename):
+            with self.assertRaisesRegex(ValueError, "different table"):
+                self.connection.drop_table("drop_race")
+
+        replacement = self.connection.catalog.get_table(identifier)
+        self.assertEqual(
+            "other-owner",
+            replacement.table_schema.options[_OWNER_ID_OPTION],
+        )
+        self.connection.get_table("drop_race")
 
     def test_companion_table_cannot_be_dropped_directly(self):
         self.connection.load_from_lerobot(

@@ -145,7 +145,6 @@ def _import_dataset(
         episodes_snapshot_id = _append_arrow_tables(
             tables["episodes"],
             _validated_episode_tables(metadata),
-            flush_each=True,
         )
         frames_snapshot_id = None
         if int(info["total_frames"]) > 0:

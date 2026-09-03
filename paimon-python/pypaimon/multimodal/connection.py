@@ -203,27 +203,11 @@ class MultimodalConnection:
         except (DatabaseNotExistException, TableNotExistException):
             pass
 
-        companions = []
         if owner_id is not None:
             from pypaimon.multimodal.lerobot.metadata import \
-                _companion_table_identifiers
-            for companion in _companion_table_identifiers(
-                    raw_table).values():
-                try:
-                    table = self.catalog.get_table(companion)
-                except (DatabaseNotExistException, TableNotExistException):
-                    continue
-                actual = table.table_schema.options.get(_OWNER_ID_OPTION)
-                if actual != owner_id:
-                    raise ValueError(
-                        "Refusing to drop %s because it belongs to a "
-                        "different table." % companion)
-                companions.append(companion)
-            for companion in companions:
-                self.catalog.drop_table(
-                    companion,
-                    ignore_if_not_exists=True,
-                )
+                _drop_import_tables
+            _drop_import_tables(self.catalog, raw_table, owner_id)
+            return
         self.catalog.drop_table(
             identifier,
             ignore_if_not_exists=ignore_if_not_exists,
