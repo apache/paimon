@@ -26,7 +26,6 @@ from pypaimon.catalog.catalog_exception import (
     TableAlreadyExistException,
     TableNotExistException,
 )
-from pypaimon.common.identifier import Identifier
 from pypaimon.multimodal.table import MultimodalTable, _to_arrow_table
 
 _DEFAULT_OPTIONS = {
@@ -179,37 +178,8 @@ class MultimodalConnection:
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
-        identifier = self._identifier(name)
-        owner_id = None
-        try:
-            from pypaimon.multimodal.lerobot.metadata import (
-                _OWNER_ID_OPTION,
-                _is_managed_root,
-            )
-            raw_table = self.catalog.get_table(identifier)
-            table_options = raw_table.table_schema.options
-            managed_root = _is_managed_root(table_options)
-            if _OWNER_ID_OPTION in table_options and not managed_root:
-                raise ValueError(
-                    "%s is a managed LeRobot companion table; drop its "
-                    "frame table instead." % identifier)
-            if managed_root:
-                if Identifier.from_string(
-                        identifier).get_branch_name() is not None:
-                    raise ValueError(
-                        "Dropping a managed LeRobot table branch is not "
-                        "supported; drop the branch through the Catalog.")
-                owner_id = table_options.get(_OWNER_ID_OPTION)
-        except (DatabaseNotExistException, TableNotExistException):
-            pass
-
-        if owner_id is not None:
-            from pypaimon.multimodal.lerobot.metadata import \
-                _drop_import_tables
-            _drop_import_tables(self.catalog, raw_table, owner_id)
-            return
         self.catalog.drop_table(
-            identifier,
+            self._identifier(name),
             ignore_if_not_exists=ignore_if_not_exists,
         )
 

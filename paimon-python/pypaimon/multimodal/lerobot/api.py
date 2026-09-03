@@ -20,18 +20,11 @@ import numbers
 import sys
 from typing import Mapping, Optional
 
-from pypaimon.catalog.catalog_exception import (
-    DatabaseNotExistException,
-    TableAlreadyExistException,
-    TableNotExistException,
-)
+from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
-    _OWNER_ID_OPTION,
     _append_arrow_tables,
-    _drop_import_tables,
     _load_dataset_metadata,
     _managed_table_options,
-    _new_owner_id,
     _prepare_metadata_tables,
     _positive_integer,
     _publish_dataset,
@@ -134,56 +127,41 @@ def _import_dataset(
         batch_size,
         options,
         metadata):
-    table, owner_id = _create_target_table(
+    table = _create_target_table(
         connection, table_name, source_schema, options)
-    try:
-        tables = _prepare_metadata_tables(
-            connection, table.raw_table, owner_id, metadata)
-        version_id = 1
-        _reserve_dataset_version(
-            tables["versions"],
-            version_id,
+    tables = _prepare_metadata_tables(
+        connection, table.raw_table, metadata)
+    version_id = 1
+    _reserve_dataset_version(
+        tables["versions"],
+        version_id,
+        metadata,
+    )
+    episodes_snapshot_id = _append_arrow_tables(
+        tables["episodes"],
+        _validated_episode_tables(metadata),
+    )
+    frames_snapshot_id = None
+    if int(info["total_frames"]) > 0:
+        frames_snapshot_id = _write_dataset(
+            table,
+            dataset,
+            info,
+            source,
+            source_schema,
+            batch_size,
             metadata,
         )
-        episodes_snapshot_id = _append_arrow_tables(
-            tables["episodes"],
-            _validated_episode_tables(metadata),
-        )
-        frames_snapshot_id = None
-        if int(info["total_frames"]) > 0:
-            frames_snapshot_id = _write_dataset(
-                table,
-                dataset,
-                info,
-                source,
-                source_schema,
-                batch_size,
-                metadata,
-            )
-        _publish_dataset(
-            connection,
-            tables,
-            version_id,
-            metadata,
-            table.identifier,
-            frames_snapshot_id,
-            episodes_snapshot_id,
-        )
-        return version_id
-    except BaseException as error:
-        try:
-            _drop_import_tables(
-                connection.catalog,
-                table.raw_table,
-                owner_id,
-                owned_only=True,
-            )
-        except BaseException as cleanup_error:
-            raise RuntimeError(
-                "LeRobot import failed and cleanup also failed: %s"
-                % cleanup_error
-            ) from error
-        raise
+    _publish_dataset(
+        connection,
+        tables,
+        version_id,
+        metadata,
+        table.identifier,
+        frames_snapshot_id,
+        episodes_snapshot_id,
+    )
+    return version_id
 
 
 def _validated_counts(info, source):
@@ -217,10 +195,9 @@ def _required_count(info, name, source):
 
 def _create_target_table(
         connection, table_name, source_schema, options):
-    owner_id = _new_owner_id()
     create_options = dict(options or {})
     managed_options = _managed_table_options(
-        connection._identifier(table_name), owner_id)
+        connection._identifier(table_name))
     reserved_options = set(managed_options).intersection(create_options)
     if reserved_options:
         raise ValueError(
@@ -238,25 +215,4 @@ def _create_target_table(
             "LeRobot target %s already exists; use a new target table."
             % connection._identifier(table_name)
         ) from error
-    except BaseException as error:
-        try:
-            frames_table = connection.catalog.get_table(
-                connection._identifier(table_name))
-        except (DatabaseNotExistException, TableNotExistException):
-            frames_table = None
-        if frames_table is not None and frames_table.table_schema.options.get(
-                _OWNER_ID_OPTION) == owner_id:
-            try:
-                _drop_import_tables(
-                    connection.catalog,
-                    frames_table,
-                    owner_id,
-                    owned_only=True,
-                )
-            except BaseException as cleanup_error:
-                raise RuntimeError(
-                    "LeRobot target creation failed and cleanup also failed: "
-                    "%s" % cleanup_error
-                ) from error
-        raise
-    return table, owner_id
+    return table

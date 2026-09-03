@@ -19,7 +19,6 @@
 from array import array
 import json
 import numbers
-import uuid
 from pathlib import Path
 
 import pyarrow as pa
@@ -37,9 +36,7 @@ from pypaimon.multimodal.table import _target_schema
 
 
 _VERSION_ID = "version_id"
-_OWNER_ID_OPTION = "pypaimon.lerobot.owner-id"
 _PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
-_MISSING = object()
 _TABLE_SUFFIXES = {
     "versions": "__versions",
     "episodes": "__episodes",
@@ -145,10 +142,6 @@ def _load_dataset_metadata(dataset, info, source):
     }
 
 
-def _new_owner_id():
-    return uuid.uuid4().hex
-
-
 def _companion_identifier(frames_identifier, suffix):
     identifier = (
         frames_identifier
@@ -174,21 +167,16 @@ def _quote_identifier_part(value):
     return "`%s`" % value if "." in value else value
 
 
-def _managed_table_options(frames_identifier, owner_id):
+def _managed_table_options(frames_identifier):
     identifier = Identifier.from_string(str(frames_identifier))
     if identifier.get_branch_name() is not None:
         raise ValueError(
             "LeRobot import does not support table branches.")
-    result = {_OWNER_ID_OPTION: owner_id}
+    result = {}
     for name, suffix in _TABLE_SUFFIXES.items():
         result[_COMPANION_OPTION_KEYS[name]] = _companion_identifier(
             frames_identifier, suffix)
     return result
-
-
-def _is_managed_root(options):
-    return _OWNER_ID_OPTION in options and all(
-        key in options for key in _COMPANION_OPTION_KEYS.values())
 
 
 def _companion_table_identifiers(frames_table):
@@ -204,7 +192,7 @@ def _companion_table_identifiers(frames_table):
     return identifiers
 
 
-def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
+def _prepare_metadata_tables(connection, frames_table, metadata):
     schemas = {
         "versions": _VERSIONS_SCHEMA,
         "episodes": metadata["episodes_schema"],
@@ -225,41 +213,23 @@ def _prepare_metadata_tables(connection, frames_table, owner_id, metadata):
     tables = {}
     for name, schema in schemas.items():
         identifier = identifiers[name]
+        options = {"bucket": "-1"}
+        pandas_metadata = (schema.metadata or {}).get(b"pandas")
+        if pandas_metadata is not None:
+            options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(
+                "utf-8")
+        paimon_schema = PaimonSchema.from_pyarrow_schema(
+            schema,
+            options=options,
+        )
         try:
-            table = connection.catalog.get_table(identifier)
-        except (DatabaseNotExistException, TableNotExistException):
-            options = {
-                "bucket": "-1",
-                _OWNER_ID_OPTION: owner_id,
-            }
-            pandas_metadata = (schema.metadata or {}).get(b"pandas")
-            if pandas_metadata is not None:
-                options[_PANDAS_METADATA_OPTION] = pandas_metadata.decode(
-                    "utf-8")
-            paimon_schema = PaimonSchema.from_pyarrow_schema(
-                schema,
-                options=options,
-            )
-            try:
-                connection.catalog.create_table(
-                    identifier, paimon_schema, False)
-            except TableAlreadyExistException:
-                pass
-            table = connection.catalog.get_table(identifier)
-        if table.table_schema.primary_keys:
+            connection.catalog.create_table(
+                identifier, paimon_schema, False)
+        except TableAlreadyExistException as error:
             raise ValueError(
-                "LeRobot metadata table %s must be append-only." % identifier)
-        actual = _target_schema(table)
-        if not actual.equals(schema, check_metadata=False):
-            raise ValueError(
-                "LeRobot metadata table %s has schema %s; expected %s."
-                % (identifier, actual, schema))
-        actual_owner_id = table.table_schema.options.get(_OWNER_ID_OPTION)
-        if actual_owner_id != owner_id:
-            raise ValueError(
-                "LeRobot metadata table %s belongs to a different target "
-                "table. Drop the stale companion tables before importing."
-                % identifier)
+                "LeRobot metadata table %s already exists." % identifier
+            ) from error
+        table = connection.catalog.get_table(identifier)
         tables[name] = table
     return tables
 
@@ -341,64 +311,6 @@ def _manifest_row(
         "stats_json": metadata["stats_json"],
         "has_subtasks": metadata["subtasks_table"] is not None,
     }
-
-
-def _drop_import_tables(
-        catalog, frames_table, owner_id, owned_only=False):
-    root_identifier = (
-        frames_table.identifier
-        if isinstance(frames_table.identifier, Identifier)
-        else Identifier.from_string(str(frames_table.identifier))
-    )
-    identifiers = list(
-        _companion_table_identifiers(frames_table).values())
-    identifiers.append(root_identifier)
-    owned = []
-    for identifier in identifiers:
-        identifier = (
-            identifier
-            if isinstance(identifier, Identifier)
-            else Identifier.from_string(str(identifier))
-        )
-        actual_owner = _table_owner(catalog, identifier)
-        if actual_owner is _MISSING:
-            continue
-        if actual_owner != owner_id:
-            if owned_only:
-                continue
-            raise ValueError(
-                "Refusing to drop %s because it belongs to a different "
-                "table." % identifier)
-        owned.append(identifier)
-
-    failures = []
-    for identifier in owned:
-        if identifier == root_identifier and failures:
-            break
-        try:
-            if _table_owner(catalog, identifier) != owner_id:
-                failures.append(str(identifier))
-                continue
-            catalog.drop_table(identifier)
-        except BaseException:
-            try:
-                if _table_owner(catalog, identifier) is _MISSING:
-                    continue
-            except BaseException:
-                pass
-            failures.append(str(identifier))
-    if failures:
-        raise RuntimeError(
-            "LeRobot cleanup could not drop tables: %s"
-            % ", ".join(failures))
-
-
-def _table_owner(catalog, identifier):
-    try:
-        table = catalog.get_table(identifier)
-        return table.table_schema.options.get(_OWNER_ID_OPTION)
-    except (DatabaseNotExistException, TableNotExistException):
-        return _MISSING
 
 
 def _append_arrow(table, data):

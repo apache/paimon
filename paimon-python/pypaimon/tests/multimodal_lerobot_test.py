@@ -45,7 +45,6 @@ from pypaimon.multimodal.lerobot.metadata import (
     _restore_pandas_metadata,
     _subtask_indices,
     _validated_episode_tables,
-    _OWNER_ID_OPTION,
 )
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
@@ -100,7 +99,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
-            _managed_table_options("db.robot$branch_dev", "owner")
+            _managed_table_options("db.robot$branch_dev")
 
     def test_companion_identifier_preserves_quoted_components(self):
         name = _companion_identifier(
@@ -1264,12 +1263,12 @@ class LeRobotImportTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "has %s" % column):
                     self.connection.load_from_lerobot(table_name, source)
-                for suffix in (
-                        "", "__versions", "__episodes", "__tasks",
-                        "__subtasks"):
-                    with self.assertRaises(TableNotExistException):
-                        self.connection.catalog.get_table(
-                            self.connection._identifier(table_name + suffix))
+                self.connection.get_table(table_name)
+                self.assertEqual(
+                    ["PENDING"],
+                    [row["status"] for row in _catalog_rows(
+                        self.connection, table_name + "__versions")],
+                )
 
     def test_task_text_remains_in_published_task_mapping(self):
         source = self.temp_dir / "reordered_tasks"
@@ -1316,8 +1315,12 @@ class LeRobotImportTest(unittest.TestCase):
                 ValueError, "declares task indices"):
             self.connection.load_from_lerobot(
                 "extra_episode_task", source)
-        with self.assertRaises(TableNotExistException):
-            self.connection.get_table("extra_episode_task")
+        self.connection.get_table("extra_episode_task")
+        self.assertEqual(
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "extra_episode_task__versions")],
+        )
 
     def test_nonempty_dataset_cannot_publish_without_tasks(self):
         source = self.temp_dir / "missing_tasks"
@@ -1342,8 +1345,12 @@ class LeRobotImportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "task_index"):
             self.connection.load_from_lerobot("missing_tasks", source)
-        with self.assertRaises(TableNotExistException):
-            self.connection.get_table("missing_tasks")
+        self.connection.get_table("missing_tasks")
+        self.assertEqual(
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "missing_tasks__versions")],
+        )
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"
@@ -1420,7 +1427,7 @@ class LeRobotImportTest(unittest.TestCase):
             table.raw_table.tag_manager().get(tag).id,
         )
 
-    def test_failed_publication_is_cleaned_and_can_retry(self):
+    def test_failed_publication_remains_pending(self):
         with patch(
                 "pypaimon.multimodal.lerobot.api._publish_dataset",
                 side_effect=RuntimeError("publish failed")):
@@ -1428,15 +1435,12 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "failed_publish", self.image_source)
 
-        for suffix in (
-                "", "__versions", "__episodes", "__tasks", "__subtasks"):
-            with self.assertRaises(TableNotExistException):
-                self.connection.catalog.get_table(
-                    self.connection._identifier("failed_publish" + suffix))
-
-        version_id = self.connection.load_from_lerobot(
-            "failed_publish", self.image_source)
-        self.assertEqual(1, version_id)
+        self.connection.get_table("failed_publish")
+        self.assertEqual(
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "failed_publish__versions")],
+        )
 
     def test_lost_commit_response_does_not_fail_import(self):
         from pypaimon.snapshot.renaming_snapshot_commit import (
@@ -1470,38 +1474,19 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection, "lost_commit_response__versions")],
         )
 
-    def test_stale_companion_does_not_block_retry(self):
+    def test_existing_companion_is_rejected(self):
         self.connection.load_from_lerobot(
             "other_group", self.image_source)
         stale = self.connection._identifier("stale__tasks")
-        stale_name = Identifier.from_string(stale).get_full_name()
         self.connection.catalog.rename_table(
             self.connection._identifier("other_group__tasks"), stale)
 
-        original_rename = self.connection.catalog.rename_table
-        renamed_sources = []
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.connection.load_from_lerobot(
+                "stale", self.image_source)
 
-        def track_rename(source, target):
-            renamed_sources.append(source.get_full_name())
-            return original_rename(source, target)
-
-        with patch.object(
-                self.connection.catalog,
-                "rename_table",
-                side_effect=track_rename):
-            with self.assertRaisesRegex(ValueError, "different target"):
-                self.connection.load_from_lerobot(
-                    "stale", self.image_source)
-        self.assertNotIn(stale_name, renamed_sources)
-        with self.assertRaises(TableNotExistException):
-            self.connection.catalog.get_table(
-                self.connection._identifier("stale"))
-
-        self.connection.catalog.drop_table(stale)
-        self.assertEqual(
-            1,
-            self.connection.load_from_lerobot("stale", self.image_source),
-        )
+        self.connection.get_table("stale")
+        self.connection.catalog.get_table(stale)
 
     def test_invalid_target_options_do_not_leave_table(self):
         with self.assertRaisesRegex(ValueError, "data-evolution.enabled"):
@@ -1518,7 +1503,7 @@ class LeRobotImportTest(unittest.TestCase):
             "invalid_options", self.image_source)
         self.assertEqual(1, version_id)
 
-    def test_target_open_failure_is_cleaned_and_can_retry(self):
+    def test_target_open_failure_leaves_created_table(self):
         original_get = self.connection.get_table
         failed = [False]
 
@@ -1533,35 +1518,8 @@ class LeRobotImportTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "get failed"):
                 self.connection.load_from_lerobot(
                     "failed_open", self.image_source)
-            version_id = self.connection.load_from_lerobot(
-                "failed_open", self.image_source)
 
-        self.assertEqual(1, version_id)
-
-    def test_target_open_failure_does_not_drop_another_owner(self):
-        original_create = self.connection.create_table
-
-        def create_other_owner(*args, **kwargs):
-            options = dict(kwargs["options"])
-            options[_OWNER_ID_OPTION] = "other-owner"
-            kwargs["options"] = options
-            original_create(*args, **kwargs)
-            raise RuntimeError("get failed")
-
-        with patch.object(
-                self.connection,
-                "create_table",
-                side_effect=create_other_owner):
-            with self.assertRaisesRegex(RuntimeError, "get failed"):
-                self.connection.load_from_lerobot(
-                    "other_owner", self.image_source)
-
-        table = self.connection.catalog.get_table(
-            self.connection._identifier("other_owner"))
-        self.assertEqual(
-            "other-owner",
-            table.table_schema.options[_OWNER_ID_OPTION],
-        )
+        self.connection.get_table("failed_open")
 
     def test_dataset_close_failure_does_not_override_success(self):
         from pypaimon.multimodal.lerobot import api
@@ -1694,176 +1652,13 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.load_from_lerobot(
                     "concurrent_append", self.image_source)
 
-        for name in (
-                "concurrent_append",
-                "concurrent_append__versions",
-                "concurrent_append__episodes",
-                "concurrent_append__tasks",
-                "concurrent_append__subtasks"):
-            with self.subTest(name=name):
-                with self.assertRaises(TableNotExistException):
-                    self.connection.catalog.get_table(
-                        self.connection._identifier(name))
-
-    def test_drop_table_removes_companion_tables(self):
-        self.connection.load_from_lerobot("drop_group", self.image_source)
-        self.connection.drop_table("drop_group")
-
-        for name in (
-                "drop_group", "drop_group__versions",
-                "drop_group__episodes", "drop_group__tasks",
-                "drop_group__subtasks"):
-            with self.subTest(name=name):
-                with self.assertRaises(TableNotExistException):
-                    self.connection.catalog.get_table(
-                        self.connection._identifier(name))
-
-    def test_drop_failure_is_not_retried(self):
-        self.connection.load_from_lerobot(
-            "retry_drop", self.image_source)
-        episode_name = Identifier.from_string(self.connection._identifier(
-            "retry_drop__episodes"))
-        episode_table = self.connection.catalog.get_table(episode_name)
-        expected_owner = episode_table.table_schema.options[
-            _OWNER_ID_OPTION]
-        original_drop = self.connection.catalog.drop_table
-        attempts = [0]
-
-        def flaky_drop(identifier, ignore_if_not_exists=False):
-            if identifier == episode_name:
-                attempts[0] += 1
-                raise RuntimeError("injected drop failure")
-            return original_drop(identifier, ignore_if_not_exists)
-
-        with patch.object(
-                self.connection.catalog,
-                "drop_table",
-                side_effect=flaky_drop):
-            with self.assertRaisesRegex(RuntimeError, "could not drop"):
-                self.connection.drop_table("retry_drop")
-
-        self.assertEqual(1, attempts[0])
-        remaining = self.connection.catalog.get_table(episode_name)
+        self.connection.get_table("concurrent_append")
         self.assertEqual(
-            expected_owner,
-            remaining.table_schema.options.get(_OWNER_ID_OPTION),
-        )
-        self.connection.get_table("retry_drop")
-
-        self.connection.drop_table("retry_drop")
-        for name in (
-                "retry_drop", "retry_drop__versions",
-                "retry_drop__episodes", "retry_drop__tasks"):
-            with self.assertRaises(TableNotExistException):
-                self.connection.catalog.get_table(
-                    self.connection._identifier(name))
-
-    def test_drop_response_loss_is_reconciled_without_retry(self):
-        self.connection.load_from_lerobot(
-            "lost_drop_response", self.image_source)
-        episode_name = Identifier.from_string(self.connection._identifier(
-            "lost_drop_response__episodes"))
-        original_drop = self.connection.catalog.drop_table
-        attempts = [0]
-
-        def drop_then_lose_response(identifier, ignore_if_not_exists=False):
-            result = original_drop(identifier, ignore_if_not_exists)
-            if identifier == episode_name:
-                attempts[0] += 1
-                raise RuntimeError("response lost")
-            return result
-
-        with patch.object(
-                self.connection.catalog,
-                "drop_table",
-                side_effect=drop_then_lose_response):
-            self.connection.drop_table("lost_drop_response")
-
-        self.assertEqual(1, attempts[0])
-
-    def test_drop_table_does_not_rename_table_directories(self):
-        self.connection.load_from_lerobot(
-            "direct_group_drop", self.image_source)
-
-        with patch.object(
-                self.connection.catalog,
-                "rename_table",
-                side_effect=AssertionError("rename must not be used")):
-            self.connection.drop_table("direct_group_drop")
-
-    def test_drop_table_validates_group_before_deleting(self):
-        self.connection.load_from_lerobot(
-            "mixed_owner", self.image_source)
-        identifier = self.connection._identifier("mixed_owner__tasks")
-        table = self.connection.catalog.get_table(identifier)
-        schema = table.table_schema.to_schema()
-        schema.options = dict(schema.options)
-        schema.options[_OWNER_ID_OPTION] = "other-owner"
-        self.connection.catalog.drop_table(identifier)
-        self.connection.catalog.create_table(identifier, schema, False)
-
-        with patch.object(
-                self.connection.catalog,
-                "drop_table",
-                wraps=self.connection.catalog.drop_table) as drop:
-            with self.assertRaisesRegex(ValueError, "different table"):
-                self.connection.drop_table("mixed_owner")
-            drop.assert_not_called()
-
-        for name in (
-                "mixed_owner", "mixed_owner__versions",
-                "mixed_owner__episodes", "mixed_owner__tasks"):
-            self.connection.catalog.get_table(
-                self.connection._identifier(name))
-
-    def test_companion_table_cannot_be_dropped_directly(self):
-        self.connection.load_from_lerobot(
-            "direct_drop", self.image_source)
-
-        with self.assertRaisesRegex(ValueError, "companion table"):
-            self.connection.drop_table("direct_drop__tasks")
-
-        self.connection.get_table("direct_drop")
-        self.connection.catalog.get_table(
-            self.connection._identifier("direct_drop__tasks"))
-        self.connection.drop_table("direct_drop")
-
-    def test_drop_table_rejects_managed_branch(self):
-        self.connection.load_from_lerobot(
-            "branch_drop", self.image_source)
-        self.connection.catalog.create_branch(
-            self.connection._identifier("branch_drop"), "dev")
-
-        with self.assertRaisesRegex(ValueError, "table branch"):
-            self.connection.drop_table("branch_drop$branch_dev")
-        for name in (
-                "branch_drop", "branch_drop__versions",
-                "branch_drop__episodes", "branch_drop__tasks"):
-            self.connection.catalog.get_table(
-                self.connection._identifier(name))
-        with self.assertRaises(TableNotExistException):
-            self.connection.catalog.get_table(
-                self.connection._identifier("branch_drop__subtasks"))
-
-    def test_table_group_survives_frame_table_rename(self):
-        self.connection.load_from_lerobot("before_rename", self.image_source)
-        self.connection.catalog.rename_table(
-            self.connection._identifier("before_rename"),
-            self.connection._identifier("after_rename"),
+            ["PENDING"],
+            [row["status"] for row in _catalog_rows(
+                self.connection, "concurrent_append__versions")],
         )
 
-        with self.assertRaisesRegex(ValueError, "already exists"):
-            self.connection.load_from_lerobot(
-                "after_rename", self.image_source)
-
-        self.connection.drop_table("after_rename")
-        for name in (
-                "after_rename", "before_rename__versions",
-                "before_rename__episodes", "before_rename__tasks",
-                "before_rename__subtasks"):
-            with self.assertRaises(TableNotExistException):
-                self.connection.catalog.get_table(
-                    self.connection._identifier(name))
 
 if __name__ == "__main__":
     unittest.main()

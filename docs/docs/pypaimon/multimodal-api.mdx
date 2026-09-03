@@ -654,9 +654,7 @@ version_id = conn.load_from_lerobot(
 
 A READY row in `<table>__versions` identifies a release; reading the same tag
 from its component tables reconstructs that release.
-The one-time importer requires a new target table. `drop_table()` removes the
-table group; companion tables cannot be dropped separately through
-`MultimodalConnection`.
+The one-time importer requires a new target table.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
