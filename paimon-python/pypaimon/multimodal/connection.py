@@ -71,35 +71,18 @@ class MultimodalConnection:
         """Create a multimodal table and optionally add initial data."""
         identifier = self._identifier(name)
         already_exists = _table_exists(self.catalog, identifier)
-        if already_exists and ignore_if_exists:
-            try:
-                return self.get_table(name)
-            except (DatabaseNotExistException, TableNotExistException):
-                pass
-        try:
-            paimon_schema = _to_paimon_schema(
-                schema, data, options, partitioned)
-            _validate_multimodal_schema(paimon_schema, identifier)
-        except ValueError:
-            if ignore_if_exists:
-                try:
-                    return self.get_table(name)
-                except (DatabaseNotExistException, TableNotExistException):
-                    pass
-            raise
+        paimon_schema = _to_paimon_schema(schema, data, options, partitioned)
 
         self._create_database_for(identifier)
-        created = False
         try:
             self.catalog.create_table(
-                identifier, paimon_schema, False)
-            created = True
+                identifier, paimon_schema, ignore_if_exists)
         except TableAlreadyExistException:
             if not ignore_if_exists:
                 raise
 
         table = self.get_table(name)
-        if data is not None and created:
+        if data is not None and not already_exists:
             table.add(data)
         return table
 
@@ -210,10 +193,7 @@ def _table_exists(catalog, identifier: str) -> bool:
 
 
 def _validate_multimodal_table(table, identifier: str):
-    _validate_multimodal_schema(table.table_schema, identifier)
-
-
-def _validate_multimodal_schema(table_schema, identifier: str):
+    table_schema = table.table_schema
     options = table_schema.options
     if str(options.get("data-evolution.enabled", "false")).lower() != "true":
         raise ValueError(
