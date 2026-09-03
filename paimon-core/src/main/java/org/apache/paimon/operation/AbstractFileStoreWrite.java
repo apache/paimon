@@ -674,8 +674,31 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo.get(), bucket),
                     e);
         }
-        if (restored.totalBuckets() != null && validateNumBuckets) {
-            checkNumBuckets(partInfo.get(), expectedTotalBuckets, restored.totalBuckets());
+        Integer restoredTotalBuckets = restored.totalBuckets();
+        if (restoredTotalBuckets != null
+                && validateNumBuckets
+                && expectedTotalBuckets != restoredTotalBuckets) {
+            if (partitionType.getFieldCount() > 0 && options.bucketPerPartitionCountEnabled()) {
+                if (bucket >= restoredTotalBuckets) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Trying to write bucket %d to %s, but the partition only has %d "
+                                            + "buckets (table default: %d). Recompute the bucket using the "
+                                            + "partition's bucket count, or rescale the partition via "
+                                            + "INSERT OVERWRITE.",
+                                    bucket,
+                                    partInfo.get(),
+                                    restoredTotalBuckets,
+                                    expectedTotalBuckets));
+                }
+                LOG.info(
+                        "{} uses {} buckets (expected: {}). Accepting per-partition bucket count.",
+                        partInfo.get(),
+                        restoredTotalBuckets,
+                        expectedTotalBuckets);
+            } else {
+                checkNumBuckets(partInfo.get(), expectedTotalBuckets, restoredTotalBuckets);
+            }
         }
         return restored;
     }
