@@ -1438,6 +1438,25 @@ class LeRobotImportTest(unittest.TestCase):
             "failed_publish", self.image_source)
         self.assertEqual(1, version_id)
 
+    def test_stale_companion_does_not_block_retry(self):
+        self.connection.load_from_lerobot(
+            "other_group", self.image_source)
+        stale = self.connection._identifier("stale__tasks")
+        self.connection.catalog.rename_table(
+            self.connection._identifier("other_group__tasks"), stale)
+
+        with self.assertRaisesRegex(ValueError, "different target"):
+            self.connection.load_from_lerobot("stale", self.image_source)
+        with self.assertRaises(TableNotExistException):
+            self.connection.catalog.get_table(
+                self.connection._identifier("stale"))
+
+        self.connection.catalog.drop_table(stale)
+        self.assertEqual(
+            1,
+            self.connection.load_from_lerobot("stale", self.image_source),
+        )
+
     def test_invalid_target_options_do_not_leave_table(self):
         with self.assertRaisesRegex(ValueError, "data-evolution.enabled"):
             self.connection.load_from_lerobot(
@@ -1653,7 +1672,7 @@ class LeRobotImportTest(unittest.TestCase):
                     self.connection.catalog.get_table(
                         self.connection._identifier(name))
 
-    def test_drop_table_can_retry_after_companion_failure(self):
+    def test_drop_table_retries_companion_failure(self):
         self.connection.load_from_lerobot(
             "retry_drop", self.image_source)
         original_drop = self.connection.catalog.drop_table
@@ -1678,11 +1697,7 @@ class LeRobotImportTest(unittest.TestCase):
                               self.connection.catalog,
                               "drop_table",
                               side_effect=flaky_drop):
-            with self.assertRaisesRegex(RuntimeError, "injected"):
-                self.connection.drop_table("retry_drop")
-        self.connection.get_table("retry_drop")
-
-        self.connection.drop_table("retry_drop")
+            self.connection.drop_table("retry_drop")
         for name in (
                 "retry_drop", "retry_drop__versions",
                 "retry_drop__episodes", "retry_drop__tasks",

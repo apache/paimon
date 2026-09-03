@@ -173,7 +173,11 @@ def _import_dataset(
     except BaseException as error:
         try:
             _drop_import_tables(
-                connection.catalog, table.raw_table, owner_id)
+                connection.catalog,
+                table.raw_table,
+                owner_id,
+                owned_only=True,
+            )
         except BaseException as cleanup_error:
             raise RuntimeError(
                 "LeRobot import failed and cleanup also failed: %s"
@@ -244,7 +248,11 @@ def _create_target_table(
                 _OWNER_ID_OPTION) == owner_id:
             try:
                 _drop_import_tables(
-                    connection.catalog, frames_table, owner_id)
+                    connection.catalog,
+                    frames_table,
+                    owner_id,
+                    owned_only=True,
+                )
             except BaseException as cleanup_error:
                 raise RuntimeError(
                     "LeRobot target creation failed and cleanup also failed: "

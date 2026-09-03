@@ -342,7 +342,8 @@ def _manifest_row(
     }
 
 
-def _drop_import_tables(catalog, frames_table, owner_id):
+def _drop_import_tables(
+        catalog, frames_table, owner_id, owned_only=False):
     identifiers = list(
         _companion_table_identifiers(frames_table).values())
     identifiers.append(frames_table.identifier)
@@ -364,24 +365,64 @@ def _drop_import_tables(catalog, frames_table, owner_id):
                 continue
             quarantined.append((source, quarantine))
 
+        owned = []
+        foreign = []
         for source, quarantine in quarantined:
             table = catalog.get_table(quarantine)
             actual_owner = table.table_schema.options.get(_OWNER_ID_OPTION)
-            if actual_owner != owner_id:
-                raise ValueError(
-                    "Refusing to drop %s because it belongs to a different "
-                    "table." % source)
-
-        for _, quarantine in quarantined:
-            catalog.drop_table(quarantine)
-    except BaseException:
-        for source, quarantine in reversed(quarantined):
-            try:
-                catalog.rename_table(quarantine, source)
-            except (DatabaseNotExistException, TableAlreadyExistException,
-                    TableNotExistException):
-                pass
+            target = owned if actual_owner == owner_id else foreign
+            target.append((source, quarantine))
+    except BaseException as error:
+        failures = _restore_quarantined(catalog, quarantined)
+        if failures:
+            raise RuntimeError(
+                "Failed to restore quarantined LeRobot tables: %s"
+                % ", ".join(failures)) from error
         raise
+
+    if foreign and not owned_only:
+        error = ValueError(
+            "Refusing to drop %s because it belongs to a different table."
+            % foreign[0][0])
+        failures = _restore_quarantined(catalog, quarantined)
+        if failures:
+            raise RuntimeError(
+                "Failed to restore quarantined LeRobot tables: %s"
+                % ", ".join(failures)) from error
+        raise error
+
+    restore_failures = _restore_quarantined(catalog, foreign)
+    drop_failures = _drop_quarantined(catalog, owned)
+    if drop_failures:
+        drop_failures = _drop_quarantined(catalog, drop_failures)
+    if restore_failures or drop_failures:
+        raise RuntimeError(
+            "LeRobot cleanup left quarantined tables: %s"
+            % ", ".join(restore_failures + [
+                str(quarantine) for _, quarantine in drop_failures
+            ]))
+
+
+def _restore_quarantined(catalog, tables):
+    failures = []
+    for source, quarantine in reversed(tables):
+        try:
+            catalog.rename_table(quarantine, source)
+        except BaseException:
+            failures.append(str(quarantine))
+    return failures
+
+
+def _drop_quarantined(catalog, tables):
+    failures = []
+    for source, quarantine in tables:
+        try:
+            catalog.drop_table(quarantine)
+        except (DatabaseNotExistException, TableNotExistException):
+            pass
+        except BaseException:
+            failures.append((source, quarantine))
+    return failures
 
 
 def _append_arrow(table, data):
