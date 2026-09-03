@@ -201,7 +201,14 @@ class PaimonMicroBatchStream(
       startOffset.json(),
       endOffset.json(),
       admittedSplits.length,
-      () => DataEvolutionUtils.collectWrittenColumnIds(admittedSplitSnapshot, schemaLoader)
+      () =>
+        DataEvolutionUtils.collectWrittenColumnIds(
+          admittedSplitSnapshot,
+          schemaId => schemaLoader.apply(schemaId).fields(),
+          schemaId =>
+            new CoreOptions(schemaLoader.apply(schemaId).options())
+              .dataEvolutionNestedFieldEnabled()
+        )
     )
   }
 

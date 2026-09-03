@@ -52,6 +52,51 @@ class DataEvolutionReadPlannerTest {
     }
 
     @Test
+    void testTopLevelPlanningKeepsLegacyWholeFieldSelection() {
+        RowType avail0 = nest(new DataField(2, "a", DataTypes.INT()));
+        RowType avail1 =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "nest",
+                                        DataTypes.ROW(new DataField(3, "b", DataTypes.STRING())))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1), false)
+                        .plan();
+
+        assertThat(plan.nested).containsOnlyNulls();
+        assertThat(plan.rowOffsets).containsExactly(1, 0);
+        assertThat(plan.fieldOffsets).containsExactly(0, 0);
+        assertThat(plan.bunchReadFields.get(0)).containsExactly(READ_TYPE.getField(1));
+        assertThat(plan.bunchReadFields.get(1)).containsExactly(READ_TYPE.getField(0));
+    }
+
+    @Test
+    void testMissingNonNullFieldIsRejectedInBothPlanningModes() {
+        RowType readType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "id", DataTypes.INT().notNull())));
+        RowType unrelated =
+                new RowType(Collections.singletonList(new DataField(1, "other", DataTypes.INT())));
+
+        for (boolean nestedFieldEnabled : Arrays.asList(false, true)) {
+            assertThatThrownBy(
+                            () ->
+                                    new DataEvolutionReadPlanner(
+                                                    readType,
+                                                    Collections.singletonList(unrelated),
+                                                    nestedFieldEnabled)
+                                            .plan())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("id");
+        }
+    }
+
+    @Test
     void testStructSplitAcrossFilesIsComposed() {
         // bunch0 (latest) provides nest.a; bunch1 provides id + nest.b
         RowType avail0 = nest(new DataField(2, "a", DataTypes.INT()));
@@ -65,7 +110,7 @@ class DataEvolutionReadPlannerTest {
                                         DataTypes.ROW(new DataField(3, "b", DataTypes.STRING())))));
 
         DataEvolutionReadPlan plan =
-                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1)).plan();
+                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1), true).plan();
 
         // id is taken whole from bunch1
         assertThat(plan.nested[0]).isNull();
@@ -89,7 +134,7 @@ class DataEvolutionReadPlannerTest {
                 new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         DataEvolutionReadPlan plan =
-                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1)).plan();
+                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1), true).plan();
 
         // nest is taken whole from bunch0, not composed
         assertThat(plan.nested[1]).isNull();
@@ -105,7 +150,7 @@ class DataEvolutionReadPlannerTest {
                 new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         DataEvolutionReadPlan plan =
-                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1)).plan();
+                new DataEvolutionReadPlanner(READ_TYPE, Arrays.asList(avail0, avail1), true).plan();
 
         // nest still composed (only a present), no exception since b is nullable
         assertThat(plan.nested[1]).isNotNull();
@@ -166,7 +211,7 @@ class DataEvolutionReadPlannerTest {
         assertThatThrownBy(
                         () ->
                                 new DataEvolutionReadPlanner(
-                                                readType, Arrays.asList(avail0, avail1))
+                                                readType, Arrays.asList(avail0, avail1), true)
                                         .plan())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
@@ -215,12 +260,148 @@ class DataEvolutionReadPlannerTest {
                                                                         DataTypes.INT())))))));
 
         DataEvolutionReadPlan plan =
-                new DataEvolutionReadPlanner(readType, Arrays.asList(avail0, avail1)).plan();
+                new DataEvolutionReadPlanner(readType, Arrays.asList(avail0, avail1), true).plan();
 
         // id comes whole from the latest partial file
         assertThat(plan.rowOffsets[0]).isEqualTo(0);
         // payload.inner is entirely provided by bunch1; the missing leaf "y" must be null-filled
         // by schema evolution rather than rejected as an unsupported deep split.
         assertThat(plan.bunchReadFields.get(1)).anySatisfy(f -> assertThat(f.id()).isEqualTo(1));
+    }
+
+    @Test
+    void testProjectedAddedLeafUsesParentAsReaderAnchor() {
+        // Only payload.y is projected. The old file predates y, but its payload field still has to
+        // be read so schema evolution can null-fill y and the union reader keeps row cardinality.
+        RowType readType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        new RowType(
+                                                false,
+                                                Collections.singletonList(
+                                                        new DataField(3, "y", DataTypes.INT()))))));
+        RowType unrelatedUpdate =
+                new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
+        RowType oldFile =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(
+                                        1,
+                                        "payload",
+                                        new RowType(
+                                                false,
+                                                Collections.singletonList(
+                                                        new DataField(2, "x", DataTypes.INT()))))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(
+                                readType, Arrays.asList(unrelatedUpdate, oldFile), true)
+                        .plan();
+
+        assertThat(plan.rowOffsets[0]).isEqualTo(-1);
+        assertThat(plan.nested[0]).isNotNull();
+        assertThat(plan.bunchReadFields.get(0)).isEmpty();
+        assertThat(plan.bunchReadFields.get(1)).containsExactly(readType.getFields().get(0));
+    }
+
+    @Test
+    void testProjectedAddedLeafUsesAllWinningSiblingProvidersAsAnchors() {
+        RowType readType =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(5, "added", DataTypes.INT()))));
+        RowType latestX =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(2, "x", DataTypes.INT()))));
+        RowType latestZ =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(4, "z", DataTypes.INT()))));
+        RowType staleX =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(2, "x", DataTypes.INT()))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(
+                                readType, Arrays.asList(latestX, latestZ, staleX), true)
+                        .plan();
+
+        assertThat(plan.rowOffsets[0]).isEqualTo(-1);
+        assertThat(plan.nested[0]).isNotNull();
+        assertThat(plan.bunchReadFields.get(0)).containsExactly(readType.getFields().get(0));
+        assertThat(plan.bunchReadFields.get(1)).containsExactly(readType.getFields().get(0));
+        assertThat(plan.bunchReadFields.get(2)).isEmpty();
+    }
+
+    @Test
+    void testProjectedExistingLeafUsesAllWinningSiblingProvidersAsAnchors() {
+        RowType readType =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(2, "x", DataTypes.INT()))));
+        RowType latestX =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(2, "x", DataTypes.INT()))));
+        RowType latestZ =
+                rowType(
+                        new DataField(
+                                1, "payload", rowType(new DataField(4, "z", DataTypes.INT()))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(readType, Arrays.asList(latestX, latestZ), true)
+                        .plan();
+
+        assertThat(plan.rowOffsets[0]).isEqualTo(-1);
+        assertThat(plan.nested[0]).isNotNull();
+        assertThat(plan.bunchReadFields.get(0)).containsExactly(readType.getFields().get(0));
+        assertThat(plan.bunchReadFields.get(1)).containsExactly(readType.getFields().get(0));
+    }
+
+    @Test
+    void testProjectedDeepAddedLeafUsesSiblingUnderSameParent() {
+        DataField projectedSub =
+                new DataField(2, "sub", rowType(new DataField(4, "added", DataTypes.INT())));
+        RowType readType = rowType(new DataField(1, "payload", rowType(projectedSub)));
+        RowType existingSub =
+                rowType(
+                        new DataField(
+                                1,
+                                "payload",
+                                rowType(
+                                        new DataField(
+                                                2,
+                                                "sub",
+                                                rowType(
+                                                        new DataField(
+                                                                3,
+                                                                "existing",
+                                                                DataTypes.INT()))))));
+        RowType otherSibling =
+                rowType(
+                        new DataField(
+                                1,
+                                "payload",
+                                rowType(new DataField(5, "other", DataTypes.STRING()))));
+
+        DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(
+                                readType, Arrays.asList(existingSub, otherSibling), true)
+                        .plan();
+
+        assertThat(plan.rowOffsets[0]).isEqualTo(-1);
+        assertThat(plan.nested[0]).isNotNull();
+        RowType subProviderReadType = (RowType) plan.bunchReadFields.get(0).get(0).type();
+        assertThat(subProviderReadType.getFields()).containsExactly(projectedSub);
+        assertThat(plan.bunchReadFields.get(1)).containsExactly(readType.getFields().get(0));
+    }
+
+    private static RowType rowType(DataField field) {
+        return new RowType(Collections.singletonList(field));
     }
 }

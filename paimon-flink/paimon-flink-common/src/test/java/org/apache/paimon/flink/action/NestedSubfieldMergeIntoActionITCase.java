@@ -138,6 +138,57 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testDisabledOptionTreatsDotAsPartOfTopLevelColumnName() throws Exception {
+        testDottedTopLevelColumn(false);
+    }
+
+    @Test
+    public void testEnabledOptionTreatsDotAsPartOfTopLevelColumnName() throws Exception {
+        testDottedTopLevelColumn(true);
+    }
+
+    private void testDottedTopLevelColumn(boolean nestedFieldEnabled) throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "T",
+                        Arrays.asList("id INT", "`literal.dot` INT"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                if (nestedFieldEnabled) {
+                                    put(DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+                                }
+                            }
+                        }));
+        insertInto("T", "(1, 10)");
+
+        sEnv.executeSql(
+                buildDdl(
+                        "S",
+                        Arrays.asList("id INT", "new_value INT"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap()));
+        insertInto("S", "(1, 100)");
+
+        builder(warehouse, database, "T")
+                .withMergeCondition("T.id=S.id")
+                .withMatchedUpdateSet("T.literal.dot=S.new_value")
+                .withSourceTable("S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        testBatchRead(
+                "SELECT id, `literal.dot` FROM T",
+                Collections.singletonList(changelogRow("+I", 1, 100)));
+        assertThat(deltaWriteCols("T")).contains(Collections.singletonList("literal.dot"));
+    }
+
+    @Test
     public void testUpdateWholeStructStillWorks() throws Exception {
         prepareNestedTarget(true);
         sEnv.executeSql(

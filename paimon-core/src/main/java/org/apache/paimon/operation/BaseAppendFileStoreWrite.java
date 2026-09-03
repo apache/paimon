@@ -193,19 +193,28 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
 
     @Override
     public void withWriteType(RowType writeType) {
+        List<String> fullNames = rowType.getFieldNames();
+        List<String> writeCols;
+        if (options.dataEvolutionNestedFieldEnabled()) {
+            // A plain top-level name means the whole column; a dotted path means only that
+            // sub-field is written.
+            writeCols = writeType.collectLeafPaths(rowType);
+        } else {
+            // Preserve the legacy top-level encoding. Do not derive dotted leaf paths while the
+            // feature is disabled: a dot may be part of an ordinary top-level column name.
+            writeCols = writeType.getFieldNames();
+        }
+
         this.writeType = writeType;
         if (blobContext != null) {
             blobContext = blobContext.withWriteType(writeType);
         }
-        List<String> fullNames = rowType.getFieldNames();
-        // writeCols carries (possibly nested) dotted paths, e.g. ["f0", "nest.a"]; a plain
-        // top-level name means the whole column, a dotted path means only that sub-field is written
-        this.writeCols = writeType.leafPaths(rowType);
         // optimize writeCols to null in following cases:
         // writeType contains all columns (without _ROW_ID and _SEQUENCE_NUMBER)
         if (writeCols.equals(fullNames)) {
             writeCols = null;
         }
+        this.writeCols = writeCols;
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
@@ -320,9 +329,11 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                // use the same dotted-leaf-path encoding as withWriteType so a partial nested
-                // writeType records its real sub-field content consistently across write paths
-                rowType.equals(writeType) ? null : writeType.leafPaths(rowType),
+                rowType.equals(writeType)
+                        ? null
+                        : options.dataEvolutionNestedFieldEnabled()
+                                ? writeType.collectLeafPaths(rowType)
+                                : writeType.getFieldNames(),
                 rowSidecarFileFormat(),
                 Long.MAX_VALUE);
     }

@@ -1382,6 +1382,18 @@ public class SchemaManager implements Serializable {
                     String.format("Change '%s' is not supported yet.", key));
         }
 
+        if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(key)) {
+            boolean oldEnabled =
+                    oldValue == null
+                            ? CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.defaultValue()
+                            : Boolean.parseBoolean(oldValue);
+            boolean newEnabled = Boolean.parseBoolean(newValue);
+            if (oldEnabled && !newEnabled) {
+                throw new UnsupportedOperationException(
+                        String.format("Cannot disable table option '%s'.", key));
+            }
+        }
+
         if (CoreOptions.BUCKET.key().equals(key)) {
             int oldBucket =
                     oldValue == null
@@ -1472,6 +1484,14 @@ public class SchemaManager implements Serializable {
                     key,
                     options.get(key),
                     DELETION_VECTORS_ENABLED.defaultValue().toString());
+        }
+
+        if (CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.defaultValue().toString());
         }
 
         if (IGNORE_DELETE.key().equals(key)) {

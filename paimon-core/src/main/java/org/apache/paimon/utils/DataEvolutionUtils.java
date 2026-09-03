@@ -19,10 +19,10 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -52,9 +52,12 @@ public class DataEvolutionUtils {
      * Collect exact written field ids; an empty list is exact and an empty optional is unresolved.
      */
     public static Optional<List<Integer>> collectWrittenColumnIds(
-            Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
+            Collection<DataSplit> splits,
+            Function<Long, List<DataField>> schemaFieldsLoader,
+            Function<Long, Boolean> nestedFieldEnabledLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
         Map<Long, List<DataField>> schemaFieldsCache = new HashMap<>();
+        Map<Long, Boolean> nestedFieldEnabledCache = new HashMap<>();
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
         try {
             for (DataSplit split : splits) {
@@ -66,14 +69,19 @@ public class DataEvolutionUtils {
                                 schemaFieldsCache.computeIfAbsent(
                                         file.schemaId(),
                                         schemaId -> {
-                                            TableSchema schema = schemaLoader.apply(schemaId);
+                                            List<DataField> loaded =
+                                                    schemaFieldsLoader.apply(schemaId);
                                             checkArgument(
-                                                    schema != null,
+                                                    loaded != null,
                                                     "Cannot find schema %s.",
                                                     schemaId);
-                                            return schema.fields();
+                                            return loaded;
                                         });
-                        fileFieldIds = resolveFileFieldIds(schemaFields, file, true);
+                        boolean nestedFieldEnabled =
+                                nestedFieldEnabledCache.computeIfAbsent(
+                                        file.schemaId(), nestedFieldEnabledLoader);
+                        fileFieldIds =
+                                resolveFileFieldIds(schemaFields, file, nestedFieldEnabled, true);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
                     }
                     fieldIds.addAll(fileFieldIds);
@@ -89,12 +97,15 @@ public class DataEvolutionUtils {
      * Table field ids physically present in a file, resolved through the schema used to write it.
      */
     public static Set<Integer> fileFieldIds(
-            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        return resolveFileFieldIds(scanTableSchema.apply(file.schemaId()).fields(), file, false);
+            List<DataField> schemaFields, DataFileMeta file, boolean nestedFieldEnabled) {
+        return resolveFileFieldIds(schemaFields, file, nestedFieldEnabled, false);
     }
 
     private static Set<Integer> resolveFileFieldIds(
-            List<DataField> schemaFields, DataFileMeta file, boolean strict) {
+            List<DataField> schemaFields,
+            DataFileMeta file,
+            boolean nestedFieldEnabled,
+            boolean strict) {
         List<String> writeCols = file.writeCols();
         Set<Integer> ids = new HashSet<>();
         if (writeCols == null) {
@@ -115,7 +126,7 @@ public class DataEvolutionUtils {
             // same top-level field. Try the exact name first so a column whose own name contains a
             // dot is not split, matching RowType#projectByPaths.
             DataField field = byName.get(writeCol);
-            if (field == null) {
+            if (field == null && nestedFieldEnabled) {
                 int dot = writeCol.indexOf('.');
                 if (dot > 0) {
                     field = byName.get(writeCol.substring(0, dot));
@@ -142,15 +153,32 @@ public class DataEvolutionUtils {
 
     /** Table fields physically present in a file, in their physical write order. */
     public static List<DataField> fileFields(
-            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        TableSchema schema = scanTableSchema.apply(file.schemaId());
+            List<DataField> schemaFields, DataFileMeta file, boolean nestedFieldEnabled) {
         List<String> writeCols = file.writeCols();
         if (writeCols == null) {
-            return schema.fields();
+            return schemaFields;
+        }
+
+        if (nestedFieldEnabled) {
+            Set<String> fieldNames =
+                    schemaFields.stream().map(DataField::name).collect(Collectors.toSet());
+            List<String> tableWriteCols =
+                    writeCols.stream()
+                            .filter(
+                                    writeCol -> {
+                                        if (fieldNames.contains(writeCol)) {
+                                            return true;
+                                        }
+                                        int dot = writeCol.indexOf('.');
+                                        return dot > 0
+                                                && fieldNames.contains(writeCol.substring(0, dot));
+                                    })
+                            .collect(Collectors.toList());
+            return new RowType(schemaFields).projectByPaths(tableWriteCols).getFields();
         }
 
         Map<String, DataField> fieldsByName = new HashMap<>();
-        for (DataField field : schema.fields()) {
+        for (DataField field : schemaFields) {
             fieldsByName.put(field.name(), field);
         }
         List<DataField> fields = new ArrayList<>();

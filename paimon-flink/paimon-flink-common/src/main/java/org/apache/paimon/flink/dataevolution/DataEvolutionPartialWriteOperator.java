@@ -70,6 +70,7 @@ public class DataEvolutionPartialWriteOperator
 
     private final FileStoreTable table;
     private final Long baseSnapshotId;
+    private final boolean nestedFieldEnabled;
 
     // dataType
     private final RowType dataType;
@@ -106,9 +107,11 @@ public class DataEvolutionPartialWriteOperator
             Long baseSnapshotId) {
         this.table = table.copy(dataEvolutionWriteOptions());
         this.baseSnapshotId = baseSnapshotId;
-        // writePaths may carry nested dotted paths (e.g. "nest.a") for sub-field-level data
-        // evolution; projectByPaths handles both plain top-level names and nested paths.
-        this.writeType = table.rowType().projectByPaths(writePaths);
+        this.nestedFieldEnabled = this.table.coreOptions().dataEvolutionNestedFieldEnabled();
+        this.writeType =
+                nestedFieldEnabled
+                        ? table.rowType().projectByPaths(writePaths)
+                        : table.rowType().project(writePaths);
         // sourceType is already pruned to the written columns (with partial nested structs) and
         // carries the table's field ids, so it is used directly as the read/data type.
         this.dataType = sourceType;

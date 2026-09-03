@@ -78,7 +78,7 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
     }
   }
 
-  // Guards the read path: DataEvolutionSplitRead calls leafPaths() on the planned read type,
+  // Guards the read path: DataEvolutionSplitRead calls collectLeafPaths() on the planned read type,
   // which now requires recursive field order to match the schema. A reversed nested projection
   // must still read back correctly rather than tripping that check.
   test("Sub-field data evolution: reversed nested projection reads correctly") {
@@ -221,6 +221,28 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
       assert(
         !deltaCols.exists(cols => cols.contains("nest.a")),
         s"expected no dotted (sub-field) writeCols when feature is disabled, got: $deltaCols")
+    }
+  }
+
+  test("Nested-field evolution disabled: a dot remains part of a top-level column name") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, `literal.dot` INT) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10)")
+
+      Seq((1, 100)).toDF("id", "new_value").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.`literal.dot` = s.new_value
+             |""".stripMargin).collect()
+
+      checkAnswer(sql("SELECT id, `literal.dot` FROM t"), Seq(Row(1, 100)))
+      assert(latestDeltaWriteCols("t").exists(_ == Seq("literal.dot")))
     }
   }
 

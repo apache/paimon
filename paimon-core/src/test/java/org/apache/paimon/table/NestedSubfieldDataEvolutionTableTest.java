@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -49,6 +50,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests for <b>sub-field-level</b> data evolution + row-tracking: updating a single sub-field of a
@@ -73,6 +75,7 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
         b.column("mp", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
         b.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         b.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        b.option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
         return b.build();
     }
 
@@ -89,6 +92,254 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
     private void commit(BatchWriteBuilder builder, List<CommitMessage> messages) throws Exception {
         try (BatchTableCommit commit = builder.newCommit()) {
             commit.commit(messages);
+        }
+    }
+
+    @Test
+    public void testNestedFieldOptionCanBePersistentlyEnabledAfterWrite() throws Exception {
+        Schema disabledSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "b", DataTypes.STRING())))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), disabledSchema, false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(table.rowType())) {
+            write.write(GenericRow.of(1, GenericRow.of(10, BinaryString.fromString("old"))));
+            commit(builder, write.prepareCommit());
+        }
+        // Keep a reader created from the old table object. Long-running engines may retain it
+        // across the persisted false -> true option change.
+        ReadBuilder staleReadBuilder = table.newReadBuilder();
+
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.setOption(
+                        CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true"),
+                false);
+        table = getTableDefault();
+        RowType partialType = table.rowType().projectByPaths(Collections.singletonList("nest.a"));
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(partialType)) {
+            write.write(GenericRow.of(GenericRow.of(20)));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            commit(builder, messages);
+        }
+
+        try (RecordReader<InternalRow> reader =
+                staleReadBuilder.newRead().createReader(staleReadBuilder.newScan().plan())) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.getInt(0)).isEqualTo(1);
+            InternalRow nest = row.getRow(1, 2);
+            assertThat(nest.getInt(0)).isEqualTo(20);
+            assertThat(nest.getString(1).toString()).isEqualTo("old");
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @Test
+    public void testDisabledOptionAllowsTopLevelColumnContainingDot() throws Exception {
+        Schema disabledSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("literal.dot", DataTypes.INT())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), disabledSchema, false);
+        FileStoreTable table = getTableDefault();
+        RowType writeType =
+                table.rowType().projectByPaths(Collections.singletonList("literal.dot"));
+
+        try (BatchTableWrite ignored =
+                table.newBatchWriteBuilder().newWrite().withWriteType(writeType)) {
+            // A dot in a top-level column name is not a nested sub-field write.
+        }
+    }
+
+    @Test
+    public void testNestedFieldOptionCannotBeDisabledAfterWrite() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(table.rowType())) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("v"),
+                            GenericRow.of(10, BinaryString.fromString("n")),
+                            arrOf(1),
+                            mapOf("k", 1)));
+            commit(builder, write.prepareCommit());
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.setOption(
+                                                CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED
+                                                        .key(),
+                                                "false"),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier(),
+                                        SchemaChange.removeOption(
+                                                CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED
+                                                        .key()),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
+    }
+
+    @Test
+    public void testAddedLeafPreservesNullnessAcrossSiblingGroups() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        RowType full = table.rowType();
+        RowType cgA = full.projectByPaths(Collections.singletonList("nest.a"));
+        RowType cgB = full.projectByPaths(Collections.singletonList("nest.b"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        try (BatchTableWrite write = builder.newWrite().withWriteType(cgB)) {
+            write.write(GenericRow.of(GenericRow.of(BinaryString.fromString("present-in-b"))));
+            commit(builder, write.prepareCommit());
+        }
+        try (BatchTableWrite write = builder.newWrite().withWriteType(cgA)) {
+            write.write(GenericRow.of((Object) null));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            commit(builder, messages);
+        }
+
+        RowType projectedA = table.rowType().projectByPaths(Collections.singletonList("nest.a"));
+        ReadBuilder projectedAReadBuilder = table.newReadBuilder().withReadType(projectedA);
+        try (RecordReader<InternalRow> reader =
+                projectedAReadBuilder
+                        .newRead()
+                        .createReader(projectedAReadBuilder.newScan().plan())) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.isNullAt(0)).isFalse();
+            assertThat(row.getRow(0, 1).isNullAt(0)).isTrue();
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
+
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn(new String[] {"nest", "added"}, DataTypes.INT(), null, null),
+                false);
+        table = getTableDefault();
+        RowType readType = table.rowType().projectByPaths(Collections.singletonList("nest.added"));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.isNullAt(0)).isFalse();
+            assertThat(row.getRow(0, 1).isNullAt(0)).isTrue();
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @Test
+    public void testProjectedDeepAddedLeafPreservesEveryParentNullness() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                0,
+                                                "sub",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(
+                                                                1, "existing", DataTypes.INT()))),
+                                        DataTypes.FIELD(2, "other", DataTypes.STRING())))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        RowType otherType = table.rowType().projectByPaths(Collections.singletonList("nest.other"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(otherType)) {
+            write.write(GenericRow.of(GenericRow.of(BinaryString.fromString("other-0"))));
+            write.write(GenericRow.of(GenericRow.of(BinaryString.fromString("other-1"))));
+            commit(builder, write.prepareCommit());
+        }
+
+        RowType existingType =
+                table.rowType().projectByPaths(Collections.singletonList("nest.sub.existing"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(existingType)) {
+            write.write(GenericRow.of(GenericRow.of(GenericRow.of(10))));
+            write.write(GenericRow.of(GenericRow.of((Object) null)));
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            commit(builder, messages);
+        }
+
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn(
+                        new String[] {"nest", "sub", "added"}, DataTypes.INT(), null, null),
+                false);
+        table = getTableDefault();
+        RowType readType =
+                table.rowType().projectByPaths(Collections.singletonList("nest.sub.added"));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+
+            InternalRow first = batch.next();
+            assertThat(first).isNotNull();
+            InternalRow firstNest = first.getRow(0, 1);
+            assertThat(firstNest).isNotNull();
+            InternalRow firstSub = firstNest.getRow(0, 1);
+            assertThat(firstSub).isNotNull();
+            assertThat(firstSub.isNullAt(0)).isTrue();
+
+            InternalRow second = batch.next();
+            assertThat(second).isNotNull();
+            InternalRow secondNest = second.getRow(0, 1);
+            assertThat(secondNest).isNotNull();
+            assertThat(secondNest.isNullAt(0)).isTrue();
+
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
         }
     }
 

@@ -2538,7 +2538,9 @@ public class CoreOptions implements Serializable {
                                     + "reconstruct it. Every such component reading or writing this "
                                     + "table must be upgraded before enabling this option, and "
                                     + "downgrading the binary is unsafe once such files have been "
-                                    + "committed.");
+                                    + "committed. This option may only be enabled through a persisted "
+                                    + "table-option change; dynamic overrides and disabling or removing "
+                                    + "the option after it has been enabled are not supported.");
 
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")

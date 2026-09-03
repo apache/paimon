@@ -937,7 +937,9 @@ case class MergeIntoPaimonDataEvolutionTable(
           case None => Seq(attr.name)
         }
     }
-    val writeType = table.rowType().projectByPaths(writePaths.asJava)
+    val writeType =
+      if (nestedFieldEnabled) table.rowType().projectByPaths(writePaths.asJava)
+      else table.rowType().project(writePaths.asJava)
 
     val writePartialFields = updateColumnsSorted.nonEmpty
     val shouldPersistOutput = writePartialFields && hasMatchedDeleteActions

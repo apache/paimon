@@ -118,7 +118,7 @@ class RowIdColumnConflictCheckerTest {
     void testSubFieldDisjointLeavesDoNotConflict() {
         // schema 2: id INT, nest ROW<a INT, b INT>
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.b"))))
                 .isFalse();
@@ -127,7 +127,7 @@ class RowIdColumnConflictCheckerTest {
     @Test
     void testSubFieldSameLeafConflicts() {
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
@@ -137,7 +137,7 @@ class RowIdColumnConflictCheckerTest {
     void testWholeStructConflictsWithSubField() {
         // a whole-struct write expands to all of its leaves, so it conflicts with a sub-field write
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
@@ -145,15 +145,33 @@ class RowIdColumnConflictCheckerTest {
 
     @Test
     void testFullSchemaWriteConflictsWithSubField() {
-        RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 2L, null));
+        RowIdColumnConflictChecker checker = nestedChecker(file("current", 0L, 10L, 2L, null));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
     }
 
+    @Test
+    void testNestedWriteColumnIsUnknownWhenOptionDisabled() {
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+
+        assertThatThrownBy(
+                        () ->
+                                checker.conflictsWith(
+                                        file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find write column 'nest.a'");
+    }
+
     private RowIdColumnConflictChecker checker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
-                createSchemaManager(), Arrays.asList(files));
+                createSchemaManager(), Arrays.asList(files), false);
+    }
+
+    private RowIdColumnConflictChecker nestedChecker(DataFileMeta... files) {
+        return RowIdColumnConflictChecker.fromDataFiles(
+                createSchemaManager(), Arrays.asList(files), true);
     }
 
     private DataFileMeta file(

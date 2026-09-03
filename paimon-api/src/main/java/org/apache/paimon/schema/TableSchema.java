@@ -285,12 +285,15 @@ public class TableSchema implements Serializable {
             return this;
         }
 
+        RowType rowType = new RowType(fields);
+        List<DataField> projectedFields =
+                new CoreOptions(options).dataEvolutionNestedFieldEnabled()
+                        ? rowType.projectByPaths(writeCols).getFields()
+                        : rowType.project(writeCols).getFields();
         return new TableSchema(
                 version,
                 id,
-                // writeCols may contain nested dotted paths (e.g. "nest.a") for sub-field-level
-                // data evolution; projectByPaths handles both plain top-level names and paths
-                new RowType(fields).projectByPaths(writeCols).getFields(),
+                projectedFields,
                 highestFieldId,
                 partitionKeys,
                 primaryKeys,

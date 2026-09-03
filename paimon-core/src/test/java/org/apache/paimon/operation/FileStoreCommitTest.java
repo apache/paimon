@@ -2062,6 +2062,7 @@ public class FileStoreCommitTest {
                                 store.bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 dataEvolutionEnabled,
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
