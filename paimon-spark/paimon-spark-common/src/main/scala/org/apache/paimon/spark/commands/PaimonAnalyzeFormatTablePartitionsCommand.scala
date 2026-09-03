@@ -18,12 +18,14 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.fs.Path
 import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.catalyst.analysis.PaimonResolvePartitionSpec
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.table.format.FormatTablePartitionStatsCollector
+import org.apache.paimon.table.format.{FormatTablePartitionRegistryValidator, FormatTablePartitionStatsCollector}
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.normalizePartitionSpec
@@ -32,7 +34,7 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.unsafe.types.UTF8String
 
-import java.util.{List => JList, Map => JMap}
+import java.util.{Collections, List => JList, Map => JMap, Objects}
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.ListMap
@@ -62,11 +64,34 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val prefix = leadingPrefix(sparkSession)
-    val partitions = v2Table.partitionManager
-      .listPartitions(prefix.asJava, null)
+    val manager = v2Table.partitionManager
+    val registry = manager
+      .listPartitions(Collections.emptyMap[String, String](), null)
       .asScala
-      .map(_.spec())
       .toList
+    FormatTablePartitionRegistryValidator.validatePartitionLocations(
+      registry.asJava,
+      v2Table.table.partitionKeys(),
+      new Path(v2Table.table.location()),
+      v2Table.name(),
+      CoreOptions.fromMap(v2Table.table.options()).formatTablePartitionOnlyValueInPath(),
+      v2Table.table.catalogContext()
+    )
+    val registeredPartitions = registry.filter(
+      partition =>
+        prefix.forall { case (key, value) => Objects.equals(value, partition.spec().get(key)) })
+    val customLocationPartitions = registeredPartitions.filter {
+      partition =>
+        val options = partition.options()
+        options != null && options.containsKey(CoreOptions.PATH.key())
+    }
+    if (customLocationPartitions.nonEmpty) {
+      throw new UnsupportedOperationException(
+        s"ANALYZE TABLE cannot measure partitions with a custom location in Format Table " +
+          s"${v2Table.name()}: " +
+          customLocationPartitions.map(_.spec()).mkString("[", ", ", "]"))
+    }
+    val partitions = registeredPartitions.map(_.spec())
 
     if (partitions.isEmpty && prefix.nonEmpty) {
       throw new NoSuchPartitionException(

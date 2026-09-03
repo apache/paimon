@@ -152,9 +152,13 @@ public class FormatTablePartitionRepair {
             boolean dropPartitions,
             @Nullable FormatTablePartitionStatsCollector statsCollector) {
         Set<Map<String, String>> registeredPartitions = new HashSet<>();
+        Set<Map<String, String>> customLocationPartitions = new HashSet<>();
         for (Partition partition :
                 partitionManager.listPartitions(Collections.<String, String>emptyMap(), null)) {
             registeredPartitions.add(partition.spec());
+            if (hasCustomLocation(partition)) {
+                customLocationPartitions.add(partition.spec());
+            }
         }
 
         Set<Map<String, String>> filesystemSet = new HashSet<>(filesystemPartitions);
@@ -171,7 +175,8 @@ public class FormatTablePartitionRepair {
         List<Map<String, String>> dropDiff = new ArrayList<>();
         if (dropPartitions) {
             for (Map<String, String> partition : registeredPartitions) {
-                if (!filesystemSet.contains(partition)) {
+                if (!filesystemSet.contains(partition)
+                        && !customLocationPartitions.contains(partition)) {
                     dropDiff.add(partition);
                 }
             }
@@ -187,7 +192,8 @@ public class FormatTablePartitionRepair {
             // exists to correct. Without ADD it stays inside the already registered set.
             List<Map<String, String>> measured = new ArrayList<>();
             for (Map<String, String> partition : filesystemPartitions) {
-                if (addPartitions || registeredPartitions.contains(partition)) {
+                if ((addPartitions || registeredPartitions.contains(partition))
+                        && !customLocationPartitions.contains(partition)) {
                     measured.add(partition);
                 }
             }
@@ -203,6 +209,17 @@ public class FormatTablePartitionRepair {
             partitionManager.dropPartitions(dropDiff);
         }
         return addDiff.size() + dropDiff.size();
+    }
+
+    private static boolean hasCustomLocation(Partition partition) {
+        Map<String, String> options = partition.options();
+        if (options == null || !options.containsKey(CoreOptions.PATH.key())) {
+            return false;
+        }
+        if (options.get(CoreOptions.PATH.key()) == null) {
+            throw new IllegalStateException("Partition path option must not be null.");
+        }
+        return true;
     }
 
     /** Sort partitions by their canonical path for a stable, deterministic apply order. */

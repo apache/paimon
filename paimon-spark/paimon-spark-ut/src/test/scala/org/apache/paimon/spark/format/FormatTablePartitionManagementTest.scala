@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.format
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.{CatalogContext, Identifier}
 import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
@@ -32,6 +33,7 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, NoSuchPartitionsException}
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
+import org.apache.spark.sql.connector.catalog.TableCatalog
 import org.apache.spark.unsafe.types.UTF8String
 
 import java.lang.reflect.{InvocationHandler, InvocationTargetException, Method, Proxy}
@@ -96,11 +98,10 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
       val sparkTable = new PaimonFormatTable(table)
       sparkTable.createFormatTablePartitions(
         Array(partitionRow(20260715, 10)),
-        Array[JMap[String, String]](Collections.emptyMap()),
+        Array(Map("owner" -> "spark").asJava),
         ignoreIfExists = true)
 
-      // ADD PARTITION creates the directory client-side, so a scan sees an empty partition
-      // rather than failing on a missing directory (Hive ADD PARTITION semantics).
+      // An unrelated option does not turn a default-location partition into a custom one.
       assert(fileIO.exists(partitionDir))
     } finally {
       fileIO.delete(tablePath, true)
@@ -143,7 +144,208 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     assert(dropCalls == 0)
   }
 
-  test("catalog-managed ADD with LOCATION is rejected before any catalog RPC") {
+  test("catalog-managed ADD converts LOCATION and preserves the other options") {
+    var createCalls = 0
+    var forwardedOptions = Seq.empty[Map[String, String]]
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
+        createCalls += 1
+        forwardedOptions = partitionOptions.asScala.map(_.asScala.toMap).toSeq
+      }
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.emptyList()
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Collections.emptyList()
+    }
+
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-add-location").toUri)
+    val externalPath =
+      new Path(Files.createTempDirectory("catalog-partition-format-add-external").toUri)
+    val directPath =
+      new Path(Files.createTempDirectory("catalog-partition-format-add-direct-path").toUri)
+    val requestedLocation =
+      "FILE://" + externalPath.toUri.getPath.replace("/", "//") + "/"
+    val requestedPath = "FILE://" + directPath.toUri.getPath.replace("/", "//") + "/"
+    val properties = Map("LOCATION" -> requestedLocation, "owner" -> "spark").asJava
+    val pathOptions = Map(CoreOptions.PATH.key() -> requestedPath, "kind" -> "archive").asJava
+    val sparkTable =
+      new PaimonFormatTable(
+        formatTableWithCatalogManagedPartitions(
+          location = tablePath.toString,
+          partitionManager = gateway))
+    try {
+      sparkTable.createFormatTablePartitions(
+        Array(
+          new GenericInternalRow(Array[Any](20260715, 10)),
+          new GenericInternalRow(Array[Any](20260716, 11))),
+        Array(properties, pathOptions),
+        ignoreIfExists = true
+      )
+
+      assert(createCalls == 1)
+      assert(
+        forwardedOptions == Seq(
+          Map(CoreOptions.PATH.key() -> externalPath.toString.stripSuffix("/"), "owner" -> "spark"),
+          Map(CoreOptions.PATH.key() -> directPath.toString.stripSuffix("/"), "kind" -> "archive")
+        ))
+      assert(properties.asScala.toMap == Map("LOCATION" -> requestedLocation, "owner" -> "spark"))
+      assert(
+        pathOptions.asScala.toMap ==
+          Map(CoreOptions.PATH.key() -> requestedPath, "kind" -> "archive"))
+      assert(!sparkTable.table.fileIO().exists(new Path(tablePath, "dt=20260715/hh=10")))
+      assert(!sparkTable.table.fileIO().exists(new Path(tablePath, "dt=20260716/hh=11")))
+    } finally {
+      sparkTable.table.fileIO().delete(tablePath, true)
+      sparkTable.table.fileIO().delete(externalPath, true)
+      sparkTable.table.fileIO().delete(directPath, true)
+    }
+  }
+
+  test("catalog-managed ADD rejects malformed partition options before catalog access") {
+    val gateway = new InMemoryPartitionManager
+    val sparkTable =
+      new PaimonFormatTable(formatTableWithCatalogManagedPartitions(partitionManager = gateway))
+    val row = partitionRow(20260715, 10)
+
+    intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(
+        Array(row),
+        Array.empty[JMap[String, String]],
+        ignoreIfExists = true)
+    }
+    intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(
+        Array(row),
+        Array[JMap[String, String]](null),
+        ignoreIfExists = true)
+    }
+
+    val nullKey = new java.util.LinkedHashMap[String, String]()
+    nullKey.put(null, "value")
+    intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(Array(row), Array(nullKey), ignoreIfExists = true)
+    }
+
+    val duplicateLocation = new java.util.LinkedHashMap[String, String]()
+    duplicateLocation.put("location", "file:/first")
+    duplicateLocation.put("LOCATION", "file:/second")
+    intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(
+        Array(row),
+        Array(duplicateLocation),
+        ignoreIfExists = true)
+    }
+
+    val locationAndPath = new java.util.LinkedHashMap[String, String]()
+    locationAndPath.put(TableCatalog.PROP_LOCATION, "file:/location")
+    locationAndPath.put(CoreOptions.PATH.key(), "file:/path")
+    intercept[IllegalArgumentException] {
+      sparkTable.createFormatTablePartitions(
+        Array(row),
+        Array(locationAndPath),
+        ignoreIfExists = true)
+    }
+
+    assert(gateway.createRequests.isEmpty)
+  }
+
+  test("catalog-managed partition metadata exposes path as location and preserves options") {
+    val spec = partitionSpec(20260715, 10)
+    val storedOptions = new java.util.HashMap[String, String]()
+    storedOptions.put(CoreOptions.PATH.key(), "file:/external/dt=20260715/hh=10")
+    storedOptions.put("LOCATION", "file:/stale")
+    storedOptions.put("owner", "spark")
+    storedOptions.put(PartitionStatistics.FIELD_RECORD_COUNT, "stale")
+    val partition =
+      new Partition(spec.asJava, 7L, 11L, 3L, 13L, 0, false, null, null, null, null, storedOptions)
+    val gateway = partitionManagerReturning(partition)
+    val sparkTable =
+      new PaimonFormatTable(formatTableWithCatalogManagedPartitions(partitionManager = gateway))
+
+    val metadata = sparkTable.loadPartitionMetadata(partitionRow(20260715, 10)).asScala.toMap
+
+    assert(!metadata.contains(CoreOptions.PATH.key()))
+    assert(metadata(TableCatalog.PROP_LOCATION) == "file:/external/dt=20260715/hh=10")
+    assert(!metadata.contains("LOCATION"))
+    assert(metadata("owner") == "spark")
+    assert(metadata(PartitionStatistics.FIELD_RECORD_COUNT) == "7")
+    assert(metadata(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES) == "11")
+    assert(storedOptions.containsKey(CoreOptions.PATH.key()))
+    assert(storedOptions.containsKey("LOCATION"))
+    assert(!storedOptions.containsKey(TableCatalog.PROP_LOCATION))
+  }
+
+  test("catalog-managed partition metadata ignores location options without a path") {
+    val options = new java.util.HashMap[String, String]()
+    options.put("LOCATION", "file:/not-the-partition-path")
+    options.put("owner", "spark")
+    val partition =
+      new Partition(
+        partitionSpec(20260715, 10).asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        options)
+    val sparkTable =
+      new PaimonFormatTable(
+        formatTableWithCatalogManagedPartitions(
+          partitionManager = partitionManagerReturning(partition)))
+
+    val metadata = sparkTable.loadPartitionMetadata(partitionRow(20260715, 10)).asScala.toMap
+
+    assert(!metadata.keys.exists(TableCatalog.PROP_LOCATION.equalsIgnoreCase))
+    assert(metadata("owner") == "spark")
+    assert(options.containsKey("LOCATION"))
+  }
+
+  test("catalog-managed partition metadata rejects a null path option") {
+    val options = new java.util.HashMap[String, String]()
+    options.put(CoreOptions.PATH.key(), null)
+    val partition =
+      new Partition(
+        partitionSpec(20260715, 10).asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        options)
+    val sparkTable =
+      new PaimonFormatTable(
+        formatTableWithCatalogManagedPartitions(
+          partitionManager = partitionManagerReturning(partition)))
+
+    intercept[IllegalStateException] {
+      sparkTable.loadPartitionMetadata(partitionRow(20260715, 10))
+    }
+  }
+
+  test("catalog-managed ADD rejects locations owned by the table before catalog RPC") {
     var createCalls = 0
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
@@ -165,17 +367,29 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
         Collections.emptyList()
     }
 
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-add-owned-location").toUri)
     val sparkTable =
-      new PaimonFormatTable(formatTableWithCatalogManagedPartitions(partitionManager = gateway))
-    val error = intercept[UnsupportedOperationException] {
-      sparkTable.createFormatTablePartitions(
-        Array(new GenericInternalRow(Array[Any](20260715, 10))),
-        Array(Map("location" -> "file:/tmp/custom").asJava),
-        ignoreIfExists = true)
-    }
+      new PaimonFormatTable(
+        formatTableWithCatalogManagedPartitions(
+          location = tablePath.toString,
+          partitionManager = gateway))
+    val defaultPath = new Path(tablePath, "dt=20260715/hh=10")
+    try {
+      Seq(tablePath, defaultPath, tablePath.getParent).foreach {
+        location =>
+          intercept[IllegalArgumentException] {
+            sparkTable.createFormatTablePartitions(
+              Array(new GenericInternalRow(Array[Any](20260715, 10))),
+              Array(Map("location" -> location.toString).asJava),
+              ignoreIfExists = true)
+          }
+      }
 
-    assert(error.getMessage.contains("LOCATION"))
-    assert(createCalls == 0)
+      assert(createCalls == 0)
+    } finally {
+      sparkTable.table.fileIO().delete(tablePath, true)
+    }
   }
 
   test("catalog-managed ADD rejects a partition value that would escape the table location") {
@@ -269,12 +483,12 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
 
       override def listPartitionsByNames(
           partitions: JList[JMap[String, String]]): JList[Partition] =
-        Collections.emptyList()
+        registeredPartitions(partitions.asScala.map(_.asScala.toMap).toSeq: _*)
 
       override def listPartitions(
           prefix: JMap[String, String],
           filter: Predicate): JList[Partition] =
-        Collections.emptyList()
+        registeredPartitions(partitionSpec(20260715, 10))
     }
 
     try {
@@ -294,6 +508,255 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
       assert(!fileIO.exists(partitionDir))
     } finally {
       fileIO.delete(tablePath, true)
+    }
+  }
+
+  test("catalog-managed DROP rejects a custom location that owns the target default directory") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(
+        Files.createTempDirectory("catalog-partition-format-drop-overlapping-location").toUri)
+    val customSpec = partitionSpec(20260715, 10)
+    val targetSpec = partitionSpec(20260716, 11)
+    val targetDir = new Path(tablePath, "dt=20260716/hh=11")
+    val marker = new Path(targetDir, "marker.csv")
+    val customPartition =
+      new Partition(
+        customSpec.asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        Map(CoreOptions.PATH.key() -> targetDir.toString).asJava)
+    val targetPartition =
+      new Partition(targetSpec.asJava, 0L, 0L, 0L, 0L, 0, false)
+    var dropCalls = 0
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.singletonList(targetPartition)
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Seq(customPartition, targetPartition).asJava
+    }
+
+    try {
+      fileIO.writeFile(marker, "target", false)
+      val sparkTable =
+        new PaimonFormatTable(
+          formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway))
+
+      val error = intercept[IllegalStateException] {
+        sparkTable.dropFormatTablePartitions(
+          Array(Array("dt", "hh")),
+          Array(partitionRow(20260716, 11)))
+      }
+
+      assert(error.getMessage.contains("invalid custom location"))
+      assert(dropCalls == 0)
+      assert(fileIO.exists(marker))
+    } finally {
+      fileIO.delete(tablePath, true)
+    }
+  }
+
+  test("catalog-managed DROP of a custom-location partition leaves all data in place") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-location-residue").toUri)
+    val defaultDir = new Path(tablePath, "dt=20260715/hh=10")
+    val externalDir =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-location-external").toUri)
+    val spec = partitionSpec(20260715, 10)
+    var dropCalls = 0
+    val customPartition =
+      new Partition(
+        spec.asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        Map(CoreOptions.PATH.key() -> externalDir.toString).asJava)
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.singletonList(customPartition)
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Collections.singletonList(customPartition)
+    }
+
+    try {
+      fileIO.writeFile(new Path(defaultDir, "residue.csv"), "default", false)
+      fileIO.writeFile(new Path(externalDir, "external.csv"), "external", false)
+      val sparkTable =
+        new PaimonFormatTable(
+          formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway))
+
+      assert(
+        sparkTable
+          .dropFormatTablePartitions(Array(Array("dt", "hh")), Array(partitionRow(20260715, 10))))
+
+      assert(dropCalls == 1)
+      assert(fileIO.exists(defaultDir))
+      assert(fileIO.exists(externalDir))
+    } finally {
+      fileIO.delete(tablePath, true)
+      fileIO.delete(externalDir, true)
+    }
+  }
+
+  test("catalog-managed DROP rejects a null path option") {
+    val options = new java.util.HashMap[String, String]()
+    options.put(CoreOptions.PATH.key(), null)
+    val partition =
+      new Partition(
+        partitionSpec(20260715, 10).asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        options)
+    val sparkTable =
+      new PaimonFormatTable(
+        formatTableWithCatalogManagedPartitions(
+          partitionManager = partitionManagerReturning(partition)))
+
+    intercept[IllegalStateException] {
+      sparkTable.dropCatalogRegisteredPartitions(Seq(partition))
+    }
+  }
+
+  test("catalog-managed DROP unregisters a custom location without deleting its data") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-location-table").toUri)
+    val externalDir =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-location-data").toUri)
+    val externalFile = new Path(externalDir, "external.csv")
+    val tableUri = tablePath.toUri.normalize()
+    val tableRoot = tableUri.getPath.stripSuffix("/")
+    def isWithinTable(path: Path): Boolean = {
+      val candidate = path.toUri.normalize()
+      candidate.getScheme == tableUri.getScheme &&
+      candidate.getAuthority == tableUri.getAuthority &&
+      (candidate.getPath.stripSuffix("/") == tableRoot ||
+        candidate.getPath.startsWith(tableRoot + "/"))
+    }
+    val guardedFileIO = Proxy
+      .newProxyInstance(
+        classOf[FileIO].getClassLoader,
+        Array(classOf[FileIO]),
+        new InvocationHandler {
+          override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
+            Option(args).getOrElse(Array.empty[AnyRef]).foreach {
+              case path: Path if !isWithinTable(path) =>
+                throw new AssertionError(
+                  s"DROP must not access path outside table root $tablePath: $path via ${method.getName}")
+              case _ =>
+            }
+            try {
+              method.invoke(fileIO, Option(args).getOrElse(Array.empty[AnyRef]): _*)
+            } catch {
+              case error: InvocationTargetException => throw error.getCause
+            }
+          }
+        }
+      )
+      .asInstanceOf[FileIO]
+    val spec = partitionSpec(20260715, 10)
+    val customPartition =
+      new Partition(
+        spec.asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        Map(CoreOptions.PATH.key() -> externalDir.toString).asJava)
+    var dropped = Seq.empty[Map[String, String]]
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
+        dropped = partitions.asScala.map(_.asScala.toMap).toSeq
+      }
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.singletonList(customPartition)
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Collections.singletonList(customPartition)
+    }
+
+    try {
+      fileIO.writeFile(externalFile, "external", false)
+      val sparkTable =
+        new PaimonFormatTable(
+          formatTableWithCatalogManagedPartitions(guardedFileIO, tablePath.toString, gateway))
+
+      assert(
+        sparkTable
+          .dropFormatTablePartitions(Array(Array("dt", "hh")), Array(partitionRow(20260715, 10))))
+
+      assert(dropped == Seq(spec))
+      assert(fileIO.exists(externalFile))
+    } finally {
+      fileIO.delete(tablePath, true)
+      fileIO.delete(externalDir, true)
     }
   }
 
@@ -753,6 +1216,27 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
         Collections.emptyList()
     }
 
+  private def partitionManagerReturning(partition: Partition): FormatTablePartitionManager =
+    new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.singletonList(partition)
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Collections.singletonList(partition)
+    }
+
   private class InMemoryPartitionManager(initialPartitions: Seq[Map[String, String]] = Seq.empty)
     extends FormatTablePartitionManager {
 
@@ -821,10 +1305,10 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
     override def listPartitionsByNames(partitions: JList[JMap[String, String]]): JList[Partition] =
-      Collections.emptyList()
+      registeredPartitions(partitions.asScala.map(_.asScala.toMap).toSeq: _*)
 
     override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
-      Collections.emptyList()
+      registeredPartitions(partitionSpec(20260715, 10))
   }
 
   private def partitionRow(dt: Int, hh: Int): InternalRow =
