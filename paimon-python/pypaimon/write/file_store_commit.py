@@ -968,6 +968,16 @@ class FileStoreCommit:
                                 snapshot):
                             entries.extend(self.manifest_file_manager.read(
                                 manifest.file_name, drop_stats=False))
+                        path_factory = self.table.path_factory()
+                        for entry in entries:
+                            file = entry.file
+                            file.file_path = file.external_path or "%s/%s" % (
+                                path_factory.bucket_path(
+                                    tuple(entry.partition.values),
+                                    entry.bucket,
+                                ).rstrip("/"),
+                                file.file_name,
+                            )
                         self._notify_commit_callbacks(
                             snapshot, entries, commit_identifier)
                     return True

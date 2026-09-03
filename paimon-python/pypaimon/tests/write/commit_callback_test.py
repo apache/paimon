@@ -152,7 +152,13 @@ class CommitCallbackTest(unittest.TestCase):
             'name': ['a', 'b'],
             'dt': ['p1', 'p1'],
         }, schema=self.pa_schema))
-        table_commit.commit(table_write.prepare_commit())
+        messages = table_write.prepare_commit()
+        expected_paths = sorted(
+            file.file_path
+            for message in messages
+            for file in message.new_files
+        )
+        table_commit.commit(messages)
 
         self.assertEqual([1], attempts)
         self.assertEqual(1, len(callback.contexts))
@@ -160,6 +166,11 @@ class CommitCallbackTest(unittest.TestCase):
         self.assertGreater(len(callback.contexts[0].commit_entries), 0)
         for entry in callback.contexts[0].commit_entries:
             self.assertIsNotNone(entry.file.first_row_id)
+        self.assertEqual(expected_paths, sorted(
+            entry.file.file_path
+            for entry in callback.contexts[0].commit_entries
+            if entry.kind == 0
+        ))
         table_write.close()
         table_commit.close()
 
