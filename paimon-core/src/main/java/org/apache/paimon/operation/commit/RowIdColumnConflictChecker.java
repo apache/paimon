@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.SpecialFields;
@@ -56,20 +55,20 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
     private final Map<Long, RowType> rowTypeCache = new HashMap<>();
     private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
 
-    private RowIdColumnConflictChecker(SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
+    private RowIdColumnConflictChecker(
+            SchemaManager schemaManager,
+            List<DataFileMeta> deltaFiles,
+            boolean nestedFieldEnabled) {
         this.schemaManager = schemaManager;
-        this.nestedFieldEnabled =
-                new CoreOptions(
-                                schemaManager
-                                        .latestOrThrow("Cannot find the latest table schema.")
-                                        .options())
-                        .dataEvolutionNestedFieldEnabled();
+        this.nestedFieldEnabled = nestedFieldEnabled;
         this.writeRanges = buildWriteRanges(deltaFiles);
     }
 
     public static RowIdColumnConflictChecker fromDataFiles(
-            SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
-        return new RowIdColumnConflictChecker(schemaManager, deltaFiles);
+            SchemaManager schemaManager,
+            List<DataFileMeta> deltaFiles,
+            boolean nestedFieldEnabled) {
+        return new RowIdColumnConflictChecker(schemaManager, deltaFiles, nestedFieldEnabled);
     }
 
     private List<WriteRange> buildWriteRanges(List<DataFileMeta> deltaFiles) {

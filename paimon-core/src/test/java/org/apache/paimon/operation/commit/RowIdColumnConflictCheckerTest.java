@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -167,12 +166,12 @@ class RowIdColumnConflictCheckerTest {
 
     private RowIdColumnConflictChecker checker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
-                createSchemaManager(), Arrays.asList(files));
+                createSchemaManager(), Arrays.asList(files), false);
     }
 
     private RowIdColumnConflictChecker nestedChecker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
-                createSchemaManager(true), Arrays.asList(files));
+                createSchemaManager(), Arrays.asList(files), true);
     }
 
     private DataFileMeta file(
@@ -199,10 +198,6 @@ class RowIdColumnConflictCheckerTest {
     }
 
     private SchemaManager createSchemaManager() {
-        return createSchemaManager(false);
-    }
-
-    private SchemaManager createSchemaManager(boolean nestedFieldEnabled) {
         Map<Long, org.apache.paimon.schema.TableSchema> schemas = new HashMap<>();
         schemas.put(
                 0L,
@@ -245,12 +240,7 @@ class RowIdColumnConflictCheckerTest {
                                                         new DataField(3, "b", DataTypes.INT())))),
                                 Collections.emptyList(),
                                 Collections.singletonList("id"),
-                                nestedFieldEnabled
-                                        ? Collections.singletonMap(
-                                                CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED
-                                                        .key(),
-                                                "true")
-                                        : Collections.emptyMap(),
+                                Collections.emptyMap(),
                                 "")));
         return new TestingSchemaManager(
                 new Path("/tmp/row-id-column-conflict-checker-test"), schemas);
