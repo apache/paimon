@@ -30,7 +30,6 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
@@ -78,6 +77,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class ManifestsTable implements ReadonlyTable {
@@ -193,6 +193,8 @@ public class ManifestsTable implements ReadonlyTable {
         private @Nullable Long schemaIdMin = null;
         private @Nullable Long schemaIdMax = null;
         private final List<Long> schemaIds = new ArrayList<>();
+        private boolean hasInFilter;
+        private boolean emptyRange;
 
         public ManifestsRead(FileStoreTable dataTable) {
             this.dataTable = dataTable;
@@ -204,31 +206,30 @@ public class ManifestsTable implements ReadonlyTable {
                 return this;
             }
 
-            if (predicate instanceof CompoundPredicate) {
-                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                if ((compoundPredicate.function()) instanceof And) {
-                    List<Predicate> children = compoundPredicate.children();
-                    for (Predicate leaf : children) {
-                        handleLeafPredicate(leaf, LEAF_NAME);
-                    }
+            for (Predicate child : splitAnd(predicate)) {
+                if (child instanceof CompoundPredicate
+                        && ((CompoundPredicate) child).function() instanceof Or) {
+                    InPredicateVisitor.extractInElements(child, LEAF_NAME)
+                            .ifPresent(this::mergeSchemaIds);
+                } else {
+                    handleLeafPredicate(child, LEAF_NAME);
                 }
-
-                // optimize for IN filter
-                if ((compoundPredicate.function()) instanceof Or) {
-                    InPredicateVisitor.extractInElements(predicate, LEAF_NAME)
-                            .ifPresent(
-                                    leafs ->
-                                            leafs.forEach(
-                                                    leaf ->
-                                                            schemaIds.add(
-                                                                    Long.parseLong(
-                                                                            leaf.toString()))));
-                }
-            } else {
-                handleLeafPredicate(predicate, LEAF_NAME);
             }
 
             return this;
+        }
+
+        private void mergeSchemaIds(List<Object> ids) {
+            List<Long> parsedIds = new ArrayList<>();
+            for (Object id : ids) {
+                parsedIds.add(Long.parseLong(id.toString()));
+            }
+            if (hasInFilter) {
+                schemaIds.retainAll(parsedIds);
+            } else {
+                schemaIds.addAll(parsedIds);
+                hasInFilter = true;
+            }
         }
 
         private void handleLeafPredicate(Predicate predicate, String leafName) {
@@ -236,25 +237,48 @@ public class ManifestsTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (schemaPred != null) {
                 if (schemaPred.function() instanceof Equal) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0);
-                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                    long schemaId = (Long) schemaPred.literals().get(0);
+                    updateMinSchemaId(schemaId);
+                    updateMaxSchemaId(schemaId);
                 }
 
                 if (schemaPred.function() instanceof GreaterThan) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0) + 1;
+                    long schemaId = (Long) schemaPred.literals().get(0);
+                    if (schemaId == Long.MAX_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMinSchemaId(schemaId + 1);
+                    }
                 }
 
                 if (schemaPred.function() instanceof GreaterOrEqual) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0);
+                    updateMinSchemaId((Long) schemaPred.literals().get(0));
                 }
 
                 if (schemaPred.function() instanceof LessThan) {
-                    schemaIdMax = (Long) schemaPred.literals().get(0) - 1;
+                    long schemaId = (Long) schemaPred.literals().get(0);
+                    if (schemaId == Long.MIN_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMaxSchemaId(schemaId - 1);
+                    }
                 }
 
                 if (schemaPred.function() instanceof LessOrEqual) {
-                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                    updateMaxSchemaId((Long) schemaPred.literals().get(0));
                 }
+            }
+        }
+
+        private void updateMinSchemaId(long candidate) {
+            if (schemaIdMin == null || candidate > schemaIdMin) {
+                schemaIdMin = candidate;
+            }
+        }
+
+        private void updateMaxSchemaId(long candidate) {
+            if (schemaIdMax == null || candidate < schemaIdMax) {
+                schemaIdMax = candidate;
             }
         }
 
@@ -274,17 +298,22 @@ public class ManifestsTable implements ReadonlyTable {
             if (!(split instanceof ManifestsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            List<ManifestFileMeta> manifestFileMetas = allManifests(dataTable);
-
-            // Apply schema_id filter
-            if (!schemaIds.isEmpty()) {
-                manifestFileMetas = filterBySchemaIds(manifestFileMetas, schemaIds);
-            } else if (schemaIdMin != null || schemaIdMax != null) {
-                manifestFileMetas =
-                        filterBySchemaIdRange(
-                                manifestFileMetas,
-                                Optional.ofNullable(schemaIdMin),
-                                Optional.ofNullable(schemaIdMax));
+            // Apply schema_id filter before loading manifest metadata.
+            List<ManifestFileMeta> manifestFileMetas;
+            if (emptyRange) {
+                manifestFileMetas = Collections.emptyList();
+            } else {
+                manifestFileMetas = allManifests(dataTable);
+                if (!schemaIds.isEmpty()) {
+                    manifestFileMetas =
+                            filterBySchemaIds(manifestFileMetas, filterSchemaIdsByRange(schemaIds));
+                } else if (schemaIdMin != null || schemaIdMax != null) {
+                    manifestFileMetas =
+                            filterBySchemaIdRange(
+                                    manifestFileMetas,
+                                    Optional.ofNullable(schemaIdMin),
+                                    Optional.ofNullable(schemaIdMax));
+                }
             }
 
             @SuppressWarnings("unchecked")
@@ -306,6 +335,20 @@ public class ManifestsTable implements ReadonlyTable {
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
+        }
+
+        private List<Long> filterSchemaIdsByRange(List<Long> ids) {
+            List<Long> filteredIds = new ArrayList<>();
+            for (long id : ids) {
+                if (schemaIdMin != null && id < schemaIdMin) {
+                    continue;
+                }
+                if (schemaIdMax != null && id > schemaIdMax) {
+                    continue;
+                }
+                filteredIds.add(id);
+            }
+            return filteredIds;
         }
 
         private static List<ManifestFileMeta> filterBySchemaIds(

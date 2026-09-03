@@ -117,6 +117,32 @@ public class ConsumersTableTest extends TableTestBase {
         assertThat(result).isEmpty();
     }
 
+    @Test
+    public void testFilterByConsumerIdMultipleInFilters() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ConsumersTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.in(0, Arrays.asList("id1", "id2")),
+                        builder.in(0, Arrays.asList("id2", "id999")));
+        List<InternalRow> result = readWithFilter(consumersTable, predicate);
+
+        assertThat(result).containsExactly(GenericRow.of(BinaryString.fromString("id2"), 6L));
+    }
+
+    @Test
+    public void testFilterByConsumerIdMultipleInFiltersWithNestedAnd() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ConsumersTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        PredicateBuilder.and(
+                                builder.in(0, Arrays.asList("id1", "id2")),
+                                builder.in(0, Arrays.asList("id2", "id999"))),
+                        builder.equal(0, BinaryString.fromString("id2")));
+        List<InternalRow> result = readWithFilter(consumersTable, predicate);
+
+        assertThat(result).containsExactly(GenericRow.of(BinaryString.fromString("id2"), 6L));
+    }
+
     private List<InternalRow> getExpectedResult() throws IOException {
         Map<String, Long> consumers = manager.consumers();
         return consumers.entrySet().stream()
