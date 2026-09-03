@@ -714,7 +714,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             dataFilesToDelete.addAll(commitMessage.compactIncrement().changelogFiles());
 
             for (DataFileMeta file : dataFilesToDelete) {
-                fileIO.deleteQuietly(dataPathFactory.toPath(file));
+                file.collectFiles(dataPathFactory).forEach(fileIO::deleteQuietly);
             }
 
             List<IndexFileMeta> indexFilesToDelete = new ArrayList<>();
