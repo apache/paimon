@@ -63,12 +63,14 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
@@ -94,6 +96,7 @@ public class FormatTableCommit implements BatchTableCommit {
     protected boolean overwrite = false;
     private Catalog hiveCatalog;
     private Identifier tableIdentifier;
+    private final CatalogContext catalogContext;
     @Nullable private final FormatTablePartitionManager partitionManager;
     private final boolean dynamicPartitionOverwrite;
     private final int cleanupThreadNum;
@@ -165,6 +168,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.overwrite = overwrite;
         this.partitionKeys = partitionKeys;
         this.tableIdentifier = tableIdentifier;
+        this.catalogContext = catalogContext;
         this.partitionManager = partitionManager;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.cleanupThreadNum = cleanupThreadNum;
@@ -202,6 +206,8 @@ public class FormatTableCommit implements BatchTableCommit {
                                     + commitMessage.getClass().getName());
                 }
             }
+
+            List<Partition> validatedPartitions = rejectWritesToCustomLocationPartitions(messages);
 
             Set<Map<String, String>> partitionSpecs = new HashSet<>();
             Set<Path> clearedPartitionPaths = new HashSet<>();
@@ -243,7 +249,10 @@ public class FormatTableCommit implements BatchTableCommit {
                     // is everything the table holds rather than the files this commit happens to
                     // write: a statement whose query returns nothing still empties the table.
                     clearedPartitionPaths.addAll(
-                            deletePreviousDataFiles(tableDataDirectories(), 0, cleanupThreadNum));
+                            deletePreviousDataFiles(
+                                    tableDataDirectories(validatedPartitions),
+                                    0,
+                                    cleanupThreadNum));
                 }
             }
             if (overwrite) {
@@ -388,6 +397,136 @@ public class FormatTableCommit implements BatchTableCommit {
         }
     }
 
+    /** Rejects writes whose files would belong to a catalog partition outside the table root. */
+    private List<Partition> rejectWritesToCustomLocationPartitions(
+            List<TwoPhaseCommitMessage> messages) {
+        if (partitionManager == null || partitionKeys == null || partitionKeys.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        try {
+            return rejectWritesToCustomLocationPartitionsBeforeMutation(messages);
+        } catch (RuntimeException failure) {
+            // Nothing has been published yet. Abort should clean staging only: the target may be
+            // a pre-existing file in a directory owned by another partition.
+            markPublishedTargetsToPreserveOnAbort(messages);
+            throw failure;
+        }
+    }
+
+    private List<Partition> rejectWritesToCustomLocationPartitionsBeforeMutation(
+            List<TwoPhaseCommitMessage> messages) {
+        Predicate<Partition> affectsPartition;
+        boolean hasStaticPrefixWithoutFiles = false;
+        if (overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
+            LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
+            if (staticSpec.size() == partitionKeys.size()) {
+                affectsPartition = partition -> partition.spec().equals(staticPartitions);
+            } else {
+                affectsPartition =
+                        partition -> partitionSpecMatchesPrefix(partition.spec(), staticSpec);
+            }
+        } else if (overwrite && !replacesOnlyWrittenPartitions()) {
+            affectsPartition = ignored -> true;
+        } else {
+            Set<Map<String, String>> affectedSpecs = new LinkedHashSet<>();
+            for (TwoPhaseCommitMessage message : messages) {
+                Path targetPath = message.getCommitter().targetPath();
+                if (targetPath == null) {
+                    // Preserve the established failure order for a malformed committer. The
+                    // publish or registration path will report its own contract violation.
+                    continue;
+                }
+                affectedSpecs.add(
+                        extractPartitionSpecFromPath(targetPath.getParent(), partitionKeys));
+            }
+            if (!overwrite && staticPartitions != null && !staticPartitions.isEmpty()) {
+                LinkedHashMap<String, String> staticSpec = orderedPartitionPrefix(staticPartitions);
+                if (staticSpec.size() == partitionKeys.size()) {
+                    if (affectedSpecs.isEmpty()) {
+                        affectedSpecs.add(staticPartitions);
+                    }
+                } else {
+                    hasStaticPrefixWithoutFiles = affectedSpecs.isEmpty();
+                }
+            }
+            if (affectedSpecs.isEmpty() && !hasStaticPrefixWithoutFiles) {
+                return Collections.emptyList();
+            }
+            affectsPartition =
+                    affectedSpecs.isEmpty()
+                            ? ignored -> false
+                            : partition -> affectedSpecs.contains(partition.spec());
+        }
+
+        List<Partition> registry = loadPartitionRegistry();
+        List<Partition> affectedPartitions =
+                registry.stream().filter(affectsPartition).collect(Collectors.toList());
+        for (Partition partition : affectedPartitions) {
+            if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                throw unsupportedCustomLocation(overwrite ? "Overwriting" : "Writing", partition);
+            }
+        }
+        return registry;
+    }
+
+    private LinkedHashMap<String, String> orderedPartitionPrefix(
+            Map<String, String> partitionSpec) {
+        if (partitionSpec.size() > partitionKeys.size()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition spec %s is not a leading prefix of partition keys %s.",
+                            partitionSpec, partitionKeys));
+        }
+        LinkedHashMap<String, String> orderedSpec = new LinkedHashMap<>();
+        for (int i = 0; i < partitionSpec.size(); i++) {
+            String key = partitionKeys.get(i);
+            if (!partitionSpec.containsKey(key)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Partition spec %s is not a leading prefix of partition keys %s.",
+                                partitionSpec, partitionKeys));
+            }
+            orderedSpec.put(key, partitionSpec.get(key));
+        }
+        return orderedSpec;
+    }
+
+    /** Validates every registered path before using it for a write or truncate decision. */
+    private List<Partition> loadPartitionRegistry() {
+        List<Partition> partitions = partitionManager.listPartitions(Collections.emptyMap(), null);
+        FormatTablePartitionRegistryValidator.validatePartitionLocations(
+                partitions,
+                partitionKeys,
+                new Path(location),
+                tableIdentifier.getFullName(),
+                formatTablePartitionOnlyValueInPath,
+                catalogContext);
+        return partitions;
+    }
+
+    private static boolean partitionSpecMatchesPrefix(
+            Map<String, String> partitionSpec, Map<String, String> prefix) {
+        for (Map.Entry<String, String> entry : prefix.entrySet()) {
+            if (!partitionSpec.containsKey(entry.getKey())
+                    || !Objects.equals(entry.getValue(), partitionSpec.get(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private UnsupportedOperationException unsupportedCustomLocation(
+            String operation, Partition partition) {
+        return new UnsupportedOperationException(
+                String.format(
+                        "%s catalog-managed Format Table partition %s with custom location "
+                                + "'%s' is not supported.",
+                        operation,
+                        partition.spec(),
+                        FormatTablePartitionPathResolver.customLocation(partition)));
+    }
+
     private List<Void> publishMessage(TwoPhaseCommitMessage message) {
         try {
             message.getCommitter().commit(fileIO);
@@ -436,7 +575,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 new ArrayList<>(specs),
                 true,
                 new ArrayList<>(statisticsByPartition.values()),
-                replaceStatistics);
+                replaceStatistics,
+                null);
     }
 
     /** What one commit wrote into a partition, with one more of its files folded in. */
@@ -674,17 +814,17 @@ public class FormatTableCommit implements BatchTableCommit {
      * has not registered, or one whose name does not parse into the partition keys - and replacing
      * what the table holds leaves it alone, the way {@link #truncateTable()} does.
      */
-    private List<Path> tableDataDirectories() {
+    private List<Path> tableDataDirectories(List<Partition> validatedPartitions) {
         if (partitionKeys == null || partitionKeys.isEmpty()) {
             return Collections.singletonList(new Path(location));
         }
         List<Path> directories = new ArrayList<>();
         if (partitionManager != null) {
-            for (Map<String, String> spec : registeredPartitions(Collections.emptyMap())) {
+            for (Partition partition : validatedPartitions) {
                 directories.add(
                         buildPartitionPath(
                                 location,
-                                spec,
+                                partition.spec(),
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys));
             }
@@ -1070,7 +1210,13 @@ public class FormatTableCommit implements BatchTableCommit {
         // Emptying the table is emptying every partition it has, and which those are is answered
         // by whatever the table reads its partitions from.
         if (partitionManager != null) {
-            truncate(registeredPartitions(Collections.emptyMap()));
+            List<Partition> partitions = loadPartitionRegistry();
+            for (Partition partition : partitions) {
+                if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                    throw unsupportedCustomLocation("Truncating", partition);
+                }
+            }
+            truncate(partitions.stream().map(Partition::spec).collect(Collectors.toList()));
             return;
         }
         // Filesystem partition discovery: the partition directories the scan reads are the table.
@@ -1091,45 +1237,47 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
-        if (partitionManager == null) {
-            truncate(partitionSpecs);
+        if (partitionSpecs.isEmpty()) {
             return;
         }
-        // Complete specs are asked for in one request; only a prefix has to be listed on its own.
-        List<Map<String, String>> complete = new ArrayList<>();
+        List<Map<String, String>> normalizedSpecs = new ArrayList<>(partitionSpecs.size());
         for (Map<String, String> partitionSpec : partitionSpecs) {
-            if (partitionSpec.size() == partitionKeys.size()) {
-                complete.add(partitionSpec);
+            normalizedSpecs.add(orderedPartitionPrefix(partitionSpec));
+        }
+        if (partitionManager == null) {
+            truncate(normalizedSpecs);
+            return;
+        }
+        List<Partition> registry = loadPartitionRegistry();
+        Map<Map<String, String>, Partition> partitions =
+                selectRequestedPartitions(registry, normalizedSpecs);
+        for (Partition partition : partitions.values()) {
+            if (FormatTablePartitionPathResolver.customLocation(partition) != null) {
+                throw unsupportedCustomLocation("Truncating", partition);
             }
         }
-        Set<Map<String, String>> registered =
-                complete.isEmpty()
-                        ? Collections.emptySet()
-                        : partitionManager.listPartitionsByNames(complete).stream()
-                                .map(Partition::spec)
-                                .collect(Collectors.toSet());
-        List<Map<String, String>> partitions = new ArrayList<>();
-        for (Map<String, String> partitionSpec : partitionSpecs) {
-            if (partitionSpec.size() == partitionKeys.size()) {
-                if (registered.contains(partitionSpec)) {
-                    partitions.add(partitionSpec);
-                }
-            } else {
-                partitions.addAll(registeredPartitions(partitionSpec));
-            }
-        }
-        truncate(partitions);
+        truncate(partitions.values().stream().map(Partition::spec).collect(Collectors.toList()));
     }
 
-    /**
-     * The registered partitions named by {@code prefix}, which names only the leading partition
-     * keys, or none of them. The catalog says which partitions a catalog-managed table has, so
-     * truncating neither empties nor registers a directory still waiting for MSCK REPAIR TABLE.
-     */
-    private List<Map<String, String>> registeredPartitions(Map<String, String> prefix) {
-        return partitionManager.listPartitions(prefix, null).stream()
-                .map(Partition::spec)
-                .collect(Collectors.toList());
+    private Map<Map<String, String>, Partition> selectRequestedPartitions(
+            List<Partition> registry, List<Map<String, String>> partitionSpecs) {
+        Map<Map<String, String>, Partition> selected = new LinkedHashMap<>();
+        Set<Map<String, String>> requestedPrefixes = new HashSet<>(partitionSpecs);
+        for (Partition partition : registry) {
+            if (requestedPrefixes.contains(Collections.emptyMap())) {
+                selected.putIfAbsent(partition.spec(), partition);
+                continue;
+            }
+            LinkedHashMap<String, String> registeredPrefix = new LinkedHashMap<>();
+            for (String partitionKey : partitionKeys) {
+                registeredPrefix.put(partitionKey, partition.spec().get(partitionKey));
+                if (requestedPrefixes.contains(registeredPrefix)) {
+                    selected.putIfAbsent(partition.spec(), partition);
+                    break;
+                }
+            }
+        }
+        return selected;
     }
 
     private void truncate(List<Map<String, String>> partitionSpecs) {

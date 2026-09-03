@@ -763,7 +763,8 @@ class FormatTablePartitionRepairTest {
                 List<Map<String, String>> partitions,
                 boolean ignoreIfExists,
                 @Nullable List<PartitionStatistics> statistics,
-                boolean replaceStatistics) {
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
             createdPartitions.add(new ArrayList<>(partitions));
             createIgnoreFlags.add(ignoreIfExists);
             reportedStatistics.add(statistics == null ? null : new ArrayList<>(statistics));

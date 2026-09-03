@@ -194,7 +194,7 @@ public class FormatTablePartitionRepair {
             sortByCanonicalPath(measured, partitionKeys);
             if (!measured.isEmpty()) {
                 partitionManager.createPartitions(
-                        measured, true, statsCollector.collect(measured), true);
+                        measured, true, statsCollector.collect(measured), true, null);
             }
         } else if (!addDiff.isEmpty()) {
             partitionManager.createPartitions(addDiff, true);

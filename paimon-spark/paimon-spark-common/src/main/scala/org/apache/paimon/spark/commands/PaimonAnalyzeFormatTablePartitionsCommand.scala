@@ -87,7 +87,7 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
           measureOnExecutors(sparkSession, partitions, parallelism)
         }
       v2Table.partitionManager
-        .createPartitions(partitions.asJava, true, statistics, true)
+        .createPartitions(partitions.asJava, true, statistics, true, null)
     }
     Seq.empty[Row]
   }

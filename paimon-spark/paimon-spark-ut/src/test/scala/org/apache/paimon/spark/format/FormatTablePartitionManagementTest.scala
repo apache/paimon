@@ -54,7 +54,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
         forwardedPartitions = partitions.asScala.toSeq
         forwardedIgnoreIfExists = ignoreIfExists
       }
@@ -113,7 +114,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -148,7 +150,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = createCalls += 1
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = createCalls += 1
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -182,7 +185,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = createCalls += 1
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = createCalls += 1
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -254,7 +258,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         // Ordering contract: the directory must still exist when the catalog unregisters.
@@ -308,7 +313,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -426,7 +432,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -471,7 +478,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -521,7 +529,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit =
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit =
         throw new AssertionError("An ambiguous DROP must not recreate catalog partitions")
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
@@ -729,7 +738,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -759,7 +769,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
         partitions: JList[JMap[String, String]],
         ignoreIfExists: Boolean,
         statistics: JList[PartitionStatistics],
-        replaceStatistics: Boolean): Unit = synchronized {
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = synchronized {
       val requested = partitions.asScala.map(_.asScala.toMap).toSeq
       requests :+= ((requested, ignoreIfExists))
       if (!ignoreIfExists) {
@@ -804,7 +815,8 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
         partitions: JList[JMap[String, String]],
         ignoreIfExists: Boolean,
         statistics: JList[PartitionStatistics],
-        replaceStatistics: Boolean): Unit = {}
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = {}
 
     override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 

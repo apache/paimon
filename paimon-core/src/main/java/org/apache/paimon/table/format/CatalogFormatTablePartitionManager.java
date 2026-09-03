@@ -159,8 +159,9 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics) {
-        // Validated before the empty check: returning early would swallow a malformed report.
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions) {
+        validatePartitionOptions(partitionOptions, partitions);
         Map<Map<String, String>, PartitionStatistics> statisticsBySpec =
                 validateAndIndexStatistics(statistics, partitions);
         if (partitions.isEmpty()) {
@@ -172,24 +173,59 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                         // Rejecting the whole batch when any partition exists is only meaningful
                         // if the batch stays one request, so a strict create is never split.
                         catalog.createPartitions(
-                                identifier, partitions, false, statistics, replaceStatistics, null);
+                                identifier,
+                                partitions,
+                                false,
+                                statistics,
+                                replaceStatistics,
+                                partitionOptions);
                         return null;
                     }
                     // isRetrySafe() bounds the transport retry only: a caller-level rerun of a
                     // multi-batch ADD still double counts the batches that already landed.
+                    int offset = 0;
                     for (List<Map<String, String>> batch : batches(partitions)) {
                         // A partition and its statistics travel in the same request.
+                        int end = offset + batch.size();
                         catalog.createPartitions(
                                 identifier,
                                 batch,
                                 true,
                                 statisticsOf(batch, statisticsBySpec),
                                 replaceStatistics,
-                                null);
+                                partitionOptions == null
+                                        ? null
+                                        : partitionOptions.subList(offset, end));
+                        offset = end;
                     }
                     return null;
                 },
                 "create partitions");
+    }
+
+    private void validatePartitionOptions(
+            @Nullable List<Map<String, String>> partitionOptions,
+            List<Map<String, String>> partitions) {
+        if (partitionOptions == null) {
+            return;
+        }
+        checkArgument(
+                partitionOptions.size() == partitions.size(),
+                "Partition options for table %s must align with all %s partition specs.",
+                identifier.getFullName(),
+                partitions.size());
+        Set<Map<String, String>> uniqueSpecs = capacityFor(partitions.size());
+        for (int i = 0; i < partitionOptions.size(); i++) {
+            Map<String, String> options = partitionOptions.get(i);
+            checkArgument(options != null, "Partition options must not contain null maps.");
+            checkArgument(
+                    options.entrySet().stream()
+                            .noneMatch(entry -> entry.getKey() == null || entry.getValue() == null),
+                    "Partition options must not contain null keys or values.");
+            checkArgument(
+                    partitions.get(i) != null && uniqueSpecs.add(partitions.get(i)),
+                    "Partition specs must be non-null and unique when partition options are provided.");
+        }
     }
 
     /**

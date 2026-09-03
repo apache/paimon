@@ -892,7 +892,8 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 specs,
                 true,
                 Collections.singletonList(new PartitionStatistics(spec, 4L, 400L, 2L, 500L, -1)),
-                false);
+                false,
+                null);
         assertStatistics(identifier, 7L, 700L, 3L, 1000L);
 
         // A field reported as unknown leaves the stored one alone rather than zeroing it.

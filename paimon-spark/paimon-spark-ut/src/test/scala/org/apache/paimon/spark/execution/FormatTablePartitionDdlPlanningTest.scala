@@ -370,7 +370,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -423,7 +424,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -492,7 +494,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -559,7 +562,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -625,7 +629,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -669,7 +674,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -727,7 +733,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           partitions: JList[JMap[String, String]],
           ignoreIfExists: Boolean,
           statistics: JList[PartitionStatistics],
-          replaceStatistics: Boolean): Unit = {}
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -923,7 +930,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
         partitions: JList[JMap[String, String]],
         ignoreIfExists: Boolean,
         statistics: JList[PartitionStatistics],
-        replaceStatistics: Boolean): Unit = {
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = {
       createCalls += 1
       created = partitions.asScala.toSeq
       this.ignoreIfExists = ignoreIfExists
@@ -958,7 +966,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
         partitionsToCreate: JList[JMap[String, String]],
         ignoreIfExists: Boolean,
         statistics: JList[PartitionStatistics],
-        replaceStatistics: Boolean): Unit = synchronized {
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = synchronized {
       val batch = partitionsToCreate.asScala.map(_.asScala.toMap).toSeq
       batches :+= batch
       val duplicates = batch.filter(partitions.contains)
