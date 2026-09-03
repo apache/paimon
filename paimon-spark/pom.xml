@@ -385,4 +385,30 @@ under the License.
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>exclude-fluss-tests-on-java8</id>
+            <activation>
+                <jdk>[1.8,1.9)</jdk>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- Fluss test jars target Java 11 and register JUnit extensions. Keep
+                                 them off the Java 8 Surefire classpath; Fluss ITs use ScalaTest. -->
+                            <classpathDependencyExcludes>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-common</classpathDependencyExclude>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-server</classpathDependencyExclude>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-test-utils</classpathDependencyExclude>
+                            </classpathDependencyExcludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

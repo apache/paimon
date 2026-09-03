@@ -90,13 +90,23 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
     assert(flussCatalog.initializeCount == 1)
   }
 
-  test("keep a regular file store table on Paimon") {
+  test("keep a regular file store table on Paimon without loading Fluss") {
     val paimonTable = SparkTable(fileStoreTable(Collections.emptyMap[String, String]()))
-    val flussCatalog = new TestingTableCatalog
-    val catalog = testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog))
+    val catalog = testingSparkCatalog(paimonTable, missingFlussDelegate)
 
     assert(catalog.loadTable(tableIdentifier) eq paimonTable)
-    assert(flussCatalog.initializeCount == 0)
+  }
+
+  test("report a missing Fluss connector for a marked table") {
+    val paimonTable =
+      SparkTable(fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+    val catalog = testingSparkCatalog(paimonTable, missingFlussDelegate)
+
+    val error = intercept[IllegalStateException] {
+      catalog.loadTable(tableIdentifier)
+    }
+    assert(error.getMessage.contains("matching the Spark version"))
+    assert(error.getCause.isInstanceOf[ClassNotFoundException])
   }
 
   test("do not route a non-file-store table carrying the marker") {
@@ -115,6 +125,16 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
       "paimon",
       new FlussCatalogDelegate.CatalogLoader {
         override def load(classLoader: ClassLoader): TableCatalog = catalog
+      }
+    )
+
+  private def missingFlussDelegate: FlussCatalogDelegate =
+    new FlussCatalogDelegate(
+      Collections.singletonMap("fluss.bootstrap.servers", "localhost:9123"),
+      "paimon",
+      new FlussCatalogDelegate.CatalogLoader {
+        override def load(classLoader: ClassLoader): TableCatalog =
+          throw new ClassNotFoundException("org.apache.fluss.spark.SparkCatalog")
       }
     )
 

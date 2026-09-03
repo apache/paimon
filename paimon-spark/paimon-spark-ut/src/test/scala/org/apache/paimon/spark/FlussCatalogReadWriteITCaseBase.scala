@@ -34,15 +34,15 @@ import java.time.Duration
 /** MiniCluster tests for reading and writing Fluss LakeStream tables through Paimon catalog. */
 abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
 
-  private val flussSparkConnectorAvailable =
-    scala.util.Properties.versionNumberString.startsWith("2.12.")
+  private val flussTestEnvironmentAvailable =
+    scala.util.Properties.versionNumberString.startsWith("2.12.") && javaMajorVersion >= 11
 
   private val flussCatalogName = "fluss_catalog"
   private val flussDatabase = "fluss"
   private val lakeWarehouse: Path =
     Files.createTempDirectory("paimon-fluss-catalog-it").resolve("warehouse")
 
-  private val flussCluster: FlussClusterExtension =
+  private lazy val flussCluster: FlussClusterExtension =
     FlussClusterExtension.builder
       .setClusterConf(flussConfiguration)
       .setNumOfTabletServers(1)
@@ -52,7 +52,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
 
   override protected def sparkConf: SparkConf = {
     val conf = super.sparkConf
-    if (flussSparkConnectorAvailable) {
+    if (flussTestEnvironmentAvailable) {
       val bootstrapServers = flussCluster.getBootstrapServers
       val paimonExtensions = conf.get("spark.sql.extensions")
 
@@ -78,14 +78,14 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
   }
 
   override protected def beforeAll(): Unit = {
-    if (flussSparkConnectorAvailable) {
+    if (flussTestEnvironmentAvailable) {
       flussCluster.start()
     }
     try {
       super.beforeAll()
     } catch {
       case t: Throwable =>
-        if (flussSparkConnectorAvailable) {
+        if (flussTestEnvironmentAvailable) {
           flussCluster.close()
         }
         throw t
@@ -97,7 +97,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
       super.afterAll()
     } finally {
       try {
-        if (flussSparkConnectorAvailable) {
+        if (flussTestEnvironmentAvailable) {
           flussCluster.close()
         }
       } finally {
@@ -107,7 +107,9 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
   }
 
   test("read and write a Fluss log table through Paimon catalog") {
-    assume(flussSparkConnectorAvailable)
+    assume(
+      flussTestEnvironmentAvailable,
+      "Fluss Spark integration tests require Scala 2.12 and Java 11 or later")
     withFlussTable("log_orders") {
       verifyLakeStreamMarker("log_orders")
 
@@ -124,7 +126,9 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
   }
 
   test("read and write a Fluss primary-key table through Paimon catalog") {
-    assume(flussSparkConnectorAvailable)
+    assume(
+      flussTestEnvironmentAvailable,
+      "Fluss Spark integration tests require Scala 2.12 and Java 11 or later")
     withFlussTable("pk_orders", primaryKey = true) {
       verifyLakeStreamMarker("pk_orders")
 
@@ -196,4 +200,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
     conf.setString("server.data-disk.write-limit-ratio", "1.0")
     conf
   }
+
+  private def javaMajorVersion: Int =
+    System.getProperty("java.specification.version").split("\\.").last.toInt
 }
