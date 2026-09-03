@@ -406,6 +406,19 @@ under the License.
                                 <classpathDependencyExclude>org.apache.fluss:fluss-test-utils</classpathDependencyExclude>
                             </classpathDependencyExcludes>
                         </configuration>
+                        <executions>
+                            <execution>
+                                <id>integration-tests</id>
+                                <configuration>
+                                    <!-- JUnit Vintage resolves field types while discovering ITs.
+                                         Avoid loading FlussClusterExtension after excluding the
+                                         Java 11 Fluss test jars above. -->
+                                    <excludes combine.children="append">
+                                        <exclude>**/FlussCatalogReadWriteITCase.*</exclude>
+                                    </excludes>
+                                </configuration>
+                            </execution>
+                        </executions>
                     </plugin>
                 </plugins>
             </build>
