@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.spark.catalog.FlussCatalogDelegate;
 import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportFluss;
@@ -313,9 +314,10 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public org.apache.spark.sql.connector.catalog.Table loadTable(Identifier ident)
             throws NoSuchTableException {
-        org.apache.spark.sql.connector.catalog.Table table =
-                loadSparkTable(ident, Collections.emptyMap());
-        return isFlussTable(table) ? flussCatalogDelegate.loadTable(ident) : table;
+        return loadTableWithFluss(
+                ident,
+                identifier -> loadSparkTable(identifier, Collections.emptyMap()),
+                flussCatalogDelegate::loadTable);
     }
 
     /**

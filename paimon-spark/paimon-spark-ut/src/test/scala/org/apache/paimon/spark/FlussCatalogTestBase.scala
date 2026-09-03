@@ -18,16 +18,18 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.catalog.SupportFluss
+import org.apache.paimon.spark.catalog.{FlussCatalogDelegate, SupportFluss}
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCapability, TableCatalog, TableChange}
+import org.apache.spark.sql.connector.catalog.{Identifier, MetadataColumn, SupportsRead, SupportsWrite, Table, TableCapability, TableCatalog, TableChange, TruncatableTable}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.read.{Scan, ScanBuilder}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, Write, WriteBuilder}
+import org.apache.spark.sql.types.{DataTypes, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.lang.reflect.{Field, InvocationHandler, Method, Proxy}
-import java.util.{Collections, HashMap, Map => JMap, Set => JSet}
+import java.util.{Collections, EnumSet, HashMap, Map => JMap, Set => JSet}
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.collection.JavaConverters._
@@ -36,6 +38,9 @@ import scala.collection.JavaConverters._
 abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
 
   private val tableIdentifier = Identifier.of(Array("db"), "orders")
+  private val realTimeIdentifier = Identifier.of(Array("db"), "orders$rt")
+  private val systemTableIdentifier = Identifier.of(Array("db"), "orders$snapshots")
+  private val emptyOptions = new CaseInsensitiveStringMap(Collections.emptyMap[String, String]())
 
   test("map Fluss options and initialize the delegate lazily") {
     val catalog = new TestingTableCatalog
@@ -43,7 +48,7 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
     val options = new HashMap[String, String]
     options.put("warehouse", "/tmp/warehouse")
     options.put("fluss.bootstrap.servers", "localhost:9123")
-    options.put("fluss.client.security.protocol", "sasl")
+    options.put("FLUSS.client.security.protocol", "sasl")
     val delegate = new FlussCatalogDelegate(
       options,
       "paimon",
@@ -55,10 +60,6 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
       }
     )
 
-    assert(
-      delegate.flussOptions().asScala == Map(
-        "bootstrap.servers" -> "localhost:9123",
-        "client.security.protocol" -> "sasl"))
     assert(delegate.loadTable(tableIdentifier) eq catalog.table)
     assert(catalog.catalogName == "paimon")
     assert(
@@ -80,18 +81,90 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
     assert(error.getMessage.contains("fluss.bootstrap.servers"))
   }
 
-  test("route a marked file store table to Fluss") {
+  test("read a marked base table from Paimon and write it to Fluss") {
     val paimonTable =
-      SparkTable(fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+      new TestingSparkTable(
+        fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
     val flussCatalog = new TestingTableCatalog
     val catalog = testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog))
 
-    assert(catalog.loadTable(tableIdentifier) eq flussCatalog.table)
+    val table = catalog.loadTable(tableIdentifier)
+    assert(table.isInstanceOf[FlussLakeStreamTable])
+    assert(!table.isInstanceOf[SparkTable])
+    assert(!table.isInstanceOf[TruncatableTable])
+    assert(table.schema() eq flussCatalog.table.schema())
+    assert(table.properties().get(SupportFluss.LAKESTREAM_ENABLED) == "true")
+    assert(table.asInstanceOf[SupportsRead].newScanBuilder(emptyOptions) eq paimonTable.scanBuilder)
+    assert(
+      table.asInstanceOf[SupportsWrite].newWriteBuilder(null) eq flussCatalog.table.writeBuilder)
+    assert(table.capabilities().contains(TableCapability.BATCH_READ))
+    assert(table.capabilities().contains(TableCapability.BATCH_WRITE))
+    assert(!table.capabilities().contains(TableCapability.V1_BATCH_WRITE))
     assert(flussCatalog.initializeCount == 1)
+    assert(flussCatalog.lastIdentifier == tableIdentifier)
+  }
+
+  test("route the $rt suffix to a read-only Fluss table") {
+    val paimonTable =
+      new TestingSparkTable(
+        fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+    val flussCatalog = new TestingTableCatalog
+    val catalog = testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog))
+
+    val table = catalog.loadTable(realTimeIdentifier)
+    assert(table.isInstanceOf[FlussLakeStreamReadTable])
+    assert(table.isInstanceOf[SupportsRead])
+    assert(!table.isInstanceOf[SupportsWrite])
+    assert(
+      table
+        .asInstanceOf[SupportsRead]
+        .newScanBuilder(emptyOptions) eq flussCatalog.table.scanBuilder)
+    assert(flussCatalog.lastIdentifier == tableIdentifier)
+    assert(catalog.lastPaimonIdentifier == tableIdentifier)
+  }
+
+  test("reject $rt for a regular Paimon table") {
+    val paimonTable =
+      new TestingSparkTable(fileStoreTable(Collections.emptyMap[String, String]()))
+    val flussCatalog = new TestingTableCatalog
+    val catalog = testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog))
+
+    intercept[org.apache.spark.sql.catalyst.analysis.NoSuchTableException] {
+      catalog.loadTable(realTimeIdentifier)
+    }
+    assert(flussCatalog.initializeCount == 0)
+  }
+
+  test("keep Paimon system tables on Paimon") {
+    val paimonTable =
+      new TestingSparkTable(
+        fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+    val systemTable = new TestingTable(Collections.emptyMap[String, String]())
+    val flussCatalog = new TestingTableCatalog
+    val catalog =
+      testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog), systemTable)
+
+    assert(catalog.loadTable(systemTableIdentifier) eq systemTable)
+    assert(catalog.lastPaimonIdentifier == systemTableIdentifier)
+    assert(flussCatalog.initializeCount == 0)
+  }
+
+  test("do not support the $stream suffix") {
+    val paimonTable =
+      new TestingSparkTable(
+        fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+    val flussCatalog = new TestingTableCatalog
+    val catalog = testingSparkCatalog(paimonTable, configuredDelegate(flussCatalog))
+
+    intercept[org.apache.spark.sql.catalyst.analysis.NoSuchTableException] {
+      catalog.loadTable(Identifier.of(Array("db"), "orders$stream"))
+    }
+    assert(flussCatalog.initializeCount == 0)
   }
 
   test("keep a regular file store table on Paimon without loading Fluss") {
-    val paimonTable = SparkTable(fileStoreTable(Collections.emptyMap[String, String]()))
+    val paimonTable =
+      new TestingSparkTable(fileStoreTable(Collections.emptyMap[String, String]()))
     val catalog = testingSparkCatalog(paimonTable, missingFlussDelegate)
 
     assert(catalog.loadTable(tableIdentifier) eq paimonTable)
@@ -99,7 +172,8 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
 
   test("report a missing Fluss connector for a marked table") {
     val paimonTable =
-      SparkTable(fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
+      new TestingSparkTable(
+        fileStoreTable(Collections.singletonMap(SupportFluss.LAKESTREAM_ENABLED, "true")))
     val catalog = testingSparkCatalog(paimonTable, missingFlussDelegate)
 
     val error = intercept[IllegalStateException] {
@@ -138,8 +212,11 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
       }
     )
 
-  private def testingSparkCatalog(table: Table, delegate: FlussCatalogDelegate): SparkCatalog = {
-    val catalog = new TestingSparkCatalog(table)
+  private def testingSparkCatalog(
+      table: Table,
+      delegate: FlussCatalogDelegate,
+      systemTable: Table = null): TestingSparkCatalog = {
+    val catalog = new TestingSparkCatalog(table, systemTable)
     val field: Field = classOf[SparkCatalog].getDeclaredField("flussCatalogDelegate")
     field.setAccessible(true)
     field.set(catalog, delegate)
@@ -162,11 +239,22 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
       )
       .asInstanceOf[FileStoreTable]
 
-  private class TestingSparkCatalog(table: Table) extends SparkCatalog {
+  private class TestingSparkCatalog(table: Table, systemTable: Table) extends SparkCatalog {
+
+    var lastPaimonIdentifier: Identifier = _
 
     override protected def loadSparkTable(
         ident: Identifier,
-        extraOptions: JMap[String, String]): Table = table
+        extraOptions: JMap[String, String]): Table = {
+      lastPaimonIdentifier = ident
+      if (ident == tableIdentifier) {
+        table
+      } else if (ident == systemTableIdentifier && systemTable != null) {
+        systemTable
+      } else {
+        throw new org.apache.spark.sql.catalyst.analysis.NoSuchTableException(ident)
+      }
+    }
   }
 
   private class TestingTable(tableProperties: JMap[String, String]) extends Table {
@@ -181,9 +269,65 @@ abstract class FlussCatalogTestBase extends PaimonSparkTestBase {
     override def properties(): JMap[String, String] = tableProperties
   }
 
+  private class TestingSparkTable(override val table: FileStoreTable) extends SparkTable(table) {
+
+    private val tableSchema =
+      new StructType().add("lake_only", DataTypes.IntegerType, true)
+
+    val scanBuilder: ScanBuilder = new ScanBuilder {
+      override def build(): Scan = null
+    }
+
+    override def name(): String = "orders"
+
+    override lazy val schema: StructType = tableSchema
+
+    override def partitioning(): Array[Transform] = Array.empty
+
+    override def properties(): JMap[String, String] = table.options()
+
+    override def capabilities(): JSet[TableCapability] =
+      EnumSet.of(
+        TableCapability.BATCH_READ,
+        TableCapability.MICRO_BATCH_READ,
+        TableCapability.V1_BATCH_WRITE)
+
+    override def metadataColumns(): Array[MetadataColumn] = Array.empty
+
+    override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = scanBuilder
+  }
+
+  private class TestingReadWriteTable
+    extends TestingTable(Collections.emptyMap[String, String]())
+    with SupportsRead
+    with SupportsWrite {
+
+    private val tableSchema = new StructType().add("id", DataTypes.IntegerType, true)
+
+    val scanBuilder: ScanBuilder = new ScanBuilder {
+      override def build(): Scan = null
+    }
+    val writeBuilder: WriteBuilder = new WriteBuilder {
+      override def build(): Write = null
+    }
+
+    override def capabilities(): JSet[TableCapability] =
+      EnumSet.of(
+        TableCapability.BATCH_READ,
+        TableCapability.MICRO_BATCH_READ,
+        TableCapability.BATCH_WRITE,
+        TableCapability.STREAMING_WRITE)
+
+    override def schema(): StructType = tableSchema
+
+    override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = scanBuilder
+
+    override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = writeBuilder
+  }
+
   private class TestingTableCatalog extends TableCatalog {
 
-    val table: Table = new TestingTable(Collections.emptyMap[String, String]())
+    val table = new TestingReadWriteTable
 
     var catalogName: String = _
     var options: CaseInsensitiveStringMap = _

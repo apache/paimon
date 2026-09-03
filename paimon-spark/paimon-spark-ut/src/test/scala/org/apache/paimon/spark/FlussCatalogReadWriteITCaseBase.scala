@@ -106,7 +106,7 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
     }
   }
 
-  test("read and write a Fluss log table through Paimon catalog") {
+  test("write a Fluss log table and read its lake and real-time views") {
     assume(
       flussTestEnvironmentAvailable,
       "Fluss Spark integration tests require Scala 2.12 and Java 11 or later")
@@ -114,18 +114,19 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
       verifyLakeStreamMarker("log_orders")
 
       sql("INSERT INTO paimon.fluss.log_orders VALUES (1, 'a'), (2, 'b')")
+      checkAnswer(sql("SELECT * FROM paimon.fluss.log_orders"), Nil)
       checkAnswer(
-        sql("SELECT * FROM fluss_catalog.fluss.log_orders"),
+        sql("SELECT * FROM paimon.fluss.`log_orders$rt`"),
         Row(1, "a") :: Row(2, "b") :: Nil)
 
       sql("INSERT INTO fluss_catalog.fluss.log_orders VALUES (3, 'c')")
       checkAnswer(
-        sql("SELECT * FROM paimon.fluss.log_orders"),
+        sql("SELECT * FROM paimon.fluss.`log_orders$rt`"),
         Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
     }
   }
 
-  test("read and write a Fluss primary-key table through Paimon catalog") {
+  test("write a Fluss primary-key table and read its lake and real-time views") {
     assume(
       flussTestEnvironmentAvailable,
       "Fluss Spark integration tests require Scala 2.12 and Java 11 or later")
@@ -133,13 +134,14 @@ abstract class FlussCatalogReadWriteITCaseBase extends PaimonSparkTestBase {
       verifyLakeStreamMarker("pk_orders")
 
       sql("INSERT INTO paimon.fluss.pk_orders VALUES (1, 'a'), (2, 'b')")
+      checkAnswer(sql("SELECT * FROM paimon.fluss.pk_orders"), Nil)
       checkAnswer(
-        sql("SELECT * FROM fluss_catalog.fluss.pk_orders"),
+        sql("SELECT * FROM paimon.fluss.`pk_orders$rt`"),
         Row(1, "a") :: Row(2, "b") :: Nil)
 
       sql("INSERT INTO fluss_catalog.fluss.pk_orders VALUES (1, 'a2'), (3, 'c')")
       checkAnswer(
-        sql("SELECT * FROM paimon.fluss.pk_orders"),
+        sql("SELECT * FROM paimon.fluss.`pk_orders$rt`"),
         Row(1, "a2") :: Row(2, "b") :: Row(3, "c") :: Nil)
     }
   }

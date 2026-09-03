@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark;
+package org.apache.paimon.spark.catalog;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -24,12 +26,11 @@ import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Loads LakeStream tables from the Fluss Spark catalog used by Spark reads and writes. */
-class FlussCatalogDelegate {
+public final class FlussCatalogDelegate {
 
     static final String FLUSS_OPTION_PREFIX = "fluss.";
     static final String FLUSS_BOOTSTRAP_SERVERS = "fluss.bootstrap.servers";
@@ -42,15 +43,17 @@ class FlussCatalogDelegate {
 
     private volatile TableCatalog flussCatalog;
 
-    FlussCatalogDelegate(Map<String, String> catalogOptions, String catalogName) {
+    public FlussCatalogDelegate(Map<String, String> catalogOptions, String catalogName) {
         this(catalogOptions, catalogName, FlussCatalogDelegate::loadFlussCatalog);
     }
 
-    FlussCatalogDelegate(
+    @VisibleForTesting
+    public FlussCatalogDelegate(
             Map<String, String> catalogOptions, String catalogName, CatalogLoader catalogLoader) {
         this.catalogName = catalogName;
+        CaseInsensitiveStringMap options = new CaseInsensitiveStringMap(catalogOptions);
         this.flussOptions =
-                catalogOptions.entrySet().stream()
+                options.entrySet().stream()
                         .filter(entry -> entry.getKey().startsWith(FLUSS_OPTION_PREFIX))
                         .collect(
                                 Collectors.toMap(
@@ -65,11 +68,7 @@ class FlussCatalogDelegate {
         return flussOptions.containsKey("bootstrap.servers");
     }
 
-    Map<String, String> flussOptions() {
-        return new HashMap<>(flussOptions);
-    }
-
-    Table loadTable(Identifier identifier) throws NoSuchTableException {
+    public Table loadTable(Identifier identifier) throws NoSuchTableException {
         return catalog().loadTable(identifier);
     }
 
@@ -120,7 +119,8 @@ class FlussCatalogDelegate {
         return classLoader == null ? FlussCatalogDelegate.class.getClassLoader() : classLoader;
     }
 
-    interface CatalogLoader {
+    @VisibleForTesting
+    public interface CatalogLoader {
         TableCatalog load(ClassLoader classLoader) throws Exception;
     }
 }
