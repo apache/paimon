@@ -5247,6 +5247,52 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result['id'], list(range(2000)))
         self.assertEqual(result['name'], ['updated'] * 2000)
 
+    def test_legacy_stored_descriptor_fields_keeps_dedicated_blob_layout(self):
+        """blob.stored-descriptor-fields must not switch Python to inline descriptors.
+
+        Master ignored that key and wrote dedicated .blob payloads. Head write
+        with the same option must keep that layout so old readers still see
+        payloads, and head read must not fail-fast on those bytes.
+        """
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.stored-descriptor-fields': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.legacy_stored_descriptor_fields', schema, False)
+        table = self.catalog.get_table('test_db.legacy_stored_descriptor_fields')
+
+        payload = b'legacy-dedicated-blob-payload'
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'picture': [payload],
+        }, schema=pa_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertGreaterEqual(len(blob_files), 1)
+        self.assertTrue(all(f.write_cols == ['picture'] for f in blob_files))
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('picture').to_pylist()[0], payload)
+
 
 class GetBlobTest(unittest.TestCase):
 
