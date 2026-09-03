@@ -212,7 +212,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         GenericRow.of(1, BinaryString.fromString("Alice")),
                         GenericRow.of(2, BinaryString.fromString("Bob")));
 
-        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter"}) {
+        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter", "sep"}) {
             Options options = new Options();
             options.set(fallbackKey, ";");
 
