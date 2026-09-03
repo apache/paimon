@@ -73,7 +73,7 @@ class _AsOfJoin:
     """Lazy, chainable result of :func:`join_asof`."""
 
     def __init__(self, left, on, by):
-        self._anchor = _pin_scan(_require_scan(left, "left"))
+        self._anchor = _pin_scan_to_snapshot(_require_scan(left, "left"))
         self._on = on
         self._by = by
         self._sources = ()
@@ -221,7 +221,7 @@ class _AsOfJoinRight:
                  right_on, suffix):
         _validate_join_options(direction, tolerance, right_on, suffix)
         self.label = label
-        self.query = _pin_scan(_require_scan(query, label))
+        self.query = _pin_scan_to_snapshot(_require_scan(query, label))
         self.direction = direction
         self.tolerance = tolerance
         self.suffix = suffix
@@ -313,7 +313,7 @@ def _require_scan(query, label):
     return query
 
 
-def _pin_scan(query):
+def _pin_scan_to_snapshot(query):
     table = query._table
     options = table.options
     if not options.row_tracking_enabled(False):
