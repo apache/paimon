@@ -89,6 +89,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileSource fileSource;
     @Nullable private final FileFormat rowSidecarFileFormat;
     @Nullable private final BlobFileContext blobContext;
+    private final boolean omitAllNonDedicatedWriteCols;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -134,71 +135,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean statsDenseStore,
             boolean dataEvolutionEnabled,
             @Nullable FileFormat rowSidecarFileFormat,
-            @Nullable BlobFileContext blobContext) {
-        this(
-                fileIO,
-                ioManager,
-                schemaId,
-                fileFormat,
-                vectorFileFormat,
-                targetFileSize,
-                blobTargetFileSize,
-                vectorTargetFileSize,
-                targetFileRowNum,
-                writeSchema,
-                writeCols,
-                maxSequenceNumber,
-                compactManager,
-                dataFileRead,
-                forceCompact,
-                pathFactory,
-                increment,
-                useWriteBuffer,
-                spillable,
-                fileCompression,
-                spillCompression,
-                statsCollectorFactories,
-                maxDiskSize,
-                fileIndexOptions,
-                asyncFileWrite,
-                statsDenseStore,
-                dataEvolutionEnabled,
-                rowSidecarFileFormat,
-                blobContext,
-                FileSource.APPEND);
-    }
-
-    public AppendOnlyWriter(
-            FileIO fileIO,
-            @Nullable IOManager ioManager,
-            long schemaId,
-            FileFormat fileFormat,
-            @Nullable FileFormat vectorFileFormat,
-            long targetFileSize,
-            long blobTargetFileSize,
-            long vectorTargetFileSize,
-            long targetFileRowNum,
-            RowType writeSchema,
-            @Nullable List<String> writeCols,
-            long maxSequenceNumber,
-            CompactManager compactManager,
-            IOFunction<List<DataFileMeta>, RecordReaderIterator<InternalRow>> dataFileRead,
-            boolean forceCompact,
-            DataFilePathFactory pathFactory,
-            @Nullable CommitIncrement increment,
-            boolean useWriteBuffer,
-            boolean spillable,
-            String fileCompression,
-            CompressOptions spillCompression,
-            StatsCollectorFactories statsCollectorFactories,
-            MemorySize maxDiskSize,
-            FileIndexOptions fileIndexOptions,
-            boolean asyncFileWrite,
-            boolean statsDenseStore,
-            boolean dataEvolutionEnabled,
-            @Nullable FileFormat rowSidecarFileFormat,
             @Nullable BlobFileContext blobContext,
-            FileSource fileSource) {
+            FileSource fileSource,
+            boolean omitAllNonDedicatedWriteCols) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -218,6 +157,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileSource = fileSource;
         this.rowSidecarFileFormat = dataEvolutionEnabled ? rowSidecarFileFormat : null;
         this.blobContext = blobContext;
+        this.omitAllNonDedicatedWriteCols = omitAllNonDedicatedWriteCols;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -403,7 +343,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     fileIndexOptions,
                     fileSource,
                     statsDenseStore,
-                    blobContext);
+                    blobContext,
+                    omitAllNonDedicatedWriteCols);
         }
         return new RowDataRollingFileWriter(
                 fileIO,

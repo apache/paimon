@@ -200,9 +200,6 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
     private static List<DataField> fileFields(
             Function<Long, TableSchema> schemaLoader, DataFileMeta file) {
         TableSchema fileSchema = schemaLoader.apply(file.schemaId());
-        boolean nestedFieldEnabled =
-                new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled();
-        return org.apache.paimon.utils.DataEvolutionUtils.fileFields(
-                fileSchema.fields(), file, nestedFieldEnabled);
+        return org.apache.paimon.utils.DataEvolutionUtils.fileFields(fileSchema, file);
     }
 }

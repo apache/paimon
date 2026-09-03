@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -74,6 +75,25 @@ class RowIdColumnConflictCheckerTest {
         RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 0L, null));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 0L, Arrays.asList("b"))))
+                .isTrue();
+    }
+
+    @Test
+    void testTreatsNullWriteColumnsAsAllNonDedicatedColumns() {
+        RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 3L, null));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, Arrays.asList("blob"))))
+                .isFalse();
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, Arrays.asList("value"))))
+                .isTrue();
+
+        checker = checker(file("current", 0L, 10L, 3L, Arrays.asList("blob")));
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, null))).isFalse();
+
+        checker = checker(file("legacy-current", 0L, 10L, 4L, null));
+        assertThat(
+                        checker.conflictsWith(
+                                file("legacy-historical", 0L, 10L, 4L, Arrays.asList("blob"))))
                 .isTrue();
     }
 
@@ -242,7 +262,41 @@ class RowIdColumnConflictCheckerTest {
                                 Collections.singletonList("id"),
                                 Collections.emptyMap(),
                                 "")));
+        schemas.put(
+                3L,
+                org.apache.paimon.schema.TableSchema.create(
+                        3L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "value", DataTypes.INT()),
+                                        new DataField(1, "blob", DataTypes.BLOB())),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                dataEvolutionOptions(true),
+                                "")));
+        schemas.put(
+                4L,
+                org.apache.paimon.schema.TableSchema.create(
+                        4L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "value", DataTypes.INT()),
+                                        new DataField(1, "blob", DataTypes.BLOB())),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true"),
+                                "")));
         return new TestingSchemaManager(
                 new Path("/tmp/row-id-column-conflict-checker-test"), schemas);
+    }
+
+    private static Map<String, String> dataEvolutionOptions(boolean optimized) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        if (optimized) {
+            options.put(CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(), "true");
+        }
+        return options;
     }
 }

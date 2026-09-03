@@ -73,6 +73,18 @@ class TableSchemaTest {
                 .containsExactly(1);
     }
 
+    @Test
+    void testCompactNullWriteColsRequiresSchemaOption() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        TableSchema legacy = dedicatedSchema(options);
+        assertThat(legacy.dataFileSchema(null).fieldNames()).containsExactly("id", "blob", "name");
+
+        options.put(CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(), "true");
+        TableSchema optimized = dedicatedSchema(options);
+        assertThat(optimized.dataFileSchema(null).fieldNames()).containsExactly("id", "name");
+    }
+
     private static TableSchema nestedSchema(Map<String, String> options) {
         return new TableSchema(
                 1L,
@@ -83,6 +95,20 @@ class TableSchemaTest {
                                 DataTypes.ROW(
                                         new DataField(2, "a", DataTypes.INT()),
                                         new DataField(3, "b", DataTypes.STRING())))),
+                3,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    private static TableSchema dedicatedSchema(Map<String, String> options) {
+        return new TableSchema(
+                1L,
+                Arrays.asList(
+                        new DataField(1, "id", DataTypes.INT()),
+                        new DataField(2, "blob", DataTypes.BLOB()),
+                        new DataField(3, "name", DataTypes.STRING())),
                 3,
                 Collections.emptyList(),
                 Collections.emptyList(),

@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -334,6 +335,43 @@ public class FilesTableTest extends TableTestBase {
                                 .map(row -> row.getString(12).toString())
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("{f0=null, f1=a, f2=null}", "{f0=null, f1=null, f2=1}");
+    }
+
+    @Test
+    public void testReadStatsWithOmittedNonDedicatedWriteCols() throws Exception {
+        String tableName = "DataEvolutionBlobFilesTable";
+        Identifier identifier = identifier(tableName);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("blob", DataTypes.BLOB())
+                        .column("f1", DataTypes.STRING())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(),
+                                "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+
+        FileStoreTable dataEvolutionTable = getTable(identifier);
+        write(
+                dataEvolutionTable,
+                GenericRow.of(1, new BlobData(new byte[] {1, 2, 3}), BinaryString.fromString("a")));
+
+        FilesTable dataEvolutionFilesTable =
+                (FilesTable)
+                        catalog.getTable(
+                                identifier(tableName + SYSTEM_TABLE_SPLITTER + FilesTable.FILES));
+        InternalRow normalFile =
+                read(dataEvolutionFilesTable).stream()
+                        .filter(row -> row.isNullAt(19))
+                        .findFirst()
+                        .get();
+
+        assertThat(normalFile.getString(10).toString()).isEqualTo("{blob=1, f0=0, f1=0}");
+        assertThat(normalFile.getString(11).toString()).isEqualTo("{blob=null, f0=1, f1=a}");
+        assertThat(normalFile.getString(12).toString()).isEqualTo("{blob=null, f0=1, f1=a}");
     }
 
     private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {

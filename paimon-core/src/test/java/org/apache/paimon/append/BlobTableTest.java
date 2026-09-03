@@ -94,6 +94,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.append.dataevolution.DataEvolutionCompactTask.TaskType.BLOB;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
@@ -167,6 +168,93 @@ public class BlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(1000);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testOmitWriteColsForAllNonDedicatedColumns(boolean optimizationEnabled)
+            throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        if (optimizationEnabled) {
+            schemaBuilder.option(
+                    CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(), "true");
+        }
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        FileStoreTable table = getTableDefault();
+        writeRows(
+                table,
+                Collections.singletonList(
+                        GenericRow.of(
+                                1, BinaryString.fromString("before"), new BlobData(blobBytes))));
+
+        List<DataFileMeta> initialFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        DataFileMeta initialNormalFile =
+                initialFiles.stream()
+                        .filter(file -> !isBlobFile(file.fileName()))
+                        .findFirst()
+                        .get();
+        assertThat(initialNormalFile.writeCols())
+                .isEqualTo(optimizationEnabled ? null : Arrays.asList("f0", "f1"));
+        assertThat(
+                        initialFiles.stream()
+                                .filter(file -> isBlobFile(file.fileName()))
+                                .findFirst()
+                                .get()
+                                .writeCols())
+                .isEqualTo(Collections.singletonList("f2"));
+
+        RowType normalWriteType = table.schema().logicalRowType().project("f0", "f1");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(normalWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(2, BinaryString.fromString("after")));
+            List<CommitMessage> messages = write.prepareCommit();
+            DataFileMeta updatedNormalFile =
+                    ((CommitMessageImpl) messages.get(0)).newFilesIncrement().newFiles().get(0);
+            assertThat(updatedNormalFile.writeCols())
+                    .isEqualTo(optimizationEnabled ? null : Arrays.asList("f0", "f1"));
+            assignFirstRowId(messages, 0L);
+            commit.commit(messages);
+        }
+
+        List<InternalRow> rows = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(table.rowType());
+        readDefault(row -> rows.add(serializer.copy(row)));
+        assertThat(rows.size()).isEqualTo(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(2);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("after");
+        assertThat(rows.get(0).getBlob(2).toData()).isEqualTo(blobBytes);
+
+        if (optimizationEnabled) {
+            DataEvolutionCompactCoordinator coordinator =
+                    new DataEvolutionCompactCoordinator(
+                            table, false, false, table.latestSnapshot().get());
+            List<CommitMessage> compactMessages = new ArrayList<>();
+            for (DataEvolutionCompactTask task : coordinator.plan()) {
+                compactMessages.add(task.doCompact(table, commitUser));
+            }
+            assertThat(compactMessages.size()).isGreaterThan(0);
+            commitDefault(compactMessages);
+
+            List<DataFileMeta> compactedNormalFiles =
+                    table.store().newScan().plan().files().stream()
+                            .map(ManifestEntry::file)
+                            .filter(file -> !isBlobFile(file.fileName()))
+                            .collect(Collectors.toList());
+            assertThat(compactedNormalFiles.size()).isEqualTo(1);
+            assertThat(compactedNormalFiles.get(0).writeCols()).isNull();
+        }
     }
 
     @Test

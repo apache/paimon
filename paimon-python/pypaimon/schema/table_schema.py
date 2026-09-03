@@ -23,7 +23,12 @@ from typing import Dict, List, Optional
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import json_field
-from pypaimon.schema.data_types import DataField, current_highest_field_id
+from pypaimon.schema.data_types import (
+    DataField,
+    VectorType,
+    current_highest_field_id,
+    is_blob_file_field,
+)
 from pypaimon.schema.schema import Schema
 
 
@@ -99,6 +104,58 @@ class TableSchema:
         """
         field_map = {f.name: f for f in self.fields}
         return [field_map[name] for name in self.bucket_keys]
+
+    def data_file_fields(
+        self, write_cols: Optional[List[str]]
+    ) -> List[DataField]:
+        """Return fields physically stored in a data file.
+
+        A null ``write_cols`` normally represents the full schema. For a
+        data-evolution schema which enables compact metadata and has dedicated
+        BLOB or vector fields, it represents every non-dedicated field instead.
+        Dedicated files retain explicit write columns.
+        """
+        if write_cols is not None:
+            fields_by_name = {field.name: field for field in self.fields}
+            return [
+                fields_by_name[name]
+                for name in write_cols
+                if name in fields_by_name
+            ]
+
+        core_options = CoreOptions.from_dict(self.options)
+        if (
+            not core_options.data_evolution_enabled(False)
+            or not core_options.data_evolution_write_cols_optimization_enabled(False)
+        ):
+            return list(self.fields)
+        inline_blob_fields = (
+            core_options.blob_descriptor_fields()
+            | core_options.blob_view_fields()
+        )
+        return [
+            field
+            for field in self.fields
+            if not (
+                is_blob_file_field(field)
+                and field.name not in inline_blob_fields
+            )
+            and not (
+                core_options.with_vector_format()
+                and isinstance(field.type, VectorType)
+            )
+        ]
+
+    def partial_file_write_cols(
+        self, write_cols: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        """Resolve columns for a partial file using compact metadata."""
+        if write_cols is not None:
+            return list(write_cols)
+        physical_fields = self.data_file_fields(None)
+        if len(physical_fields) == len(self.fields):
+            return None
+        return [field.name for field in physical_fields]
 
     def to_schema(self) -> Schema:
         return Schema(

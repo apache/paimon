@@ -112,7 +112,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, options));
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
     }
 
     @Test
@@ -170,7 +171,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        BlobFileContext.create(SCHEMA, options));
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
         for (int i = 0; i < 11; i++) {
             cappedWriter.write(
                     GenericRow.of(i, BinaryString.fromString("t" + i), new BlobData(testBlobData)));
@@ -204,7 +206,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        BlobFileContext.create(SCHEMA, options));
+                        BlobFileContext.create(SCHEMA, options),
+                        false);
 
         cappedWriter.write(
                 GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
@@ -264,7 +267,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(coreOptions),
                         FileSource.APPEND,
                         false,
-                        BlobFileContext.create(SCHEMA, coreOptions));
+                        BlobFileContext.create(SCHEMA, coreOptions),
+                        false);
 
         List<InternalRow> rows =
                 Arrays.asList(
@@ -338,7 +342,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -409,7 +414,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         byte[] blobData = new byte[1024 * 1024];
         new Random(321).nextBytes(blobData);
@@ -476,7 +482,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -557,7 +564,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -779,7 +787,8 @@ public class DedicatedFormatRollingFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // statsDenseStore
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())),
+                        false);
 
         // Write data
         for (int i = 0; i < 3; i++) {

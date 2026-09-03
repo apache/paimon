@@ -204,10 +204,7 @@ class PaimonMicroBatchStream(
       () =>
         DataEvolutionUtils.collectWrittenColumnIds(
           admittedSplitSnapshot,
-          schemaId => schemaLoader.apply(schemaId).fields(),
-          schemaId =>
-            new CoreOptions(schemaLoader.apply(schemaId).options())
-              .dataEvolutionNestedFieldEnabled()
+          schemaId => schemaLoader.apply(schemaId)
         )
     )
   }

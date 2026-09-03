@@ -97,6 +97,43 @@ public class VectorStoreTableTest extends TableTestBase {
     }
 
     @Test
+    public void testOmitWriteColsForAllNonDedicatedColumns() throws Exception {
+        catalog.createTable(identifier(), schemaDefault(true), true);
+        commitDefault(writeDataDefault(1, 1));
+
+        List<DataFileMeta> files =
+                getTableDefault().store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        assertThat(
+                        files.stream()
+                                .filter(file -> !file.fileName().contains(".vector."))
+                                .filter(file -> !file.fileName().endsWith(".blob"))
+                                .findFirst()
+                                .get()
+                                .writeCols())
+                .isNull();
+        assertThat(
+                        files.stream()
+                                .filter(file -> file.fileName().endsWith(".blob"))
+                                .findFirst()
+                                .get()
+                                .writeCols())
+                .isEqualTo(Collections.singletonList("f2"));
+        assertThat(
+                        files.stream()
+                                .filter(file -> file.fileName().contains(".vector."))
+                                .findFirst()
+                                .get()
+                                .writeCols())
+                .isEqualTo(Collections.singletonList("f3"));
+
+        AtomicInteger count = new AtomicInteger();
+        readDefault(row -> count.incrementAndGet());
+        assertThat(count.get()).isEqualTo(1);
+    }
+
+    @Test
     public void testMultiBatch() throws Exception {
         int rowNum = (RANDOM.nextInt(64) + 1) * 2;
 
@@ -220,6 +257,10 @@ public class VectorStoreTableTest extends TableTestBase {
 
     @Override
     protected Schema schemaDefault() {
+        return schemaDefault(false);
+    }
+
+    private Schema schemaDefault(boolean optimizeWriteCols) {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
@@ -233,6 +274,10 @@ public class VectorStoreTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f3");
         schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
+        if (optimizeWriteCols) {
+            schemaBuilder.option(
+                    CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(), "true");
+        }
         return schemaBuilder.build();
     }
 

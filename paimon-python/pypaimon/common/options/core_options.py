@@ -735,6 +735,18 @@ class CoreOptions:
         .with_description("Whether to enable data evolution.")
     )
 
+    DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("data-evolution.write-cols-optimization.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to omit write columns from data file metadata when a "
+            "data evolution file contains all non-dedicated columns. Readers "
+            "always support the omitted metadata, but writing it is disabled "
+            "by default for compatibility with older readers."
+        )
+    )
+
     DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("data-evolution.row-id-conflict-rewrite.max-size")
         .memory_type()
@@ -1407,6 +1419,12 @@ class CoreOptions:
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def data_evolution_write_cols_optimization_enabled(self, default=None):
+        return self.options.get(
+            CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED,
+            default,
+        )
 
     def data_evolution_row_id_conflict_rewrite_max_size(self, default=None):
         value = self.options.get(

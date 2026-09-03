@@ -40,6 +40,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.BlobFetchMetrics;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -59,13 +60,18 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -86,6 +92,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private @Nullable BlobFetchMetrics blobFetchMetrics;
     private RowType writeType;
     private @Nullable List<String> writeCols;
+    private boolean omitAllNonDedicatedWriteCols;
     private FileSource fileSource = FileSource.APPEND;
     private boolean forceBufferSpill = false;
 
@@ -116,6 +123,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.rowType = rowType;
         this.writeType = rowType;
         this.writeCols = null;
+        this.omitAllNonDedicatedWriteCols =
+                options.dataEvolutionEnabled()
+                        && options.dataEvolutionWriteColsOptimizationEnabled()
+                        && writesAllNonDedicatedColumns(rowType.getFieldNames(), options);
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.blobContext = BlobFileContext.create(rowType, options);
@@ -183,7 +194,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.dataEvolutionEnabled(),
                 rowSidecarFileFormat(),
                 blobContext,
-                fileSource);
+                fileSource,
+                omitAllNonDedicatedWriteCols);
     }
 
     public BaseAppendFileStoreWrite withFileSource(FileSource fileSource) {
@@ -209,12 +221,33 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (blobContext != null) {
             blobContext = blobContext.withWriteType(writeType);
         }
+        this.omitAllNonDedicatedWriteCols =
+                options.dataEvolutionEnabled()
+                        && options.dataEvolutionWriteColsOptimizationEnabled()
+                        && writesAllNonDedicatedColumns(writeCols, options);
         // optimize writeCols to null in following cases:
         // writeType contains all columns (without _ROW_ID and _SEQUENCE_NUMBER)
-        if (writeCols.equals(fullNames)) {
+        if (writeCols.equals(fullNames) || omitAllNonDedicatedWriteCols) {
             writeCols = null;
         }
         this.writeCols = writeCols;
+    }
+
+    private boolean writesAllNonDedicatedColumns(
+            List<String> writtenColumns, CoreOptions coreOptions) {
+        Set<String> dedicatedFields =
+                new HashSet<>(fieldNamesInBlobFile(rowType, coreOptions.blobInlineField()));
+        dedicatedFields.addAll(fieldNamesInVectorFile(rowType, coreOptions.withVectorFormat()));
+        List<String> nonDedicatedFields =
+                rowType.getFields().stream()
+                        .map(DataField::name)
+                        .filter(name -> !dedicatedFields.contains(name))
+                        .collect(Collectors.toList());
+        List<String> writtenNonDedicatedFields =
+                writtenColumns.stream()
+                        .filter(name -> !dedicatedFields.contains(name))
+                        .collect(Collectors.toList());
+        return writtenNonDedicatedFields.equals(nonDedicatedFields);
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
@@ -329,7 +362,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 FileSource.COMPACT,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                rowType.equals(writeType)
+                rowType.equals(writeType) || omitAllNonDedicatedWriteCols
                         ? null
                         : options.dataEvolutionNestedFieldEnabled()
                                 ? writeType.collectLeafPaths(rowType)

@@ -855,8 +855,8 @@ class TableUpdateByRowId:
         # BlobWriter.prepare_commit preserves write/rolling order, which is required
         # for assigning continuous row-id ranges to rolled blob files.
         for file in new_files:
-            file.write_cols = file.write_cols or column_names
             if DataFileMeta.is_blob_file(file.file_name):
+                file.write_cols = file.write_cols or column_names
                 if len(file.write_cols) != 1:
                     raise RuntimeError(
                         f"Blob update file {file.file_name} should contain "

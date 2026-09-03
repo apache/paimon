@@ -18,7 +18,9 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
@@ -55,8 +57,32 @@ public class DataEvolutionUtils {
             Collection<DataSplit> splits,
             Function<Long, List<DataField>> schemaFieldsLoader,
             Function<Long, Boolean> nestedFieldEnabledLoader) {
+        return collectWrittenColumnIds(splits, schemaFieldsLoader, null, nestedFieldEnabledLoader);
+    }
+
+    /** Collect exact written field ids using the physical null-write-cols schema. */
+    public static Optional<List<Integer>> collectWrittenColumnIds(
+            Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        Function<Long, TableSchema> cachedSchemaLoader =
+                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaLoader);
+        return collectWrittenColumnIds(
+                splits,
+                schemaId -> cachedSchemaLoader.apply(schemaId).fields(),
+                schemaId -> cachedSchemaLoader.apply(schemaId).dataFileSchema(null).fields(),
+                schemaId ->
+                        new CoreOptions(cachedSchemaLoader.apply(schemaId).options())
+                                .dataEvolutionNestedFieldEnabled());
+    }
+
+    private static Optional<List<Integer>> collectWrittenColumnIds(
+            Collection<DataSplit> splits,
+            Function<Long, List<DataField>> schemaFieldsLoader,
+            @Nullable Function<Long, List<DataField>> nullWriteSchemaFieldsLoader,
+            Function<Long, Boolean> nestedFieldEnabledLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
         Map<Long, List<DataField>> schemaFieldsCache = new HashMap<>();
+        Map<Long, List<DataField>> nullWriteSchemaFieldsCache = new HashMap<>();
         Map<Long, Boolean> nestedFieldEnabledCache = new HashMap<>();
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
         try {
@@ -77,11 +103,31 @@ public class DataEvolutionUtils {
                                                     schemaId);
                                             return loaded;
                                         });
+                        List<DataField> nullWriteSchemaFields = schemaFields;
+                        if (file.writeCols() == null && nullWriteSchemaFieldsLoader != null) {
+                            nullWriteSchemaFields =
+                                    nullWriteSchemaFieldsCache.computeIfAbsent(
+                                            file.schemaId(),
+                                            schemaId -> {
+                                                List<DataField> loaded =
+                                                        nullWriteSchemaFieldsLoader.apply(schemaId);
+                                                checkArgument(
+                                                        loaded != null,
+                                                        "Cannot find schema %s.",
+                                                        schemaId);
+                                                return loaded;
+                                            });
+                        }
                         boolean nestedFieldEnabled =
                                 nestedFieldEnabledCache.computeIfAbsent(
                                         file.schemaId(), nestedFieldEnabledLoader);
                         fileFieldIds =
-                                resolveFileFieldIds(schemaFields, file, nestedFieldEnabled, true);
+                                resolveFileFieldIds(
+                                        schemaFields,
+                                        nullWriteSchemaFields,
+                                        file,
+                                        nestedFieldEnabled,
+                                        true);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
                     }
                     fieldIds.addAll(fileFieldIds);
@@ -98,18 +144,30 @@ public class DataEvolutionUtils {
      */
     public static Set<Integer> fileFieldIds(
             List<DataField> schemaFields, DataFileMeta file, boolean nestedFieldEnabled) {
-        return resolveFileFieldIds(schemaFields, file, nestedFieldEnabled, false);
+        return resolveFileFieldIds(schemaFields, schemaFields, file, nestedFieldEnabled, false);
+    }
+
+    public static Set<Integer> fileFieldIds(TableSchema schema, DataFileMeta file) {
+        boolean nestedFieldEnabled =
+                new CoreOptions(schema.options()).dataEvolutionNestedFieldEnabled();
+        return resolveFileFieldIds(
+                schema.fields(),
+                schema.dataFileSchema(null).fields(),
+                file,
+                nestedFieldEnabled,
+                false);
     }
 
     private static Set<Integer> resolveFileFieldIds(
             List<DataField> schemaFields,
+            List<DataField> nullWriteSchemaFields,
             DataFileMeta file,
             boolean nestedFieldEnabled,
             boolean strict) {
         List<String> writeCols = file.writeCols();
         Set<Integer> ids = new HashSet<>();
         if (writeCols == null) {
-            for (DataField field : schemaFields) {
+            for (DataField field : nullWriteSchemaFields) {
                 ids.add(field.id());
             }
             return ids;
@@ -154,9 +212,47 @@ public class DataEvolutionUtils {
     /** Table fields physically present in a file, in their physical write order. */
     public static List<DataField> fileFields(
             List<DataField> schemaFields, DataFileMeta file, boolean nestedFieldEnabled) {
+        return fileFields(schemaFields, schemaFields, file, nestedFieldEnabled);
+    }
+
+    /** Table fields physically present in a file, including compact null-write-cols metadata. */
+    public static List<DataField> fileFields(TableSchema schema, DataFileMeta file) {
+        return fileFields(
+                schema.fields(),
+                schema.dataFileSchema(null).fields(),
+                file,
+                new CoreOptions(schema.options()).dataEvolutionNestedFieldEnabled());
+    }
+
+    /**
+     * Returns the columns of a partial data file, materializing compact null write-column metadata
+     * when necessary.
+     *
+     * <p>An empty optional means that a null value still denotes a true full-schema file. This
+     * distinction is required by callers which only operate on partial updates.
+     */
+    public static Optional<List<String>> partialFileWriteCols(
+            TableSchema schema, DataFileMeta file) {
+        if (file.writeCols() != null) {
+            return Optional.of(file.writeCols());
+        }
+
+        List<DataField> physicalFields = schema.dataFileSchema(null).fields();
+        if (physicalFields.size() == schema.fields().size()) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                physicalFields.stream().map(DataField::name).collect(Collectors.toList()));
+    }
+
+    private static List<DataField> fileFields(
+            List<DataField> schemaFields,
+            List<DataField> nullWriteSchemaFields,
+            DataFileMeta file,
+            boolean nestedFieldEnabled) {
         List<String> writeCols = file.writeCols();
         if (writeCols == null) {
-            return schemaFields;
+            return nullWriteSchemaFields;
         }
 
         if (nestedFieldEnabled) {
