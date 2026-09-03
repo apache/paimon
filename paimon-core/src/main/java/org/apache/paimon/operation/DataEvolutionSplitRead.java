@@ -225,9 +225,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
 
-        // the merge path builds its readers with filter push down disabled, so the shared builder
-        // carries no filters, the single file path creates its own with per file filters
-        Builder formatBuilder = formatBuilder(readRowType, null);
         // the suppliers below run lazily, so take the filters now, the same way the read type is
         // already taken by the caller
         List<Predicate> filters = readTypeFilters(this.filters, readRowType);
@@ -262,7 +259,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     needMergeFiles,
                                     partition,
                                     dataFilePathFactory,
-                                    formatBuilder,
                                     rowRanges,
                                     readRowType,
                                     deletionVector);
@@ -286,7 +282,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<DataFileMeta> needMergeFiles,
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
-            Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
             @Nullable DeletionVectorWithRange deletionVector)
@@ -318,6 +313,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         boolean nestedFieldEnabled = nestedFieldEnabledFor(needMergeFiles);
+        Builder formatBuilder = formatBuilder(readRowType, null, nestedFieldEnabled);
         // Resolve each bunch's physically-provided (row-tracked) row type, then delegate all no-IO
         // layout planning to DataEvolutionReadPlanner; this class only resolves schemas and builds
         // readers.
@@ -357,20 +353,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     formatReaderMappings.computeIfAbsent(
                             new FormatKey(schemaId, formatIdentifier, cacheKey),
                             key ->
-                                    nestedFieldEnabled
-                                            ? formatBuilder.build(
-                                                    formatIdentifier,
-                                                    schema,
-                                                    dataSchema,
-                                                    readFields,
-                                                    false,
-                                                    true)
-                                            : formatBuilder.build(
-                                                    formatIdentifier,
-                                                    schema,
-                                                    dataSchema,
-                                                    readFields,
-                                                    false));
+                                    formatBuilder.build(
+                                            formatIdentifier,
+                                            schema,
+                                            dataSchema,
+                                            readFields,
+                                            false));
             fileRecordReaders[i] =
                     new ForceSingleBatchReader(
                             createFieldBunchReader(
@@ -564,14 +552,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                 readRowType,
                                 nestedFieldEnabled),
                         key ->
-                                formatBuilder(readRowType, fileFilters)
-                                        .build(
-                                                formatIdentifier,
-                                                schema,
-                                                dataSchema,
-                                                readRowType.getFields(),
-                                                true,
-                                                nestedFieldEnabled));
+                                formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
+                                        .build(formatIdentifier, schema, dataSchema));
 
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
@@ -768,7 +750,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return false;
     }
 
-    private Builder formatBuilder(RowType readRowType, @Nullable List<Predicate> filters) {
+    private Builder formatBuilder(
+            RowType readRowType, @Nullable List<Predicate> filters, boolean nestedFieldEnabled) {
         return new Builder(
                 formatDiscover,
                 readRowType.getFields(),
@@ -776,7 +759,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 schema -> rowTypeWithRowTracking(schema.logicalRowType(), true, true).getFields(),
                 filters,
                 null,
-                null);
+                null,
+                nestedFieldEnabled);
     }
 
     /**

@@ -165,6 +165,7 @@ public class FormatReaderMapping {
         @Nullable private final List<Predicate> filters;
         @Nullable private final TopN topN;
         @Nullable private final Integer limit;
+        private final boolean nestedFieldEnabled;
 
         public Builder(
                 FileFormatDiscover formatDiscover,
@@ -173,12 +174,24 @@ public class FormatReaderMapping {
                 @Nullable List<Predicate> filters,
                 @Nullable TopN topN,
                 @Nullable Integer limit) {
+            this(formatDiscover, readFields, fieldsExtractor, filters, topN, limit, false);
+        }
+
+        public Builder(
+                FileFormatDiscover formatDiscover,
+                List<DataField> readFields,
+                Function<TableSchema, List<DataField>> fieldsExtractor,
+                @Nullable List<Predicate> filters,
+                @Nullable TopN topN,
+                @Nullable Integer limit,
+                boolean nestedFieldEnabled) {
             this.formatDiscover = formatDiscover;
             this.readFields = readFields;
             this.fieldsExtractor = fieldsExtractor;
             this.filters = filters;
             this.topN = topN;
             this.limit = limit;
+            this.nestedFieldEnabled = nestedFieldEnabled;
         }
 
         /**
@@ -205,22 +218,6 @@ public class FormatReaderMapping {
                 TableSchema dataSchema,
                 List<DataField> expectedFields,
                 boolean enabledFilterPushDown) {
-            return build(
-                    formatIdentifier,
-                    tableSchema,
-                    dataSchema,
-                    expectedFields,
-                    enabledFilterPushDown,
-                    new CoreOptions(tableSchema.options()).dataEvolutionNestedFieldEnabled());
-        }
-
-        public FormatReaderMapping build(
-                String formatIdentifier,
-                TableSchema tableSchema,
-                TableSchema dataSchema,
-                List<DataField> expectedFields,
-                boolean enabledFilterPushDown,
-                boolean nestedFieldEnabled) {
 
             // extract the whole data fields in logic.
             List<DataField> allDataFieldsInFile =
