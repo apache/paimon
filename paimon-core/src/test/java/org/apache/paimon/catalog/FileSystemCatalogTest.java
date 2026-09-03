@@ -22,8 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -142,7 +142,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         Path tablePath =
                 ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
                         .getTableLocation(identifier);
-        new SchemaManager(fileIO, tablePath).createTable(schema);
+        new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
 
         // The option names one thing only, so a catalog that cannot serve it says so rather than
         // reading the table's partitions from somewhere the option did not ask for.

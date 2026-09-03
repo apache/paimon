@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -88,7 +89,7 @@ public class ChainTableDeletionVectorReadTest {
 
     private void createTable(boolean deletionVectors) throws Exception {
         tablePath = new Path("file://" + tempDir + "/chain_dv_" + deletionVectors);
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "k");
@@ -128,7 +129,7 @@ public class ChainTableDeletionVectorReadTest {
     }
 
     private void configureBranch(String branchName) throws Exception {
-        SchemaManager sm = new SchemaManager(fileIO, tablePath, branchName);
+        SchemaManager sm = new FileSystemSchemaManager(fileIO, tablePath, branchName);
         sm.commitChanges(
                 SchemaChange.setOption(
                         CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), SNAPSHOT_BRANCH),
@@ -139,7 +140,8 @@ public class ChainTableDeletionVectorReadTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         String branchName = CoreOptions.branch(options.toMap());
-        TableSchema schema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        TableSchema schema =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get();
         return FileStoreTableFactory.create(fileIO, tablePath, schema, CatalogEnvironment.empty());
     }
 
