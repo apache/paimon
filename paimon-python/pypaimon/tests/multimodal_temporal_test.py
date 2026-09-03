@@ -14,14 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from unittest import mock
 
 import pyarrow as pa
 import pypaimon.multimodal as pmm
+from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+from pypaimon.read.scanner.file_scanner import FileScanner
 
 
 class MultimodalTemporalTest(unittest.TestCase):
@@ -183,6 +187,214 @@ class MultimodalTemporalTest(unittest.TestCase):
             "secondary__matched_time": 90,
             "secondary__time_delta": -10,
         }], aligned.to_list())
+
+    def test_alignment_resolves_tags_before_execution(self):
+        anchors = self._table("tagged_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.string(),
+        })
+        secondary = self._table("tagged_secondary", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 100, "value": "old"}])
+        secondary.add([
+            {"episode_id": 1, "event_time": 100, "value": "old-match"}
+        ])
+        anchors.raw_table.create_tag("v1")
+        secondary.raw_table.create_tag("v1")
+        aligned = pmm.align(
+            anchors.scan(tag_name="v1"),
+            on="event_time",
+            by="episode_id",
+            sources={"secondary": pmm.exact(
+                secondary.scan(tag_name="v1"))},
+        )
+
+        anchors.add([{"episode_id": 1, "event_time": 200, "value": "new"}])
+        secondary.add([
+            {"episode_id": 1, "event_time": 200, "value": "new-match"}
+        ])
+        anchors.raw_table.replace_tag("v1")
+        secondary.raw_table.replace_tag("v1")
+        anchors.raw_table.delete_tag("v1")
+        secondary.raw_table.delete_tag("v1")
+
+        self.assertEqual([100], [
+            row["event_time"] for row in aligned.to_list()
+        ])
+
+    def test_alignment_normalizes_scan_mode_when_pinning(self):
+        anchors = self.conn.create_table(
+            "latest_full_anchors",
+            schema=pa.schema([
+                pa.field("episode_id", pa.int32()),
+                pa.field("event_time", pa.int64()),
+            ]),
+            options={"scan.mode": "latest-full"},
+        )
+        secondary = self._table("latest_full_secondary", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 100}])
+        secondary.add([
+            {"episode_id": 1, "event_time": 100, "value": 7}
+        ])
+
+        row = pmm.align(
+            anchors.scan(),
+            on="event_time",
+            by="episode_id",
+            sources={"secondary": pmm.exact(secondary.scan())},
+        ).to_list()[0]
+
+        self.assertEqual(7, row["secondary__value"])
+
+    def test_alignment_rejects_non_finite_temporal_values(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                anchors = self._table("float_anchor_%s" % id(value), {
+                    "episode_id": pa.int32(),
+                    "event_time": pa.float64(),
+                })
+                secondary = self._table("float_source_%s" % id(value), {
+                    "episode_id": pa.int32(),
+                    "event_time": pa.float64(),
+                    "value": pa.int32(),
+                })
+                anchors.add([{"episode_id": 1, "event_time": 100.0}])
+                secondary.add([
+                    {"episode_id": 1, "event_time": value, "value": 7}
+                ])
+                aligned = pmm.align(
+                    anchors.scan(),
+                    on="event_time",
+                    by="episode_id",
+                    sources={"secondary": pmm.nearest(
+                        secondary.scan(), tolerance=1.0)},
+                )
+                with self.assertRaisesRegex(ValueError, "must be finite"):
+                    aligned.to_list()
+
+    def test_alignment_validates_tolerance_type_and_value(self):
+        table = self._table("tolerance", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        for tolerance in (float("nan"), float("inf"), -1):
+            with self.subTest(tolerance=tolerance):
+                with self.assertRaises((TypeError, ValueError)):
+                    pmm.nearest(table.scan(), tolerance=tolerance)
+        with self.assertRaisesRegex(TypeError, "Numeric alignment"):
+            pmm.align(
+                table.scan(), on="event_time", by="episode_id",
+                sources={"source": pmm.nearest(
+                    table.scan(), tolerance=timedelta(milliseconds=1))},
+            )
+        with self.assertRaisesRegex(ValueError, "int64 maximum"):
+            pmm.align(
+                table.scan(), on="event_time", by="episode_id",
+                sources={"source": pmm.nearest(
+                    table.scan(), tolerance=1 << 63)},
+            )
+
+    def test_alignment_rejects_masked_row_ids(self):
+        anchors = self._table("masked_row_id_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        source = self._table("masked_row_id_source", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 100}])
+        source.add([{"episode_id": 1, "event_time": 100, "value": 7}])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"_ROW_ID": json.dumps({"name": "NULL"})},
+        )
+        anchors.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth
+        )
+
+        aligned = pmm.align(
+            anchors.scan(), on="event_time", by="episode_id",
+            sources={"source": pmm.exact(source.scan())},
+        )
+        with self.assertRaisesRegex(ValueError, "masks _ROW_ID"):
+            aligned.to_list()
+
+    def test_alignment_supports_nested_projections(self):
+        anchors = self._table("nested_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "metadata": pa.struct([pa.field("value", pa.int32())]),
+        })
+        secondary = self._table("nested_secondary", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "payload": pa.struct([pa.field("value", pa.int32())]),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 100,
+             "metadata": {"value": 1}},
+            {"episode_id": 1, "event_time": 200, "metadata": None},
+        ])
+        secondary.add([
+            {"episode_id": 1, "event_time": 100,
+             "payload": {"value": 7}},
+        ])
+
+        rows = pmm.align(
+            anchors.scan().select([
+                "episode_id", "event_time", "metadata.value"]),
+            on="event_time",
+            by="episode_id",
+            sources={"secondary": pmm.exact(
+                secondary.scan().select("payload.value"))},
+        ).to_list()
+
+        self.assertEqual([1, None], [row["metadata_value"] for row in rows])
+        self.assertEqual(
+            [7, None], [row["secondary__payload_value"] for row in rows])
+
+    def test_alignment_reuses_payload_scan_plans_across_batches(self):
+        anchors = self._table("planned_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        secondary = self._table("planned_secondary", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": value}
+            for value in range(8)
+        ])
+        secondary.add([
+            {"episode_id": 1, "event_time": value, "value": value}
+            for value in range(8)
+        ])
+        aligned = pmm.align(
+            anchors.scan(), on="event_time", by="episode_id",
+            sources={"secondary": pmm.exact(secondary.scan())},
+        )
+        original_scan = FileScanner.scan
+
+        with mock.patch.object(
+                FileScanner, "scan", autospec=True,
+                side_effect=original_scan) as scan:
+            reader = aligned.to_arrow_batch_reader(batch_size=1)
+            self.assertEqual(8, sum(batch.num_rows for batch in reader))
+
+        self.assertEqual(4, scan.call_count)
 
     def test_alignment_keeps_blob_payloads_as_descriptors(self):
         anchors = self._table("blob_anchors", {

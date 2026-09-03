@@ -14,25 +14,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Bounded temporal alignment for multimodal table scans."""
+"""Temporal alignment for multimodal table scans."""
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+import math
+from numbers import Integral, Real
 from typing import Optional
 
 import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.multimodal.query import ScanQuery
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.snapshot.time_travel_util import TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.table.source.global_index_live_row_filter import (
+    table_at_snapshot,
+)
+from pypaimon.utils.range import Range
 
 
 _ROW_ID = SpecialFields.ROW_ID.name
+_MAX_INT64 = (1 << 63) - 1
 
 
 @dataclass(frozen=True)
@@ -64,7 +73,7 @@ def nearest(query, *, tolerance, on=None):
 
 
 def align(anchor, *, on, by, sources):
-    """Build a batch-streaming, episode-local temporal alignment.
+    """Build an episode-local temporal alignment with batched payload reads.
 
     The anchor scan defines output rows. Each named secondary source
     contributes at most one row according to its match policy. All scans are
@@ -78,7 +87,8 @@ def align(anchor, *, on, by, sources):
         try:
             by = tuple(by)
         except TypeError as error:
-            raise ValueError("by must be a column name or sequence.") from error
+            raise ValueError(
+                "by must be a column name or sequence.") from error
     if not by:
         raise ValueError("align requires at least one grouping column in by.")
     if (any(not isinstance(name, str) or not name for name in by)
@@ -109,33 +119,40 @@ class AlignedScan:
 
     def to_arrow_batch_reader(self, *, batch_size=1024):
         """Plan scalar timestamps once, then fetch selected rows in batches."""
-        if not isinstance(batch_size, int) or batch_size <= 0:
+        if (isinstance(batch_size, bool)
+                or not isinstance(batch_size, int)
+                or batch_size <= 0):
             raise ValueError("batch_size must be a positive integer.")
 
-        anchor_rows = _metadata_rows(self._anchor, self._on, self._by)
-        anchor_rows.sort(key=_metadata_sort_key(self._on, self._by))
+        anchor_metadata = _metadata_table(self._anchor, self._on, self._by)
+        anchor_fetcher = _RowIdFetcher(self._anchor)
+        source_fetchers = {}
         for source in self._sources.values():
             source.plan()
+            source_fetchers[source.name] = _RowIdFetcher(source.spec.query)
 
         def batches():
-            for start in range(0, len(anchor_rows), batch_size):
-                rows = anchor_rows[start:start + batch_size]
-                yield self._build_batch(rows)
+            for start in range(0, len(anchor_metadata), batch_size):
+                rows = _arrow_rows(anchor_metadata.slice(start, batch_size))
+                yield self._build_batch(
+                    rows, anchor_fetcher, source_fetchers)
 
-        return pa.RecordBatchReader.from_batches(self.schema, batches())
+        return pa.ipc.RecordBatchReader.from_batches(self.schema, batches())
 
     def to_arrow(self):
         reader = self.to_arrow_batch_reader()
         try:
             return reader.read_all()
         finally:
-            reader.close()
+            close = getattr(reader, "close", None)
+            if close is not None:
+                close()
 
     def to_pandas(self):
         return self.to_arrow().to_pandas()
 
     def to_list(self):
-        return self.to_arrow().to_pylist()
+        return _arrow_rows(self.to_arrow())
 
     def _validate_anchor(self):
         _require_columns(
@@ -149,6 +166,16 @@ class AlignedScan:
                     "type; got %s and %s."
                     % (source.name, anchor_type, source.time_type)
                 )
+            for name in self._by:
+                anchor_group_type = self._anchor_table_schema.field(name).type
+                source_group_type = source.table_schema.field(name).type
+                if source_group_type != anchor_group_type:
+                    raise TypeError(
+                        "Anchor and source %r grouping column %r must have "
+                        "the same type; got %s and %s."
+                        % (source.name, name, anchor_group_type,
+                           source_group_type)
+                    )
 
     def _output_schema(self):
         fields = list(self._anchor_schema)
@@ -185,16 +212,16 @@ class AlignedScan:
                 names.add(field.name)
         return pa.schema(fields)
 
-    def _build_batch(self, anchor_rows):
+    def _build_batch(self, anchor_rows, anchor_fetcher, source_fetchers):
         anchor_ids = [row[_ROW_ID] for row in anchor_rows]
-        anchor = _fetch_rows(self._anchor, anchor_ids)
+        anchor = anchor_fetcher.fetch(anchor_ids)
         arrays = [anchor[name] for name in self._anchor_schema.names]
 
         for source in self._sources.values():
             matches = [source.match(row) for row in anchor_rows]
             matched_ids = [match[0] for match in matches if match is not None]
             unique_ids = list(dict.fromkeys(matched_ids))
-            values = _fetch_rows(source.spec.query, unique_ids)
+            values = source_fetchers[source.name].fetch(unique_ids)
             positions = {
                 row_id: index for index, row_id in enumerate(unique_ids)
             }
@@ -227,19 +254,21 @@ class AlignedScan:
 class _PinnedSource:
 
     def __init__(self, name, spec, anchor_on, by):
-        if not name or "__" in name:
+        if (not isinstance(name, str) or not name or "__" in name):
             raise ValueError(
                 "Aligned source names must be non-empty and cannot contain "
                 "'__'.")
         self.name = name
         self.spec = spec
         self.anchor_on = anchor_on
-        self.on = spec.on or anchor_on
+        self.on = anchor_on if spec.on is None else spec.on
         self.by = by
-        table_schema = _table_schema(spec.query)
-        _require_columns(table_schema, by + (self.on,), "source %r" % name)
-        self.time_type = table_schema.field(self.on).type
+        self.table_schema = _table_schema(spec.query)
+        _require_columns(
+            self.table_schema, by + (self.on,), "source %r" % name)
+        self.time_type = self.table_schema.field(self.on).type
         _delta_type(self.time_type)
+        _validate_tolerance(spec.tolerance, self.time_type)
         schema = _query_schema(spec.query)
         self.payload_schema = pa.schema([
             field for field in schema
@@ -251,51 +280,65 @@ class _PinnedSource:
         return "%s__%s" % (self.name, field)
 
     def plan(self):
-        rows = _metadata_rows(self.spec.query, self.on, self.by)
-        groups = {}
-        for row in rows:
-            key = tuple(row[name] for name in self.by)
-            groups.setdefault(key, []).append((row[self.on], row[_ROW_ID]))
-
+        metadata = _metadata_table(self.spec.query, self.on, self.by)
+        self._times = metadata[self.on].combine_chunks()
+        self._time_keys = _time_search_keys(self._times, self.time_type)
+        self._row_ids = metadata[_ROW_ID].combine_chunks()
         self._index = {}
-        for key, values in groups.items():
-            values.sort()
-            times = [value[0] for value in values]
-            if len(times) != len(set(times)):
+        group_columns = [metadata[name].combine_chunks() for name in self.by]
+        previous = None
+        start = 0
+        for position in range(len(metadata)):
+            key = tuple(column[position].as_py() for column in group_columns)
+            if position and key != previous:
+                self._index[previous] = (start, position)
+                start = position
+            if (position > start
+                    and self._time_keys[position]
+                    == self._time_keys[position - 1]):
                 raise ValueError(
                     "Source %r has duplicate timestamps within group %r."
                     % (self.name, key)
                 )
-            self._index[key] = (times, [value[1] for value in values])
+            previous = key
+        if len(metadata):
+            self._index[previous] = (start, len(metadata))
 
     def match(self, anchor_row):
         key = tuple(anchor_row[name] for name in self.by)
-        values = self._index.get(key)
-        if values is None:
+        bounds = self._index.get(key)
+        if bounds is None:
             return None
-        times, row_ids = values
         target = anchor_row[self.anchor_on]
-        index = _match_index(times, target, self.spec.method)
+        target_key = _time_search_key(target, self.time_type)
+        index = _match_index(
+            self._time_keys, target_key, self.spec.method, *bounds)
         if index is None:
             return None
-        delta = times[index] - target
+        matched_time = self._times[index].as_py()
+        delta = matched_time - target
         if (self.spec.tolerance is not None
                 and abs(delta) > self.spec.tolerance):
             return None
-        return row_ids[index], times[index], delta
+        return self._row_ids[index].as_py(), matched_time, delta
 
 
 def _match_spec(query, method, tolerance, on):
     _require_scan(query, method)
+    if on is not None and (not isinstance(on, str) or not on):
+        raise ValueError("on must be a non-empty column name.")
     if method != "exact" and tolerance is None:
         raise ValueError("%s requires a non-null tolerance." % method)
     if tolerance is not None:
-        try:
-            zero = timedelta(0) if isinstance(tolerance, timedelta) else 0
-            negative = tolerance < zero
-        except TypeError:
-            negative = False
-        if negative:
+        if isinstance(tolerance, bool) or not isinstance(
+                tolerance, (Real, timedelta)):
+            raise TypeError("tolerance must be numeric or datetime.timedelta.")
+        if (isinstance(tolerance, Real)
+                and not isinstance(tolerance, Integral)
+                and not math.isfinite(tolerance)):
+            raise ValueError("tolerance must be finite.")
+        zero = timedelta(0) if isinstance(tolerance, timedelta) else 0
+        if tolerance < zero:
             raise ValueError("tolerance must be non-negative.")
     return _MatchSpec(query, method, tolerance, on)
 
@@ -311,7 +354,8 @@ def _pin_match_spec(spec, name):
 
 
 def _require_scan(query, label):
-    if type(query) is not ScanQuery:
+    if (type(query) is not ScanQuery
+            or getattr(query, "_result_factory", None) is not None):
         raise TypeError("%s must be a MultimodalTable.scan() query." % label)
     return query
 
@@ -321,16 +365,13 @@ def _pin_scan(query):
     options = table.options
     if not options.row_tracking_enabled(False):
         raise ValueError("align requires 'row-tracking.enabled' = 'true'.")
-    empty = False
-    if (options.scan_snapshot_id() is None
-            and options.scan_tag_name() is None):
+    snapshot = TimeTravelUtil.try_travel_to_snapshot(
+        options.options, table.tag_manager(), table.snapshot_manager())
+    if snapshot is None:
         snapshot = table.snapshot_manager().get_latest_snapshot()
-        if snapshot is None:
-            empty = True
-        else:
-            table = table.copy({
-                CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
-            })
+    empty = snapshot is None
+    if snapshot is not None:
+        table = table_at_snapshot(table, snapshot)
     pinned = ScanQuery(table)
     pinned._predicate = query._predicate
     pinned._projection = query._projection
@@ -341,7 +382,9 @@ def _pin_scan(query):
 
 
 def _query_schema(query):
-    table = query._table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
+    table = query._table.copy_without_time_travel({
+        CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
+    })
     builder = query._configured_read_builder(table)
     return PyarrowFieldParser.from_paimon_schema(builder.read_type())
 
@@ -350,90 +393,256 @@ def _table_schema(query):
     return PyarrowFieldParser.from_paimon_schema(query._table.fields)
 
 
-def _metadata_rows(query, on, by):
-    columns = list(dict.fromkeys(by + (on, _ROW_ID)))
+def _metadata_table(query, on, by):
+    key_columns = list(dict.fromkeys(by + (on,)))
+    output_columns = key_columns + [_ROW_ID]
     if getattr(query, "_temporal_empty", False):
-        return []
-    table = query._table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
+        return pa.Table.from_arrays([
+            pa.array([], type=_table_schema(query).field(name).type)
+            for name in key_columns
+        ] + [pa.array([], type=pa.int64())], names=output_columns)
+    table = query._table.copy_without_time_travel({
+        CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
+    })
     builder = table.new_read_builder()
     if query._predicate is not None:
         builder = builder.with_filter(query._predicate)
-        for name in query._predicate_fields():
-            if name not in columns:
-                columns.append(name)
-    builder = builder.with_projection(columns)
+    builder = builder.with_projection(output_columns)
     if query._limit is not None:
         builder = builder.with_limit(query._limit)
-    arrow = builder.new_read().to_arrow(builder.new_scan().plan().splits())
-    rows = arrow.select(list(by) + [on, _ROW_ID]).to_pylist()
-    for row in rows:
-        if row[on] is None or any(row[name] is None for name in by):
-            raise ValueError("Temporal keys cannot be null: %r." % row)
-    return rows
+    splits = _plan_with_visible_row_ids(builder)
+    arrow = builder.new_read().to_arrow(splits)
+    metadata = arrow.select(output_columns).combine_chunks()
+    schema = _table_schema(query)
+    for name in key_columns:
+        column = metadata[name]
+        if column.null_count:
+            raise ValueError("Temporal key %r cannot be null." % name)
+        if pa.types.is_floating(schema.field(name).type):
+            for scalar in column:
+                if not math.isfinite(scalar.as_py()):
+                    raise ValueError(
+                        "Temporal key %r must be finite." % name)
+    sort_keys = [(name, "ascending") for name in output_columns]
+    return metadata.take(pc.sort_indices(metadata, sort_keys=sort_keys))
 
 
-def _fetch_rows(query, row_ids):
-    schema = _query_schema(query)
-    if not row_ids:
-        return pa.Table.from_arrays(
-            [pa.array([], type=field.type) for field in schema], schema=schema)
+class _RowIdFetcher:
 
-    table = query._table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
-    visible = schema.names
-    projection = list(dict.fromkeys(visible + [_ROW_ID]))
-    for name in query._predicate_fields():
-        if name not in projection:
-            projection.append(name)
-    builder = table.new_read_builder().with_projection(projection)
-    row_id_predicate = builder.new_predicate_builder().is_in(_ROW_ID, row_ids)
-    predicates = [row_id_predicate]
-    if query._predicate is not None:
-        predicates.insert(0, query._predicate)
-    builder = builder.with_filter(PredicateBuilder.and_predicates(predicates))
-    arrow = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+    def __init__(self, query):
+        self._schema = _query_schema(query)
+        table = query._table.copy_without_time_travel({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
+        })
+        projection = query._effective_projection()
+        if projection is None:
+            projection = [field.name for field in table.fields]
+        projection = list(dict.fromkeys(projection + [_ROW_ID]))
+        visible_builder = table.new_read_builder().with_projection(projection)
+        self._fetch_schema = PyarrowFieldParser.from_paimon_schema(
+            visible_builder.read_type())
+        self._name_paths = visible_builder._nested_name_paths()
+        if self._name_paths is None:
+            builder = visible_builder
+        else:
+            top_level = list(dict.fromkeys(
+                path[0] for path in self._name_paths))
+            builder = table.new_read_builder().with_projection(top_level)
+        if query._predicate is not None:
+            builder = builder.with_filter(query._predicate)
+        self._read = builder.new_read()
+        self._splits = _plan_with_visible_row_ids(builder)
+        self._split_ranges = [
+            self._row_ranges(split) for split in self._splits]
+        self._range_index = _SplitRangeIndex(self._split_ranges)
 
-    found = arrow[_ROW_ID].to_pylist()
-    positions = {}
-    for index, row_id in enumerate(found):
-        if row_id in positions:
-            raise RuntimeError("Duplicate row id %r in aligned scan." % row_id)
-        positions[row_id] = index
-    missing = [row_id for row_id in row_ids if row_id not in positions]
-    if missing:
-        raise RuntimeError(
-            "Aligned row ids disappeared from pinned snapshot: %r." % missing)
-    take = pa.array([positions[row_id] for row_id in row_ids], type=pa.int64())
-    return arrow.select(visible).take(take)
+    @staticmethod
+    def _row_ranges(split):
+        if isinstance(split, QueryAuthSplit):
+            split = split.split
+        if isinstance(split, IndexedSplit):
+            ranges = split.row_ranges()
+        else:
+            ranges = [
+                data_file.row_id_range()
+                for data_file in split.files
+                if data_file.row_id_range() is not None
+            ]
+        return Range.sort_and_merge_overlap(ranges, True)
+
+    def fetch(self, row_ids):
+        if not row_ids:
+            return pa.Table.from_arrays(
+                [pa.array([], type=field.type) for field in self._schema],
+                schema=self._schema,
+            )
+
+        wanted = Range.sort_and_merge_overlap(
+            [Range(row_id, row_id) for row_id in set(row_ids)], True)
+        selected_splits = []
+        for split_index in self._range_index.find(wanted):
+            original = self._splits[split_index]
+            auth_result = None
+            split = original
+            if isinstance(split, QueryAuthSplit):
+                auth_result = split.auth_result
+                split = split.split
+            if isinstance(split, IndexedSplit):
+                split = split.data_split()
+            allowed = Range.and_(wanted, self._split_ranges[split_index])
+            if not allowed:
+                continue
+            indexed = IndexedSplit(
+                split,
+                allowed,
+                exact_merged_row_count=sum(r.count() for r in allowed),
+            )
+            if auth_result is not None:
+                indexed = QueryAuthSplit(indexed, auth_result)
+            selected_splits.append(indexed)
+
+        arrow = self._project_fetch(self._read.to_arrow(selected_splits))
+        found = arrow[_ROW_ID].to_pylist()
+        positions = {}
+        for index, row_id in enumerate(found):
+            if row_id in positions:
+                raise RuntimeError(
+                    "Duplicate row id %r in aligned scan." % row_id)
+            positions[row_id] = index
+        missing = [row_id for row_id in row_ids if row_id not in positions]
+        if missing:
+            raise RuntimeError(
+                "Aligned row ids disappeared from pinned snapshot: %r."
+                % missing
+            )
+        take = pa.array(
+            [positions[row_id] for row_id in row_ids], type=pa.int64())
+        return arrow.select(self._schema.names).take(take)
+
+    def _project_fetch(self, arrow):
+        if self._name_paths is None:
+            return arrow
+        arrays = []
+        for path in self._name_paths:
+            array = arrow[path[0]]
+            for name in path[1:]:
+                index = array.type.get_field_index(name)
+                if index < 0:
+                    raise KeyError("Nested field %r does not exist." % name)
+                array = array.flatten()[index]
+            arrays.append(array)
+        return pa.Table.from_arrays(arrays, schema=self._fetch_schema)
 
 
-def _metadata_sort_key(on, by):
-    def key(row):
-        return tuple(row[name] for name in by) + (row[on], row[_ROW_ID])
-    return key
+class _SplitRangeIndex:
+
+    def __init__(self, ranges_by_split):
+        self._intervals = sorted(
+            (row_range.from_, row_range.to, split_index)
+            for split_index, ranges in enumerate(ranges_by_split)
+            for row_range in ranges
+        )
+        self._starts = [interval[0] for interval in self._intervals]
+        self._max_ends = []
+        max_end = -1
+        for _, end, _ in self._intervals:
+            max_end = max(max_end, end)
+            self._max_ends.append(max_end)
+
+    def find(self, ranges):
+        split_indices = set()
+        for row_range in ranges:
+            right = bisect_right(self._starts, row_range.to)
+            left = bisect_left(
+                self._max_ends, row_range.from_, 0, right)
+            for position in range(left, right):
+                _, end, split_index = self._intervals[position]
+                if end >= row_range.from_:
+                    split_indices.add(split_index)
+        return sorted(split_indices)
 
 
-def _match_index(times, target, method):
-    position = bisect_left(times, target)
+def _arrow_rows(table):
+    if hasattr(table, "to_pylist"):
+        return table.to_pylist()
+    columns = table.to_pydict()
+    return [
+        {name: columns[name][index] for name in table.column_names}
+        for index in range(table.num_rows)
+    ]
+
+
+def _plan_with_visible_row_ids(builder):
+    splits = builder.new_scan().plan().splits()
+    for split in splits:
+        if not isinstance(split, QueryAuthSplit):
+            continue
+        masking = getattr(split.auth_result, "column_masking", None)
+        if masking and _ROW_ID in masking:
+            raise ValueError(
+                "Temporal alignment cannot use a query that masks _ROW_ID.")
+    return splits
+
+
+def _match_index(times, target, method, start=0, end=None):
+    end = len(times) if end is None else end
+    if start >= end:
+        return None
+    position = bisect_left(times, target, start, end)
     if method == "exact":
-        if position < len(times) and times[position] == target:
+        if position < end and times[position] == target:
             return position
         return None
     if method == "backward":
-        if position < len(times) and times[position] == target:
+        if position < end and times[position] == target:
             return position
-        return position - 1 if position else None
+        return position - 1 if position > start else None
     if method == "forward":
-        return position if position < len(times) else None
+        return position if position < end else None
     if method == "nearest":
-        if position == 0:
-            return 0
-        if position == len(times):
-            return len(times) - 1
+        if position == start:
+            return start
+        if position == end:
+            return end - 1
         before = position - 1
-        if target - times[before] <= times[position] - target:
+        before_value = _python_scalar(times[before])
+        after_value = _python_scalar(times[position])
+        if target - before_value <= after_value - target:
             return before
         return position
     raise ValueError("Unknown temporal match method %r." % method)
+
+
+def _time_search_keys(values, data_type):
+    if pa.types.is_timestamp(data_type):
+        values = pc.cast(values, pa.int64())
+    return values.to_numpy(zero_copy_only=False)
+
+
+def _time_search_key(value, data_type):
+    if pa.types.is_timestamp(data_type):
+        return pa.scalar(value, type=data_type).value
+    return value
+
+
+def _python_scalar(value):
+    item = getattr(value, "item", None)
+    return item() if item is not None else value
+
+
+def _validate_tolerance(tolerance, data_type):
+    if tolerance is None:
+        return
+    if pa.types.is_timestamp(data_type):
+        if not isinstance(tolerance, timedelta):
+            raise TypeError(
+                "Timestamp alignment tolerance must be datetime.timedelta.")
+        return
+    if isinstance(tolerance, timedelta):
+        raise TypeError("Numeric alignment tolerance must be numeric.")
+    if pa.types.is_integer(data_type) and tolerance > _MAX_INT64:
+        raise ValueError(
+            "Integer alignment tolerance cannot exceed int64 maximum.")
 
 
 def _delta_type(data_type):
