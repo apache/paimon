@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -126,6 +127,47 @@ public class DataEvolutionUtilsTest {
                                         1,
                                         Collections.singletonList("unknown"))))
                 .isEmpty();
+    }
+
+    @Test
+    public void testNestedWriteColumnResolutionRequiresEnabledOption() {
+        DataField nested =
+                new DataField(
+                        1,
+                        "nest",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.INT()),
+                                new DataField(3, "b", DataTypes.INT())));
+        TableSchema disabled = tableSchema(1L, Collections.emptyMap(), nested);
+        DataFileMeta nestedFile =
+                dataFile("nested.parquet", 1L, Collections.singletonList("nest.a"));
+
+        assertThat(DataEvolutionUtils.fileFieldIds(ignored -> disabled, nestedFile)).isEmpty();
+        assertThat(collectWrittenColumnIds(ignored -> disabled, nestedFile)).isEmpty();
+
+        Map<String, String> enabledOptions = new HashMap<>();
+        enabledOptions.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        TableSchema enabled = tableSchema(1L, enabledOptions, nested);
+        assertThat(DataEvolutionUtils.fileFieldIds(ignored -> enabled, nestedFile))
+                .containsExactly(1);
+        assertThat(collectWrittenColumnIds(ignored -> enabled, nestedFile))
+                .hasValue(Collections.singletonList(1));
+    }
+
+    @Test
+    public void testDottedTopLevelWriteColumnWinsOverNestedPath() {
+        TableSchema schema =
+                tableSchema(
+                        1L,
+                        Collections.emptyMap(),
+                        new DataField(1, "nest.a", DataTypes.INT()),
+                        new DataField(
+                                2, "nest", DataTypes.ROW(new DataField(3, "a", DataTypes.INT()))));
+        DataFileMeta file = dataFile("dotted.parquet", 1L, Collections.singletonList("nest.a"));
+
+        assertThat(DataEvolutionUtils.fileFieldIds(ignored -> schema, file)).containsExactly(1);
+        assertThat(collectWrittenColumnIds(ignored -> schema, file))
+                .hasValue(Collections.singletonList(1));
     }
 
     @Test
@@ -269,6 +311,29 @@ public class DataEvolutionUtilsTest {
     }
 
     @Test
+    public void testFileFieldsProjectsNestedPathsOnlyWhenEnabled() {
+        DataField nested =
+                new DataField(
+                        1,
+                        "nest",
+                        DataTypes.ROW(
+                                new DataField(2, "a", DataTypes.INT()),
+                                new DataField(3, "b", DataTypes.INT())));
+        DataFileMeta file = dataFile("nested.parquet", 1, Arrays.asList("nest.b", "nest.a"));
+
+        TableSchema disabled = tableSchema(1L, Collections.emptyMap(), nested);
+        assertThat(DataEvolutionUtils.fileFields(ignored -> disabled, file)).isEmpty();
+
+        Map<String, String> enabledOptions = new HashMap<>();
+        enabledOptions.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        TableSchema enabled = tableSchema(1L, enabledOptions, nested);
+        List<DataField> fields = DataEvolutionUtils.fileFields(ignored -> enabled, file);
+        assertThat(fields).extracting(DataField::name).containsExactly("nest");
+        assertThat(((org.apache.paimon.types.RowType) fields.get(0).type()).getFieldNames())
+                .containsExactly("b", "a");
+    }
+
+    @Test
     public void testFieldMaxSequenceNumberFallsBackForMissingOrMalformedArray() {
         DataFileMeta legacy = dataFile("legacy.parquet", 10, null);
         DataFileMeta malformed =
@@ -380,13 +445,18 @@ public class DataEvolutionUtilsTest {
     }
 
     private static TableSchema tableSchema(long id, DataField... fields) {
+        return tableSchema(id, Collections.emptyMap(), fields);
+    }
+
+    private static TableSchema tableSchema(
+            long id, Map<String, String> options, DataField... fields) {
         return TableSchema.create(
                 id,
                 new Schema(
                         Arrays.asList(fields),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.emptyMap(),
+                        options,
                         null));
     }
 }

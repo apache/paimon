@@ -70,6 +70,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -318,6 +319,18 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
+        boolean nestedFieldEnabled = nestedFieldEnabledFor(needMergeFiles);
+        if (!nestedFieldEnabled) {
+            return createTopLevelUnionReader(
+                    fieldsFiles,
+                    partition,
+                    dataFilePathFactory,
+                    formatBuilder,
+                    rowRanges,
+                    readRowType,
+                    deletionVector);
+        }
+
         // Init all we need to create a compound reader: resolve each bunch's physically-provided
         // (row-tracked) row type, then delegate the no-IO layout planning (leaf-level matching and
         // nested sub-field assembly) to DataEvolutionReadPlanner; this class only builds readers.
@@ -351,14 +364,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             RowType partialReadRowType = new RowType(readFields);
             FormatReaderMapping formatReaderMapping =
                     formatReaderMappings.computeIfAbsent(
-                            new FormatKey(schemaId, formatIdentifier, readerCacheKey(readFields)),
+                            new FormatKey(
+                                    schemaId,
+                                    formatIdentifier,
+                                    readerCacheKey(
+                                            readFields, dataSchema.fields(), nestedFieldEnabled)),
                             key ->
                                     formatBuilder.build(
                                             formatIdentifier,
                                             schema,
                                             dataSchema,
                                             readFields,
-                                            false));
+                                            false,
+                                            nestedFieldEnabled));
             fileRecordReaders[i] =
                     new ForceSingleBatchReader(
                             createFieldBunchReader(
@@ -385,10 +403,105 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 plan.rowOffsets, plan.fieldOffsets, fileRecordReaders, plan.nested);
     }
 
+    private boolean nestedFieldEnabledFor(List<DataFileMeta> files) {
+        if (coreOptions.dataEvolutionNestedFieldEnabled()) {
+            return true;
+        }
+        for (DataFileMeta file : files) {
+            TableSchema fileSchema = schemaFetcher.apply(file.schemaId());
+            if (new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Build the pre-nested-feature union plan, matching fields only by their top-level ids. */
+    private DataEvolutionFileReader createTopLevelUnionReader(
+            List<FieldBunch> fieldsFiles,
+            BinaryRow partition,
+            DataFilePathFactory dataFilePathFactory,
+            Builder formatBuilder,
+            List<Range> rowRanges,
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
+            throws IOException {
+        List<DataField> allReadFields = readRowType.getFields();
+        RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[fieldsFiles.size()];
+        int[] readFieldIds = allReadFields.stream().mapToInt(DataField::id).toArray();
+        int[] rowOffsets = new int[allReadFields.size()];
+        int[] fieldOffsets = new int[allReadFields.size()];
+        Arrays.fill(rowOffsets, -1);
+        Arrays.fill(fieldOffsets, -1);
+
+        for (int i = 0; i < fieldsFiles.size(); i++) {
+            FieldBunch bunch = fieldsFiles.get(i);
+            DataFileMeta firstFile = bunch.files().get(0);
+            FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
+            String formatIdentifier = readTarget.formatIdentifier;
+            long schemaId = firstFile.schemaId();
+            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
+            Set<Integer> availableFieldIds =
+                    rowTypeWithRowTracking(dataSchema.logicalRowType()).getFields().stream()
+                            .map(DataField::id)
+                            .collect(Collectors.toSet());
+            List<DataField> readFields = new ArrayList<>();
+            for (int j = 0; j < readFieldIds.length; j++) {
+                if (rowOffsets[j] == -1 && availableFieldIds.contains(readFieldIds[j])) {
+                    rowOffsets[j] = i;
+                    fieldOffsets[j] = readFields.size();
+                    readFields.add(allReadFields.get(j));
+                }
+            }
+
+            if (readFields.isEmpty()) {
+                fileRecordReaders[i] = null;
+                continue;
+            }
+
+            List<String> readFieldNames =
+                    readFields.stream().map(DataField::name).collect(Collectors.toList());
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
+                            new FormatKey(schemaId, formatIdentifier, readFieldNames),
+                            key ->
+                                    formatBuilder.build(
+                                            formatIdentifier,
+                                            schema,
+                                            dataSchema,
+                                            readFields,
+                                            false));
+            RowType partialReadRowType = new RowType(readFields);
+            fileRecordReaders[i] =
+                    new ForceSingleBatchReader(
+                            createFieldBunchReader(
+                                    partition,
+                                    bunch,
+                                    dataFilePathFactory,
+                                    formatReaderMapping,
+                                    rowRanges,
+                                    partialReadRowType,
+                                    deletionVector));
+        }
+
+        for (int i = 0; i < rowOffsets.length; i++) {
+            if (rowOffsets[i] == -1) {
+                checkArgument(
+                        allReadFields.get(i).type().isNullable(),
+                        format(
+                                "Field %s is not null but can't find any file contains it.",
+                                allReadFields.get(i)));
+            }
+        }
+
+        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
+    }
+
     /**
-     * A cache key describing the exact (possibly partially nested) fields read from one bunch. It
-     * encodes field ids and nesting structure rather than names, so two bunches reading different
-     * sub-fields of the same struct (e.g. {@code nest.a} vs {@code nest.b}) never collide.
+     * A cache key describing both the exact (possibly partially nested) fields requested from one
+     * bunch and the projected data schema it physically provides. Both affect schema-evolution
+     * casts, so two bunches reading the same projected shape from different sibling files must not
+     * share a mapping.
      *
      * <p>Deliberately not {@link RowType#leafPaths(RowType)}: that describes a written type
      * relative to the schema it was written against and therefore enforces the write-side
@@ -396,14 +509,22 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * bound by those — it may be pruned arbitrarily deep by the engine, and it may be *wider* than
      * the file's own schema after a nested {@code ADD COLUMN}.
      */
-    private static List<String> readerCacheKey(List<DataField> readFields) {
-        List<String> key = new ArrayList<>(readFields.size());
-        for (DataField field : readFields) {
+    private static List<String> readerCacheKey(
+            List<DataField> readFields, List<DataField> dataFields, boolean nestedFieldEnabled) {
+        List<String> key = new ArrayList<>(readFields.size() + dataFields.size() + 3);
+        key.add("nested=" + nestedFieldEnabled);
+        appendFieldsKey("read", readFields, key);
+        appendFieldsKey("data", dataFields, key);
+        return key;
+    }
+
+    private static void appendFieldsKey(String prefix, List<DataField> fields, List<String> key) {
+        key.add(prefix);
+        for (DataField field : fields) {
             StringBuilder builder = new StringBuilder();
             appendFieldKey(field, builder);
             key.add(builder.toString());
         }
-        return key;
     }
 
     private static void appendFieldKey(DataField field, StringBuilder builder) {
@@ -523,6 +644,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
         TableSchema dataSchema = schemaId == schema.id() ? schema : schemaFetcher.apply(schemaId);
+        boolean nestedFieldEnabled = nestedFieldEnabledFor(Collections.singletonList(file));
 
         // no column merge here, so the filters this file can answer reach both the file index and
         // the format reader
@@ -530,10 +652,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         FormatReaderMapping formatReaderMapping =
                 singleFileReaderMappings.computeIfAbsent(
                         new SingleFileKey(
-                                schemaId, formatIdentifier, file.writeCols(), readRowType),
+                                schemaId,
+                                formatIdentifier,
+                                file.writeCols(),
+                                readRowType,
+                                nestedFieldEnabled),
                         key ->
                                 formatBuilder(readRowType, fileFilters)
-                                        .build(formatIdentifier, schema, dataSchema));
+                                        .build(
+                                                formatIdentifier,
+                                                schema,
+                                                dataSchema,
+                                                readRowType.getFields(),
+                                                true,
+                                                nestedFieldEnabled));
 
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled) {
@@ -945,7 +1077,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * pushes down depend on the read type, which is not the same for every split: {@link
      * IndexedSplitRecordReader#readInfo} adds a row id to the read type when the split carries
      * scores. The columns the file wrote are part of the key as well, they decide which filters the
-     * file can answer.
+     * file can answer. The effective nested mode can change for a retained reader after a persisted
+     * false-to-true table-option update, and it changes the schema-evolution mapping.
      */
     private static class SingleFileKey {
 
@@ -953,16 +1086,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         private final String formatIdentifier;
         @Nullable private final List<String> writeCols;
         private final RowType readRowType;
+        private final boolean nestedFieldEnabled;
 
         private SingleFileKey(
                 long schemaId,
                 String formatIdentifier,
                 @Nullable List<String> writeCols,
-                RowType readRowType) {
+                RowType readRowType,
+                boolean nestedFieldEnabled) {
             this.schemaId = schemaId;
             this.formatIdentifier = formatIdentifier;
             this.writeCols = writeCols;
             this.readRowType = readRowType;
+            this.nestedFieldEnabled = nestedFieldEnabled;
         }
 
         @Override
@@ -975,6 +1111,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             SingleFileKey that = (SingleFileKey) o;
             return schemaId == that.schemaId
+                    && nestedFieldEnabled == that.nestedFieldEnabled
                     && Objects.equals(formatIdentifier, that.formatIdentifier)
                     && Objects.equals(writeCols, that.writeCols)
                     && Objects.equals(readRowType, that.readRowType);
@@ -982,7 +1119,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         @Override
         public int hashCode() {
-            return Objects.hash(schemaId, formatIdentifier, writeCols, readRowType);
+            return Objects.hash(
+                    schemaId, formatIdentifier, writeCols, readRowType, nestedFieldEnabled);
         }
     }
 

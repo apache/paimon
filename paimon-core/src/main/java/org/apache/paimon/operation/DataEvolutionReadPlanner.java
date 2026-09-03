@@ -89,12 +89,16 @@ class DataEvolutionReadPlanner {
         boolean[] composite = new boolean[numFields];
         int[] wholeBunch = new int[numFields];
         Arrays.fill(wholeBunch, -1);
+        List<Set<Integer>> nullnessAnchors = new ArrayList<>();
+        for (int i = 0; i < numFields; i++) {
+            nullnessAnchors.add(new LinkedHashSet<>());
+        }
 
         for (int j = 0; j < numFields; j++) {
             DataField rf = allReadFields.get(j);
             List<Integer> leaves = leafIdsOf(rf);
             Map<Integer, Integer> leafProvider = new HashMap<>();
-            Set<Integer> providers = new HashSet<>();
+            Set<Integer> providers = new LinkedHashSet<>();
             for (int leaf : leaves) {
                 int p = providerOf(leaf, bunchLeaves);
                 if (p >= 0) {
@@ -102,32 +106,51 @@ class DataEvolutionReadPlanner {
                     providers.add(p);
                 }
             }
-            if (providers.isEmpty()) {
-                // no file provides this field; it stays null (nullability checked below)
+
+            if (!(rf.type() instanceof RowType)) {
+                if (!providers.isEmpty()) {
+                    int b = providers.iterator().next();
+                    bunchSelection.get(b).put(rf.id(), null);
+                    wholeBunch[j] = b;
+                }
                 continue;
             }
-            // Only read a field whole from a single file when that file covers ALL of its leaves.
-            // If a single file provides only some leaves of a struct, go through the composite
-            // plan so the selection is made per direct sub-field: the sub-fields it does provide
-            // are read from it, and the ones absent everywhere stay null.
+
+            // A ROW's nullness is determined by all of its latest sibling providers, including
+            // siblings omitted by the projection. Otherwise projecting only nest.a could return a
+            // null nest from a later nest.a file even though nest.b in another winning file keeps
+            // the merged nest non-null.
+            Set<Integer> parentProviders =
+                    topFieldProvidersOf(rf.id(), bunchAvailTypes, bunchLeaves);
+            if (parentProviders.isEmpty()) {
+                // The whole top-level ROW is absent. Leave it unplanned so the caller can either
+                // null-fill a nullable field or reject a missing non-null field.
+                continue;
+            }
             boolean allLeavesCovered = leafProvider.size() == leaves.size();
-            if (providers.size() == 1 && allLeavesCovered) {
+            if (providers.size() == 1 && allLeavesCovered && parentProviders.equals(providers)) {
                 int b = providers.iterator().next();
                 bunchSelection.get(b).put(rf.id(), null);
                 wholeBunch[j] = b;
             } else {
-                checkArgument(
-                        rf.type() instanceof RowType,
-                        "Field %s is split across files but is not a struct.",
-                        rf.name());
                 composite[j] = true;
+                nullnessAnchors.get(j).addAll(parentProviders);
                 for (DataField sub : ((RowType) rf.type()).getFields()) {
-                    Set<Integer> subProviders = new HashSet<>();
+                    Set<Integer> subProviders = new LinkedHashSet<>();
                     for (int leaf : leafIdsOf(sub)) {
                         int p = leafProvider.getOrDefault(leaf, -1);
                         if (p >= 0) {
                             subProviders.add(p);
                         }
+                    }
+                    if (subProviders.isEmpty()) {
+                        // Every requested leaf may have been added after the files were written.
+                        // Find the latest provider of older siblings under this direct sub-field;
+                        // reading that sub-field preserves its ROW nullness while schema evolution
+                        // null-fills the requested leaves.
+                        subProviders =
+                                subFieldProvidersOf(
+                                        rf.id(), sub.id(), bunchAvailTypes, bunchLeaves);
                     }
                     if (subProviders.size() > 1) {
                         throw new UnsupportedOperationException(
@@ -151,6 +174,14 @@ class DataEvolutionReadPlanner {
                                 .add(sub.id());
                     }
                     // else: sub-field absent everywhere -> stays null
+                }
+                for (int parentProvider : parentProviders) {
+                    Map<Integer, Set<Integer>> selection = bunchSelection.get(parentProvider);
+                    if (!selection.containsKey(rf.id())) {
+                        // This provider only contributes an unprojected sibling. Read the projected
+                        // shape as a hidden anchor so it still participates in parent nullness.
+                        selection.put(rf.id(), null);
+                    }
                 }
             }
         }
@@ -204,6 +235,16 @@ class DataEvolutionReadPlanner {
                 Arrays.fill(subFieldOffsets, -1);
                 Map<Integer, Integer> bunchToPartial = new LinkedHashMap<>();
                 List<int[]> partials = new ArrayList<>();
+                for (int b : nullnessAnchors.get(j)) {
+                    Map<Integer, Integer> subOffsets = bunchSubOffset.get(b).get(rf.id());
+                    bunchToPartial.put(b, partials.size());
+                    partials.add(
+                            new int[] {
+                                b,
+                                bunchTopOffset.get(b).get(rf.id()),
+                                subOffsets == null ? subFields.size() : subOffsets.size()
+                            });
+                }
                 for (int s = 0; s < subCount; s++) {
                     int subId = subFields.get(s).id();
                     int b = findSubProvider(rf.id(), subId, bunchSubOffset);
@@ -273,6 +314,53 @@ class DataEvolutionReadPlanner {
             }
         }
         return -1;
+    }
+
+    private static Set<Integer> topFieldProvidersOf(
+            int fieldId, List<RowType> bunchTypes, List<Set<Integer>> bunchLeaves) {
+        Set<Integer> siblingLeaves = new LinkedHashSet<>();
+        for (RowType bunchType : bunchTypes) {
+            if (bunchType.containsField(fieldId)) {
+                collectLeafIds(
+                        Collections.singletonList(bunchType.getField(fieldId)), siblingLeaves);
+            }
+        }
+        Set<Integer> providers = new LinkedHashSet<>();
+        for (int leaf : siblingLeaves) {
+            int provider = providerOf(leaf, bunchLeaves);
+            if (provider >= 0) {
+                providers.add(provider);
+            }
+        }
+        return providers;
+    }
+
+    private static Set<Integer> subFieldProvidersOf(
+            int topFieldId,
+            int subFieldId,
+            List<RowType> bunchTypes,
+            List<Set<Integer>> bunchLeaves) {
+        Set<Integer> siblingLeaves = new LinkedHashSet<>();
+        for (RowType bunchType : bunchTypes) {
+            if (!bunchType.containsField(topFieldId)) {
+                continue;
+            }
+            DataField topField = bunchType.getField(topFieldId);
+            if (topField.type() instanceof RowType
+                    && ((RowType) topField.type()).containsField(subFieldId)) {
+                collectLeafIds(
+                        Collections.singletonList(((RowType) topField.type()).getField(subFieldId)),
+                        siblingLeaves);
+            }
+        }
+        Set<Integer> providers = new LinkedHashSet<>();
+        for (int leaf : siblingLeaves) {
+            int provider = providerOf(leaf, bunchLeaves);
+            if (provider >= 0) {
+                providers.add(provider);
+            }
+        }
+        return providers;
     }
 
     private static int findSubProvider(

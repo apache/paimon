@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.SpecialFields;
@@ -50,11 +51,19 @@ import java.util.stream.Collectors;
 public class RowIdColumnConflictChecker implements RowIdConflictChecker {
 
     private final SchemaManager schemaManager;
+    private final boolean nestedFieldEnabled;
     private final List<WriteRange> writeRanges;
     private final Map<Long, RowType> rowTypeCache = new HashMap<>();
+    private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
 
     private RowIdColumnConflictChecker(SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
         this.schemaManager = schemaManager;
+        this.nestedFieldEnabled =
+                new CoreOptions(
+                                schemaManager
+                                        .latestOrThrow("Cannot find the latest table schema.")
+                                        .options())
+                        .dataEvolutionNestedFieldEnabled();
         this.writeRanges = buildWriteRanges(deltaFiles);
     }
 
@@ -97,13 +106,18 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
     private void addWriteFieldIds(Set<Integer> fieldIds, DataFileMeta file) {
         List<String> writeCols = file.writeCols();
         if (writeCols == null) {
-            // full-schema write touches every leaf field
-            collectLeafIds(rowType(file.schemaId()).getFields(), fieldIds);
+            if (nestedFieldEnabled) {
+                // A full-schema write touches every leaf field when nested data evolution is in
+                // use, so it conflicts with any partial sub-field write.
+                collectLeafIds(rowType(file.schemaId()).getFields(), fieldIds);
+            } else {
+                fieldIds.addAll(fieldIdByName(file.schemaId()).values());
+            }
             return;
         }
 
         for (String writeCol : writeCols) {
-            fieldIds.addAll(leafFieldIds(file.schemaId(), writeCol));
+            fieldIds.addAll(writeFieldIds(file.schemaId(), writeCol));
         }
     }
 
@@ -183,7 +197,7 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
         }
 
         for (String writeCol : writeCols) {
-            for (Integer fieldId : leafFieldIds(file.schemaId(), writeCol)) {
+            for (Integer fieldId : writeFieldIds(file.schemaId(), writeCol)) {
                 if (fieldIds.contains(fieldId)) {
                     return true;
                 }
@@ -198,9 +212,16 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
      * its leaf ids, so a whole-struct write and a sub-field write of the same struct still
      * conflict.
      */
-    private List<Integer> leafFieldIds(long schemaId, String writeCol) {
+    private List<Integer> writeFieldIds(long schemaId, String writeCol) {
         if (SpecialFields.isSystemField(writeCol)) {
             return Collections.emptyList();
+        }
+        if (!nestedFieldEnabled) {
+            Integer fieldId = fieldIdByName(schemaId).get(writeCol);
+            if (fieldId == null) {
+                throw unknownWriteColumn(schemaId, writeCol, null);
+            }
+            return Collections.singletonList(fieldId);
         }
         // projectByPaths handles both plain top-level names and dotted nested paths, and throws if
         // the path does not exist in the schema
@@ -208,10 +229,7 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
         try {
             projected = rowType(schemaId).projectByPaths(Collections.singletonList(writeCol));
         } catch (IllegalArgumentException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Cannot find write column '%s' in schema %s.", writeCol, schemaId),
-                    e);
+            throw unknownWriteColumn(schemaId, writeCol, e);
         }
         List<Integer> ids = new ArrayList<>();
         collectLeafIds(projected.getFields(), ids);
@@ -231,6 +249,21 @@ public class RowIdColumnConflictChecker implements RowIdConflictChecker {
     private RowType rowType(long schemaId) {
         return rowTypeCache.computeIfAbsent(
                 schemaId, id -> schemaManager.schema(id).logicalRowType());
+    }
+
+    private Map<String, Integer> fieldIdByName(long schemaId) {
+        return fieldIdByNameCache.computeIfAbsent(
+                schemaId,
+                id ->
+                        rowType(id).getFields().stream()
+                                .collect(Collectors.toMap(DataField::name, DataField::id)));
+    }
+
+    private static RuntimeException unknownWriteColumn(
+            long schemaId, String writeCol, Throwable cause) {
+        return new RuntimeException(
+                String.format("Cannot find write column '%s' in schema %s.", writeCol, schemaId),
+                cause);
     }
 
     /** Range and field id Set. */

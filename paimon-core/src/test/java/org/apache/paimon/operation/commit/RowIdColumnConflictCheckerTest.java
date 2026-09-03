@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -118,7 +119,7 @@ class RowIdColumnConflictCheckerTest {
     void testSubFieldDisjointLeavesDoNotConflict() {
         // schema 2: id INT, nest ROW<a INT, b INT>
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.b"))))
                 .isFalse();
@@ -127,7 +128,7 @@ class RowIdColumnConflictCheckerTest {
     @Test
     void testSubFieldSameLeafConflicts() {
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
@@ -137,7 +138,7 @@ class RowIdColumnConflictCheckerTest {
     void testWholeStructConflictsWithSubField() {
         // a whole-struct write expands to all of its leaves, so it conflicts with a sub-field write
         RowIdColumnConflictChecker checker =
-                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
@@ -145,15 +146,33 @@ class RowIdColumnConflictCheckerTest {
 
     @Test
     void testFullSchemaWriteConflictsWithSubField() {
-        RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 2L, null));
+        RowIdColumnConflictChecker checker = nestedChecker(file("current", 0L, 10L, 2L, null));
 
         assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
                 .isTrue();
     }
 
+    @Test
+    void testNestedWriteColumnIsUnknownWhenOptionDisabled() {
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+
+        assertThatThrownBy(
+                        () ->
+                                checker.conflictsWith(
+                                        file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find write column 'nest.a'");
+    }
+
     private RowIdColumnConflictChecker checker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
                 createSchemaManager(), Arrays.asList(files));
+    }
+
+    private RowIdColumnConflictChecker nestedChecker(DataFileMeta... files) {
+        return RowIdColumnConflictChecker.fromDataFiles(
+                createSchemaManager(true), Arrays.asList(files));
     }
 
     private DataFileMeta file(
@@ -180,6 +199,10 @@ class RowIdColumnConflictCheckerTest {
     }
 
     private SchemaManager createSchemaManager() {
+        return createSchemaManager(false);
+    }
+
+    private SchemaManager createSchemaManager(boolean nestedFieldEnabled) {
         Map<Long, org.apache.paimon.schema.TableSchema> schemas = new HashMap<>();
         schemas.put(
                 0L,
@@ -222,7 +245,12 @@ class RowIdColumnConflictCheckerTest {
                                                         new DataField(3, "b", DataTypes.INT())))),
                                 Collections.emptyList(),
                                 Collections.singletonList("id"),
-                                Collections.emptyMap(),
+                                nestedFieldEnabled
+                                        ? Collections.singletonMap(
+                                                CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED
+                                                        .key(),
+                                                "true")
+                                        : Collections.emptyMap(),
                                 "")));
         return new TestingSchemaManager(
                 new Path("/tmp/row-id-column-conflict-checker-test"), schemas);

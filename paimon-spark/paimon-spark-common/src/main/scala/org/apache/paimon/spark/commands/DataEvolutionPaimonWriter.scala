@@ -53,8 +53,13 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
     writePartialFields(
       data,
-      table.rowType().projectByPaths(columnNames.asJava),
-      rawBlobPlaceholderMarkerColumns)
+      if (table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+        table.rowType().projectByPaths(columnNames.asJava)
+      } else {
+        table.rowType().project(columnNames.asJava)
+      },
+      rawBlobPlaceholderMarkerColumns
+    )
   }
 
   // Sub-field-aware write: writeType is already pruned to the written top-level columns and

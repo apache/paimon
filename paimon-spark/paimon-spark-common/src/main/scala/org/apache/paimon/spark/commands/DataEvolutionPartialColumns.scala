@@ -39,26 +39,37 @@ private[spark] object DataEvolutionPartialColumns {
    * The top-level column a write path addresses. A path that names a field exactly is that field
    * even when its own name contains a dot, mirroring `RowType#projectByPaths`.
    */
-  def topLevelOf(path: String, fieldNames: Set[String]): String = {
+  def topLevelOf(table: FileStoreTable, path: String): String = {
+    if (!table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+      return path
+    }
+    val fieldNames = table.rowType().getFieldNames.asScala.toSet
     val dot = path.indexOf('.')
     if (dot < 0 || fieldNames.contains(path)) path else path.substring(0, dot)
   }
 
   /** Distinct top-level column names addressed by `paths`, in first-seen order. */
-  def topLevelColumns(paths: Seq[String], fieldNames: Set[String]): Seq[String] =
-    paths.map(path => topLevelOf(path, fieldNames)).distinct
+  def topLevelColumns(table: FileStoreTable, paths: Seq[String]): Seq[String] =
+    paths.map(path => topLevelOf(table, path)).distinct
 
   /** Whether any path addresses a sub-field rather than a whole top-level column. */
-  def hasNestedPaths(paths: Seq[String], fieldNames: Set[String]): Boolean =
-    paths.exists(path => topLevelOf(path, fieldNames) != path)
+  def hasNestedPaths(table: FileStoreTable, paths: Seq[String]): Boolean =
+    paths.exists(path => topLevelOf(table, path) != path)
 
   /**
    * The Spark type of the row a file with these write paths physically holds, i.e. the Spark view
    * of `table.rowType().projectByPaths(paths)`. Its fields are in write-path order, which is the
    * order [[DataEvolutionPaimonWriter.writePartialFields]] expects the data frame to be in.
    */
-  def writeStructType(table: FileStoreTable, paths: Seq[String]): StructType =
-    SparkTypeUtils.fromPaimonRowType(table.rowType().projectByPaths(paths.asJava))
+  def writeStructType(table: FileStoreTable, paths: Seq[String]): StructType = {
+    val writeType =
+      if (table.coreOptions().dataEvolutionNestedFieldEnabled()) {
+        table.rowType().projectByPaths(paths.asJava)
+      } else {
+        table.rowType().project(paths.asJava)
+      }
+    SparkTypeUtils.fromPaimonRowType(writeType)
+  }
 
   /**
    * One projection per top-level column, in write-path order and aliased to the column's name. A
@@ -67,8 +78,7 @@ private[spark] object DataEvolutionPartialColumns {
    * with nulls.
    */
   def projections(table: FileStoreTable, paths: Seq[String]): Seq[Column] = {
-    val fieldNames = table.rowType().getFieldNames.asScala.toSet
-    val topCols = topLevelColumns(paths, fieldNames)
+    val topCols = topLevelColumns(table, paths)
     val writeType = writeStructType(table, paths)
     topCols.zip(writeType.fields).map {
       case (name, field) =>

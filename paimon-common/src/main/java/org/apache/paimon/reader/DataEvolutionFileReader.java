@@ -86,7 +86,9 @@ public class DataEvolutionFileReader implements RecordReader<InternalRow> {
     @Nullable
     public RecordIterator<InternalRow> readBatch() throws IOException {
         DataEvolutionRow row = new DataEvolutionRow(readers.length, rowOffsets, fieldOffsets);
-        row.setNested(nested);
+        if (nested != null) {
+            row.setNested(nested);
+        }
         RecordIterator<InternalRow>[] iterators = new RecordIterator[readers.length];
         for (int i = 0; i < readers.length; i++) {
             RecordReader<InternalRow> reader = readers[i];

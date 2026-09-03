@@ -315,7 +315,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         checkSchema(source);
 
         RowType sourceType;
-        if (updateAll) {
+        if (updateAll || !coreOptions.dataEvolutionNestedFieldEnabled()) {
             List<String> columnNames = source.getResolvedSchema().getColumnNames();
             sourceType = SpecialFields.rowTypeWithRowId(table.rowType()).project(columnNames);
             writePaths =
@@ -345,6 +345,10 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Also sets {@link #writePaths}.
      */
     private List<String> buildExplicitProject() {
+        if (!coreOptions.dataEvolutionNestedFieldEnabled()) {
+            return buildTopLevelExplicitProject();
+        }
+
         checkNoDuplicateSetTargets();
         Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
 
@@ -461,12 +465,63 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         return project;
     }
 
+    /** Build the legacy top-level projection when nested-field data evolution is disabled. */
+    private List<String> buildTopLevelExplicitProject() {
+        Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
+        List<String> project = new ArrayList<>();
+        writePaths = new ArrayList<>();
+        for (Map.Entry<String, String> entry : changes.entrySet()) {
+            String fieldName = topLevelTarget(entry.getKey());
+            if (!targetFieldNames.contains(fieldName)) {
+                throw new RuntimeException(
+                        String.format(
+                                "Invalid column reference '%s' of table '%s' at matched-upsert action.",
+                                entry.getKey(), identifier.getFullName()));
+            }
+            writePaths.add(fieldName);
+            project.add(String.format("%s AS `%s`", entry.getValue(), fieldName));
+        }
+        return project;
+    }
+
+    /** Resolve a top-level SET target without interpreting dots inside an actual column name. */
+    private String topLevelTarget(String target) {
+        if (targetFieldNames.contains(target)) {
+            return target;
+        }
+
+        String qualifier = targetTableName() + ".";
+        if (target.startsWith(qualifier)) {
+            String unqualified = target.substring(qualifier.length());
+            if (targetFieldNames.contains(unqualified)) {
+                return unqualified;
+            }
+        }
+
+        List<String> path = new ArrayList<>(Arrays.asList(target.split("\\.")));
+        if (path.size() > 1 && path.get(0).equals(targetTableName())) {
+            path = new ArrayList<>(path.subList(1, path.size()));
+        }
+        if (path.size() > 1 && resolvesAgainstTarget(path)) {
+            throw new UnsupportedOperationException(
+                    "Updating a nested sub-field ('"
+                            + target
+                            + "') requires '"
+                            + CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key()
+                            + "=true'.");
+        }
+
+        // Keep the historical qualifier handling for ordinary top-level columns.
+        return path.get(path.size() - 1);
+    }
+
     /** The first-seen order of top-level columns present in the (dotted) write paths. */
     private List<String> explicitTopColumnOrder(List<String> paths) {
         List<String> order = new ArrayList<>();
         for (String path : paths) {
             int dot = path.indexOf('.');
-            String topCol = dot < 0 ? path : path.substring(0, dot);
+            String topCol =
+                    dot < 0 || targetFieldNames.contains(path) ? path : path.substring(0, dot);
             if (!order.contains(topCol)) {
                 order.add(topCol);
             }
@@ -486,7 +541,20 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * silently updating one of them.
      */
     private List<String> parseTargetPath(String target) {
+        // Prefer exact top-level names before interpreting dots as path separators. This mirrors
+        // RowType#projectByPaths and keeps columns whose names contain '.' addressable.
+        if (targetFieldNames.contains(target)) {
+            return Collections.singletonList(target);
+        }
         List<String> segs = new ArrayList<>(Arrays.asList(target.split("\\.")));
+        String qualifier = targetTableName() + ".";
+        if (target.startsWith(qualifier)) {
+            String unqualifiedTarget = target.substring(qualifier.length());
+            if (targetFieldNames.contains(unqualifiedTarget) && !resolvesAgainstTarget(segs)) {
+                return Collections.singletonList(unqualifiedTarget);
+            }
+        }
+
         if (segs.size() > 1 && segs.get(0).equals(targetTableName())) {
             List<String> unqualified = new ArrayList<>(segs.subList(1, segs.size()));
             boolean asQualified = resolvesAgainstTarget(unqualified);
@@ -796,7 +864,9 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 // source must fully cover the target struct, so a narrower source is rejected
                 // instead of being written as an incomplete whole-struct file.
                 boolean structCompatible = false;
-                if (paimonType instanceof RowType && targetField.type() instanceof RowType) {
+                if (coreOptions.dataEvolutionNestedFieldEnabled()
+                        && paimonType instanceof RowType
+                        && targetField.type() instanceof RowType) {
                     RowType sourceStruct = (RowType) paimonType;
                     RowType targetStruct = (RowType) targetField.type();
                     structCompatible =
@@ -878,7 +948,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Whether the given top-level column is written through dotted sub-field paths (e.g. nest.a).
      */
     private boolean isSubFieldWrite(String topColumn) {
-        if (writePaths == null) {
+        if (!coreOptions.dataEvolutionNestedFieldEnabled() || writePaths == null) {
             return false;
         }
         String prefix = topColumn + ".";

@@ -172,8 +172,7 @@ private[spark] class DataEvolutionRowIdConflictRewriter(
     // columnNames are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
     // scan is always in terms of the top-level columns, and a projection then prunes each
     // partially written struct down to the leaves the file actually holds.
-    val fieldNames = table.rowType().getFieldNames.asScala.toSet
-    val topColumns = DataEvolutionPartialColumns.topLevelColumns(columnNames, fieldNames)
+    val topColumns = DataEvolutionPartialColumns.topLevelColumns(table, columnNames)
     val projections = DataEvolutionPartialColumns.projections(table, columnNames)
     val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     def readRows(splits: Seq[DataSplit]) = {

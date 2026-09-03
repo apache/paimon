@@ -43,6 +43,10 @@ public class DataEvolutionRow implements InternalRow {
      */
     private NestedField[] nested;
 
+    // Only nested-field composition installs nullable source rows. Ordinary union rows retain the
+    // legacy invariant that every referenced source row is present.
+    private boolean rowsMayBeNull;
+
     private RowKind rowKind;
 
     public DataEvolutionRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
@@ -72,6 +76,7 @@ public class DataEvolutionRow implements InternalRow {
     }
 
     private void setRowsAllowNull(InternalRow[] newRows) {
+        rowsMayBeNull = true;
         for (int i = 0; i < newRows.length; i++) {
             this.rows[i] = newRows[i];
             if (rowKind == null && newRows[i] != null) {
@@ -139,7 +144,7 @@ public class DataEvolutionRow implements InternalRow {
             return true;
         }
         InternalRow row = chooseRow(pos);
-        return row == null || row.isNullAt(offsetInRow(pos));
+        return (rowsMayBeNull && row == null) || row.isNullAt(offsetInRow(pos));
     }
 
     @Override

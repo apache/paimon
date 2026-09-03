@@ -224,6 +224,28 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Nested-field evolution disabled: a dot remains part of a top-level column name") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, `literal.dot` INT) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10)")
+
+      Seq((1, 100)).toDF("id", "new_value").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.`literal.dot` = s.new_value
+             |""".stripMargin).collect()
+
+      checkAnswer(sql("SELECT id, `literal.dot` FROM t"), Seq(Row(1, 100)))
+      assert(latestDeltaWriteCols("t").exists(_ == Seq("literal.dot")))
+    }
+  }
+
   test(
     "Sub-field data evolution: sub-fields touched by separate WHEN MATCHED clauses in reverse " +
       "schema order are not swapped (regression for #8334 review)") {

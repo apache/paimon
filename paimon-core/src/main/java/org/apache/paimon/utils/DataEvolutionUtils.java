@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
@@ -54,7 +55,7 @@ public class DataEvolutionUtils {
     public static Optional<List<Integer>> collectWrittenColumnIds(
             Collection<DataSplit> splits, Function<Long, TableSchema> schemaLoader) {
         Set<Integer> fieldIds = new TreeSet<>();
-        Map<Long, List<DataField>> schemaFieldsCache = new HashMap<>();
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
         Map<Pair<Long, List<String>>, Set<Integer>> fieldIdsCache = new HashMap<>();
         try {
             for (DataSplit split : splits) {
@@ -62,18 +63,18 @@ public class DataEvolutionUtils {
                     Pair<Long, List<String>> cacheKey = Pair.of(file.schemaId(), file.writeCols());
                     Set<Integer> fileFieldIds = fieldIdsCache.get(cacheKey);
                     if (fileFieldIds == null) {
-                        List<DataField> schemaFields =
-                                schemaFieldsCache.computeIfAbsent(
+                        TableSchema schema =
+                                schemaCache.computeIfAbsent(
                                         file.schemaId(),
                                         schemaId -> {
-                                            TableSchema schema = schemaLoader.apply(schemaId);
+                                            TableSchema loaded = schemaLoader.apply(schemaId);
                                             checkArgument(
-                                                    schema != null,
+                                                    loaded != null,
                                                     "Cannot find schema %s.",
                                                     schemaId);
-                                            return schema.fields();
+                                            return loaded;
                                         });
-                        fileFieldIds = resolveFileFieldIds(schemaFields, file, true);
+                        fileFieldIds = resolveFileFieldIds(schema, file, true);
                         fieldIdsCache.put(cacheKey, fileFieldIds);
                     }
                     fieldIds.addAll(fileFieldIds);
@@ -90,11 +91,12 @@ public class DataEvolutionUtils {
      */
     public static Set<Integer> fileFieldIds(
             Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
-        return resolveFileFieldIds(scanTableSchema.apply(file.schemaId()).fields(), file, false);
+        return resolveFileFieldIds(scanTableSchema.apply(file.schemaId()), file, false);
     }
 
     private static Set<Integer> resolveFileFieldIds(
-            List<DataField> schemaFields, DataFileMeta file, boolean strict) {
+            TableSchema schema, DataFileMeta file, boolean strict) {
+        List<DataField> schemaFields = schema.fields();
         List<String> writeCols = file.writeCols();
         Set<Integer> ids = new HashSet<>();
         if (writeCols == null) {
@@ -115,7 +117,8 @@ public class DataEvolutionUtils {
             // same top-level field. Try the exact name first so a column whose own name contains a
             // dot is not split, matching RowType#projectByPaths.
             DataField field = byName.get(writeCol);
-            if (field == null) {
+            if (field == null
+                    && new CoreOptions(schema.options()).dataEvolutionNestedFieldEnabled()) {
                 int dot = writeCol.indexOf('.');
                 if (dot > 0) {
                     field = byName.get(writeCol.substring(0, dot));
@@ -147,6 +150,24 @@ public class DataEvolutionUtils {
         List<String> writeCols = file.writeCols();
         if (writeCols == null) {
             return schema.fields();
+        }
+
+        if (new CoreOptions(schema.options()).dataEvolutionNestedFieldEnabled()) {
+            Set<String> fieldNames =
+                    schema.fields().stream().map(DataField::name).collect(Collectors.toSet());
+            List<String> tableWriteCols =
+                    writeCols.stream()
+                            .filter(
+                                    writeCol -> {
+                                        if (fieldNames.contains(writeCol)) {
+                                            return true;
+                                        }
+                                        int dot = writeCol.indexOf('.');
+                                        return dot > 0
+                                                && fieldNames.contains(writeCol.substring(0, dot));
+                                    })
+                            .collect(Collectors.toList());
+            return schema.project(tableWriteCols).fields();
         }
 
         Map<String, DataField> fieldsByName = new HashMap<>();

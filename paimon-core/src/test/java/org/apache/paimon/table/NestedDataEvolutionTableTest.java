@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -269,6 +270,70 @@ public class NestedDataEvolutionTableTest extends DataEvolutionTestBase {
 
         // project only _ROW_ID
         assertThat(readRowIds()).hasSize(n);
+    }
+
+    @Test
+    public void testProjectedAddedNestedLeafKeepsRowCardinality() throws Exception {
+        createTableDefault();
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.setOption(
+                        CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true"),
+                false);
+        RowType originalType = getTableDefault().rowType();
+        int n = 3;
+
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(originalType)) {
+            for (int i = 0; i < n; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("old" + i),
+                                i == n - 1 ? null : nestOf(i, "n" + i),
+                                arrOf(i),
+                                mapOf("k" + i, i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        catalog.alterTable(
+                identifier(),
+                SchemaChange.addColumn(new String[] {"nest", "c"}, DataTypes.INT(), null, null),
+                false);
+        FileStoreTable table = getTableDefault();
+        builder = table.newBatchWriteBuilder();
+        RowType updatedColumn = table.rowType().project(Collections.singletonList("f1"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(updatedColumn)) {
+            for (int i = 0; i < n; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("new" + i)));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            setFirstRowId(messages, 0L);
+            builder.newCommit().commit(messages);
+        }
+
+        RowType readType = table.rowType().projectByPaths(Collections.singletonList("nest.c"));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+            for (int i = 0; i < n; i++) {
+                InternalRow row = batch.next();
+                assertThat(row).isNotNull();
+                if (i == n - 1) {
+                    assertThat(row.isNullAt(0)).isTrue();
+                } else {
+                    InternalRow nest = row.getRow(0, 1);
+                    assertThat(nest).isNotNull();
+                    assertThat(nest.isNullAt(0)).isTrue();
+                }
+            }
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
     }
 
     /**
