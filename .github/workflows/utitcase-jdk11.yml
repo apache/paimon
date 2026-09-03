@@ -56,6 +56,14 @@ jobs:
           distribution: 'temurin'
       - name: Build
         run:  mvn -T 1C -B -ntp clean install -DskipTests -Pflink1,spark3
+      - name: Test Fluss with Spark 3
+        run: |
+          mvn -B -ntp verify \
+            -pl org.apache.paimon:paimon-spark-3.5_2.12,org.apache.paimon:paimon-spark-3.4_2.12 \
+            -Pflink1,spark3 \
+            -DfailIfNoTests=false \
+            -Dtest=none \
+            -DwildcardSuites=org.apache.paimon.spark.FlussCatalogTest,org.apache.paimon.spark.FlussCatalogReadWriteITCase
       - name: Test
         run: |
           # run tests with random timezone to find out timezone related bugs

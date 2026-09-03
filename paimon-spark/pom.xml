@@ -385,4 +385,43 @@ under the License.
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>exclude-fluss-tests-on-java8</id>
+            <activation>
+                <jdk>[1.8,1.9)</jdk>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- Fluss test jars target Java 11 and register JUnit extensions. Keep
+                                 them off the Java 8 Surefire classpath; Fluss ITs use ScalaTest. -->
+                            <classpathDependencyExcludes>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-common</classpathDependencyExclude>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-server</classpathDependencyExclude>
+                                <classpathDependencyExclude>org.apache.fluss:fluss-test-utils</classpathDependencyExclude>
+                            </classpathDependencyExcludes>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>integration-tests</id>
+                                <configuration>
+                                    <!-- JUnit Vintage resolves field types while discovering ITs.
+                                         Avoid loading FlussClusterExtension after excluding the
+                                         Java 11 Fluss test jars above. -->
+                                    <excludes combine.children="append">
+                                        <exclude>**/FlussCatalogReadWriteITCase.*</exclude>
+                                    </excludes>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

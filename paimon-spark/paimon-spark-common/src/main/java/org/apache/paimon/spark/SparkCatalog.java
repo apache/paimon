@@ -30,8 +30,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.spark.catalog.FlussCatalogDelegate;
 import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
+import org.apache.paimon.spark.catalog.SupportFluss;
 import org.apache.paimon.spark.catalog.SupportV1Function;
 import org.apache.paimon.spark.catalog.SupportView;
 import org.apache.paimon.spark.catalog.functions.FunctionIdentifierConverter;
@@ -117,6 +119,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkBaseCatalog
         implements SupportView,
+                SupportFluss,
                 SupportV1Function,
                 FunctionCatalog,
                 SupportsNamespaces,
@@ -130,6 +133,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Catalog catalog;
     private String defaultDatabase;
     private boolean v1FunctionEnabled;
+    private FlussCatalogDelegate flussCatalogDelegate;
     @Nullable private PaimonV1FunctionRegistry v1FunctionRegistry;
 
     @Override
@@ -137,6 +141,7 @@ public class SparkCatalog extends SparkBaseCatalog
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         checkRequiredConfigurations(sparkSession);
         this.catalogName = name;
+        this.flussCatalogDelegate = new FlussCatalogDelegate(options.asCaseSensitiveMap(), name);
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options.asCaseSensitiveMap()),
@@ -309,7 +314,10 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public org.apache.spark.sql.connector.catalog.Table loadTable(Identifier ident)
             throws NoSuchTableException {
-        return loadSparkTable(ident, Collections.emptyMap());
+        return loadTableWithFluss(
+                ident,
+                identifier -> loadSparkTable(identifier, Collections.emptyMap()),
+                flussCatalogDelegate::loadTable);
     }
 
     /**
