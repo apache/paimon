@@ -37,6 +37,14 @@ _SCALAR_DTYPES = {
     "string": pa.string(),
 }
 
+_V3_CONTROL_DTYPES = {
+    "timestamp": "float32",
+    "frame_index": "int64",
+    "episode_index": "int64",
+    "index": "int64",
+    "task_index": "int64",
+}
+
 
 def _require_v3(info, source):
     version = str(info.get("codebase_version", ""))
@@ -56,6 +64,23 @@ def _schema_from_info(info):
         _feature_field(name, feature)
         for name, feature in features.items()
     ])
+
+
+def _validate_v3_control_features(info):
+    features = info.get("features")
+    if not isinstance(features, dict):
+        raise ValueError("LeRobot metadata features must be an object.")
+    expected = dict(_V3_CONTROL_DTYPES)
+    if "subtask_index" in features:
+        expected["subtask_index"] = "int64"
+    for name, dtype in expected.items():
+        feature = features.get(name)
+        if not isinstance(feature, dict) \
+                or str(feature.get("dtype", "")) != dtype \
+                or _feature_shape(feature, name) != (1,):
+            raise ValueError(
+                "LeRobot V3 control feature %s must have dtype=%s and "
+                "shape=[1]." % (name, dtype))
 
 
 def _validate_lerobot_schema(source_schema, target_schema, source):

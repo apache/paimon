@@ -16,6 +16,7 @@
 
 """LeRobot component tables and version publication."""
 
+from array import array
 import json
 import numbers
 import uuid
@@ -73,6 +74,39 @@ _EPISODE_CONTROL_COLUMNS = [
     "tasks",
     "length",
 ]
+
+
+class _EpisodeIndex:
+
+    def __init__(self):
+        self._ranges = array("q")
+        self._task_offsets = array("q", [0])
+        self._task_indices = array("q")
+
+    def append(self, begin, end, task_indices):
+        self._ranges.extend((begin, end))
+        self._task_indices.extend(task_indices)
+        self._task_offsets.append(len(self._task_indices))
+
+    def __len__(self):
+        return len(self._ranges) // 2
+
+    def __getitem__(self, index):
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        task_begin = self._task_offsets[index]
+        task_end = self._task_offsets[index + 1]
+        begin = self._ranges[index * 2]
+        end = self._ranges[index * 2 + 1]
+        return {
+            "episode_index": index,
+            "dataset_from_index": begin,
+            "dataset_to_index": end,
+            "length": end - begin,
+            "task_indices": self._task_indices[task_begin:task_end],
+        }
 
 
 def _load_dataset_metadata(dataset, info, source):
@@ -489,19 +523,64 @@ def _source_episodes(dataset, source):
 
 
 def _validated_episode_tables(metadata):
-    rows = []
+    episodes = _EpisodeIndex()
+    expected_begin = 0
     for table in _source_episode_tables(metadata):
-        rows.extend(table.select(_EPISODE_CONTROL_COLUMNS).to_pylist())
+        controls = table.select(_EPISODE_CONTROL_COLUMNS)
+        columns = {
+            name: controls.column(name)
+            for name in _EPISODE_CONTROL_COLUMNS
+        }
+        for offset in range(controls.num_rows):
+            index = _integer(
+                columns["episode_index"][offset].as_py(),
+                "episode_index",
+            )
+            begin = _integer(
+                columns["dataset_from_index"][offset].as_py(),
+                "dataset_from_index",
+            )
+            end = _integer(
+                columns["dataset_to_index"][offset].as_py(),
+                "dataset_to_index",
+            )
+            length = _integer(
+                columns["length"][offset].as_py(), "length")
+            if index != len(episodes) or begin != expected_begin \
+                    or end <= begin or length != end - begin:
+                raise ValueError(
+                    "LeRobot Episode %d has inconsistent index, range, "
+                    "or length." % len(episodes))
+            names = columns["tasks"][offset].as_py() or []
+            if isinstance(names, str):
+                names = [names]
+            if metadata["task_indices"] and not names:
+                raise ValueError(
+                    "LeRobot Episode %d does not declare any task." % index)
+            try:
+                task_indices = [
+                    metadata["task_indices"][str(name)] for name in names
+                ]
+            except (KeyError, TypeError) as error:
+                raise ValueError(
+                    "LeRobot Episode %d refers to an unknown task." % index
+                ) from error
+            if len(set(task_indices)) != len(task_indices):
+                raise ValueError(
+                    "LeRobot Episode %d repeats a task." % index)
+            episodes.append(begin, end, task_indices)
+            expected_begin = end
         yield table
         del table
-    rows.sort(key=lambda row: _integer(
-        row.get("episode_index"), "episode_index"))
-    metadata["episodes"] = _episode_rows(
-        rows,
-        metadata["task_indices"],
-        metadata["total_frames"],
-        metadata["total_episodes"],
-    )
+    if len(episodes) != metadata["total_episodes"]:
+        raise ValueError(
+            "LeRobot metadata reports %d Episodes but %d were found."
+            % (metadata["total_episodes"], len(episodes)))
+    if expected_begin != metadata["total_frames"]:
+        raise ValueError(
+            "LeRobot Episode ranges cover %d frames but metadata reports %d."
+            % (expected_begin, metadata["total_frames"]))
+    metadata["episodes"] = episodes
 
 
 def _source_episode_tables(metadata):
@@ -578,55 +657,6 @@ def _subtask_indices(subtasks_table, info):
                 "text mappings for [0, %d)."
                 % subtasks_table.num_rows)
     return range(subtasks_table.num_rows)
-
-
-def _episode_rows(records, task_indices, total_frames, total_episodes):
-    if len(records) != total_episodes:
-        raise ValueError(
-            "LeRobot metadata reports %d Episodes but %d were found."
-            % (total_episodes, len(records)))
-    rows = []
-    expected_begin = 0
-    for ordinal, record in enumerate(records):
-        index = _integer(record.get("episode_index"), "episode_index")
-        begin = _integer(
-            record.get("dataset_from_index"), "dataset_from_index")
-        end = _integer(record.get("dataset_to_index"), "dataset_to_index")
-        length = _integer(record.get("length"), "length")
-        if index != ordinal or begin != expected_begin or end <= begin \
-                or length != end - begin:
-            raise ValueError(
-                "LeRobot Episode %d has inconsistent index, range, or length."
-                % ordinal)
-        names = record.get("tasks", [])
-        if isinstance(names, str):
-            names = [names]
-        if task_indices and not names:
-            raise ValueError(
-                "LeRobot Episode %d does not declare any task." % ordinal)
-        try:
-            episode_task_indices = [task_indices[str(name)] for name in names]
-        except (KeyError, TypeError) as error:
-            raise ValueError(
-                "LeRobot Episode %d refers to an unknown task." % ordinal
-            ) from error
-        if len(set(episode_task_indices)) != len(episode_task_indices):
-            raise ValueError(
-                "LeRobot Episode %d repeats a task." % ordinal)
-
-        rows.append({
-            "episode_index": index,
-            "dataset_from_index": begin,
-            "dataset_to_index": end,
-            "length": length,
-            "task_indices": episode_task_indices,
-        })
-        expected_begin = end
-    if expected_begin != total_frames:
-        raise ValueError(
-            "LeRobot Episode ranges cover %d frames but metadata reports %d."
-            % (expected_begin, total_frames))
-    return rows
 
 
 def _canonical_json(value, allow_nan=False):

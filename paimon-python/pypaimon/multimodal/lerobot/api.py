@@ -42,6 +42,7 @@ from pypaimon.multimodal.lerobot.loader import _write_dataset
 from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
+    _validate_v3_control_features,
 )
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
@@ -93,6 +94,7 @@ def load_from_lerobot(
         _schema_from_info(local_info)
         _positive_integer(local_info.get("fps"), "fps")
         _validated_counts(local_info, resolved_source.path)
+        _validate_v3_control_features(local_info)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
             LeRobotDataset, resolved_source, local_info)
@@ -100,6 +102,7 @@ def load_from_lerobot(
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
+            _validate_v3_control_features(info)
 
             lerobot_schema = _schema_from_info(info)
             metadata = _load_dataset_metadata(
