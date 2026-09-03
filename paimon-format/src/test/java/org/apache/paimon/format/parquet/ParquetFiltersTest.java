@@ -227,15 +227,16 @@ class ParquetFiltersTest {
                 ParquetFilters.convert(
                         Collections.singletonList(builder.startsWith(0, "abc")), schema, true);
         assertThat(filter).isInstanceOf(FilterPredicateCompat.class);
-        FilterPredicate parquetPredicate =
-                ((FilterPredicateCompat) filter).getFilterPredicate();
+        FilterPredicate parquetPredicate = ((FilterPredicateCompat) filter).getFilterPredicate();
         assertThat(parquetPredicate)
                 .isEqualTo(
                         FilterApi.and(
                                 FilterApi.gtEq(
-                                        FilterApi.binaryColumn("string1"), Binary.fromString("abc")),
+                                        FilterApi.binaryColumn("string1"),
+                                        Binary.fromString("abc")),
                                 FilterApi.lt(
-                                        FilterApi.binaryColumn("string1"), Binary.fromString("abd"))));
+                                        FilterApi.binaryColumn("string1"),
+                                        Binary.fromString("abd"))));
     }
 
     @Test
