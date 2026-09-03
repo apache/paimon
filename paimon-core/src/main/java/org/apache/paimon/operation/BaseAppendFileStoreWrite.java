@@ -198,7 +198,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (options.dataEvolutionNestedFieldEnabled()) {
             // A plain top-level name means the whole column; a dotted path means only that
             // sub-field is written.
-            writeCols = writeType.leafPaths(rowType);
+            writeCols = writeType.collectLeafPaths(rowType);
         } else {
             // Preserve the legacy top-level encoding. Do not derive dotted leaf paths while the
             // feature is disabled: a dot may be part of an ordinary top-level column name.
@@ -332,7 +332,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 rowType.equals(writeType)
                         ? null
                         : options.dataEvolutionNestedFieldEnabled()
-                                ? writeType.leafPaths(rowType)
+                                ? writeType.collectLeafPaths(rowType)
                                 : writeType.getFieldNames(),
                 rowSidecarFileFormat(),
                 Long.MAX_VALUE);

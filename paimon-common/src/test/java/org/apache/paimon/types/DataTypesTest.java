@@ -297,21 +297,21 @@ public class DataTypesTest {
         RowType reordered = type.projectByPaths(Arrays.asList("nest.b", "nest.a"));
         Assertions.assertThat(((RowType) reordered.getField("nest").type()).getFieldNames())
                 .containsExactly("b", "a");
-        // ... and leafPaths does not collapse it to the whole column name: coversFully requires
-        // the same physical order as the full type, not just the same field ids, so a
+        // ... and collectLeafPaths does not collapse it to the whole column name: coversFully
+        // requires the same physical order as the full type, not just the same field ids, so a
         // complete-but-reordered struct is still treated as a partial (order-preserving) write.
         // Collapsing it to "nest" would let a reader reconstruct schema-declaration order (a, b)
         // instead of the physical write order (b, a).
-        Assertions.assertThat(reordered.leafPaths(type)).containsExactly("nest.b", "nest.a");
+        Assertions.assertThat(reordered.collectLeafPaths(type)).containsExactly("nest.b", "nest.a");
     }
 
     /**
-     * leafPaths replaced getFieldNames() on the write path, and its result is persisted into the
-     * manifest as writeCols. Metadata written there is permanent, so for any write type that
+     * collectLeafPaths replaced getFieldNames() on the write path, and its result is persisted into
+     * the manifest as writeCols. Metadata written there is permanent, so for any write type that
      * contains no partially-written struct the two must produce exactly the same list.
      */
     @Test
-    void testLeafPathsEqualsFieldNamesWithoutPartialStruct() {
+    void testCollectLeafPathsEqualsFieldNamesWithoutPartialStruct() {
         RowType full =
                 new RowType(
                         Arrays.asList(
@@ -331,8 +331,10 @@ public class DataTypesTest {
                         Collections.singletonList("nest"),
                         Collections.singletonList("id"))) {
             RowType writeType = full.projectByPaths(names);
-            Assertions.assertThat(writeType.leafPaths(full))
-                    .as("leafPaths must equal getFieldNames for whole-column write type %s", names)
+            Assertions.assertThat(writeType.collectLeafPaths(full))
+                    .as(
+                            "collectLeafPaths must equal getFieldNames for whole-column write type %s",
+                            names)
                     .isEqualTo(writeType.getFieldNames());
         }
 
@@ -342,17 +344,17 @@ public class DataTypesTest {
                         Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
                                 new DataField(-1, "_ROW_ID", DataTypes.BIGINT())));
-        Assertions.assertThat(withSystemField.leafPaths(full))
+        Assertions.assertThat(withSystemField.collectLeafPaths(full))
                 .isEqualTo(withSystemField.getFieldNames());
 
         // a top-level column whose name contains a dot is still emitted whole, not rejected
         RowType dotted =
                 new RowType(Collections.singletonList(new DataField(0, "a.b", DataTypes.INT())));
-        Assertions.assertThat(dotted.leafPaths(dotted)).containsExactly("a.b");
+        Assertions.assertThat(dotted.collectLeafPaths(dotted)).containsExactly("a.b");
     }
 
     @Test
-    void testLeafPaths() {
+    void testCollectLeafPaths() {
         RowType full =
                 new RowType(
                         Arrays.asList(
@@ -374,21 +376,23 @@ public class DataTypesTest {
                                                                         DataTypes.INT())))))));
 
         // a full write collapses to top-level names (no dotted paths)
-        Assertions.assertThat(full.leafPaths(full)).containsExactly("id", "nest");
+        Assertions.assertThat(full.collectLeafPaths(full)).containsExactly("id", "nest");
 
         // one level of partial nesting: a direct sub-field of a top-level struct
         Assertions.assertThat(
-                        full.projectByPaths(Collections.singletonList("nest.a")).leafPaths(full))
+                        full.projectByPaths(Collections.singletonList("nest.a"))
+                                .collectLeafPaths(full))
                 .containsExactly("nest.a");
 
         // a whole sub-struct under a partial top-level struct is still one level
         Assertions.assertThat(
-                        full.projectByPaths(Collections.singletonList("nest.sub")).leafPaths(full))
+                        full.projectByPaths(Collections.singletonList("nest.sub"))
+                                .collectLeafPaths(full))
                 .containsExactly("nest.sub");
 
         // deeper than one level (a partial sub-struct) is rejected so it can never be committed
         RowType deepPartial = full.projectByPaths(Collections.singletonList("nest.sub.x"));
-        assertThatThrownBy(() -> deepPartial.leafPaths(full))
+        assertThatThrownBy(() -> deepPartial.collectLeafPaths(full))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("one level");
     }

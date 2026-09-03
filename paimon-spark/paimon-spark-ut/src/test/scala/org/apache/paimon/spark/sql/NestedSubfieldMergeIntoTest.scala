@@ -78,7 +78,7 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
     }
   }
 
-  // Guards the read path: DataEvolutionSplitRead calls leafPaths() on the planned read type,
+  // Guards the read path: DataEvolutionSplitRead calls collectLeafPaths() on the planned read type,
   // which now requires recursive field order to match the schema. A reversed nested projection
   // must still read back correctly rather than tripping that check.
   test("Sub-field data evolution: reversed nested projection reads correctly") {

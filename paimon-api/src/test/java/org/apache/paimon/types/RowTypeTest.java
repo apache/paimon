@@ -26,11 +26,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link RowType#leafPaths} and {@link RowType#projectByPaths}. */
+/** Tests for {@link RowType#collectLeafPaths} and {@link RowType#projectByPaths}. */
 class RowTypeTest {
 
     @Test
-    void leafPathsRejectsDottedPathCollidingWithTopLevelFieldName() {
+    void collectLeafPathsRejectsDottedPathCollidingWithTopLevelFieldName() {
         // fullType has a top-level field literally named "a.b" (id 5), plus a struct "a" (id 6)
         // with children x (id 7) and b (id 8).
         RowType fullType =
@@ -58,13 +58,13 @@ class RowTypeTest {
                                                 Arrays.asList(
                                                         new DataField(8, "b", new IntType()))))));
 
-        assertThatThrownBy(() -> writeType.leafPaths(fullType))
+        assertThatThrownBy(() -> writeType.collectLeafPaths(fullType))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("a.b");
     }
 
     @Test
-    void leafPathsPreservesReorderedFullStructWriteOrder() {
+    void collectLeafPathsPreservesReorderedFullStructWriteOrder() {
         // fullType: nest<a INT, b STRING> declared in order a, b.
         RowType nestFull =
                 new RowType(
@@ -81,7 +81,7 @@ class RowTypeTest {
         // Even though every sub-field of "nest" is present, the reordered layout must not
         // collapse to the bare top-level name "nest" (that would silently discard the physical
         // write order and let a reader reconstruct schema-declaration order instead).
-        List<String> leafPaths = writeType.leafPaths(fullType);
+        List<String> leafPaths = writeType.collectLeafPaths(fullType);
         assertThat(leafPaths).containsExactly("nest.b", "nest.a");
 
         RowType reconstructed = fullType.projectByPaths(leafPaths);
@@ -90,7 +90,7 @@ class RowTypeTest {
     }
 
     @Test
-    void leafPathsCollapsesToWholeFieldWhenOrderMatches() {
+    void collectLeafPathsCollapsesToWholeFieldWhenOrderMatches() {
         // Same schema, but written in declaration order: coversFully should still collapse to
         // the bare top-level name, since nothing is ambiguous or reordered here.
         RowType nestFull =
@@ -101,6 +101,6 @@ class RowTypeTest {
         RowType fullType = new RowType(Arrays.asList(new DataField(1, "nest", nestFull)));
 
         RowType writeType = fullType.projectByPaths(Arrays.asList("nest.a", "nest.b"));
-        assertThat(writeType.leafPaths(fullType)).containsExactly("nest");
+        assertThat(writeType.collectLeafPaths(fullType)).containsExactly("nest");
     }
 }

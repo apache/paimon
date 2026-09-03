@@ -503,7 +503,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
      * casts, so two bunches reading the same projected shape from different sibling files must not
      * share a mapping.
      *
-     * <p>Deliberately not {@link RowType#leafPaths(RowType)}: that describes a written type
+     * <p>Deliberately not {@link RowType#collectLeafPaths(RowType)}: that describes a written type
      * relative to the schema it was written against and therefore enforces the write-side
      * restrictions (at most one level of partial nesting, no dotted names). A read type is not
      * bound by those — it may be pruned arbitrarily deep by the engine, and it may be *wider* than

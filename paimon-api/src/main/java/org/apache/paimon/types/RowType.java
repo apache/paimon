@@ -416,7 +416,7 @@ public final class RowType extends DataType {
      * covers some sub-fields is expanded into dotted leaf paths. This is the inverse of {@link
      * #projectByPaths(List)} and is used to derive {@code writeCols}.
      */
-    public List<String> leafPaths(RowType fullType) {
+    public List<String> collectLeafPaths(RowType fullType) {
         List<String> result = new ArrayList<>();
         collectLeafPaths(getFields(), fullType, fullType, "", result);
         return result;
