@@ -1716,7 +1716,15 @@ class LeRobotImportTest(unittest.TestCase):
             expected_owner,
             remaining.table_schema.options.get(_OWNER_ID_OPTION),
         )
-        original_drop(episode_name)
+        self.connection.get_table("retry_drop")
+
+        self.connection.drop_table("retry_drop")
+        for name in (
+                "retry_drop", "retry_drop__versions",
+                "retry_drop__episodes", "retry_drop__tasks"):
+            with self.assertRaises(TableNotExistException):
+                self.connection.catalog.get_table(
+                    self.connection._identifier(name))
 
     def test_drop_response_loss_is_reconciled_without_retry(self):
         self.connection.load_from_lerobot(

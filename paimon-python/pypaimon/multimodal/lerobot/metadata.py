@@ -345,9 +345,14 @@ def _manifest_row(
 
 def _drop_import_tables(
         catalog, frames_table, owner_id, owned_only=False):
+    root_identifier = (
+        frames_table.identifier
+        if isinstance(frames_table.identifier, Identifier)
+        else Identifier.from_string(str(frames_table.identifier))
+    )
     identifiers = list(
         _companion_table_identifiers(frames_table).values())
-    identifiers.append(frames_table.identifier)
+    identifiers.append(root_identifier)
     owned = []
     for identifier in identifiers:
         identifier = (
@@ -368,6 +373,8 @@ def _drop_import_tables(
 
     failures = []
     for identifier in owned:
+        if identifier == root_identifier and failures:
+            break
         try:
             if _table_owner(catalog, identifier) != owner_id:
                 failures.append(str(identifier))
