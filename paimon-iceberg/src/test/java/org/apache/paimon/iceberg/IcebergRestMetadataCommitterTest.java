@@ -34,6 +34,7 @@ import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -385,7 +386,7 @@ public class IcebergRestMetadataCommitterTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         // change1: add a column
         // change2: change 'metadata.iceberg.delete-after-commit.enabled' to false
         // change3: change 'metadata.iceberg.previous-versions-max' to 10
@@ -445,7 +446,7 @@ public class IcebergRestMetadataCommitterTest {
         commit.commit(1, write.prepareCommit(false, 1));
         table.createTag("before-evolution", 1);
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copy(table.schemaManager().latest().get());
         write.close();
@@ -487,7 +488,10 @@ public class IcebergRestMetadataCommitterTest {
                         + localMeta.currentSnapshot().schemaId());
         System.out.println(
                 "PROBE schemaLatest="
-                        + new SchemaManager(table.fileIO(), table.location()).latest().get().id());
+                        + new FileSystemSchemaManager(table.fileIO(), table.location())
+                                .latest()
+                                .get()
+                                .id());
         for (org.apache.paimon.fs.FileStatus st :
                 table.fileIO()
                         .listStatus(
@@ -665,7 +669,7 @@ public class IcebergRestMetadataCommitterTest {
 
         // Perform 3 option-only schema changes — each increments Paimon schema ID
         // but does NOT change columns, creating the dedup scenario
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.1", "value1"));
         schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.2", "value2"));
         schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.3", "value3"));
@@ -797,7 +801,7 @@ public class IcebergRestMetadataCommitterTest {
         }
 
         void evolve(SchemaChange change) throws Exception {
-            new SchemaManager(table.fileIO(), table.location()).commitChanges(change);
+            new FileSystemSchemaManager(table.fileIO(), table.location()).commitChanges(change);
             table = table.copy(table.schemaManager().latest().get());
             write.close();
             write = table.newWrite(commitUser);
@@ -847,7 +851,7 @@ public class IcebergRestMetadataCommitterTest {
         commit.commit(1, write.prepareCommit(false, 1));
 
         // schema change
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write.close();

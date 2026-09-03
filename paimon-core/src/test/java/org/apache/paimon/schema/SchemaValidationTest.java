@@ -1443,6 +1443,32 @@ class SchemaValidationTest {
     }
 
     @Test
+    void testNestedFieldDataEvolutionRequiresDataEvolution() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(3, "b", DataTypes.STRING()))));
+        TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key())
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_ENABLED.key());
+
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
     public void testFileIndexColumns() {
         List<String> keys =
                 Arrays.asList(

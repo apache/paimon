@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -879,7 +880,7 @@ public class FileDeletionTest {
                 throw new UnsupportedOperationException("Unsupported generator mode: " + mode);
         }
 
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(root));
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, new Path(root));
 
         TableSchema tableSchema =
                 schemaManager.createTable(

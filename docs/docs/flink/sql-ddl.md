@@ -49,6 +49,9 @@ and a table whose catalog holds no partitions reads as empty. Flink has no SQL c
 them: use Spark's `MSCK REPAIR TABLE` or the catalog's partition API. Flink writes on a current
 version do register the partitions they produce.
 
+Flink SQL cannot set a custom partition `LOCATION`. Upgrade Flink readers before registering custom
+locations through the catalog API.
+
 In a REST catalog, asking for catalog-managed partitions on a table that cannot have them — an
 external table, or `format-table.implementation = engine` — fails. In any other catalog the option
 keeps the meaning it has always had on a Format Table — none — and partitions come from the

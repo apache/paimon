@@ -20,7 +20,6 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
@@ -89,7 +88,8 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     @Override
     List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter)
             throws IOException {
-        return enumeratePartitions(findCatalogPartitions(partitionFilter), partitionFilter);
+        CatalogPartitionListing listing = findCatalogPartitions(partitionFilter);
+        return enumeratePartitions(filterPartitions(listing.partitionPaths, partitionFilter));
     }
 
     @Override
@@ -97,34 +97,43 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         if (table.partitionKeys().isEmpty()) {
             return super.plan(partitionFilter);
         }
-        List<Partition> partitions = findCatalogPartitions(partitionFilter);
-        List<PartitionEntry> entries = toPartitionEntries(partitions, partitionFilter);
-        return new ScanPlan(enumeratePartitions(partitions, partitionFilter), rowCount(entries));
+        CatalogPartitionListing listing = findCatalogPartitions(partitionFilter);
+        List<Pair<LinkedHashMap<String, String>, Path>> selected =
+                filterPartitions(listing.partitionPaths, partitionFilter);
+        List<PartitionEntry> entries = toPartitionEntries(listing.partitions, partitionFilter);
+        return new ScanPlan(enumeratePartitions(selected), rowCount(entries));
     }
 
     private List<Split> enumeratePartitions(
-            List<Partition> catalogPartitions, @Nullable PartitionPredicate partitionFilter)
-            throws IOException {
-        List<Pair<LinkedHashMap<String, String>, Path>> partitions =
-                toSpecsAndPaths(
-                        catalogPartitions, coreOptions.formatTablePartitionOnlyValueInPath());
+            List<Pair<LinkedHashMap<String, String>, Path>> partitions) throws IOException {
         List<Split> splits = new ArrayList<>();
         if (partitions.isEmpty()) {
             return splits;
         }
 
-        FileIO fileIO = table.fileIO();
-        // Establish the filesystem on the caller thread so listing workers reuse it under the
-        // caller's security context instead of creating it lazily under a shared worker.
-        fileIO.exists(new Path(table.location()));
+        FormatTableFileIOResolver fileIOResolver = new FormatTableFileIOResolver(table);
+        boolean tableFileIOPrepared = false;
+        for (Pair<LinkedHashMap<String, String>, Path> partition : partitions) {
+            boolean useCatalogContextFileIO =
+                    fileIOResolver.useCatalogContextFileIO(partition.getValue());
+            if (useCatalogContextFileIO) {
+                fileIOResolver.prepare(partition.getValue(), true);
+            } else if (!tableFileIOPrepared) {
+                fileIOResolver.prepare(partition.getValue(), false);
+                tableFileIOPrepared = true;
+            }
+        }
         Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
                 pair -> {
                     BinaryRow partitionRow = toPartitionRow(pair.getKey());
-                    if (partitionFilter != null && !partitionFilter.test(partitionRow)) {
-                        return Collections.emptyList();
-                    }
                     try {
-                        return createSplits(fileIO, pair.getValue(), partitionRow);
+                        boolean useCatalogContextFileIO =
+                                fileIOResolver.useCatalogContextFileIO(pair.getValue());
+                        return createSplits(
+                                fileIOResolver.fileIO(useCatalogContextFileIO),
+                                pair.getValue(),
+                                partitionRow,
+                                useCatalogContextFileIO);
                     } catch (FileNotFoundException e) {
                         warnMissingPartition(pair.getKey(), pair.getValue());
                         return Collections.emptyList();
@@ -146,12 +155,12 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     @Override
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions(
             @Nullable PartitionPredicate partitionFilter) {
-        return toSpecsAndPaths(
-                findCatalogPartitions(partitionFilter),
-                coreOptions.formatTablePartitionOnlyValueInPath());
+        CatalogPartitionListing listing = findCatalogPartitions(partitionFilter);
+        return filterPartitions(listing.partitionPaths, partitionFilter);
     }
 
-    private List<Partition> findCatalogPartitions(@Nullable PartitionPredicate partitionFilter) {
+    private CatalogPartitionListing findCatalogPartitions(
+            @Nullable PartitionPredicate partitionFilter) {
         Optional<Predicate> extracted = FormatTableScan.extractPartitionPredicate(partitionFilter);
         Map<String, String> prefix = leadingEqualityPrefix(extracted);
         Predicate catalogFilter = extracted.orElse(null);
@@ -159,7 +168,9 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         if (partitions.isEmpty() && prefix.isEmpty() && catalogFilter == null) {
             warnIfFilesystemPartitionsExist();
         }
-        return partitions;
+        List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths =
+                toSpecsAndPaths(partitions, coreOptions.formatTablePartitionOnlyValueInPath());
+        return new CatalogPartitionListing(partitions, partitionPaths);
     }
 
     @Override
@@ -169,7 +180,36 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
 
     @Override
     List<PartitionEntry> listPartitionEntries(@Nullable PartitionPredicate partitionFilter) {
-        return toPartitionEntries(findCatalogPartitions(partitionFilter), partitionFilter);
+        return toPartitionEntries(
+                findCatalogPartitions(partitionFilter).partitions, partitionFilter);
+    }
+
+    private static final class CatalogPartitionListing {
+
+        private final List<Partition> partitions;
+        private final List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths;
+
+        private CatalogPartitionListing(
+                List<Partition> partitions,
+                List<Pair<LinkedHashMap<String, String>, Path>> partitionPaths) {
+            this.partitions = partitions;
+            this.partitionPaths = partitionPaths;
+        }
+    }
+
+    private List<Pair<LinkedHashMap<String, String>, Path>> filterPartitions(
+            List<Pair<LinkedHashMap<String, String>, Path>> partitions,
+            @Nullable PartitionPredicate partitionFilter) {
+        if (partitionFilter == null) {
+            return partitions;
+        }
+        List<Pair<LinkedHashMap<String, String>, Path>> selected = new ArrayList<>();
+        for (Pair<LinkedHashMap<String, String>, Path> partition : partitions) {
+            if (partitionFilter.test(toPartitionRow(partition.getKey()))) {
+                selected.add(partition);
+            }
+        }
+        return selected;
     }
 
     private List<PartitionEntry> toPartitionEntries(
@@ -219,16 +259,45 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
 
     private List<Pair<LinkedHashMap<String, String>, Path>> toSpecsAndPaths(
             List<Partition> partitions, boolean onlyValueInPath) {
+        if (partitions.stream()
+                .noneMatch(
+                        partition ->
+                                FormatTablePartitionPathResolver.customLocation(partition)
+                                        != null)) {
+            return toDefaultSpecsAndPaths(partitions, onlyValueInPath);
+        }
         List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>(partitions.size());
         Path tablePath = new Path(table.location());
-        // A duplicate catalog entry must not duplicate all records in that partition.
-        Set<String> seenPartitionPaths = new HashSet<>(partitions.size());
+        FormatTablePartitionPathResolver pathResolver =
+                new FormatTablePartitionPathResolver(
+                        tablePath, table.fullName(), onlyValueInPath, table.catalogContext());
         for (Partition partition : partitions) {
             LinkedHashMap<String, String> spec = normalizeSpec(partition.spec(), onlyValueInPath);
-            String partitionPath =
-                    PartitionPathUtils.generatePartitionPathUtil(spec, onlyValueInPath);
-            if (seenPartitionPaths.add(partitionPath)) {
-                result.add(Pair.of(spec, new Path(tablePath, partitionPath)));
+            Path partitionPath =
+                    pathResolver.resolve(
+                            spec, FormatTablePartitionPathResolver.customLocation(partition));
+            if (pathResolver.validateAndRecord(spec, partitionPath)) {
+                result.add(Pair.of(spec, partitionPath));
+            }
+        }
+        return result;
+    }
+
+    private List<Pair<LinkedHashMap<String, String>, Path>> toDefaultSpecsAndPaths(
+            List<Partition> partitions, boolean onlyValueInPath) {
+        List<Pair<LinkedHashMap<String, String>, Path>> result = new ArrayList<>(partitions.size());
+        Set<Map<String, String>> seen = new HashSet<>(partitions.size());
+        Path tablePath = new Path(table.location());
+        for (Partition partition : partitions) {
+            LinkedHashMap<String, String> spec = normalizeSpec(partition.spec(), onlyValueInPath);
+            if (seen.add(spec)) {
+                result.add(
+                        Pair.of(
+                                spec,
+                                new Path(
+                                        tablePath,
+                                        PartitionPathUtils.generatePartitionPathUtil(
+                                                spec, onlyValueInPath))));
             }
         }
         return result;

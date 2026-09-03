@@ -28,7 +28,7 @@ import org.apache.paimon.flink.sink.TableFilter;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -235,7 +235,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                             table.name()))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
-                                            new SchemaManager(table.fileIO(), table.location()),
+                                            new FileSystemSchemaManager(
+                                                    table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
                                             catalogLoader,
                                             typeMapping))

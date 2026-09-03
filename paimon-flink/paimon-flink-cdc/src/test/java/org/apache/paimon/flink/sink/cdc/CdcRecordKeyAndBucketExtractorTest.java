@@ -21,8 +21,8 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.flink.sink.RowDataKeyAndBucketExtractor;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
@@ -180,7 +180,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
 
     private TableSchema createTableSchema() throws Exception {
         return SchemaUtils.forceCommit(
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString())),
                 new Schema(
                         ROW_TYPE.getFields(),
                         Arrays.asList("pt1", "pt2"),

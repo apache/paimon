@@ -1592,6 +1592,14 @@ public class SchemaValidation {
                     "Data evolution config must disabled with clustering.incremental");
         }
 
+        if (options.dataEvolutionNestedFieldEnabled()) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "%s requires %s=true.",
+                    CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(),
+                    CoreOptions.DATA_EVOLUTION_ENABLED.key());
+        }
+
         List<DataField> fields = schema.fields();
         List<String> blobNames =
                 fields.stream()

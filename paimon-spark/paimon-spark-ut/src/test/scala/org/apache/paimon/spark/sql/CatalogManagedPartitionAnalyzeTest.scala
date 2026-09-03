@@ -18,17 +18,22 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
+import org.apache.paimon.spark.commands.PaimonAnalyzeFormatTablePartitionsCommand
+import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.format.FormatTablePartitionManager
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
 import org.apache.spark.sql.catalyst.optimizer.BuildRight
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
+import org.mockito.Mockito.{mock, when}
 
-import java.util.Locale
+import java.util.{Collections, Locale}
 
 import scala.collection.JavaConverters._
 
@@ -487,7 +492,8 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
             0L,
             0L,
             PartitionStatistics.UNKNOWN_TOTAL_BUCKETS)).asJava,
-        true
+        true,
+        null
       )
 
       val zeroed = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}").estimateStatistics
@@ -663,6 +669,83 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
     }
   }
 
+  test("ANALYZE fails before updating a custom-located partition") {
+    val tableName = "analyze_custom_location"
+    withTable(tableName) {
+      createTable(tableName)
+      val external = new Path(new Path(tempDBDir.toURI), "analyze-custom-location")
+      formatTable(tableName)
+        .fileIO()
+        .writeFile(new Path(external, "data.csv"), "1,payload\n", false)
+      sql(
+        s"ALTER TABLE ${qualified(tableName)} ADD PARTITION " +
+          s"(dt = '20260101', hour = '00') LOCATION '${external.toString}'")
+
+      val before = statisticsOf(tableName, "20260101", "00")
+      val error = intercept[Exception] {
+        sql(
+          s"ANALYZE TABLE ${qualified(tableName)} PARTITION " +
+            s"(dt = '20260101', hour = '00') COMPUTE STATISTICS NOSCAN").collect()
+      }
+
+      val messages = causeMessages(error)
+      assert(messages.contains("custom location"), messages)
+      assert(statisticsOf(tableName, "20260101", "00") == before)
+      assert(formatTable(tableName).fileIO().exists(new Path(external, "data.csv")))
+    }
+  }
+
+  test("scoped ANALYZE validates an unselected custom owner of the selected default") {
+    val tableName = "analyze_unselected_custom_owner"
+    withTable(tableName) {
+      createTable(tableName)
+      val table = formatTable(tableName)
+      val selected = Map("dt" -> "20260101", "hour" -> "00")
+      val owner = Map("dt" -> "20260102", "hour" -> "00")
+      val selectedDefaultPath = new Path(table.location(), "dt=20260101/hour=00")
+      val selectedDefault =
+        new Path("file", null, selectedDefaultPath.toUri.getPath).toString
+      val manager = mock(classOf[FormatTablePartitionManager])
+      when(manager.listPartitions(Collections.emptyMap[String, String](), null))
+        .thenReturn(
+          Seq(
+            analyzePartition(selected),
+            analyzePartition(owner, Map(CoreOptions.PATH.key() -> selectedDefault))).asJava)
+      val sparkTable =
+        new PaimonFormatTable(MsckTestFixtures.withPartitionManager(table, manager))
+
+      val error = intercept[IllegalStateException] {
+        PaimonAnalyzeFormatTablePartitionsCommand(
+          sparkTable,
+          Map("dt" -> Some("20260101"), "hour" -> Some("00")),
+          noScan = true).run(spark)
+      }
+
+      assert(error.getMessage.contains("invalid custom location"), error)
+    }
+  }
+
+  test("ANALYZE preserves unrelated partition options") {
+    val tableName = "analyze_partition_options"
+    withTable(tableName) {
+      createTable(tableName)
+      writeCsvPartition(tableName, "20260101", "00", 1)
+      val spec = Map("dt" -> "20260101", "hour" -> "00").asJava
+      paimonCatalog.createPartitions(
+        Identifier.create(dbName0, tableName),
+        List(spec).asJava,
+        true,
+        null,
+        false,
+        List(Map("owner" -> "spark").asJava).asJava
+      )
+
+      sql(s"ANALYZE TABLE ${qualified(tableName)} COMPUTE STATISTICS NOSCAN").collect()
+
+      assert(statisticsOf(tableName, "20260101", "00").options().get("owner") == "spark")
+    }
+  }
+
   test("ANALYZE is rejected for a format table discovering partitions from the filesystem") {
     val tableName = "analyze_filesystem_partitions"
     withTable(tableName) {
@@ -686,6 +769,24 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
   }
 
   private def qualified(tableName: String): String = s"paimon.$dbName0.$tableName"
+
+  private def analyzePartition(
+      spec: Map[String, String],
+      options: Map[String, String] = Map.empty): Partition =
+    new Partition(
+      spec.asJava,
+      PartitionStatistics.UNKNOWN,
+      PartitionStatistics.UNKNOWN,
+      PartitionStatistics.UNKNOWN,
+      PartitionStatistics.UNKNOWN,
+      PartitionStatistics.UNKNOWN_TOTAL_BUCKETS,
+      false,
+      null,
+      null,
+      null,
+      null,
+      if (options.isEmpty) null else options.asJava
+    )
 
   private def createTable(tableName: String): Unit = {
     sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)

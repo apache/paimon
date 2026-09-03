@@ -77,7 +77,16 @@ class DataVectorWriter(DataWriter):
         self.normal_columns = [
             field for field in self.table.table_schema.fields if field.name in normal_name_set
         ]
-        self.write_cols = self.normal_column_names
+        all_normal_column_names = [
+            col for col in all_column_names if col not in vector_set
+        ]
+        self.write_cols = (
+            None
+            if options.data_evolution_enabled(False)
+            and options.data_evolution_write_cols_optimization_enabled(False)
+            and self.normal_column_names == all_normal_column_names
+            else self.normal_column_names
+        )
 
         self.record_count = 0
         self.closed = False
