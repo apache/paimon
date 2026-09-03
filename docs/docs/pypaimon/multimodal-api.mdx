@@ -813,8 +813,7 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
 
 ### As-of joins
 
-`join_asof` follows the binary as-of join model used by pandas, Polars, and
-DuckDB. It preserves each left row and matches at most one right row within the
+`join_asof` preserves each left row and matches at most one right row within the
 same `by` group. Chain joins to align multiple streams without materializing
 intermediate results.
 
