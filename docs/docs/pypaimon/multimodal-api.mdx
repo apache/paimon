@@ -847,14 +847,8 @@ scans; grouping columns must be scalar. `direction` supports `backward`,
 `forward`, and `nearest`; tolerance is optional and inclusive. A zero-tolerance
 nearest join is an exact match. Nearest ties choose the earlier row.
 
-Planning builds a compact Arrow index from grouping keys, timestamps, and row
-IDs. Selected payload rows, including nested projections, are then fetched in
-batches from the snapshots resolved when `join_asof` is created. BLOB values
-remain descriptors, allowing the existing BLOB and video readers to fetch or
-decode only selected samples. Payload rows are fetched per output batch, while
-the coordinator-local metadata index grows with the selected rows. Alignment
-does not interpolate values or build training windows; those operations remain
-explicit downstream steps.
+Inputs are pinned to their current snapshots when `join_asof` is created, and
+BLOB values remain descriptors until explicitly read or decoded.
 
 ### Reading BLOB columns
 
