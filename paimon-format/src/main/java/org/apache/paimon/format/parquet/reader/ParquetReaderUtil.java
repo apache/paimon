@@ -44,7 +44,6 @@ import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToPaimonField;
@@ -168,7 +167,9 @@ public class ParquetReaderUtil {
             if (columnIO instanceof GroupColumnIO) {
                 GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
                 if (!StringUtils.isNullOrWhitespaceOnly(fieldName)) {
-                    while (!Objects.equals(groupColumnIO.getName(), fieldName)) {
+                    // Column lookup is case-insensitive; the wrapper-group names can
+                    // therefore differ in case from the requested field name.
+                    while (!groupColumnIO.getName().equalsIgnoreCase(fieldName)) {
                         groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
                     }
                     elementTypeColumnIO = groupColumnIO;
