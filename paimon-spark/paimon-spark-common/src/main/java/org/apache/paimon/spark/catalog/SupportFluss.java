@@ -83,6 +83,7 @@ public interface SupportFluss {
                 Identifier.of(identifier.namespace(), tableName.substring(0, suffixStart)));
     }
 
+    /** Loads a Spark table for the given identifier. */
     @FunctionalInterface
     interface TableLoader {
         Table load(Identifier identifier) throws NoSuchTableException;

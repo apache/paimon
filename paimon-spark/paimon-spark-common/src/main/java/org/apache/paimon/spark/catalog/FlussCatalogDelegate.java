@@ -119,6 +119,7 @@ public final class FlussCatalogDelegate {
         return classLoader == null ? FlussCatalogDelegate.class.getClassLoader() : classLoader;
     }
 
+    /** Loads a Fluss {@link TableCatalog} with the supplied class loader. */
     @VisibleForTesting
     public interface CatalogLoader {
         TableCatalog load(ClassLoader classLoader) throws Exception;
