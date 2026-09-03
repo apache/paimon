@@ -36,6 +36,8 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal.lerobot.dataset import (
     PaimonLeRobotDataset,
+    _episode_ranges,
+    _validate_component_metadata,
     _validate_control_row,
 )
 from pypaimon.multimodal.lerobot.metadata import (
@@ -763,6 +765,15 @@ class TorchReadTest(unittest.TestCase):
 
     def test_paimon_lerobot_timestamp_uses_float32_quantization(self):
         frame_index = 61441
+        contract = {
+            'episode_ranges': [(0, frame_index + 1)],
+            'episode_ends': [frame_index + 1],
+            'fps': 30,
+            'task_names': {0: 'pick'},
+            'subtask_names': None,
+            'episode_tasks': (('pick',),),
+            'timestamp_type': pa.float32(),
+        }
         _validate_control_row(
             {
                 'episode_index': 0,
@@ -772,17 +783,98 @@ class TorchReadTest(unittest.TestCase):
                 'task_index': 0,
             },
             frame_index,
-            {
-                'episode_ranges': [(0, frame_index + 1)],
-                'episode_ends': [frame_index + 1],
-                'fps': 30,
-                'task_names': {0: 'pick'},
-                'subtask_names': None,
-                'episode_tasks': (('pick',),),
-                'timestamp_type': pa.float32(),
-            },
+            contract,
             1e-4,
         )
+        with self.assertRaisesRegex(ValueError, 'metadata expects'):
+            _validate_control_row(
+                {
+                    'episode_index': 0,
+                    'frame_index': frame_index,
+                    'timestamp': float('nan'),
+                    'task_index': 0,
+                },
+                frame_index,
+                contract,
+                1e-4,
+            )
+
+    def test_paimon_lerobot_tolerance_must_be_finite(self):
+        metadata = SimpleNamespace(repo_id='test/repo')
+        with patch(
+                'pypaimon.multimodal.lerobot.dataset.'
+                '_load_published_version',
+                return_value=(None, metadata, 1)):
+            for tolerance in (float('nan'), float('inf'), float('-inf')):
+                with self.subTest(tolerance=tolerance):
+                    with self.assertRaisesRegex(
+                            ValueError, 'finite and non-negative'):
+                        PaimonLeRobotDataset(None, tolerance_s=tolerance)
+
+    def test_paimon_lerobot_episode_metadata_must_be_exact(self):
+        valid = {
+            'episode_index': 0,
+            'dataset_from_index': 0,
+            'dataset_to_index': 1,
+            'length': 1,
+        }
+        cases = (
+            (
+                'extra row',
+                [valid, dict(valid, episode_index=1)],
+                'contains 2 rows, expected 1',
+            ),
+            (
+                'wrong episode index',
+                [dict(valid, episode_index=1)],
+                'row 0 has episode_index=1',
+            ),
+            (
+                'wrong length',
+                [dict(valid, length=2)],
+                'episode 0 has length 2, expected 1',
+            ),
+        )
+        for name, episodes, message in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, message):
+                    _episode_ranges(
+                        SimpleNamespace(episodes=episodes), 1, 1)
+
+    def test_paimon_lerobot_component_metadata_must_match_manifest(self):
+        tasks = [{'task_index': 0}]
+        cases = (
+            (
+                'task count',
+                {},
+                2,
+                tasks,
+                None,
+                'task metadata contains 1 rows, expected 2',
+            ),
+            (
+                'missing subtasks',
+                {'subtask_index': {}},
+                1,
+                tasks,
+                None,
+                'has_subtasks does not match',
+            ),
+            (
+                'unexpected subtasks',
+                {},
+                1,
+                tasks,
+                [{'subtask_index': 0}],
+                'has_subtasks does not match',
+            ),
+        )
+        for name, features, total_tasks, task_rows, subtasks, message \
+                in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, message):
+                    _validate_component_metadata(
+                        features, total_tasks, task_rows, subtasks)
 
     def test_non_streaming_row_tracking_without_data_evolution_materializes(self):
         schema = Schema.from_pyarrow_schema(

@@ -20,6 +20,7 @@
 import bisect
 import io
 import json
+import math
 import operator
 from array import array
 
@@ -97,8 +98,8 @@ class PaimonLeRobotDataset:
         self.image_transforms = image_transforms
         self.delta_timestamps = delta_timestamps
         self.tolerance_s = float(tolerance_s)
-        if self.tolerance_s < 0:
-            raise ValueError("tolerance_s must be non-negative.")
+        if not math.isfinite(self.tolerance_s) or self.tolerance_s < 0:
+            raise ValueError("tolerance_s must be finite and non-negative.")
         self.blob_parallelism = _positive_int(
             blob_parallelism, "blob_parallelism")
         if image_transforms is not None and not callable(image_transforms):
@@ -130,10 +131,15 @@ class PaimonLeRobotDataset:
         self._total_episodes = int(
             _metadata_member(
                 self.meta, "total_episodes", info.get("total_episodes", -1)))
+        self._total_tasks = int(
+            _metadata_member(
+                self.meta, "total_tasks", info.get("total_tasks", -1)))
         if self._total_frames < 0 or self._total_episodes < 0:
             raise ValueError(
                 "LeRobot metadata must define total_frames and "
                 "total_episodes.")
+        if self._total_tasks < 0:
+            raise ValueError("LeRobot metadata must define total_tasks.")
 
         self._episode_ranges = _episode_ranges(
             self.meta, self._total_frames, self._total_episodes)
@@ -170,6 +176,8 @@ class PaimonLeRobotDataset:
         table_fields = set(target_schema.names)
         tasks = _metadata_member(self.meta, "tasks")
         subtasks = _metadata_member(self.meta, "subtasks")
+        _validate_component_metadata(
+            self._features, self._total_tasks, tasks, subtasks)
         source_schema = _schema_from_info(info)
         _validate_lerobot_schema(source_schema, target_schema, self.repo_id)
         control_contract = _control_contract(
@@ -531,16 +539,35 @@ def _episode_ranges(metadata, total_frames, total_episodes):
     episodes = _metadata_member(metadata, "episodes")
     if episodes is None:
         return None
+    if len(episodes) != total_episodes:
+        raise ValueError(
+            "LeRobot episode metadata contains %d rows, expected %d."
+            % (len(episodes), total_episodes))
     ranges = []
     expected = 0
     for ordinal in range(total_episodes):
         row = _episode_row(episodes, ordinal)
-        begin = int(row["dataset_from_index"])
-        end = int(row["dataset_to_index"])
+        try:
+            index = operator.index(row["episode_index"])
+            begin = operator.index(row["dataset_from_index"])
+            end = operator.index(row["dataset_to_index"])
+            length = operator.index(row["length"])
+        except (KeyError, TypeError) as error:
+            raise ValueError(
+                "LeRobot episode %d metadata must contain integer controls."
+                % ordinal) from error
+        if index != ordinal:
+            raise ValueError(
+                "LeRobot episode row %d has episode_index=%d."
+                % (ordinal, index))
         if begin != expected or end <= begin:
             raise ValueError(
                 "LeRobot episode %d has invalid frame range [%d, %d)."
                 % (ordinal, begin, end))
+        if length != end - begin:
+            raise ValueError(
+                "LeRobot episode %d has length %d, expected %d."
+                % (ordinal, length, end - begin))
         ranges.append((begin, end))
         expected = end
     if expected != total_frames:
@@ -548,6 +575,20 @@ def _episode_ranges(metadata, total_frames, total_episodes):
             "LeRobot episode ranges cover %d frames, expected %d."
             % (expected, total_frames))
     return ranges
+
+
+def _validate_component_metadata(features, total_tasks, tasks, subtasks):
+    task_count = 0 if tasks is None else len(tasks)
+    if task_count != total_tasks:
+        raise ValueError(
+            "LeRobot task metadata contains %d rows, expected %d."
+            % (task_count, total_tasks))
+    has_subtasks = subtasks is not None
+    has_subtask_feature = "subtask_index" in features
+    if has_subtasks != has_subtask_feature:
+        raise ValueError(
+            "Paimon LeRobot manifest has_subtasks does not match the "
+            "subtask_index feature.")
 
 
 def _control_contract(
@@ -798,7 +839,8 @@ def _validate_control_row(row, index, contract, tolerance_s):
         raise ValueError(
             "Paimon timestamp at LeRobot index %d must be numeric." % index
         ) from error
-    if abs(timestamp - expected_timestamp) > tolerance_s:
+    if not math.isfinite(timestamp) \
+            or abs(timestamp - expected_timestamp) > tolerance_s:
         raise ValueError(
             "Paimon timestamp at LeRobot index %d is %r, metadata expects %r."
             % (index, timestamp, expected_timestamp))
