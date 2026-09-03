@@ -54,7 +54,7 @@ from pypaimon.multimodal.lerobot.loader import (
 from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
     _validate_lerobot_schema,
-    _validate_v3_control_features,
+    _validate_v3_required_features,
 )
 from pypaimon.multimodal.lerobot.source import (
     _LeRobotSource,
@@ -398,7 +398,7 @@ class LeRobotValidationTest(unittest.TestCase):
                         ValueError, "cannot be converted"):
                     _validate_lerobot_schema(source, target, "dataset")
 
-    def test_v3_control_features_have_native_types(self):
+    def test_v3_required_features_have_native_types(self):
         features = {
             "timestamp": {"dtype": "float32", "shape": [1]},
             "frame_index": {"dtype": "int64", "shape": [1]},
@@ -406,7 +406,7 @@ class LeRobotValidationTest(unittest.TestCase):
             "index": {"dtype": "int64", "shape": [1]},
             "task_index": {"dtype": "int64", "shape": [1]},
         }
-        _validate_v3_control_features({"features": features})
+        _validate_v3_required_features({"features": features})
 
         for name, replacement in (
                 ("timestamp", {"dtype": "float64", "shape": [1]}),
@@ -416,13 +416,13 @@ class LeRobotValidationTest(unittest.TestCase):
                 invalid = dict(features)
                 invalid[name] = replacement
                 with self.assertRaisesRegex(
-                        ValueError, "control feature %s" % name):
-                    _validate_v3_control_features({"features": invalid})
+                        ValueError, "required feature %s" % name):
+                    _validate_v3_required_features({"features": invalid})
 
         missing = dict(features)
         del missing["task_index"]
-        with self.assertRaisesRegex(ValueError, "control feature task_index"):
-            _validate_v3_control_features({"features": missing})
+        with self.assertRaisesRegex(ValueError, "required feature task_index"):
+            _validate_v3_required_features({"features": missing})
 
     def test_remote_episode_metadata_projects_stats_columns(self):
         source = _LeRobotSource(
