@@ -640,6 +640,44 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testCsvPermissiveKeepsFieldsAfterMalformed() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.DOUBLE());
+        Options options = new Options();
+        options.set(CsvOptions.MODE, CsvOptions.Mode.PERMISSIVE);
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+        Path testFile = new Path(parent, "permissive_first_" + UUID.randomUUID() + ".csv");
+
+        // Malformed field in the first position: PERMISSIVE must null only the
+        // offending field and keep the valid fields after it.
+        fileIO.writeFile(testFile, "x,Alice,1.5\n3,Carol,3.5", false);
+        List<InternalRow> result = read(format, rowType, rowType, testFile);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).isNullAt(0)).isTrue();
+        assertThat(result.get(0).getString(1)).isEqualTo(fromString("Alice"));
+        assertThat(result.get(0).getDouble(2)).isEqualTo(1.5);
+        assertThat(result.get(1).getInt(0)).isEqualTo(3);
+        assertThat(result.get(1).getString(1)).isEqualTo(fromString("Carol"));
+        assertThat(result.get(1).getDouble(2)).isEqualTo(3.5);
+
+        // PERMISSIVE is the default mode, so this format is built without setting csv.mode.
+        // Covers a malformed field in the middle and two malformed fields in one row.
+        RowType midRowType = DataTypes.ROW(DataTypes.INT(), DataTypes.DOUBLE(), DataTypes.STRING());
+        FileFormat defaultFormat =
+                new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+        Path midFile = new Path(parent, "permissive_middle_" + UUID.randomUUID() + ".csv");
+        fileIO.writeFile(midFile, "1,oops,world\ny,bad,keep", false);
+        List<InternalRow> midResult = read(defaultFormat, midRowType, midRowType, midFile);
+        assertThat(midResult).hasSize(2);
+        assertThat(midResult.get(0).getInt(0)).isEqualTo(1);
+        assertThat(midResult.get(0).isNullAt(1)).isTrue();
+        assertThat(midResult.get(0).getString(2)).isEqualTo(fromString("world"));
+        assertThat(midResult.get(1).isNullAt(0)).isTrue();
+        assertThat(midResult.get(1).isNullAt(1)).isTrue();
+        assertThat(midResult.get(1).getString(2)).isEqualTo(fromString("keep"));
+    }
+
+    @Test
     public void testCsvParserParseField() {
         RowType rowType =
                 DataTypes.ROW(
