@@ -96,7 +96,7 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
     }
 
     @Test
-    public void testSubFieldWriteRequiresEnabledOption() throws Exception {
+    public void testNestedFieldOptionCannotBeEnabledDynamically() throws Exception {
         Schema disabledSchema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -110,7 +110,6 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
                         .build();
         catalog.createTable(identifier(), disabledSchema, false);
         FileStoreTable table = getTableDefault();
-        RowType partialType = table.rowType().projectByPaths(Collections.singletonList("nest.a"));
 
         assertThat(
                         table.copy(
@@ -127,35 +126,6 @@ public class NestedSubfieldDataEvolutionTableTest extends DataEvolutionTestBase 
                                                 "true")))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
-        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
-            assertThatThrownBy(() -> write.withWriteType(partialType))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
-        }
-    }
-
-    @Test
-    public void testReorderedNestedWriteRequiresEnabledOption() throws Exception {
-        Schema disabledSchema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column(
-                                "nest",
-                                DataTypes.ROW(
-                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
-                                        DataTypes.FIELD(1, "b", DataTypes.STRING())))
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .build();
-        catalog.createTable(identifier(), disabledSchema, false);
-        FileStoreTable table = getTableDefault();
-        RowType reorderedType = table.rowType().projectByPaths(Arrays.asList("nest.b", "nest.a"));
-
-        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
-            assertThatThrownBy(() -> write.withWriteType(reorderedType))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key());
-        }
     }
 
     @Test

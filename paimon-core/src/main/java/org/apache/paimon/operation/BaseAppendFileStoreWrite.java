@@ -40,7 +40,6 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.BlobFetchMetrics;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -203,12 +202,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         } else {
             // Preserve the legacy top-level encoding. Do not derive dotted leaf paths while the
             // feature is disabled: a dot may be part of an ordinary top-level column name.
-            if (containsPartialNestedField(writeType, rowType)) {
-                throw new UnsupportedOperationException(
-                        "Writing a nested sub-field requires '"
-                                + CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key()
-                                + "=true'.");
-            }
             writeCols = writeType.getFieldNames();
         }
 
@@ -222,34 +215,6 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             writeCols = null;
         }
         this.writeCols = writeCols;
-    }
-
-    private static boolean containsPartialNestedField(RowType writeType, RowType fullType) {
-        for (DataField writeField : writeType.getFields()) {
-            if (!fullType.containsField(writeField.id())) {
-                // Row-tracking system fields are not part of the table's logical row type.
-                continue;
-            }
-            DataField fullField = fullType.getField(writeField.id());
-            if (writeField.type() instanceof RowType && fullField.type() instanceof RowType) {
-                RowType writeRow = (RowType) writeField.type();
-                RowType fullRow = (RowType) fullField.type();
-                if (writeRow.getFieldCount() != fullRow.getFieldCount()) {
-                    return true;
-                }
-                List<DataField> writeChildren = writeRow.getFields();
-                List<DataField> fullChildren = fullRow.getFields();
-                for (int i = 0; i < writeChildren.size(); i++) {
-                    if (writeChildren.get(i).id() != fullChildren.get(i).id()) {
-                        return true;
-                    }
-                }
-                if (containsPartialNestedField(writeRow, fullRow)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private SimpleColStatsCollector.Factory[] statsCollectors() {
