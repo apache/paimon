@@ -487,7 +487,8 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
             0L,
             0L,
             PartitionStatistics.UNKNOWN_TOTAL_BUCKETS)).asJava,
-        true
+        true,
+        null
       )
 
       val zeroed = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}").estimateStatistics

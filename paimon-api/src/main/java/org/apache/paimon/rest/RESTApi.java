@@ -996,6 +996,7 @@ public class RESTApi {
      *     PartitionStatistics#spec()} rather than by position, or null to report none
      * @param replaceStatistics whether the report replaces the stored values rather than adding to
      *     them; ignored when {@code statistics} is null, and not sent at all in that case
+     * @param partitionOptions options aligned with {@code partitions} by position, or null
      * @return the partitions the server created and the ones it already held
      */
     public CreatePartitionsResponse createPartitions(
@@ -1003,13 +1004,15 @@ public class RESTApi {
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics) {
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions) {
         CreatePartitionsRequest request =
                 new CreatePartitionsRequest(
                         partitions,
                         ignoreIfExists,
                         statistics,
-                        statistics == null ? null : replaceStatistics);
+                        statistics == null ? null : replaceStatistics,
+                        partitionOptions);
         return client.post(
                 resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,

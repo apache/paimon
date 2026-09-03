@@ -59,13 +59,16 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link RESTApi} json. */
@@ -335,6 +338,67 @@ public class RESTApiJsonTest {
         assertFalse(explicitRequestJson.contains("replaceStatistics"));
         assertNull(defaultRequest.getPartitionStatistics());
         assertNull(defaultRequest.replaceStatistics());
+    }
+
+    @Test
+    public void createPartitionsRequestPreservesOptionsTest() throws Exception {
+        String json =
+                "{\"partitionSpecs\":[{\"dt\":\"20260901\"},{\"dt\":\"20260902\"}],"
+                        + "\"partitionOptions\":[{},"
+                        + "{\"path\":\"oss://archive-bucket/table/dt=20260902\","
+                        + "\"owner\":\"data-platform\"}]}";
+
+        CreatePartitionsRequest request = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        Map<?, ?> serialized = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put("path", "oss://archive-bucket/table/dt=20260902");
+        customOptions.put("owner", "data-platform");
+
+        assertEquals(
+                Arrays.asList(Collections.emptyMap(), customOptions),
+                serialized.get("partitionOptions"));
+    }
+
+    @Test
+    public void createPartitionsRequestRejectsNullOptionMapsTest() {
+        List<Map<String, String>> specs =
+                Arrays.asList(
+                        Collections.singletonMap("dt", "20260901"),
+                        Collections.singletonMap("dt", "20260902"));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                null,
+                                null,
+                                Arrays.asList(null, Collections.emptyMap())));
+
+        Map<String, String> nullValue = new HashMap<>();
+        nullValue.put("owner", null);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                null,
+                                null,
+                                Arrays.asList(Collections.emptyMap(), nullValue)));
+
+        Map<String, String> nullKey = new HashMap<>();
+        nullKey.put(null, "value");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        new CreatePartitionsRequest(
+                                specs,
+                                true,
+                                null,
+                                null,
+                                Arrays.asList(Collections.emptyMap(), nullKey)));
     }
 
     @Test

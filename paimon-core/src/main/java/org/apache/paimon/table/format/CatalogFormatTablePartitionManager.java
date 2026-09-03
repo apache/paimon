@@ -172,7 +172,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                         // Rejecting the whole batch when any partition exists is only meaningful
                         // if the batch stays one request, so a strict create is never split.
                         catalog.createPartitions(
-                                identifier, partitions, false, statistics, replaceStatistics);
+                                identifier, partitions, false, statistics, replaceStatistics, null);
                         return null;
                     }
                     // isRetrySafe() bounds the transport retry only: a caller-level rerun of a
@@ -184,7 +184,8 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                                 batch,
                                 true,
                                 statisticsOf(batch, statisticsBySpec),
-                                replaceStatistics);
+                                replaceStatistics,
+                                null);
                     }
                     return null;
                 },

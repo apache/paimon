@@ -476,7 +476,8 @@ class CatalogFormatTablePartitionManagerTest {
                         specCaptor.capture(),
                         eq(true),
                         statisticsCaptor.capture(),
-                        eq(false));
+                        eq(false),
+                        isNull());
         List<List<Map<String, String>>> requestedSpecs = specCaptor.getAllValues();
         List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
         assertThat(requestedSpecs).extracting(List::size).containsExactly(1000, 1000, 500);
@@ -508,7 +509,12 @@ class CatalogFormatTablePartitionManagerTest {
                 ArgumentCaptor.forClass(List.class);
         verify(catalog, times(3))
                 .createPartitions(
-                        eq(IDENTIFIER), anyList(), eq(true), statisticsCaptor.capture(), eq(false));
+                        eq(IDENTIFIER),
+                        anyList(),
+                        eq(true),
+                        statisticsCaptor.capture(),
+                        eq(false),
+                        isNull());
         List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
         assertThat(requestedStatistics.get(0)).containsExactlyElementsOf(statistics);
         // Null would mean "this client does not report", which is the call that predates
@@ -526,7 +532,7 @@ class CatalogFormatTablePartitionManagerTest {
 
         partitionManager(catalog).createPartitions(specs, false, statistics, true);
 
-        verify(catalog).createPartitions(IDENTIFIER, specs, false, statistics, true);
+        verify(catalog).createPartitions(IDENTIFIER, specs, false, statistics, true, null);
     }
 
     @Test
@@ -708,7 +714,7 @@ class CatalogFormatTablePartitionManagerTest {
         RuntimeException failure = new IllegalStateException("catalog unavailable");
         doThrow(failure)
                 .when(catalog)
-                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
         Throwable thrown = catchThrowable(() -> partitionManager.createPartitions(specs(1), true));
@@ -751,7 +757,12 @@ class CatalogFormatTablePartitionManagerTest {
         ArgumentCaptor<List<Map<String, String>>> captor = ArgumentCaptor.forClass(List.class);
         verify(catalog, times(expectedRequests))
                 .createPartitions(
-                        eq(IDENTIFIER), captor.capture(), eq(ignoreIfExists), isNull(), eq(false));
+                        eq(IDENTIFIER),
+                        captor.capture(),
+                        eq(ignoreIfExists),
+                        isNull(),
+                        eq(false),
+                        isNull());
         return captor.getAllValues();
     }
 

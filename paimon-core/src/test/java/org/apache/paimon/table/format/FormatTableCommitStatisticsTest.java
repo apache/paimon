@@ -67,6 +67,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -1045,7 +1046,7 @@ class FormatTableCommitStatisticsTest {
                             return null;
                         })
                 .when(catalog)
-                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
         FormatTablePartitionManager partitionManager =
                 FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, () -> catalog);
         List<CommitMessage> messages = new ArrayList<>();

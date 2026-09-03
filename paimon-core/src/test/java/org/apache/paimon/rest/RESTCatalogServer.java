@@ -177,6 +177,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -252,7 +253,7 @@ public class RESTCatalogServer {
     private final Queue<ListPartitionsResponse> scriptedListPartitionsByFilterResponses =
             new ConcurrentLinkedQueue<>();
 
-    private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
+    private final Map<String, List<Partition>> tablePartitionsStore = new ConcurrentHashMap<>();
     private final Map<String, View> viewStore = new ConcurrentHashMap<>();
     private final Map<String, TableSnapshot> tableLatestSnapshotStore = new HashMap<>();
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
@@ -268,10 +269,12 @@ public class RESTCatalogServer {
 
     private final ResourcePaths resourcePaths;
 
-    private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
-    private final Map<String, List<Map<String, String>>> receivedHeadersByPath = new HashMap<>();
+    private final List<Map<String, String>> receivedHeaders = new CopyOnWriteArrayList<>();
+    private final Map<String, List<Map<String, String>>> receivedHeadersByPath =
+            new ConcurrentHashMap<>();
 
     private volatile boolean partitionListingSupported = true;
+    private volatile boolean partitionOptionsCreateSupported = true;
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -338,6 +341,10 @@ public class RESTCatalogServer {
 
     public void setPartitionListingSupported(boolean partitionListingSupported) {
         this.partitionListingSupported = partitionListingSupported;
+    }
+
+    public void setPartitionOptionsCreateSupported(boolean partitionOptionsCreateSupported) {
+        this.partitionOptionsCreateSupported = partitionOptionsCreateSupported;
     }
 
     public void clearReceivedListPartitionsByFilterRequests() {
@@ -433,7 +440,7 @@ public class RESTCatalogServer {
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
                     receivedHeadersByPath
-                            .computeIfAbsent(resourcePath, ignored -> new ArrayList<>())
+                            .computeIfAbsent(resourcePath, ignored -> new CopyOnWriteArrayList<>())
                             .add(new HashMap<>(headers));
                     Map<String, String> parameters =
                             paths.length == 2 ? getParameters(paths[1]) : Collections.emptyMap();
@@ -635,8 +642,19 @@ public class RESTCatalogServer {
                                         || isListPartitionsByFilter)) {
                             return mockResponse(new ErrorResponse(null, null, "", 501), 501);
                         } else if (isDropPartitions) {
-                            return dropPartitionsHandle(restAuthParameter.data(), identifier);
+                            synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
+                                return dropPartitionsHandle(restAuthParameter.data(), identifier);
+                            }
                         } else if (isPartitions) {
+                            if ("POST".equals(restAuthParameter.method())) {
+                                synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
+                                    return partitionsApiHandle(
+                                            restAuthParameter.method(),
+                                            restAuthParameter.data(),
+                                            parameters,
+                                            identifier);
+                                }
+                            }
                             return partitionsApiHandle(
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
@@ -682,7 +700,9 @@ public class RESTCatalogServer {
                         } else if (isTableAuth) {
                             return authTable(identifier, restAuthParameter.data());
                         } else if (isCommitSnapshot) {
-                            return commitTableHandle(identifier, restAuthParameter.data());
+                            synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
+                                return commitTableHandle(identifier, restAuthParameter.data());
+                            }
                         } else if (isRollbackTable) {
                             RollbackTableRequest requestBody =
                                     parseRequest(data, RollbackTableRequest.class);
@@ -2152,6 +2172,7 @@ public class RESTCatalogServer {
                                             current.isExternal());
                             tableMetadataStore.remove(fromTable.getFullName(), current);
                             tableMetadataStore.put(toTable.getFullName(), renamedMetadata);
+                            renamePartitionState(fromTable, toTable);
                             permissionStore.renameTable(fromTable, toTable);
                         }
                     }
@@ -2159,6 +2180,16 @@ public class RESTCatalogServer {
             }
         }
         return new MockResponse().setResponseCode(200);
+    }
+
+    private void renamePartitionState(Identifier source, Identifier destination) {
+        String sourceName = source.getFullName();
+        String destinationName = destination.getFullName();
+        tablePartitionsStore.remove(destinationName);
+        List<Partition> partitions = tablePartitionsStore.remove(sourceName);
+        if (partitions != null) {
+            tablePartitionsStore.put(destinationName, partitions);
+        }
     }
 
     private MockResponse partitionsApiHandle(
@@ -2185,9 +2216,18 @@ public class RESTCatalogServer {
                 return generateFinalListPartitionsResponse(parameters, partitions);
             case "POST":
                 CreatePartitionsRequest request = parseRequest(data, CreatePartitionsRequest.class);
+                List<Map<String, String>> requestedOptions =
+                        RESTCatalogPartitionSupport.canonicalizeRequestedOptions(
+                                request, catalogContext, partitionOptionsCreateSupported);
+                String tableName = tableIdentifier.getFullName();
+                TableMetadata tableMetadata = tableMetadataStore.get(tableName);
+                if (tableMetadata == null) {
+                    throw new Catalog.TableNotExistException(tableIdentifier);
+                }
                 List<Partition> storedPartitions =
-                        tablePartitionsStore.computeIfAbsent(
-                                tableIdentifier.getFullName(), ignored -> new ArrayList<>());
+                        new ArrayList<>(
+                                tablePartitionsStore.getOrDefault(
+                                        tableName, Collections.emptyList()));
                 Set<Map<String, String>> existingSpecs =
                         storedPartitions.stream().map(Partition::spec).collect(Collectors.toSet());
                 if (!request.ignoreIfExists()) {
@@ -2209,30 +2249,42 @@ public class RESTCatalogServer {
                         return mockResponse(response, 409);
                     }
                 }
+                Optional<Map<String, String>> conflictingLocation =
+                        RESTCatalogPartitionSupport.conflictingLocation(
+                                storedPartitions, request.getPartitionSpecs(), requestedOptions);
+                if (conflictingLocation.isPresent()) {
+                    return mockResponse(
+                            RESTCatalogPartitionSupport.conflictingLocationError(
+                                    conflictingLocation.get()),
+                            409);
+                }
                 List<Map<String, String>> created = new ArrayList<>();
                 List<Map<String, String>> existed = new ArrayList<>();
-                for (Map<String, String> spec : request.getPartitionSpecs()) {
+                for (int i = 0; i < request.getPartitionSpecs().size(); i++) {
+                    Map<String, String> spec = request.getPartitionSpecs().get(i);
                     if (existingSpecs.add(spec)) {
                         // A registration measures nothing, so a new partition starts unknown.
+                        Map<String, String> options =
+                                requestedOptions == null ? null : requestedOptions.get(i);
                         storedPartitions.add(
-                                new Partition(
-                                        spec,
-                                        PartitionStatistics.UNKNOWN,
-                                        PartitionStatistics.UNKNOWN,
-                                        PartitionStatistics.UNKNOWN,
-                                        PartitionStatistics.UNKNOWN,
-                                        PartitionStatistics.UNKNOWN_TOTAL_BUCKETS,
-                                        false));
+                                RESTCatalogPartitionSupport.newPartition(spec, options));
                         created.add(spec);
                     } else {
                         existed.add(spec);
                     }
                 }
+                if (isFormatTable(tableMetadata.schema().toSchema())) {
+                    RESTCatalogPartitionSupport.validateFormatTablePartitionLocations(
+                            storedPartitions, tableMetadata, tableName, catalogContext);
+                }
                 applyPartitionStatistics(
                         storedPartitions,
                         request.getPartitionStatistics(),
                         request.replaceStatistics());
-                return mockResponse(new CreatePartitionsResponse(created, existed), 200);
+                MockResponse response =
+                        mockResponse(new CreatePartitionsResponse(created, existed), 200);
+                tablePartitionsStore.put(tableName, storedPartitions);
+                return response;
             default:
                 return new MockResponse().setResponseCode(404);
         }
@@ -2282,7 +2334,12 @@ public class RESTCatalogServer {
                                     update.lastFileCreationTime(),
                                     accumulate),
                             stored.totalBuckets(),
-                            stored.done()));
+                            stored.done(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            stored.options()));
         }
     }
 

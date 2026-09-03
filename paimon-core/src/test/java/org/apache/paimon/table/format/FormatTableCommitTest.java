@@ -89,6 +89,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -159,7 +160,8 @@ class FormatTableCommitTest {
                             throw registrationFailure;
                         })
                 .when(catalog)
-                .createPartitions(eq(identifier), anyList(), eq(true), eq(null), eq(false));
+                .createPartitions(
+                        eq(identifier), anyList(), eq(true), eq(null), eq(false), isNull());
         FormatTablePartitionManager partitionManager =
                 FormatTablePartitionManager.create(
                         identifier, Collections.singletonList("part"), () -> catalog);
@@ -191,7 +193,8 @@ class FormatTableCommitTest {
         assertThat(registeredPartitions).containsExactly(Collections.singletonMap("part", "p"));
         assertThat(fileIO.exists(targetPath)).isFalse();
         verify(catalog, never())
-                .createPartitions(eq(identifier), anyList(), eq(true), anyList(), eq(false));
+                .createPartitions(
+                        eq(identifier), anyList(), eq(true), anyList(), eq(false), isNull());
     }
 
     @Test
