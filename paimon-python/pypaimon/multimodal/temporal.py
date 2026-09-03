@@ -60,7 +60,7 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
     if (any(not isinstance(name, str) or not name for name in by)
             or len(set(by)) != len(by)):
         raise ValueError("by must contain unique, non-empty column names.")
-    return _AsOfJoinQuery(left, on, by).join_asof(
+    return _AsOfJoin(left, on, by).join_asof(
         right,
         direction=direction,
         tolerance=tolerance,
@@ -69,7 +69,7 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
     )
 
 
-class _AsOfJoinQuery:
+class _AsOfJoin:
     """Lazy, chainable result of :func:`join_asof`."""
 
     def __init__(self, left, on, by):
@@ -98,7 +98,7 @@ class _AsOfJoinQuery:
             suffix,
         )
 
-        result = object.__new__(_AsOfJoinQuery)
+        result = object.__new__(_AsOfJoin)
         result._anchor = self._anchor
         result._on = self._on
         result._by = self._by
