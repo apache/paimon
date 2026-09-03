@@ -67,7 +67,8 @@ def _write_dataset(
         info,
         source,
         source_schema,
-        batch_size):
+        batch_size,
+        metadata):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
     table_write = None
@@ -75,15 +76,37 @@ def _write_dataset(
     commit_started = False
     batch_count = 0
     row_count = 0
+    episodes = metadata["episodes"]
+    current_episode = None
+    expected_tasks = set()
+    observed_tasks = set()
     snapshot_recorder = _SnapshotRecorder()
 
     try:
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         table_commit.add_commit_callback(snapshot_recorder)
-        for begin, end in _episode_batches(dataset, info, batch_size):
+        for episode_index, episode_begin, task_indices, begin, end in \
+                _episode_batches(dataset, info, batch_size, episodes):
+            if episode_index != current_episode:
+                if current_episode is not None:
+                    _validate_episode_tasks(
+                        current_episode, expected_tasks, observed_tasks)
+                current_episode = episode_index
+                expected_tasks = set(task_indices)
+                observed_tasks = set()
             batch = _read_batch(
                 dataset, info, begin, end, source_schema)
+            seen_tasks = _validate_frame_controls(
+                batch,
+                int(info["fps"]),
+                episode_index,
+                episode_begin,
+                begin,
+                task_indices,
+                metadata["subtask_indices"],
+            )
+            observed_tasks.update(seen_tasks)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -93,6 +116,10 @@ def _write_dataset(
             table_write.write_arrow(batch)
             batch_count += 1
             row_count += batch.num_rows
+
+        if current_episode is not None:
+            _validate_episode_tasks(
+                current_episode, expected_tasks, observed_tasks)
 
         expected_rows = int(info.get("total_frames", len(dataset)))
         if row_count != expected_rows:
@@ -119,32 +146,138 @@ def _write_dataset(
                 table_commit.close()
 
 
-def _episode_batches(dataset, info, batch_size):
-    episodes = getattr(dataset.meta, "episodes", None)
+def _episode_batches(dataset, info, batch_size, episodes):
     episode_count = int(info.get("total_episodes", 0))
     total_frames = int(info.get("total_frames", len(dataset)))
-    if episodes is None:
-        raise ValueError("LeRobot v3 metadata is missing episode boundaries.")
     expected_begin = 0
     for ordinal in range(episode_count):
         episode = episodes.iloc[ordinal] if hasattr(episodes, "iloc") \
             else episodes[ordinal]
+        episode_index = int(_python_scalar(episode["episode_index"]))
         begin = int(_python_scalar(episode["dataset_from_index"]))
         end = int(_python_scalar(episode["dataset_to_index"]))
-        if begin != expected_begin or end <= begin:
+        length = int(_python_scalar(episode["length"]))
+        if episode_index != ordinal or begin != expected_begin \
+                or end <= begin or length != end - begin:
             raise ValueError(
-                "LeRobot episode %d has invalid frame range [%d, %d); "
-                "expected it to start at %d."
-                % (ordinal, begin, end, expected_begin))
+                "LeRobot episode %d has an invalid index, range, or length."
+                % ordinal)
+        episode_begin = begin
+        task_indices = episode.get("task_indices", ())
         while begin < end:
             batch_end = min(begin + batch_size, end)
-            yield begin, batch_end
+            yield (
+                episode_index,
+                episode_begin,
+                task_indices,
+                begin,
+                batch_end,
+            )
             begin = batch_end
         expected_begin = end
     if expected_begin != total_frames:
         raise ValueError(
             "LeRobot episode ranges cover %d frames but metadata reports %d."
             % (expected_begin, total_frames))
+
+
+def _validate_frame_controls(
+        batch,
+        fps,
+        episode_index,
+        episode_begin,
+        begin,
+        task_indices,
+        subtask_indices=None):
+    required = [
+        "index", "episode_index", "frame_index", "timestamp", "task_index"
+    ]
+    if subtask_indices is not None:
+        required.append("subtask_index")
+    missing = [name for name in required if name not in batch.column_names]
+    if missing:
+        raise ValueError(
+            "LeRobot frame data is missing control columns: %s."
+            % ", ".join(missing))
+
+    allowed_tasks = set(task_indices)
+    values = {
+        name: batch.column(name).to_pylist()
+        for name in required
+    }
+    seen_tasks = set()
+    for offset in range(batch.num_rows):
+        index = begin + offset
+        frame_index = index - episode_begin
+        _require_control_integer(
+            values["index"][offset], "index", index, index)
+        _require_control_integer(
+            values["episode_index"][offset],
+            "episode_index",
+            episode_index,
+            index,
+        )
+        _require_control_integer(
+            values["frame_index"][offset],
+            "frame_index",
+            frame_index,
+            index,
+        )
+        timestamp = values["timestamp"][offset]
+        expected_timestamp = pa.scalar(
+            frame_index / fps,
+            type=batch.schema.field("timestamp").type,
+        ).as_py()
+        if (isinstance(timestamp, bool)
+                or not isinstance(timestamp, numbers.Real)
+                or not math.isclose(
+                    float(timestamp), float(expected_timestamp),
+                    rel_tol=0.0, abs_tol=1e-4)):
+            raise ValueError(
+                "LeRobot frame %d has timestamp %r; expected %r."
+                % (index, timestamp, expected_timestamp))
+        task_index = _control_integer(
+            values["task_index"][offset], "task_index", index)
+        if task_index not in allowed_tasks:
+            raise ValueError(
+                "LeRobot frame %d has task_index %d outside Episode %d "
+                "tasks %s."
+                % (index, task_index, episode_index,
+                   sorted(allowed_tasks)))
+        seen_tasks.add(task_index)
+        if subtask_indices is not None:
+            subtask_index = _control_integer(
+                values["subtask_index"][offset], "subtask_index", index)
+            if subtask_index not in subtask_indices:
+                raise ValueError(
+                    "LeRobot frame %d has subtask_index %d outside [0, %d)."
+                    % (index, subtask_index, len(subtask_indices)))
+    return seen_tasks
+
+
+def _validate_episode_tasks(episode_index, expected, actual):
+    if actual != expected:
+        raise ValueError(
+            "LeRobot Episode %d declares task indices %s but its "
+            "frames use %s."
+            % (episode_index, sorted(expected), sorted(actual)))
+
+
+def _require_control_integer(value, name, expected, frame_index):
+    actual = _control_integer(value, name, frame_index)
+    if actual != expected:
+        raise ValueError(
+            "LeRobot frame %d has %s %d; expected %d."
+            % (frame_index, name, actual, expected))
+
+
+def _control_integer(value, name, frame_index):
+    value = _python_scalar(value)
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+        raise ValueError(
+            "LeRobot frame %d has non-integer %s %r."
+            % (frame_index, name, value))
+    return int(value)
 
 
 def _read_batch(dataset, info, begin, end, schema):
@@ -181,13 +314,6 @@ def _read_batch(dataset, info, begin, end, schema):
         arrays.append(_safe_array(values, field, name, dtype))
         fields.append(field)
 
-    if "task" in schema.names:
-        task_indices = raw.column("task_index").to_pylist()
-        arrays.append(pa.array(
-            [_task_name(dataset.meta.tasks, value) for value in task_indices],
-            type=pa.string(),
-        ))
-        fields.append(schema.field("task"))
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
 
 
@@ -355,17 +481,3 @@ def _encode_media_frame(value):
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
-
-
-def _task_name(tasks, task_index):
-    index = int(_python_scalar(task_index))
-    if index < 0 or index >= len(tasks):
-        raise ValueError(
-            "LeRobot task_index %d is outside [0, %d)."
-            % (index, len(tasks)))
-    if hasattr(tasks, "iloc"):
-        return str(tasks.iloc[index].name)
-    task = tasks[index]
-    if isinstance(task, dict):
-        return str(task.get("task", task.get("name")))
-    return str(task)

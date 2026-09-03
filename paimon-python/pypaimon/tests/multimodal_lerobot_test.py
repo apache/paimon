@@ -15,30 +15,46 @@
 # limitations under the License.
 
 import builtins
+from array import array
 import json
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.fs as pafs
+import pyarrow.parquet as pq
 
+from pypaimon.catalog.catalog_exception import TableNotExistException
 import pypaimon.multimodal as pmm
+from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
+from pypaimon.multimodal.lerobot.metadata import (
+    _append_arrow_tables,
+    _companion_identifier,
+    _load_dataset_metadata,
+    _managed_table_options,
+    _restore_pandas_metadata,
+    _subtask_indices,
+    _validated_episode_tables,
+)
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _read_batch,
-    _task_name,
+    _validate_frame_controls,
 )
 from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
     _validate_lerobot_schema,
+    _validate_v3_required_features,
 )
 from pypaimon.multimodal.lerobot.source import (
     _LeRobotSource,
@@ -48,6 +64,7 @@ from pypaimon.multimodal.lerobot.source import (
     _remote_source_path,
     _validate_info_paths,
 )
+from pypaimon.multimodal.table import _target_schema
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -64,7 +81,33 @@ def _replaced_contract(field, old, new):
     }
 
 
+def _catalog_rows(connection, name):
+    table = connection.catalog.get_table(connection._identifier(name))
+    builder = table.new_read_builder()
+    plan = builder.new_scan().plan()
+    return builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+
+def _catalog_arrow(connection, name):
+    table = connection.catalog.get_table(connection._identifier(name))
+    builder = table.new_read_builder()
+    plan = builder.new_scan().plan()
+    return table, builder.new_read().to_arrow(plan.splits())
+
+
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_self_contained_import_rejects_table_branches(self):
+        with self.assertRaisesRegex(ValueError, "does not support"):
+            _managed_table_options("db.robot$branch_dev")
+
+    def test_companion_identifier_preserves_quoted_components(self):
+        name = _companion_identifier(
+            "`db.name`.`robot.data`", "__tasks")
+        identifier = Identifier.from_string(name)
+
+        self.assertEqual("db.name", identifier.get_database_name())
+        self.assertEqual("robot.data__tasks", identifier.get_table_name())
 
     def test_dataset_open_never_downloads_videos(self):
         calls = []
@@ -177,10 +220,69 @@ class LeRobotValidationTest(unittest.TestCase):
                 )
         source_file_io.assert_not_called()
 
-    def test_negative_task_index_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "task_index -1"):
-            _task_name(["pick", "place"], -1)
-        self.assertEqual("place", _task_name(["pick", "place"], 1))
+    def test_timestamp_validation_quantizes_float32(self):
+        frame_index = 61441
+        batch = pa.table({
+            "index": pa.array([frame_index], type=pa.int64()),
+            "episode_index": pa.array([0], type=pa.int64()),
+            "frame_index": pa.array([frame_index], type=pa.int64()),
+            "timestamp": pa.array([frame_index / 30], type=pa.float32()),
+            "task_index": pa.array([0], type=pa.int64()),
+        })
+
+        self.assertEqual(
+            {0},
+            _validate_frame_controls(
+                batch, 30, 0, 0, frame_index, [0]),
+        )
+
+    def test_subtask_index_must_reference_metadata(self):
+        batch = pa.table({
+            "index": pa.array([0], type=pa.int64()),
+            "episode_index": pa.array([0], type=pa.int64()),
+            "frame_index": pa.array([0], type=pa.int64()),
+            "timestamp": pa.array([0], type=pa.float32()),
+            "task_index": pa.array([0], type=pa.int64()),
+            "subtask_index": pa.array([2], type=pa.int64()),
+        })
+
+        with self.assertRaisesRegex(ValueError, "subtask_index 2 outside"):
+            _validate_frame_controls(
+                batch, 30, 0, 0, 0, [0], range(2))
+
+    def test_metadata_writer_closes_after_commit_creation_failure(self):
+        table = Mock()
+        builder = table.new_batch_write_builder.return_value
+        writer = builder.new_write.return_value
+        builder.new_commit.side_effect = RuntimeError("commit init failed")
+
+        with self.assertRaisesRegex(RuntimeError, "commit init failed"):
+            _append_arrow_tables(table, [])
+
+        writer.abort.assert_called_once_with()
+        writer.close.assert_called_once_with()
+
+    def test_episode_shards_use_normal_batch_rolling(self):
+        data = pa.table({"episode_index": [0]})
+        table = Mock()
+        builder = table.new_batch_write_builder.return_value
+        writer = builder.new_write.return_value
+
+        def shards():
+            yield data
+            yield data
+            raise RuntimeError("stop after two shards")
+
+        with patch(
+                "pypaimon.multimodal.lerobot.metadata._target_schema",
+                return_value=data.schema):
+            with self.assertRaisesRegex(RuntimeError, "two shards"):
+                _append_arrow_tables(table, shards())
+
+        self.assertEqual(2, writer.write_arrow.call_count)
+        writer.prepare_commit.assert_not_called()
+        writer.abort.assert_called_once_with()
+        writer.close.assert_called_once_with()
 
     def test_optional_dependency_error_is_actionable(self):
         original_import = builtins.__import__
@@ -204,10 +306,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 "image": {"dtype": "image", "shape": [8, 10, 3]},
             }
         }
-        schema = _schema_from_info(info, include_task=True)
+        schema = _schema_from_info(info)
 
         self.assertEqual(
-            ["scalar", "vector", "tensor", "image", "task"],
+            ["scalar", "vector", "tensor", "image"],
             schema.names,
         )
         self.assertEqual(pa.int32(), schema.field("scalar").type)
@@ -220,7 +322,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
         info["features"]["scalar"]["dtype"] = "uint64"
         with self.assertRaisesRegex(ValueError, "no lossless Paimon integer"):
-            _schema_from_info(info, include_task=False)
+            _schema_from_info(info)
 
         info["features"] = {
             "camera": {
@@ -229,7 +331,7 @@ class LeRobotValidationTest(unittest.TestCase):
             }
         }
         with self.assertRaisesRegex(ValueError, "video feature camera.*not supported"):
-            _schema_from_info(info, include_task=False)
+            _schema_from_info(info)
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -243,7 +345,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 "tensor": {"dtype": "float32", "shape": [2, 3]},
                 "image": {"dtype": "image", "shape": [8, 10, 3]},
             }
-        }, include_task=False)
+        })
 
         replacements = {
             "shape": pa.field(
@@ -296,6 +398,32 @@ class LeRobotValidationTest(unittest.TestCase):
                         ValueError, "cannot be converted"):
                     _validate_lerobot_schema(source, target, "dataset")
 
+    def test_v3_required_features_have_native_types(self):
+        features = {
+            "timestamp": {"dtype": "float32", "shape": [1]},
+            "frame_index": {"dtype": "int64", "shape": [1]},
+            "episode_index": {"dtype": "int64", "shape": [1]},
+            "index": {"dtype": "int64", "shape": [1]},
+            "task_index": {"dtype": "int64", "shape": [1]},
+        }
+        _validate_v3_required_features({"features": features})
+
+        for name, replacement in (
+                ("timestamp", {"dtype": "float64", "shape": [1]}),
+                ("frame_index", {"dtype": "int32", "shape": [1]}),
+                ("episode_index", {"dtype": "int64", "shape": [2]})):
+            with self.subTest(name=name):
+                invalid = dict(features)
+                invalid[name] = replacement
+                with self.assertRaisesRegex(
+                        ValueError, "required feature %s" % name):
+                    _validate_v3_required_features({"features": invalid})
+
+        missing = dict(features)
+        del missing["task_index"]
+        with self.assertRaisesRegex(ValueError, "required feature task_index"):
+            _validate_v3_required_features({"features": missing})
+
     def test_remote_episode_metadata_projects_stats_columns(self):
         source = _LeRobotSource(
             path="oss://bucket/robot",
@@ -323,15 +451,17 @@ class LeRobotValidationTest(unittest.TestCase):
                 "pypaimon.multimodal.lerobot.source._read_remote_parquet",
                 return_value=episode_table,
             ) as read_parquet:
-                _RemoteLeRobotDataset(source, info)
+                dataset = _RemoteLeRobotDataset(source, info)
 
         read_parquet.assert_called_once_with(
             source.file_io,
             "oss://bucket/robot/meta/episodes/file.parquet",
             columns=_RemoteLeRobotDataset._EPISODE_COLUMNS,
         )
+        self.assertIsInstance(dataset._episode_starts, array)
+        self.assertNotIsInstance(dataset.meta.episodes, list)
 
-    def test_empty_local_dataset_returns_before_opening_lerobot(self):
+    def test_empty_local_dataset_is_rejected_before_opening_lerobot(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_empty_"))
         try:
             source = temp_dir / "source"
@@ -341,6 +471,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 "total_frames": 0,
                 "total_episodes": 0,
                 "total_tasks": 0,
+                "fps": 30,
                 "features": {
                     "index": {"dtype": "int64", "shape": [1]},
                 },
@@ -351,12 +482,11 @@ class LeRobotValidationTest(unittest.TestCase):
             with patch(
                     "pypaimon.multimodal.lerobot.api._import_lerobot_dataset"
             ) as import_lerobot:
-                self.assertIsNone(connection.load_from_lerobot(
-                    "empty_frames", source))
+                with self.assertRaisesRegex(ValueError, "non-empty"):
+                    connection.load_from_lerobot("empty_frames", source)
             import_lerobot.assert_not_called()
-            table = connection.get_table("empty_frames")
-            self.assertIsNone(
-                table.raw_table.snapshot_manager().get_latest_snapshot())
+            with self.assertRaises(TableNotExistException):
+                connection.get_table("empty_frames")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -371,6 +501,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 "total_frames": 0,
                 "total_episodes": 0,
                 "total_tasks": 0,
+                "fps": 30,
                 "features": {
                     "index": {"dtype": "int64", "shape": [1]},
                 },
@@ -403,6 +534,195 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_empty_dataset_with_tasks_is_rejected(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_empty_meta_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            info = {
+                "codebase_version": "v3.0",
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 1,
+                "fps": 30,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "task_index": {"dtype": "int64", "shape": [1]},
+                },
+            }
+            (source / "meta" / "info.json").write_text(json.dumps(info))
+            (source / "meta" / "stats.json").write_text(json.dumps({
+                "index": {"min": [0], "max": [0]},
+            }))
+            pq.write_table(pa.table({
+                "task_index": [0],
+                "task": ["pick"],
+            }), source / "meta" / "tasks.parquet")
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+
+            with self.assertRaisesRegex(ValueError, "non-empty"):
+                connection.load_from_lerobot("frames", source)
+            with self.assertRaises(TableNotExistException):
+                connection.get_table("frames")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_optional_subtasks_keep_their_native_schema(self):
+        import pandas as pd
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_subtasks_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            (source / "meta" / "info.json").write_text(json.dumps({
+                "codebase_version": "v3.0",
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "fps": 30,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "subtask_index": {"dtype": "int64", "shape": [1]},
+                },
+            }))
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {"subtask_index": [0]},
+                index=pd.Index(["reach"], name="instruction"),
+            )), source / "meta" / "subtasks.parquet")
+            source_info = json.loads(
+                (source / "meta" / "info.json").read_text())
+            metadata = _load_dataset_metadata(
+                None,
+                source_info,
+                _LeRobotSource(
+                    path=str(source),
+                    root=source,
+                    repo_id="local/subtasks",
+                ),
+            )
+
+            expected = pq.read_table(source / "meta" / "subtasks.parquet")
+            self.assertTrue(metadata["subtasks_table"].equals(expected))
+            self.assertEqual([0], list(metadata["subtask_indices"]))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_subtask_metadata_must_match_frame_feature(self):
+        import pandas as pd
+
+        info = {"features": {"subtask_index": {}}}
+        with self.assertRaisesRegex(ValueError, "subtasks.parquet is missing"):
+            _subtask_indices(None, info)
+        reordered = pa.Table.from_pandas(pd.DataFrame(
+            {"subtask_index": [1, 0]},
+            index=pd.Index(["reach", "grasp"], name="instruction"),
+        ))
+        with self.assertRaisesRegex(ValueError, "numeric and text mappings"):
+            _subtask_indices(reordered, info)
+        with self.assertRaisesRegex(ValueError, "Pandas index"):
+            _subtask_indices(pa.table({
+                "subtask_index": [0],
+            }), info)
+
+    def test_native_metadata_does_not_require_json_values(self):
+        import pandas as pd
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_native_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta" / "episodes").mkdir(parents=True)
+            info = {
+                "codebase_version": "v3.0",
+                "total_frames": 1,
+                "total_episodes": 1,
+                "total_tasks": 1,
+                "fps": 30,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                },
+            }
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {
+                    "task_index": [0],
+                    "native_bytes": [b"\xff"],
+                },
+                index=pd.Index(["pick"], name="instruction"),
+            )), source / "meta" / "tasks.parquet")
+            episode_table = pa.table({
+                "episode_index": [0],
+                "dataset_from_index": [0],
+                "dataset_to_index": [1],
+                "tasks": [["pick"]],
+                "length": [1],
+                "native_bytes": [b"\xff"],
+                "stats/value/mean": [float("nan")],
+            })
+            pq.write_table(
+                episode_table,
+                source / "meta" / "episodes" / "part.parquet",
+            )
+            (source / "meta" / "stats.json").write_text(json.dumps({
+                "mean": float("nan"),
+                "max": float("inf"),
+            }))
+            metadata = _load_dataset_metadata(
+                None,
+                info,
+                _LeRobotSource(
+                    path=str(source),
+                    root=source,
+                    repo_id="local/native-metadata",
+                ),
+            )
+
+            self.assertIsNone(metadata["episodes"])
+            self.assertEqual(1, len(metadata["episode_paths"]))
+            stored_episode = list(_validated_episode_tables(metadata))[0]
+            self.assertEqual(1, len(metadata["episodes"]))
+            self.assertEqual(
+                b"\xff",
+                stored_episode.column("native_bytes")[0].as_py(),
+            )
+            self.assertTrue(np.isnan(
+                stored_episode.column("stats/value/mean")[0].as_py()))
+            self.assertEqual(
+                b"\xff",
+                metadata["tasks_table"].column("native_bytes")[0].as_py(),
+            )
+            stored_stats = json.loads(metadata["stats_json"])
+            self.assertTrue(np.isnan(stored_stats["mean"]))
+            self.assertTrue(np.isinf(stored_stats["max"]))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_invalid_fps_creates_no_snapshot_or_manifest(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_fps_"))
+        try:
+            source = temp_dir / "source"
+            (source / "meta").mkdir(parents=True)
+            (source / "meta" / "info.json").write_text(json.dumps({
+                "codebase_version": "v3.0",
+                "total_frames": 0,
+                "total_episodes": 0,
+                "total_tasks": 0,
+                "fps": 0,
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                },
+            }))
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+
+            with self.assertRaisesRegex(ValueError, "fps must be positive"):
+                connection.load_from_lerobot("frames", source)
+            with self.assertRaises(TableNotExistException):
+                connection.get_table("frames")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_source_values_are_safely_converted(self):
         class Dataset:
 
@@ -428,7 +748,7 @@ class LeRobotValidationTest(unittest.TestCase):
         for feature, value, message in cases:
             with self.subTest(feature=feature, value=value):
                 info = {"features": {"value": feature}}
-                schema = _schema_from_info(info, include_task=False)
+                schema = _schema_from_info(info)
                 with self.assertRaisesRegex(ValueError, message):
                     _read_batch(Dataset(value), info, 0, 1, schema)
 
@@ -443,7 +763,7 @@ class LeRobotValidationTest(unittest.TestCase):
         for feature, value in boundary_cases:
             with self.subTest(feature=feature, value=value):
                 info = {"features": {"value": feature}}
-                schema = _schema_from_info(info, include_task=False)
+                schema = _schema_from_info(info)
                 result = _read_batch(Dataset(value), info, 0, 1, schema)
                 self.assertEqual(value, result.column("value")[0].as_py())
 
@@ -527,6 +847,21 @@ class _RemoteLeRobotFileIO:
 
     def close(self):
         self.close_count += 1
+
+
+class _FailingCloseDataset:
+
+    def __init__(self, dataset):
+        self._dataset = dataset
+
+    def __getattr__(self, name):
+        return getattr(self._dataset, name)
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def close(self):
+        raise RuntimeError("close failed")
 
 
 @unittest.skipUnless(
@@ -614,11 +949,13 @@ class LeRobotImportTest(unittest.TestCase):
             dataset.save_episode()
         dataset.finalize()
 
-    def test_import_infers_schema_preserves_episodes_and_appends(self):
-        snapshot_id = self.connection.load_from_lerobot(
+    def test_import_infers_schema_and_preserves_episodes(self):
+        import pandas as pd
+
+        version_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
-        self.assertEqual(1, snapshot_id)
+        self.assertEqual(1, version_id)
 
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
@@ -632,6 +969,10 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual("FLOAT NOT NULL", types["timestamp"])
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])
+        self.assertNotIn("dataset_id", types)
+        self.assertNotIn("metadata_version", types)
+        self.assertNotIn("version_id", types)
+        self.assertNotIn("task", types)
 
         rows = table.scan().select([
             "episode_index",
@@ -639,7 +980,6 @@ class LeRobotImportTest(unittest.TestCase):
             "timestamp",
             "index",
             "task_index",
-            "task",
             "observation.state",
             "observation.matrix",
             "action",
@@ -648,15 +988,89 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([0, 0, 1, 1, 1], [row["episode_index"] for row in rows])
         self.assertEqual([0, 1, 0, 1, 2], [row["frame_index"] for row in rows])
         self.assertEqual([0, 1, 2, 3, 4], [row["index"] for row in rows])
-        self.assertEqual(["pick", "pick", "place", "place", "place"],
-                         [row["task"] for row in rows])
+        self.assertEqual([0, 0, 1, 1, 1],
+                         [row["task_index"] for row in rows])
         self.assertEqual([1.0, -1.0], rows[1]["action"])
         self.assertEqual([[1.0, 2.0], [2.0, 1.0]],
                          rows[4]["observation.matrix"])
         self.assertAlmostEqual(0.2, rows[4]["timestamp"], places=6)
         self.assertEqual(1.0, rows[4]["reward"])
+        manifests = _catalog_rows(self.connection, "robot_data__versions")
+        self.assertEqual(1, len(manifests))
+        manifest = manifests[0]
+        self.assertEqual(version_id, manifest["version_id"])
+        self.assertEqual("v3.0", json.loads(
+            manifest["info_json"])["codebase_version"])
+        self.assertIsNotNone(manifest["stats_json"])
         self.assertEqual(
-            snapshot_id,
+            {"version_id", "info_json", "stats_json", "has_subtasks"},
+            set(manifest))
+        self.assertFalse(manifest["has_subtasks"])
+        tag = str(manifest["version_id"])
+        self.assertEqual(
+            1,
+            self.connection.catalog.get_tag(
+                table.identifier, tag).snapshot.id,
+        )
+        for name, expected_snapshot in (
+                ("robot_data__episodes", 1),
+                ("robot_data__tasks", 1)):
+            self.assertEqual(
+                expected_snapshot,
+                self.connection.catalog.get_tag(
+                    self.connection._identifier(name), tag).snapshot.id,
+            )
+
+        episodes = _catalog_rows(self.connection, "robot_data__episodes")
+        episode_fields = {
+            field.name for field in self.connection.catalog.get_table(
+                self.connection._identifier(
+                    "robot_data__episodes")).fields
+        }
+        self.assertNotIn("version_id", episode_fields)
+        source_episode_schema = pq.read_schema(next(
+            (self.image_source / "meta" / "episodes").rglob("*.parquet")))
+        self.assertTrue(_target_schema(
+            self.connection.catalog.get_table(self.connection._identifier(
+                "robot_data__episodes"))
+        ).equals(source_episode_schema, check_metadata=False))
+        self.assertEqual([(0, 0, 2), (1, 2, 5)], [
+            (row["episode_index"], row["dataset_from_index"],
+             row["dataset_to_index"])
+            for row in episodes
+        ])
+        self.assertEqual([["pick"], ["place"]], [
+            row["tasks"] for row in episodes])
+        self.assertTrue(any(
+            name.startswith("stats/") for name in episode_fields))
+
+        tasks = _catalog_rows(self.connection, "robot_data__tasks")
+        task_fields = {
+            field.name for field in self.connection.catalog.get_table(
+                self.connection._identifier("robot_data__tasks")).fields
+        }
+        self.assertNotIn("version_id", task_fields)
+        self.assertTrue(_target_schema(
+            self.connection.catalog.get_table(self.connection._identifier(
+                "robot_data__tasks"))
+        ).equals(
+            pq.read_schema(self.image_source / "meta" / "tasks.parquet"),
+            check_metadata=False,
+        ))
+        task_name = "task" if "task" in task_fields else "__index_level_0__"
+        self.assertEqual([(0, "pick"), (1, "place")], [
+            (row["task_index"], row[task_name]) for row in tasks
+        ])
+        tasks_table, tasks_arrow = _catalog_arrow(
+            self.connection, "robot_data__tasks")
+        pd.testing.assert_frame_equal(
+            pq.read_table(
+                self.image_source / "meta" / "tasks.parquet").to_pandas(),
+            _restore_pandas_metadata(
+                tasks_table, tasks_arrow).to_pandas(),
+        )
+        self.assertEqual(
+            1,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
         )
 
@@ -675,10 +1089,265 @@ class LeRobotImportTest(unittest.TestCase):
             [imported[index] for index in range(5)],
         )
 
-        appended_snapshot_id = self.connection.load_from_lerobot(
-            "robot_data", self.image_source, batch_size=4)
-        self.assertEqual(2, appended_snapshot_id)
-        self.assertEqual(10, table.scan().to_arrow().num_rows)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.connection.load_from_lerobot(
+                "robot_data", self.image_source, batch_size=4)
+        self.assertEqual(5, table.scan().to_arrow().num_rows)
+
+    def test_episode_tasks_are_validated_incrementally(self):
+        from pypaimon.multimodal.lerobot import loader
+
+        with patch.object(
+                loader,
+                "_validate_episode_tasks",
+                wraps=loader._validate_episode_tasks) as validate:
+            self.connection.load_from_lerobot(
+                "incremental_tasks", self.image_source, batch_size=1)
+
+        self.assertEqual([0, 1], [
+            call.args[0] for call in validate.call_args_list
+        ])
+
+    def test_episode_source_shards_share_paimon_files(self):
+        source = self.temp_dir / "episode_shards"
+        shutil.copytree(self.image_source, source)
+        episode_path = next(
+            (source / "meta" / "episodes").rglob("*.parquet"))
+        episodes = pq.read_table(episode_path)
+        episode_path.unlink()
+        for index in range(episodes.num_rows):
+            pq.write_table(
+                episodes.slice(index, 1),
+                episode_path.parent / ("part-%d.parquet" % index),
+            )
+
+        self.connection.load_from_lerobot("sharded_episodes", source)
+        table = self.connection.catalog.get_table(
+            self.connection._identifier("sharded_episodes__episodes"))
+        files = {
+            file.file_name
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        }
+        self.assertEqual(1, len(files))
+
+    def test_import_publishes_optional_subtasks(self):
+        import pandas as pd
+
+        source = self.temp_dir / "with_subtasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["features"]["subtask_index"] = {
+            "dtype": "int64",
+            "shape": [1],
+            "names": None,
+        }
+        info_path.write_text(json.dumps(info))
+
+        next_subtask = 0
+        for path in sorted((source / "data").rglob("*.parquet")):
+            data = pq.read_table(path)
+            values = [
+                (next_subtask + index) % 2
+                for index in range(data.num_rows)
+            ]
+            next_subtask += data.num_rows
+            pq.write_table(data.append_column(
+                "subtask_index",
+                pa.array(values, type=pa.int64()),
+            ), path)
+        subtasks = pa.Table.from_pandas(pd.DataFrame(
+            {"subtask_index": [0, 1]},
+            index=pd.Index(["reach", "grasp"], name="instruction"),
+        ))
+        pq.write_table(subtasks, source / "meta" / "subtasks.parquet")
+
+        version_id = self.connection.load_from_lerobot(
+            "with_subtasks", source)
+
+        frames = self.connection.get_table("with_subtasks")
+        self.assertNotIn("subtask", [
+            field.name for field in frames.raw_table.fields
+        ])
+        self.assertEqual([0, 1, 0, 1, 0], frames.scan().select([
+            "index", "subtask_index"
+        ]).to_arrow().sort_by("index").column("subtask_index").to_pylist())
+        subtasks_table = self.connection.catalog.get_table(
+            self.connection._identifier("with_subtasks__subtasks"))
+        self.assertTrue(_target_schema(subtasks_table).equals(
+            subtasks.schema, check_metadata=False))
+        self.assertEqual(
+            subtasks.to_pylist(),
+            _catalog_rows(self.connection, "with_subtasks__subtasks"),
+        )
+        _, subtasks_arrow = _catalog_arrow(
+            self.connection, "with_subtasks__subtasks")
+        pd.testing.assert_frame_equal(
+            subtasks.to_pandas(),
+            _restore_pandas_metadata(
+                subtasks_table, subtasks_arrow).to_pandas(),
+        )
+        self.assertTrue(_catalog_rows(
+            self.connection, "with_subtasks__versions")[0]["has_subtasks"])
+        self.assertEqual(
+            1,
+            self.connection.catalog.get_tag(
+                self.connection._identifier("with_subtasks__subtasks"),
+                str(version_id),
+            ).snapshot.id,
+        )
+
+    def test_import_preserves_quoted_database_name(self):
+        self.connection.catalog.create_database(
+            "db.name", ignore_if_exists=False)
+
+        self.connection.load_from_lerobot(
+            "`db.name`.robot", self.image_source)
+
+        table_names = self.connection.catalog.list_tables("db.name")
+        self.assertEqual([
+            "robot",
+            "robot__episodes",
+            "robot__tasks",
+            "robot__versions",
+        ], sorted(table_names))
+
+    def test_import_reuses_validated_episode_metadata(self):
+        from pypaimon.multimodal.lerobot import api
+
+        source = self.temp_dir / "stable_episodes"
+        shutil.copytree(self.image_source, source)
+        episode_path = next((source / "meta" / "episodes").rglob("*.parquet"))
+        original_write = api._write_dataset
+
+        def write_then_replace(*args, **kwargs):
+            snapshot_id = original_write(*args, **kwargs)
+            episodes = pq.read_table(episode_path)
+            tasks = episodes.column("tasks").to_pylist()
+            tasks[0] = ["place"]
+            pq.write_table(episodes.set_column(
+                episodes.schema.get_field_index("tasks"),
+                "tasks",
+                pa.array(tasks, type=episodes.schema.field("tasks").type),
+            ), episode_path)
+            return snapshot_id
+
+        with patch.object(
+                api, "_write_dataset", side_effect=write_then_replace):
+            self.connection.load_from_lerobot("stable_episodes", source)
+
+        published = _catalog_rows(
+            self.connection, "stable_episodes__episodes")
+        self.assertEqual(["pick"], published[0]["tasks"])
+
+    def test_frame_controls_must_match_published_episode_metadata(self):
+        cases = [
+            ("index", 99),
+            ("episode_index", 0),
+            ("frame_index", 1),
+            ("timestamp", 0.2),
+            ("task_index", 0),
+        ]
+        for column, value in cases:
+            with self.subTest(column=column):
+                source = self.temp_dir / ("corrupt_" + column)
+                shutil.copytree(self.image_source, source)
+                path = next((source / "data").rglob("*.parquet"))
+                data = pq.read_table(path)
+                values = data.column(column).to_pylist()
+                values[2] = value
+                index = data.schema.get_field_index(column)
+                data = data.set_column(
+                    index,
+                    column,
+                    pa.array(values, type=data.schema.field(index).type),
+                )
+                pq.write_table(data, path)
+
+                table_name = "corrupt_" + column
+                with self.assertRaisesRegex(
+                        ValueError, "has %s" % column):
+                    self.connection.load_from_lerobot(table_name, source)
+                self.connection.get_table(table_name)
+                self.assertEqual([], _catalog_rows(
+                    self.connection, table_name + "__versions"))
+
+    def test_task_text_remains_in_published_task_mapping(self):
+        source = self.temp_dir / "reordered_tasks"
+        shutil.copytree(self.image_source, source)
+        path = source / "meta" / "tasks.parquet"
+        tasks = pq.read_table(path)
+        pq.write_table(tasks.take(pa.array([1, 0])), path)
+
+        self.connection.load_from_lerobot("reordered_tasks", source)
+        table = self.connection.get_table("reordered_tasks")
+        self.assertNotIn("task", [
+            field.name for field in table.raw_table.fields
+        ])
+        frames = table.scan().select([
+            "index", "task_index"
+        ]).to_arrow().sort_by("index").to_pylist()
+        task_rows = _catalog_rows(
+            self.connection, "reordered_tasks__tasks")
+        task_name = (
+            "task" if "task" in task_rows[0] else "__index_level_0__")
+        published = {
+            row["task_index"]: row[task_name] for row in task_rows
+        }
+        self.assertEqual({0: "pick", 1: "place"}, published)
+        self.assertTrue(all(
+            row["task_index"] in published for row in frames))
+
+    def test_episode_tasks_must_exactly_match_frame_tasks(self):
+        source = self.temp_dir / "extra_episode_task"
+        shutil.copytree(self.image_source, source)
+        path = next((source / "meta" / "episodes").rglob("*.parquet"))
+        episodes = pq.read_table(path)
+        tasks = episodes.column("tasks").to_pylist()
+        tasks[0] = ["pick", "place"]
+        index = episodes.schema.get_field_index("tasks")
+        episodes = episodes.set_column(
+            index,
+            "tasks",
+            pa.array(tasks, type=episodes.schema.field(index).type),
+        )
+        pq.write_table(episodes, path)
+
+        with self.assertRaisesRegex(
+                ValueError, "declares task indices"):
+            self.connection.load_from_lerobot(
+                "extra_episode_task", source)
+        self.connection.get_table("extra_episode_task")
+        self.assertEqual([], _catalog_rows(
+            self.connection, "extra_episode_task__versions"))
+
+    def test_nonempty_dataset_cannot_publish_without_tasks(self):
+        source = self.temp_dir / "missing_tasks"
+        shutil.copytree(self.image_source, source)
+        info_path = source / "meta" / "info.json"
+        info = json.loads(info_path.read_text())
+        info["total_tasks"] = 0
+        info_path.write_text(json.dumps(info))
+        episode_path = next(
+            (source / "meta" / "episodes").rglob("*.parquet"))
+        episodes = pq.read_table(episode_path)
+        index = episodes.schema.get_field_index("tasks")
+        episodes = episodes.set_column(
+            index,
+            "tasks",
+            pa.array(
+                [[] for _ in range(episodes.num_rows)],
+                type=episodes.schema.field(index).type,
+            ),
+        )
+        pq.write_table(episodes, episode_path)
+
+        with self.assertRaisesRegex(ValueError, "task_index"):
+            self.connection.load_from_lerobot("missing_tasks", source)
+        self.connection.get_table("missing_tasks")
+        self.assertEqual([], _catalog_rows(
+            self.connection, "missing_tasks__versions"))
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"
@@ -687,16 +1356,16 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot.source._SourceFileIO",
                 return_value=source_file_io):
-            snapshot_id = self.connection.load_from_lerobot(
+            version_id = self.connection.load_from_lerobot(
                 "oss_images",
                 source,
                 batch_size=2,
             )
 
-        self.assertEqual(1, snapshot_id)
+        self.assertEqual(1, version_id)
         table = self.connection.get_table("oss_images")
         rows = table.scan().select([
-            "episode_index", "frame_index", "index", "task"
+            "episode_index", "frame_index", "index", "task_index"
         ]).to_arrow().sort_by("index").to_pylist()
         self.assertEqual([0, 0, 1, 1, 1], [
             row["episode_index"] for row in rows
@@ -704,11 +1373,9 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([0, 1, 0, 1, 2], [
             row["frame_index"] for row in rows
         ])
-        self.assertEqual(
-            ["pick", "pick", "place", "place", "place"],
-            [row["task"] for row in rows],
-        )
-        self.assertFalse(any(
+        self.assertEqual([0, 0, 1, 1, 1], [
+            row["task_index"] for row in rows])
+        self.assertTrue(any(
             path.endswith("meta/stats.json")
             for path in source_file_io.opened_paths
         ))
@@ -717,75 +1384,284 @@ class LeRobotImportTest(unittest.TestCase):
             if "/data/" in path and path.endswith(".parquet")
         ]))
 
-    def test_existing_incompatible_schema_fails_without_snapshot(self):
-        info = json.loads((self.image_source / "meta" / "info.json").read_text())
-        schema = _schema_from_info(info, include_task=True)
-        incompatible_fields = {
-            "shape": pa.field(
-                "observation.matrix",
-                schema.field("observation.matrix").type,
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("observation.matrix"),
-                    "shape=[2,2]",
-                    "shape=[5,2]",
-                ),
-            ),
-            "dtype": pa.field(
-                "action",
-                pa.list_(pa.float64(), 2),
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("action"),
-                    "dtype=float32",
-                    "dtype=float64",
-                ),
-            ),
-            "names": pa.field(
-                "action",
-                schema.field("action").type,
-                nullable=False,
-                metadata=_replaced_contract(
-                    schema.field("action"),
-                    'names=["x","y"]',
-                    'names=["y","x"]',
-                ),
-            ),
-            "array": pa.field(
-                "action",
-                pa.list_(pa.float32()),
-                nullable=False,
-                metadata=schema.field("action").metadata,
-            ),
-            "bytes": pa.field(
-                "observation.image",
-                pa.binary(),
-                nullable=False,
-                metadata=schema.field("observation.image").metadata,
-            ),
-        }
-        for name, replacement in incompatible_fields.items():
-            with self.subTest(name=name):
-                table_name = "incompatible_%s" % name
-                table = self.connection.create_table(
-                    table_name,
-                    schema=pa.schema([
-                        replacement if field.name == replacement.name
-                        else field
-                        for field in schema
-                    ]),
-                    options={
-                        "file.format": "parquet",
-                        "vector.file.format": "parquet",
-                    },
-                )
+    def test_remote_tasks_use_the_pandas_index_column(self):
+        local_source = self.temp_dir / "custom_task_index"
+        shutil.copytree(self.image_source, local_source)
+        path = local_source / "meta" / "tasks.parquet"
+        tasks = pq.read_table(path).to_pandas().rename_axis("instruction")
+        pq.write_table(pa.Table.from_pandas(tasks), path)
+        source = "oss://source-bucket/custom-task-index"
+        source_file_io = _RemoteLeRobotFileIO(local_source, source)
 
-                with self.assertRaisesRegex(
-                        ValueError, "cannot be converted"):
-                    self.connection.load_from_lerobot(
-                        table_name, self.image_source)
-                self.assertIsNone(
-                    table.raw_table.snapshot_manager().get_latest_snapshot())
+        with patch(
+                "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                return_value=source_file_io):
+            self.connection.load_from_lerobot(
+                "custom_task_index", source)
+
+        rows = _catalog_rows(
+            self.connection, "custom_task_index__tasks")
+        self.assertEqual(
+            [(0, "pick"), (1, "place")],
+            [(row["task_index"], row["instruction"]) for row in rows],
+        )
+
+    def test_empty_oss_source_does_not_require_episode_directory(self):
+        local_source = self.temp_dir / "empty_remote"
+        (local_source / "meta").mkdir(parents=True)
+        (local_source / "meta" / "info.json").write_text(json.dumps({
+            "codebase_version": "v3.0",
+            "total_frames": 0,
+            "total_episodes": 0,
+            "total_tasks": 0,
+            "fps": 30,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+            },
+        }))
+        source = "oss://source-bucket/empty-robot"
+        source_file_io = _RemoteLeRobotFileIO(local_source, source)
+
+        with patch(
+                "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                return_value=source_file_io):
+            with self.assertRaisesRegex(ValueError, "non-empty"):
+                self.connection.load_from_lerobot("empty_oss", source)
+
+    def test_tag_falls_back_for_catalogs_without_tag_api(self):
+        with patch.object(
+                self.connection.catalog,
+                "create_tag",
+                side_effect=NotImplementedError):
+            version_id = self.connection.load_from_lerobot(
+                "tag_fallback", self.image_source)
+
+        manifest = _catalog_rows(
+            self.connection, "tag_fallback__versions")[0]
+        tag = str(manifest["version_id"])
+        table = self.connection.get_table("tag_fallback")
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            table.raw_table.snapshot_manager().get_latest_snapshot().id,
+            table.raw_table.tag_manager().get(tag).id,
+        )
+
+    def test_tag_response_loss_is_reconciled(self):
+        create_tag = self.connection.catalog.create_tag
+        lost = [False]
+
+        def create_then_lose_response(*args, **kwargs):
+            result = create_tag(*args, **kwargs)
+            if not lost[0]:
+                lost[0] = True
+                raise TimeoutError("lost tag response")
+            return result
+
+        with patch.object(
+                self.connection.catalog,
+                "create_tag",
+                side_effect=create_then_lose_response):
+            version_id = self.connection.load_from_lerobot(
+                "tag_response_loss", self.image_source)
+
+        self.assertTrue(lost[0])
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            [1],
+            [row["version_id"] for row in _catalog_rows(
+                self.connection, "tag_response_loss__versions")])
+
+    def test_tag_failure_remains_unpublished(self):
+        with patch(
+                "pypaimon.multimodal.lerobot.metadata._create_tag",
+                side_effect=RuntimeError("tag failed")):
+            with self.assertRaisesRegex(RuntimeError, "tag failed"):
+                self.connection.load_from_lerobot(
+                    "failed_publish", self.image_source)
+
+        self.connection.get_table("failed_publish")
+        self.assertEqual([], _catalog_rows(
+            self.connection, "failed_publish__versions"))
+
+    def test_existing_companion_is_rejected(self):
+        self.connection.load_from_lerobot(
+            "other_group", self.image_source)
+        stale = self.connection._identifier("stale__tasks")
+        self.connection.catalog.rename_table(
+            self.connection._identifier("other_group__tasks"), stale)
+
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.connection.load_from_lerobot(
+                "stale", self.image_source)
+
+        self.connection.get_table("stale")
+        self.connection.catalog.get_table(stale)
+
+    def test_invalid_target_options_do_not_leave_table(self):
+        with self.assertRaisesRegex(ValueError, "data-evolution.enabled"):
+            self.connection.load_from_lerobot(
+                "invalid_options",
+                self.image_source,
+                options={"data-evolution.enabled": "false"},
+            )
+        with self.assertRaises(TableNotExistException):
+            self.connection.catalog.get_table(
+                self.connection._identifier("invalid_options"))
+
+        version_id = self.connection.load_from_lerobot(
+            "invalid_options", self.image_source)
+        self.assertEqual(1, version_id)
+
+    def test_target_open_failure_leaves_created_table(self):
+        original_get = self.connection.get_table
+        failed = [False]
+
+        def fail_once(name):
+            if not failed[0]:
+                failed[0] = True
+                raise RuntimeError("get failed")
+            return original_get(name)
+
+        with patch.object(
+                self.connection, "get_table", side_effect=fail_once):
+            with self.assertRaisesRegex(RuntimeError, "get failed"):
+                self.connection.load_from_lerobot(
+                    "failed_open", self.image_source)
+
+        self.connection.get_table("failed_open")
+
+    def test_dataset_close_failure_does_not_override_success(self):
+        from pypaimon.multimodal.lerobot import api
+
+        original_open = api._open_resolved_dataset
+
+        def open_with_failing_close(*args, **kwargs):
+            return _FailingCloseDataset(original_open(*args, **kwargs))
+
+        with self.assertLogs(
+                "pypaimon.multimodal.lerobot.source", level="WARNING"):
+            with patch.object(
+                    api,
+                    "_open_resolved_dataset",
+                    side_effect=open_with_failing_close):
+                version_id = self.connection.load_from_lerobot(
+                    "close_failure", self.image_source)
+
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            [1],
+            [row["version_id"] for row in _catalog_rows(
+                self.connection, "close_failure__versions")])
+
+    def test_source_close_failure_does_not_override_success(self):
+        source = "oss://source-bucket/robot-images"
+        source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
+        source_file_io.close = Mock(side_effect=RuntimeError("close failed"))
+
+        with self.assertLogs(
+                "pypaimon.multimodal.lerobot.source", level="WARNING"):
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                    return_value=source_file_io):
+                version_id = self.connection.load_from_lerobot(
+                    "source_close_failure", source)
+
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            [1],
+            [row["version_id"] for row in _catalog_rows(
+                self.connection, "source_close_failure__versions")])
+
+    def test_existing_target_is_rejected(self):
+        info = json.loads((self.image_source / "meta" / "info.json").read_text())
+        schema = _schema_from_info(info)
+        table = self.connection.create_table("existing", schema=schema)
+
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.connection.load_from_lerobot(
+                "existing", self.image_source)
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_concurrent_import_cannot_claim_the_same_target(self):
+        from pypaimon.multimodal.lerobot import api
+
+        original_prepare = api._prepare_metadata_tables
+        root_created = threading.Event()
+        release = threading.Event()
+
+        def prepare_then_wait(*args, **kwargs):
+            root_created.set()
+            release.wait(10)
+            return original_prepare(*args, **kwargs)
+
+        with patch.object(
+                api,
+                "_prepare_metadata_tables",
+                side_effect=prepare_then_wait):
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    self.connection.load_from_lerobot,
+                    "concurrent",
+                    self.image_source,
+                )
+                try:
+                    self.assertTrue(root_created.wait(10))
+                    with self.assertRaisesRegex(
+                            ValueError, "already exists"):
+                        self.connection.load_from_lerobot(
+                            "concurrent", self.image_source)
+                finally:
+                    release.set()
+                version_id = future.result(timeout=30)
+
+        self.assertEqual(1, version_id)
+        self.assertEqual(
+            5,
+            self.connection.get_table(
+                "concurrent").scan().to_arrow().num_rows,
+        )
+
+    def test_concurrent_append_cannot_enter_published_version(self):
+        from pypaimon.multimodal.lerobot import api
+
+        original_write = api._write_dataset
+
+        def append_then_write(
+                table,
+                dataset,
+                info,
+                source,
+                source_schema,
+                batch_size,
+                metadata):
+            table.add(_read_batch(
+                dataset,
+                info,
+                0,
+                1,
+                source_schema,
+            ))
+            return original_write(
+                table,
+                dataset,
+                info,
+                source,
+                source_schema,
+                batch_size,
+                metadata,
+            )
+
+        with patch.object(
+                api, "_write_dataset", side_effect=append_then_write):
+            with self.assertRaisesRegex(RuntimeError, "concurrent writes"):
+                self.connection.load_from_lerobot(
+                    "concurrent_append", self.image_source)
+
+        self.connection.get_table("concurrent_append")
+        self.assertEqual([], _catalog_rows(
+            self.connection, "concurrent_append__versions"))
+
 
 if __name__ == "__main__":
     unittest.main()

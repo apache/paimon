@@ -142,7 +142,7 @@ class MultimodalConnection:
             batch_size: int = 1024,
             options=None,
             source_options=None):
-        """Import LeRobot Dataset v3 and return the committed snapshot ID."""
+        """Import LeRobot Dataset v3 into a new Paimon table group."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
         return load_from_lerobot(
             self,
