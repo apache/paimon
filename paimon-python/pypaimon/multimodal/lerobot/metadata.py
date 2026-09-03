@@ -392,9 +392,6 @@ def _drop_import_tables(
 
     restore_failures = _restore_quarantined(catalog, foreign)
     drop_failures = _drop_quarantined(catalog, owned, owner_id)
-    if drop_failures:
-        drop_failures = _drop_quarantined(
-            catalog, drop_failures, owner_id)
     if restore_failures or drop_failures:
         raise RuntimeError(
             "LeRobot cleanup left quarantined tables: %s"
@@ -479,19 +476,17 @@ def _drop_quarantined(catalog, tables, owner_id):
     for entry in tables:
         source, quarantine, expected_owner = entry
         dropped = False
-        for _ in range(2):
-            try:
-                source_owner = _table_owner(catalog, source)
-                quarantine_owner = _table_owner(catalog, quarantine)
-                if quarantine_owner is _MISSING:
-                    dropped = source_owner != expected_owner
-                    break
-                if quarantine_owner != expected_owner \
-                        or expected_owner != owner_id:
-                    break
+        try:
+            source_owner = _table_owner(catalog, source)
+            quarantine_owner = _table_owner(catalog, quarantine)
+            if quarantine_owner is _MISSING:
+                dropped = source_owner != expected_owner
+            elif quarantine_owner == expected_owner \
+                    and expected_owner == owner_id:
                 catalog.drop_table(quarantine)
-            except BaseException:
-                pass
+                dropped = True
+        except BaseException:
+            pass
         if not dropped:
             try:
                 dropped = _table_owner(catalog, quarantine) is _MISSING \

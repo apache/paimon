@@ -1686,12 +1686,20 @@ class LeRobotImportTest(unittest.TestCase):
                     self.connection.catalog.get_table(
                         self.connection._identifier(name))
 
-    def test_drop_table_retries_companion_failure(self):
+    def test_drop_failure_is_not_retried(self):
         self.connection.load_from_lerobot(
             "retry_drop", self.image_source)
+        episode_name = self.connection._identifier(
+            "retry_drop__episodes")
+        episode_table = self.connection.catalog.get_table(episode_name)
+        expected_owner = episode_table.table_schema.options[
+            _OWNER_ID_OPTION]
+        replacement_schema = episode_table.table_schema.to_schema()
+        replacement_schema.options = dict(replacement_schema.options)
+        replacement_schema.options[_OWNER_ID_OPTION] = "other-owner"
         original_drop = self.connection.catalog.drop_table
         original_rename = self.connection.catalog.rename_table
-        failed = [False]
+        attempts = [0]
         episode_quarantine = [None]
 
         def track_rename(source, target):
@@ -1700,10 +1708,13 @@ class LeRobotImportTest(unittest.TestCase):
             return original_rename(source, target)
 
         def flaky_drop(identifier, ignore_if_not_exists=False):
-            if identifier.get_full_name() == episode_quarantine[0] \
-                    and not failed[0]:
-                failed[0] = True
-                raise RuntimeError("injected drop failure")
+            if identifier.get_full_name() == episode_quarantine[0]:
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    raise RuntimeError("injected drop failure")
+                original_drop(identifier, ignore_if_not_exists)
+                self.connection.catalog.create_table(
+                    identifier, replacement_schema, False)
             return original_drop(identifier, ignore_if_not_exists)
 
         with patch.object(self.connection.catalog, "rename_table",
@@ -1711,14 +1722,17 @@ class LeRobotImportTest(unittest.TestCase):
                               self.connection.catalog,
                               "drop_table",
                               side_effect=flaky_drop):
-            self.connection.drop_table("retry_drop")
-        for name in (
-                "retry_drop", "retry_drop__versions",
-                "retry_drop__episodes", "retry_drop__tasks",
-                "retry_drop__subtasks"):
-            with self.assertRaises(TableNotExistException):
-                self.connection.catalog.get_table(
-                    self.connection._identifier(name))
+            with self.assertRaisesRegex(RuntimeError, "quarantined"):
+                self.connection.drop_table("retry_drop")
+
+        self.assertEqual(1, attempts[0])
+        remaining = self.connection.catalog.get_table(
+            episode_quarantine[0])
+        self.assertEqual(
+            expected_owner,
+            remaining.table_schema.options.get(_OWNER_ID_OPTION),
+        )
+        original_drop(episode_quarantine[0])
 
     def test_quarantine_rename_unknown_result_is_reconciled(self):
         for suffix, error_type in (
