@@ -234,9 +234,13 @@ public class JsonFileReader extends AbstractTextFileReader {
                 case VARCHAR:
                     return BinaryString.fromString(str);
                 default:
-                    BinaryString binaryString = BinaryString.fromString(str);
                     CastExecutor cast = CastExecutors.resolve(DataTypes.STRING(), dataType);
-                    return cast.cast(binaryString);
+                    if (cast == null) {
+                        // resolve returns null when no rule matches the target type.
+                        throw new UnsupportedOperationException(
+                                "Unsupported data type for JSON format: " + dataType);
+                    }
+                    return cast.cast(BinaryString.fromString(str));
             }
         } catch (Exception e) {
             return handleParseError(e);
