@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.table.row.vector import Vector
 
 
@@ -69,6 +70,12 @@ class VectorClassTest(unittest.TestCase):
         v = Vector([])
         self.assertEqual(len(v), 0)
         self.assertEqual(v.to_list(), [])
+
+    def test_offset_row_legacy_positional_vector_indices(self):
+        row = OffsetRow(([1.0, 2.0],), 0, 1, None, None, {0})
+
+        self.assertEqual(row.get_vector(0).to_list(), [1.0, 2.0])
+        self.assertEqual(row._descriptor_field_indices, frozenset())
 
 
 class VectorFileDetectionTest(unittest.TestCase):

@@ -418,26 +418,51 @@ class FileIO(ABC):
     def read_blobs_concurrent(self, blobs, parallelism):
         """Read a list of Blobs concurrently, coalescing same-file ranged reads.
 
-        ``BlobRef`` values expose a file range and are coalesced; in-memory
-        ``BlobData`` values are returned directly.
+        Exact ``BlobRef`` values (not subclasses) with a file-backed UriReader
+        are coalesced through that FileIO so table-scoped credentials are
+        preserved. Subclasses may override ``new_input_stream()`` and must not
+        be bypassed. Other readers (for example HTTP) read through the Blob.
         """
-        from pypaimon.table.row.blob import BlobRef
+        from concurrent.futures import ThreadPoolExecutor
+
+        from pypaimon.common.uri_reader import FileUriReader
+        from pypaimon.table.row.blob import BlobData, BlobRef
+
         results: List[Optional[bytes]] = [None] * len(blobs)
-        ranges: List[Optional[tuple]] = [None] * len(blobs)
-        inmem = []
-        for i, b in enumerate(blobs):
-            if b is None:
+        file_groups = {}
+        other_blobs = []
+        for index, blob in enumerate(blobs):
+            if blob is None:
                 continue
-            if isinstance(b, BlobRef):
-                d = b.to_descriptor()
-                ranges[i] = (d.uri, d.offset, d.length)
+            if isinstance(blob, BlobData):
+                results[index] = blob.to_data()
+            elif type(blob) is BlobRef and isinstance(
+                    blob.uri_reader, FileUriReader):
+                descriptor = blob.to_descriptor()
+                source_file_io = blob.uri_reader.file_io
+                group = file_groups.setdefault(
+                    id(source_file_io), (source_file_io, []))[1]
+                group.append((index, (
+                    descriptor.uri, descriptor.offset, descriptor.length)))
             else:
-                inmem.append((i, b))
-        for i, v in enumerate(self.read_ranges_coalesced(ranges, parallelism)):
-            if v is not None:
-                results[i] = v
-        for idx, b in inmem:
-            results[idx] = b.to_data()
+                other_blobs.append((index, blob))
+
+        for source_file_io, indexed_ranges in file_groups.values():
+            ranges = [value for _, value in indexed_ranges]
+            values = source_file_io.read_ranges_coalesced(ranges, parallelism)
+            for (index, _), value in zip(indexed_ranges, values):
+                results[index] = value
+
+        if other_blobs:
+            workers = max(1, min(parallelism, len(other_blobs)))
+
+            def _read_blob(indexed_blob):
+                return indexed_blob[1].to_data()
+
+            with ThreadPoolExecutor(workers) as pool:
+                values = pool.map(_read_blob, other_blobs)
+                for (index, _), value in zip(other_blobs, values):
+                    results[index] = value
         return results
 
     def read_file_utf8(self, path: str) -> str:
