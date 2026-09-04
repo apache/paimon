@@ -110,20 +110,21 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
+    val columnListWrite = containsColumnListWrite(v2WriteCommand.query)
+    val effectiveByName = v2WriteCommand.isByName || columnListWrite
     val queryWithoutMarker = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
     val query =
-      if (
-        v2WriteCommand.isByName &&
-        containsColumnListWrite(v2WriteCommand.query)
-      ) {
-        PaimonOutputResolver.renameNestedFieldsByPosition(queryWithoutMarker, table.output)
+      if (columnListWrite) {
+        PaimonOutputResolver.renameNestedFieldsByPosition(
+          queryWithoutMarker,
+          table.output,
+          v2WriteCommand.isByName)
       } else {
         queryWithoutMarker
       }
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
-      case Some(dynamicPartitionColumns)
-          if hiveStyleDynamicPartitionEnabled && !v2WriteCommand.isByName =>
+      case Some(dynamicPartitionColumns) if hiveStyleDynamicPartitionEnabled && !effectiveByName =>
         resolveDynamicPartitionWrite(
           query,
           table,
@@ -132,7 +133,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           mergeSchemaEnabled)
       case _ =>
         v2WriteCommand match {
-          case o: OverwritePartitionsDynamic if hiveStyleDynamicPartitionEnabled && !o.isByName =>
+          case _: OverwritePartitionsDynamic
+              if hiveStyleDynamicPartitionEnabled && !effectiveByName =>
             resolveDynamicPartitionWrite(
               query,
               table,
@@ -140,14 +142,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
               options,
               mergeSchemaEnabled)
           case _ =>
-            val expected =
-              expectedAttrsForWrite(query, table, options, v2WriteCommand.isByName)
-            resolveWriteOutput(
-              query,
-              table.name,
-              expected,
-              v2WriteCommand.isByName,
-              mergeSchemaEnabled)
+            val expected = expectedAttrsForWrite(query, table, options, effectiveByName)
+            resolveWriteOutput(query, table.name, expected, effectiveByName, mergeSchemaEnabled)
         }
     }
   }

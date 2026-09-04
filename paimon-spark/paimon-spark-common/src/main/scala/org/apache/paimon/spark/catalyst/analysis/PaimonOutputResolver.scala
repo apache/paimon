@@ -58,19 +58,25 @@ object PaimonOutputResolver extends SQLConfHelper {
 
   import MissingFieldBehavior._
 
-  def renameNestedFieldsByPosition(query: LogicalPlan, expected: Seq[Attribute]): LogicalPlan = {
-    val renamed = query.output.map {
-      input =>
-        expected.find(target => conf.resolver(input.name, target.name)) match {
+  def renameNestedFieldsByPosition(
+      query: LogicalPlan,
+      expected: Seq[Attribute],
+      queryOutputByName: Boolean): LogicalPlan = {
+    val renamed = query.output.zipWithIndex.map {
+      case (input, index) =>
+        val target = if (queryOutputByName) {
+          expected.find(target => conf.resolver(input.name, target.name))
+        } else {
+          expected.lift(index)
+        }
+        target match {
           case Some(target) =>
             val targetType =
               CharVarcharUtils.getRawType(target.metadata).getOrElse(target.dataType)
             val renamedType = renameFieldsInType(input.dataType, targetType)
-            if (renamedType == input.dataType) {
-              input
-            } else {
-              applyColumnMetadata(addCast(input, renamedType), input)
-            }
+            val renamedExpr =
+              if (renamedType == input.dataType) input else addCast(input, renamedType)
+            applyColumnMetadata(renamedExpr, target)
           case None => input
         }
     }
