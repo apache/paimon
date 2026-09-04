@@ -2450,7 +2450,7 @@ public class CoreOptions implements Serializable {
                             "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
                                     + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
                                     + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
-                                    + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
     public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
