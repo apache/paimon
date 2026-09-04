@@ -288,7 +288,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         for (DataFileMeta file : compactAfter) {
             // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
             // can directly delete the file in compactAfter.
-            fileIO.deleteQuietly(pathFactory.toPath(file));
+            file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
         }
 
         sinkWriter.close();
@@ -315,7 +315,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             } finally {
                 // remove small files
                 for (DataFileMeta file : files) {
-                    fileIO.deleteQuietly(pathFactory.toPath(file));
+                    file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
                 }
             }
         }
