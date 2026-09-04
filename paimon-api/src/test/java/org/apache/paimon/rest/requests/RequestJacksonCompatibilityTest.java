@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -228,6 +229,29 @@ public class RequestJacksonCompatibilityTest {
                         type ->
                                 assertThat(jsonCreator(type).getGenericParameterTypes())
                                         .anyMatch(parameter -> !isOrdinaryJacksonType(parameter)));
+    }
+
+    @Test
+    void testTransactionKeepsIdentifierOutsideCommitRequest() throws Exception {
+        String json =
+                "{\"tableChanges\":[{\"identifier\":{\"database\":\"db\",\"object\":\"table\"},"
+                        + "\"commit\":{\"tableId\":\"uuid\",\"baseSnapshotUuid\":null,"
+                        + "\"snapshot\":null,\"statistics\":[]}}]}";
+
+        CommitTransactionRequest request =
+                RESTApi.OBJECT_MAPPER.readValue(json, CommitTransactionRequest.class);
+        CommitTransactionRequest.TableChange change = request.getTableChanges().get(0);
+        assertThat(change.getIdentifier()).isEqualTo(Identifier.create("db", "table"));
+        assertThat(change.getCommit().getTableId()).isEqualTo("uuid");
+
+        String commitJson = RESTApi.OBJECT_MAPPER.writeValueAsString(change.getCommit());
+        assertThat(commitJson).doesNotContain("identifier");
+        CommitTransactionRequest roundTrip =
+                RESTApi.OBJECT_MAPPER.readValue(
+                        RESTApi.OBJECT_MAPPER.writeValueAsString(request),
+                        CommitTransactionRequest.class);
+        assertThat(roundTrip.getTableChanges().get(0).getIdentifier())
+                .isEqualTo(Identifier.create("db", "table"));
     }
 
     @Test

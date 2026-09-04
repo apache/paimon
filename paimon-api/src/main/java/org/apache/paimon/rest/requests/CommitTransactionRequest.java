@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -35,16 +36,16 @@ public class CommitTransactionRequest implements RESTRequest {
     private static final String FIELD_TABLE_CHANGES = "tableChanges";
 
     @JsonProperty(FIELD_TABLE_CHANGES)
-    private final List<CommitTableRequest> tableChanges;
+    private final List<TableChange> tableChanges;
 
     @JsonCreator
     public CommitTransactionRequest(
-            @JsonProperty(FIELD_TABLE_CHANGES) List<CommitTableRequest> tableChanges) {
+            @JsonProperty(FIELD_TABLE_CHANGES) List<TableChange> tableChanges) {
         this.tableChanges = tableChanges;
     }
 
     @JsonGetter(FIELD_TABLE_CHANGES)
-    public List<CommitTableRequest> getTableChanges() {
+    public List<TableChange> getTableChanges() {
         return tableChanges;
     }
 
@@ -53,5 +54,37 @@ public class CommitTransactionRequest implements RESTRequest {
     @Override
     public boolean isRetrySafe() {
         return false;
+    }
+
+    /** A table identifier and its snapshot commit request. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class TableChange {
+
+        private static final String FIELD_IDENTIFIER = "identifier";
+        private static final String FIELD_COMMIT = "commit";
+
+        @JsonProperty(FIELD_IDENTIFIER)
+        private final Identifier identifier;
+
+        @JsonProperty(FIELD_COMMIT)
+        private final CommitTableRequest commit;
+
+        @JsonCreator
+        public TableChange(
+                @JsonProperty(FIELD_IDENTIFIER) Identifier identifier,
+                @JsonProperty(FIELD_COMMIT) CommitTableRequest commit) {
+            this.identifier = identifier;
+            this.commit = commit;
+        }
+
+        @JsonGetter(FIELD_IDENTIFIER)
+        public Identifier getIdentifier() {
+            return identifier;
+        }
+
+        @JsonGetter(FIELD_COMMIT)
+        public CommitTableRequest getCommit() {
+            return commit;
+        }
     }
 }

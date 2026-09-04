@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CommitTransactionRequest;
+import org.apache.paimon.rest.requests.CommitTransactionRequest.TableChange;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.table.TableSnapshot;
 
@@ -59,7 +60,7 @@ final class RESTCatalogTransactionHandler {
     private static MockResponse handleLocked(RESTCatalogServer server, String data)
             throws Exception {
         CommitTransactionRequest request = parseRequest(data, CommitTransactionRequest.class);
-        List<CommitTableRequest> tableChanges = request.getTableChanges();
+        List<TableChange> tableChanges = request.getTableChanges();
         if (tableChanges == null || tableChanges.isEmpty()) {
             return server.mockResponse(
                     new ErrorResponse(null, null, "Empty transaction", 400), 400);
@@ -70,11 +71,12 @@ final class RESTCatalogTransactionHandler {
                     new ErrorResponse(null, null, "Invalid transaction", 400), 400);
         }
 
-        for (CommitTableRequest tableChange : tableChanges) {
+        for (TableChange tableChange : tableChanges) {
             Identifier identifier = tableChange.getIdentifier();
-            if (identifier == null) {
+            CommitTableRequest commit = tableChange.getCommit();
+            if (identifier == null || commit == null) {
                 return server.mockResponse(
-                        new ErrorResponse(null, null, "Missing table identifier", 400), 400);
+                        new ErrorResponse(null, null, "Invalid table change", 400), 400);
             }
             if (Objects.equals(missingTable, identifier.getFullName())) {
                 missingTable = null;
@@ -88,14 +90,14 @@ final class RESTCatalogTransactionHandler {
                 throw new Catalog.TableNoPermissionException(identifier);
             }
             TableMetadata metadata = server.tableMetadataStore.get(identifier.getFullName());
-            if (metadata == null || !Objects.equals(metadata.uuid(), tableChange.getTableId())) {
+            if (metadata == null || !Objects.equals(metadata.uuid(), commit.getTableId())) {
                 throw new Catalog.TableNotExistException(identifier);
             }
             TableSnapshot currentSnapshot =
                     server.tableLatestSnapshotStore.get(identifier.getFullName());
             String currentSnapshotUuid =
                     currentSnapshot == null ? null : currentSnapshot.snapshot().uuid();
-            if (!Objects.equals(currentSnapshotUuid, tableChange.getBaseSnapshotUuid())) {
+            if (!Objects.equals(currentSnapshotUuid, commit.getBaseSnapshotUuid())) {
                 return conflictResponse(server);
             }
         }
@@ -108,13 +110,14 @@ final class RESTCatalogTransactionHandler {
         boolean singleCommitFailure = RESTCatalogServer.commitSuccessThrowException;
         RESTCatalogServer.commitSuccessThrowException = false;
         try {
-            for (CommitTableRequest tableChange : tableChanges) {
+            for (TableChange tableChange : tableChanges) {
+                CommitTableRequest commit = tableChange.getCommit();
                 server.commitSnapshot(
                         tableChange.getIdentifier(),
-                        tableChange.getTableId(),
-                        tableChange.getBaseSnapshotUuid(),
-                        tableChange.getSnapshot(),
-                        tableChange.getStatistics());
+                        commit.getTableId(),
+                        commit.getBaseSnapshotUuid(),
+                        commit.getSnapshot(),
+                        commit.getStatistics());
             }
         } finally {
             RESTCatalogServer.commitSuccessThrowException = singleCommitFailure;

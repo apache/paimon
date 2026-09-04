@@ -711,7 +711,7 @@ public class RESTApi {
     }
 
     /** Commit snapshots of multiple tables atomically. */
-    public void commitTransaction(List<CommitTableRequest> tableChanges) {
+    public void commitTransaction(List<CommitTransactionRequest.TableChange> tableChanges) {
         checkArgument(!tableChanges.isEmpty(), "Table changes cannot be empty.");
         client.post(
                 resourcePaths.commitTransaction(),

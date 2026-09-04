@@ -56,6 +56,7 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CommitTransactionRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -142,14 +143,15 @@ public class RESTCatalog implements Catalog {
             this.tableCommit = tableCommit;
         }
 
-        private CommitTableRequest toRequest() {
+        private CommitTransactionRequest.TableChange toRequest() {
             PreparedSnapshotCommit prepared = Objects.requireNonNull(preparedCommit);
-            return new CommitTableRequest(
+            return new CommitTransactionRequest.TableChange(
                     identifier,
-                    tableUuid,
-                    prepared.baseSnapshotUuid(),
-                    prepared.snapshot(),
-                    prepared.statistics());
+                    new CommitTableRequest(
+                            tableUuid,
+                            prepared.baseSnapshotUuid(),
+                            prepared.snapshot(),
+                            prepared.statistics()));
         }
     }
 
@@ -583,7 +585,7 @@ public class RESTCatalog implements Catalog {
                         transactionCommits);
             }
 
-            List<CommitTableRequest> tableChanges =
+            List<CommitTransactionRequest.TableChange> tableChanges =
                     transactionCommits.stream()
                             .filter(commit -> commit.preparedCommit != null)
                             .map(TransactionTableCommit::toRequest)

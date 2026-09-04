@@ -19,14 +19,12 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -37,16 +35,10 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CommitTableRequest implements RESTRequest {
 
-    private static final String FIELD_IDENTIFIER = "identifier";
     private static final String FIELD_TABLE_ID = "tableId";
     private static final String FIELD_BASE_SNAPSHOT_UUID = "baseSnapshotUuid";
     private static final String FIELD_SNAPSHOT = "snapshot";
     private static final String FIELD_STATISTICS = "statistics";
-
-    @JsonProperty(FIELD_IDENTIFIER)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    private final Identifier identifier;
 
     @JsonProperty(FIELD_TABLE_ID)
     private final String tableId;
@@ -63,30 +55,14 @@ public class CommitTableRequest implements RESTRequest {
 
     @JsonCreator
     public CommitTableRequest(
-            @JsonProperty(FIELD_IDENTIFIER) @Nullable Identifier identifier,
             @JsonProperty(FIELD_TABLE_ID) String tableId,
             @JsonProperty(FIELD_BASE_SNAPSHOT_UUID) @Nullable String baseSnapshotUuid,
             @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
             @JsonProperty(FIELD_STATISTICS) List<PartitionStatistics> statistics) {
-        this.identifier = identifier;
         this.tableId = tableId;
         this.baseSnapshotUuid = baseSnapshotUuid;
         this.snapshot = snapshot;
         this.statistics = statistics;
-    }
-
-    public CommitTableRequest(
-            String tableId,
-            @Nullable String baseSnapshotUuid,
-            Snapshot snapshot,
-            List<PartitionStatistics> statistics) {
-        this(null, tableId, baseSnapshotUuid, snapshot, statistics);
-    }
-
-    @JsonGetter(FIELD_IDENTIFIER)
-    @Nullable
-    public Identifier getIdentifier() {
-        return identifier;
     }
 
     @JsonGetter(FIELD_TABLE_ID)
