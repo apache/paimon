@@ -42,7 +42,7 @@ object VariantPushDownUtils {
     while (i < extractions.length) {
       val (path, info, isVariantTarget) = extractions(i)
       val canThrow = info.failOnError && !info.paimonType.isInstanceOf[VarCharType]
-      if (path.isEmpty || isVariantTarget || canThrow) {
+      if (path.isEmpty || isVariantTarget || canThrow || !canEncodePath(info.path)) {
         if (path.nonEmpty) {
           rejected += path
         }
@@ -67,6 +67,14 @@ object VariantPushDownUtils {
     }
     (out.toMap, accepted)
   }
+
+  /**
+   * The extraction path is encoded into the projected field's description, delimited by
+   * [[VariantMetadataUtils.DELIMITER]] and split back on read with no escaping. A path carrying the
+   * delimiter would decode into a different path, so it cannot be pushed down.
+   */
+  private def canEncodePath(path: String): Boolean =
+    !path.contains(VariantMetadataUtils.DELIMITER)
 
   /**
    * Replace each variant field at a path in `accepted` with a Paimon variant `RowType`; recurse
