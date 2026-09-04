@@ -151,57 +151,67 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             throw t;
         }
 
-        ShreddingReadPlan readPlan =
-                ShreddingReadPlanFactories.createReadPlan(
-                        readType,
-                        readFieldMetadata(reader),
-                        fileSchema,
-                        shreddingReadPlanFactories(readType));
-        DataField[] physicalReadFields = readFields(readPlan.physicalRowType());
-        RequestedSchema requestedSchema =
-                readPlan.isIdentity()
-                        ? getOrCreateRequestedSchema(fileSchema)
-                        : createRequestedSchema(fileSchema, physicalReadFields);
+        // The reader owns the open stream from here, so close it if the setup below fails.
+        try {
+            ShreddingReadPlan readPlan =
+                    ShreddingReadPlanFactories.createReadPlan(
+                            readType,
+                            readFieldMetadata(reader),
+                            fileSchema,
+                            shreddingReadPlanFactories(readType));
+            DataField[] physicalReadFields = readFields(readPlan.physicalRowType());
+            RequestedSchema requestedSchema =
+                    readPlan.isIdentity()
+                            ? getOrCreateRequestedSchema(fileSchema)
+                            : createRequestedSchema(fileSchema, physicalReadFields);
 
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Create reader of the parquet file {}, the fileSchema is {}, the requestedSchema is {}.",
-                    context.filePath(),
-                    fileSchema,
-                    requestedSchema.messageType);
-        }
-
-        int configuredBatchSize = computeBatchSize(reader, requestedSchema.messageType);
-        Preconditions.checkArgument(
-                configuredBatchSize > 0,
-                "Parquet read batch size should be positive: %s",
-                configuredBatchSize);
-        ReadBatchSizer readBatchSizer = context.readBatchSizer();
-        int initialBatchSize =
-                readBatchSizer == null
-                        ? configuredBatchSize
-                        : readBatchSizer.batchSize().orElse(configuredBatchSize);
-        reader.setRequestedSchema(requestedSchema.messageType);
-        WritableColumnVector[] writableVectors =
-                createWritableVectors(initialBatchSize, physicalReadFields);
-        IntFunction<WritableColumnVector[]> vectorFactory =
-                size -> createWritableVectors(size, physicalReadFields);
-
-        VectorizedParquetRecordReader parquetReader =
-                new VectorizedParquetRecordReader(
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Create reader of the parquet file {}, the fileSchema is {}, the requestedSchema is {}.",
                         context.filePath(),
-                        reader,
                         fileSchema,
-                        requestedSchema.fields,
-                        writableVectors,
-                        initialBatchSize,
-                        configuredBatchSize,
-                        context.fileIO(),
-                        readBatchSizer,
-                        vectorFactory);
-        return readPlan.isIdentity()
-                ? parquetReader
-                : new ShreddingFormatReader(parquetReader, readPlan);
+                        requestedSchema.messageType);
+            }
+
+            int configuredBatchSize = computeBatchSize(reader, requestedSchema.messageType);
+            Preconditions.checkArgument(
+                    configuredBatchSize > 0,
+                    "Parquet read batch size should be positive: %s",
+                    configuredBatchSize);
+            ReadBatchSizer readBatchSizer = context.readBatchSizer();
+            int initialBatchSize =
+                    readBatchSizer == null
+                            ? configuredBatchSize
+                            : readBatchSizer.batchSize().orElse(configuredBatchSize);
+            reader.setRequestedSchema(requestedSchema.messageType);
+            WritableColumnVector[] writableVectors =
+                    createWritableVectors(initialBatchSize, physicalReadFields);
+            IntFunction<WritableColumnVector[]> vectorFactory =
+                    size -> createWritableVectors(size, physicalReadFields);
+
+            VectorizedParquetRecordReader parquetReader =
+                    new VectorizedParquetRecordReader(
+                            context.filePath(),
+                            reader,
+                            fileSchema,
+                            requestedSchema.fields,
+                            writableVectors,
+                            initialBatchSize,
+                            configuredBatchSize,
+                            context.fileIO(),
+                            readBatchSizer,
+                            vectorFactory);
+            return readPlan.isIdentity()
+                    ? parquetReader
+                    : new ShreddingFormatReader(parquetReader, readPlan);
+        } catch (Throwable t) {
+            try {
+                reader.close();
+            } catch (Throwable closeFailure) {
+                t.addSuppressed(closeFailure);
+            }
+            throw t;
+        }
     }
 
     private RequestedSchema getOrCreateRequestedSchema(MessageType fileSchema) {
