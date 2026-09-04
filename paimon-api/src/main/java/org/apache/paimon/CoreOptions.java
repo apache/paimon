@@ -1637,18 +1637,19 @@ public class CoreOptions implements Serializable {
                             "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
                                     + "dedicated internal streaming scan.");
 
-    public static final ConfigOption<CompactionInitialScanMode> CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE =
-            key("continuous-compaction.initial-scan-mode")
-                    .enumType(CompactionInitialScanMode.class)
-                    .defaultValue(CompactionInitialScanMode.EARLIEST)
-                    .withDescription(
-                            "Initial snapshot mode for dedicated streaming compaction. "
-                                    + "When set to 'earliest' (the default), compaction starts from the earliest available snapshot "
-                                    + "if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. "
-                                    + "When set to 'latest', the latest snapshot is read in ALL mode "
-                                    + "as the initial baseline and subsequent scans start from the next snapshot. "
-                                    + "The 'latest' mode skips historical snapshot changes and should only be used when historical "
-                                    + "changelog replay is not required.");
+    public static final ConfigOption<CompactionInitialScanMode>
+            CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE =
+                    key("continuous-compaction.initial-scan-mode")
+                            .enumType(CompactionInitialScanMode.class)
+                            .defaultValue(CompactionInitialScanMode.EARLIEST)
+                            .withDescription(
+                                    "Initial snapshot mode for dedicated streaming compaction. "
+                                            + "When set to 'earliest' (the default), compaction starts from the earliest available snapshot "
+                                            + "if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. "
+                                            + "When set to 'latest', the latest snapshot is read in ALL mode "
+                                            + "as the initial baseline and subsequent scans start from the next snapshot. "
+                                            + "The 'latest' mode skips historical snapshot changes and should only be used when historical "
+                                            + "changelog replay is not required.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
