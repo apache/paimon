@@ -40,6 +40,7 @@ from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     _image_tensor,
+    _selected_episodes,
     _select_manifest,
 )
 from pypaimon.multimodal.lerobot.metadata import (
@@ -161,6 +162,31 @@ class LeRobotValidationTest(unittest.TestCase):
             "names": ["channels", "height", "width"],
         })
         self.assertEqual([3, 4, 5], list(tensor.shape))
+
+        depth = np.array([
+            [0, 1000, 4095],
+            [8192, 32768, 65535],
+        ], dtype=np.uint16)
+        output = io.BytesIO()
+        Image.fromarray(depth).save(output, format="PNG")
+        tensor = _image_tensor(output.getvalue(), {
+            "dtype": "image",
+            "shape": [2, 3, 1],
+            "info": {
+                "is_depth_map": True,
+                "depth_unit": "mm",
+            },
+        })
+        self.assertEqual([1, 2, 3], list(tensor.shape))
+        self.assertEqual("torch.float32", str(tensor.dtype))
+        self.assertEqual(depth.astype(np.float32).tolist(), tensor[0].tolist())
+
+    def test_selected_episodes_preserves_caller_order(self):
+        self.assertEqual([1, 0], _selected_episodes([1, 0], 2))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            _selected_episodes([1, 1], 2)
+        with self.assertRaisesRegex(ValueError, "indices in"):
+            _selected_episodes([2], 2)
 
     def test_dataset_open_never_downloads_videos(self):
         calls = []
@@ -1446,6 +1472,16 @@ class LeRobotImportTest(unittest.TestCase):
                          last["action_is_pad"].tolist())
         self.assertEqual([True, False, False],
                          first["action_is_pad"].tolist())
+
+        reordered = pmm.PaimonLeRobotDataset(
+            table,
+            episodes=[1, 0],
+            index_mapping=dataset.index_mapping,
+        )
+        self.assertEqual([1, 0], reordered.episodes)
+        self.assertEqual(5, len(reordered))
+        self.assertEqual(0, int(reordered[0]["episode_index"]))
+        self.assertEqual(1, int(reordered[-1]["episode_index"]))
 
         table.add(pa.Table.from_pylist([{
             "index": 999,

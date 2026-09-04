@@ -150,8 +150,11 @@ class PaimonLeRobotDataset:
             raise ValueError("Episode selection requires episode metadata.")
         self._selected_ranges = None
         if self.episodes is not None:
+            # LeRobot exposes the caller's episode order but its Parquet filter
+            # returns frames in their stored dataset order.
+            range_episodes = sorted(self.episodes)
             self._selected_ranges = [
-                self._episode_ranges[index] for index in self.episodes
+                self._episode_ranges[index] for index in range_episodes
             ]
             self._selected_ends = []
             size = 0
@@ -682,7 +685,7 @@ def _selected_episodes(episodes, total_episodes):
             raise ValueError("episodes must not contain duplicate indices.")
         seen.add(index)
         selected.append(index)
-    return sorted(selected)
+    return selected
 
 
 def _delta_indices(delta_timestamps, fps, tolerance_s, features):
@@ -988,7 +991,12 @@ def _image_tensor(payload, feature):
         raise ValueError(
             "LeRobot image payload has shape %s, expected %s."
             % (array.shape, payload_shape))
-    return torch.from_numpy(array).permute(2, 0, 1).float().div_(255)
+    normalize = array.dtype == np.uint8
+    if not normalize:
+        # Preserve high-bit-depth and floating-point images in native units.
+        array = array.astype(np.float32, copy=False)
+    tensor = torch.from_numpy(array).permute(2, 0, 1).float()
+    return tensor.div_(255) if normalize else tensor
 
 
 def _normalize_index(index, size):
