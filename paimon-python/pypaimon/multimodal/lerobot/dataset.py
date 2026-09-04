@@ -79,6 +79,10 @@ class PaimonLeRobotDataset:
 
     The published version and its LeRobot metadata are resolved from the
     Paimon table group and remain available through :attr:`meta`.
+
+    Set ``return_uint8=True`` to keep 8-bit images in their decoded
+    ``torch.uint8`` representation instead of normalizing them to float32.
+    Higher-bit-depth images retain the existing float32 behavior.
     """
 
     def __init__(
@@ -91,7 +95,8 @@ class PaimonLeRobotDataset:
             delta_timestamps=None,
             tolerance_s=1e-4,
             index_mapping=None,
-            blob_parallelism=16):
+            blob_parallelism=16,
+            return_uint8=False):
         raw_table, self.meta, self.version_id = _load_published_version(
             table, version_id)
         self.repo_id = self.meta.repo_id
@@ -102,6 +107,9 @@ class PaimonLeRobotDataset:
             raise ValueError("tolerance_s must be finite and non-negative.")
         self.blob_parallelism = _positive_int(
             blob_parallelism, "blob_parallelism")
+        if not isinstance(return_uint8, bool):
+            raise TypeError("return_uint8 must be a boolean.")
+        self.return_uint8 = return_uint8
         if image_transforms is not None and not callable(image_transforms):
             raise TypeError("image_transforms must be callable or None.")
 
@@ -298,11 +306,13 @@ class PaimonLeRobotDataset:
         _materialize_labels(
             base_rows, self._task_names, self._subtask_names)
         converted = {
-            position: _torch_row(row, self._features)
+            position: _torch_row(
+                row, self._features, self.return_uint8)
             for position, row in base_rows.items()
         }
         converted.update({
-            position: _torch_row(row, self._features)
+            position: _torch_row(
+                row, self._features, self.return_uint8)
             for position, row in delta_rows.items()
         })
 
@@ -966,7 +976,7 @@ def _materialize_labels(rows, task_names, subtask_names):
             row["subtask"] = subtask_names[subtask_index]
 
 
-def _torch_row(row, features):
+def _torch_row(row, features, return_uint8=False):
     import torch
 
     result = dict(row)
@@ -975,14 +985,15 @@ def _torch_row(row, features):
             continue
         value = result[key]
         if feature.get("dtype") == "image":
-            result[key] = _image_tensor(value, feature)
+            result[key] = _image_tensor(
+                value, feature, return_uint8=return_uint8)
         elif feature.get("dtype") != "string":
             dtype = getattr(torch, _TORCH_DTYPE_NAMES[feature.get("dtype")])
             result[key] = torch.tensor(value, dtype=dtype)
     return result
 
 
-def _image_tensor(payload, feature):
+def _image_tensor(payload, feature, return_uint8=False):
     if payload is None:
         raise ValueError("LeRobot image feature contains a null frame.")
     import numpy as np
@@ -1011,10 +1022,11 @@ def _image_tensor(payload, feature):
             "LeRobot image payload has shape %s, expected %s."
             % (array.shape, payload_shape))
     normalize = array.dtype == np.uint8
-    if not normalize:
-        # Preserve high-bit-depth and floating-point images in native units.
-        array = array.astype(np.float32, copy=False)
-    tensor = torch.from_numpy(array).permute(2, 0, 1).float()
+    tensor = torch.from_numpy(array).permute(2, 0, 1)
+    if normalize and return_uint8:
+        return tensor
+    # Preserve high-bit-depth and floating-point images in native units.
+    tensor = tensor.float()
     return tensor.div_(255) if normalize else tensor
 
 

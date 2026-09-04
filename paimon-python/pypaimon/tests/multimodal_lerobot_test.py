@@ -129,6 +129,7 @@ class LeRobotValidationTest(unittest.TestCase):
     def test_image_tensor_preserves_declared_channels(self):
         try:
             from PIL import Image
+            import torch
         except ImportError as error:
             self.skipTest(str(error))
 
@@ -146,13 +147,21 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 output = io.BytesIO()
                 Image.fromarray(values, mode=mode).save(output, format="PNG")
-                tensor = _image_tensor(
-                    output.getvalue(), {"dtype": "image", "shape": shape})
+                feature = {"dtype": "image", "shape": shape}
+                tensor = _image_tensor(output.getvalue(), feature)
+                uint8_tensor = _image_tensor(
+                    output.getvalue(), feature, return_uint8=True)
+
+                self.assertEqual(torch.float32, tensor.dtype)
+                self.assertEqual(torch.uint8, uint8_tensor.dtype)
                 self.assertEqual(
                     [shape[2], shape[0], shape[1]], list(tensor.shape))
-                for actual, value in zip(tensor[:, 0, 0], expected):
-                    self.assertAlmostEqual(
-                        value / 255, float(actual), places=6)
+                self.assertEqual(list(tensor.shape), list(uint8_tensor.shape))
+                self.assertGreaterEqual(float(tensor.min()), 0.0)
+                self.assertLessEqual(float(tensor.max()), 1.0)
+                self.assertEqual(expected, uint8_tensor[:, 0, 0].tolist())
+                torch.testing.assert_close(
+                    tensor, uint8_tensor.float().div(255))
 
         output = io.BytesIO()
         Image.fromarray(cases[1][1], mode="RGB").save(output, format="PNG")
@@ -163,23 +172,141 @@ class LeRobotValidationTest(unittest.TestCase):
         })
         self.assertEqual([3, 4, 5], list(tensor.shape))
 
+        uint8_tensor = _image_tensor(
+            output.getvalue(),
+            {
+                "dtype": "image",
+                "shape": [3, 4, 5],
+                "names": ["channels", "height", "width"],
+            },
+            return_uint8=True,
+        )
+        self.assertEqual(torch.uint8, uint8_tensor.dtype)
+        self.assertEqual([32, 64, 96], uint8_tensor[:, 0, 0].tolist())
+        original = uint8_tensor.clone()
+        uint8_tensor.zero_()
+        reread = _image_tensor(
+            output.getvalue(),
+            {
+                "dtype": "image",
+                "shape": [3, 4, 5],
+                "names": ["channels", "height", "width"],
+            },
+            return_uint8=True,
+        )
+        self.assertTrue(torch.equal(original, reread))
+        self.assertNotEqual(uint8_tensor.data_ptr(), reread.data_ptr())
+
         depth = np.array([
             [0, 1000, 4095],
             [8192, 32768, 65535],
         ], dtype=np.uint16)
         output = io.BytesIO()
         Image.fromarray(depth).save(output, format="PNG")
-        tensor = _image_tensor(output.getvalue(), {
+        feature = {
             "dtype": "image",
             "shape": [2, 3, 1],
             "info": {
                 "is_depth_map": True,
                 "depth_unit": "mm",
             },
-        })
+        }
+        tensor = _image_tensor(output.getvalue(), feature)
+        uint8_requested = _image_tensor(
+            output.getvalue(),
+            feature,
+            return_uint8=True,
+        )
         self.assertEqual([1, 2, 3], list(tensor.shape))
-        self.assertEqual("torch.float32", str(tensor.dtype))
+        self.assertEqual(torch.float32, tensor.dtype)
         self.assertEqual(depth.astype(np.float32).tolist(), tensor[0].tolist())
+        self.assertEqual(torch.float32, uint8_requested.dtype)
+        self.assertTrue(torch.equal(tensor, uint8_requested))
+
+    def test_dataset_uint8_getitem_matches_getitems(self):
+        try:
+            from PIL import Image
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        features = {
+            "index": {"dtype": "int64", "shape": [1]},
+            "task_index": {"dtype": "int64", "shape": [1]},
+            "observation.left": {
+                "dtype": "image", "shape": [4, 5, 3]},
+            "observation.wrist": {
+                "dtype": "image", "shape": [4, 5, 1]},
+        }
+
+        def jpeg(mode, values):
+            output = io.BytesIO()
+            Image.fromarray(values, mode=mode).save(
+                output, format="JPEG", quality=100)
+            return output.getvalue()
+
+        rows = []
+        for index in range(2):
+            rows.append({
+                "index": index,
+                "task_index": 0,
+                "observation.left": jpeg(
+                    "RGB", np.full((4, 5, 3), 40 + index, np.uint8)),
+                "observation.wrist": jpeg(
+                    "L", np.full((4, 5), 80 + index, np.uint8)),
+            })
+
+        class Rows:
+
+            def __getitems__(self, positions):
+                return [dict(rows[position]) for position in positions]
+
+        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset._total_frames = 2
+        dataset.episodes = None
+        dataset._selected_ranges = None
+        dataset._delta_indices = {}
+        dataset._dataset = Rows()
+        dataset._index_positions = {0: 0, 1: 1}
+        dataset._delta_dataset = None
+        dataset._file_io = Mock()
+        dataset._image_keys = [
+            "observation.left", "observation.wrist"]
+        dataset.blob_parallelism = 1
+        dataset._task_names = ["task"]
+        dataset._subtask_names = None
+        dataset._features = features
+        dataset.return_uint8 = True
+        dataset.image_transforms = None
+
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._resolve_image_blobs"):
+            single = dataset[1]
+            batched = dataset.__getitems__([1, 0])
+            dataset.return_uint8 = False
+            normalized = dataset[1]
+        for key in dataset._image_keys:
+            self.assertEqual(torch.uint8, single[key].dtype)
+            self.assertTrue(torch.equal(single[key], batched[0][key]))
+            torch.testing.assert_close(
+                normalized[key], single[key].float().div(255))
+
+    def test_dataset_return_uint8_requires_bool(self):
+        published = (
+            Mock(),
+            Mock(repo_id="pypaimon/invalid-return-uint8"),
+            1,
+        )
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset."
+                "_load_published_version",
+                return_value=published):
+            for invalid in (0, 1, None, "true"):
+                with self.subTest(return_uint8=invalid):
+                    with self.assertRaisesRegex(
+                            TypeError, "return_uint8 must be a boolean"):
+                        pmm.PaimonLeRobotDataset(
+                            Mock(), return_uint8=invalid)
 
     def test_selected_episodes_preserves_caller_order(self):
         self.assertEqual([1, 0], _selected_episodes([1, 0], 2))
@@ -1433,6 +1560,8 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection, "missing_tasks__versions"))
 
     def test_paimon_dataset_reads_lazy_batches_with_lerobot_metadata(self):
+        import torch
+
         version_id = self.connection.load_from_lerobot(
             "training_data", self.image_source, batch_size=2)
         table = self.connection.get_table("training_data")
@@ -1482,6 +1611,23 @@ class LeRobotImportTest(unittest.TestCase):
                          last["action_is_pad"].tolist())
         self.assertEqual([True, False, False],
                          first["action_is_pad"].tolist())
+
+        uint8_dataset = pmm.PaimonLeRobotDataset(
+            table,
+            version_id=version_id,
+            index_mapping=dataset.index_mapping,
+            return_uint8=True,
+        )
+        uint8_sample = uint8_dataset[4]
+        uint8_batch = uint8_dataset.__getitems__([4, 0])
+        uint8_image = uint8_sample["observation.image"]
+        self.assertEqual("torch.uint8", str(uint8_image.dtype))
+        self.assertEqual([3, 8, 10], list(uint8_image.shape))
+        self.assertEqual(100.0, float(uint8_image.float().mean()))
+        self.assertTrue(torch.equal(
+            uint8_image, uint8_batch[0]["observation.image"]))
+        torch.testing.assert_close(
+            last["observation.image"], uint8_image.float().div(255))
 
         reordered = pmm.PaimonLeRobotDataset(
             table,
