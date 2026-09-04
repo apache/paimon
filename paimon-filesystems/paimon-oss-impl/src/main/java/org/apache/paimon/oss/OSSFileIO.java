@@ -21,6 +21,7 @@ package org.apache.paimon.oss;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
@@ -37,14 +38,22 @@ import com.aliyun.oss.common.comm.ServiceClient;
 import com.aliyun.oss.internal.OSSHeaders;
 import com.aliyun.oss.internal.OSSMultipartOperation;
 import com.aliyun.oss.internal.OSSObjectOperation;
+import com.aliyun.oss.model.AbortMultipartUploadRequest;
+import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.CopyObjectResult;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadResult;
+import com.aliyun.oss.model.ListObjectsRequest;
+import com.aliyun.oss.model.OSSObjectSummary;
+import com.aliyun.oss.model.ObjectListing;
 import com.aliyun.oss.model.ObjectMetadata;
+import com.aliyun.oss.model.PartETag;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.aliyun.oss.model.PutObjectResult;
+import com.aliyun.oss.model.UploadPartCopyRequest;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
@@ -52,12 +61,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -111,6 +123,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final String SSE_METHOD_AES256 = "AES256";
     private static final String SSE_METHOD_KMS = "KMS";
     private static final String SSE_DATA_SM4 = "SM4";
+
+    /** Minimum part size for multipart upload-copy, OSS requires every non-tail part >= 5MB. */
+    private static final long CROSS_BUCKET_COPY_PART_SIZE = 8L * 1024 * 1024;
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -266,6 +281,322 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         } catch (Exception e) {
             throw new IOException("Failed to atomic write " + path, e);
         }
+    }
+
+    /**
+     * Rename across buckets, mirroring {@link AliyunOSSFileSystem#rename}.
+     *
+     * <p>The underlying {@code AliyunOSSFileSystem.rename} only supports copy within the same
+     * bucket, because {@code AliyunOSSFileSystemStore} pins a single {@code bucketName} and calls
+     * {@code copyObject(bucketName, srcKey, bucketName, dstKey)}. The {@link OSSClient} held by
+     * that store, however, accepts distinct source/destination buckets as long as they are in the
+     * same region. So for cross-bucket renames we bypass the Hadoop layer and drive {@code
+     * OSSClient} directly, but keep exactly the same rename semantics as {@code
+     * AliyunOSSFileSystem.rename}: root/path-containment checks, destination existence/type
+     * handling, directory rewrite to {@code dst/srcName}, empty-directory marker creation,
+     * file/directory dispatch and delete-after-copy. Copy itself is a single {@code copyObject}
+     * first, falling back to multipart {@code uploadPartCopy} when the object is larger than 1GB or
+     * a shallow copy is not supported. Cross-region copy is not supported by the OSS server-side
+     * copy API and will surface as an {@link OSSException}.
+     *
+     * @param src source path.
+     * @param dst destination path.
+     * @return true if the rename succeeds.
+     */
+    @Override
+    public boolean rename(Path src, Path dst) throws IOException {
+        URI srcUri = src.toUri();
+        URI dstUri = dst.toUri();
+        String srcBucket = srcUri.getHost();
+        String dstBucket = dstUri.getHost();
+        // Same bucket (or authority missing): fall back to the Hadoop rename path, which keeps
+        // the original semantics including directory handling and delete-after-copy.
+        if (srcBucket == null || dstBucket == null || srcBucket.equals(dstBucket)) {
+            return super.rename(src, dst);
+        }
+
+        OSSClient ossClient;
+        try {
+            ossClient = ossClient(src);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to access OSSClient for cross-bucket rename", e);
+        }
+        return renameCrossBucket(ossClient, srcBucket, dstBucket, src, dst);
+    }
+
+    /**
+     * Cross-bucket rename whose control flow mirrors {@link AliyunOSSFileSystem#rename}. Existence
+     * and type checks go through this {@link OSSFileIO} (which selects the right per-bucket {@link
+     * AliyunOSSFileSystem}), while the actual copy is driven on {@code ossClient}.
+     */
+    private boolean renameCrossBucket(
+            OSSClient ossClient, String srcBucket, String dstBucket, Path src, Path dst)
+            throws IOException {
+        // Cannot rename the root of a filesystem.
+        if (src.getParent() == null) {
+            LOG.debug("Cannot rename the root of a filesystem");
+            return false;
+        }
+        // Reject renaming a directory into a subdirectory of itself.
+        Path parent = dst.getParent();
+        while (parent != null && !src.equals(parent)) {
+            parent = parent.getParent();
+        }
+        if (parent != null) {
+            return false;
+        }
+
+        FileStatus srcStatus = getFileStatus(src);
+        FileStatus dstStatus;
+        try {
+            dstStatus = getFileStatus(dst);
+        } catch (FileNotFoundException fnde) {
+            dstStatus = null;
+        }
+
+        if (dstStatus == null) {
+            // If dst doesn't exist, its parent must exist and be a directory.
+            FileStatus dstParentStatus = getFileStatus(dst.getParent());
+            if (!dstParentStatus.isDir()) {
+                throw new IOException(
+                        String.format(
+                                "Failed to rename %s to %s, %s is a file",
+                                src, dst, dst.getParent()));
+            }
+        } else {
+            if (srcStatus.getPath().equals(dstStatus.getPath())) {
+                return !srcStatus.isDir();
+            } else if (dstStatus.isDir()) {
+                // If dst is a directory, rewrite to dst/srcName.
+                dst = new Path(dst, src.getName());
+                FileStatus[] statuses;
+                try {
+                    statuses = listStatus(dst);
+                } catch (FileNotFoundException fnde) {
+                    statuses = null;
+                }
+                if (statuses != null && statuses.length > 0) {
+                    // If dst exists and not a directory / not empty.
+                    throw new FileAlreadyExistsException(
+                            String.format(
+                                    "Failed to rename %s to %s, file already exists or not empty!",
+                                    src, dst));
+                }
+            } else {
+                // If dst is not a directory.
+                throw new FileAlreadyExistsException(
+                        String.format("Failed to rename %s to %s, file already exists!", src, dst));
+            }
+        }
+
+        boolean succeed;
+        if (srcStatus.isDir()) {
+            succeed = copyDirectoryCrossBucket(ossClient, srcBucket, dstBucket, src, dst);
+        } else {
+            succeed =
+                    copyFileCrossBucket(
+                            ossClient,
+                            srcBucket,
+                            pathToObjectKey(src.toUri()),
+                            dstBucket,
+                            pathToObjectKey(dst.toUri()),
+                            srcStatus.getLen());
+        }
+        return src.equals(dst) || (succeed && delete(src, true));
+    }
+
+    /** OSS object keys are the URI path with the leading '/' stripped. */
+    private static String pathToObjectKey(URI uri) {
+        String path = uri.getPath();
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        return path.startsWith("/") ? path.substring(1) : path;
+    }
+
+    /** Ensures {@code key} carries a trailing slash, treating it as an OSS directory prefix. */
+    private static String maybeAddTrailingSlash(String key) {
+        if (key.isEmpty()) {
+            return key;
+        }
+        return key.endsWith("/") ? key : key + "/";
+    }
+
+    /**
+     * Copy a single file across buckets, mirroring {@code AliyunOSSFileSystemStore.copyFile}:
+     * single {@code copyObject} first, fall back to multipart {@code uploadPartCopy} on failure
+     * (object larger than 1GB or shallow copy not supported).
+     */
+    private boolean copyFileCrossBucket(
+            OSSClient ossClient,
+            String srcBucket,
+            String srcKey,
+            String dstBucket,
+            String dstKey,
+            long contentLength)
+            throws IOException {
+        SseConfig sse = configuredSse();
+        try {
+            CopyObjectRequest request = new CopyObjectRequest(srcBucket, srcKey, dstBucket, dstKey);
+            if (sse != null) {
+                applySse(request, sse);
+            }
+            ossClient.copyObject(request);
+            return true;
+        } catch (OSSException e) {
+            LOG.debug(
+                    "Single cross-bucket copy failed for {} -> {}, fallback to multipartCopy: {}",
+                    srcKey,
+                    dstKey,
+                    e.getMessage());
+            return multipartCopyCrossBucket(
+                    ossClient, srcBucket, srcKey, dstBucket, dstKey, contentLength, sse);
+        }
+    }
+
+    /**
+     * Copy a single object across buckets via multipart upload-copy. Required when the object is
+     * larger than 1GB or when the OSS server does not support a shallow single-copy between the
+     * source and destination (e.g. differing storage classes). Preserves content-type and user
+     * metadata, which multipart copy does not copy by default.
+     */
+    private boolean multipartCopyCrossBucket(
+            OSSClient ossClient,
+            String srcBucket,
+            String srcKey,
+            String dstBucket,
+            String dstKey,
+            long contentLength,
+            SseConfig sse)
+            throws IOException {
+        ObjectMetadata srcMeta = ossClient.getObjectMetadata(srcBucket, srcKey);
+        ObjectMetadata newMeta = new ObjectMetadata();
+        if (srcMeta.getContentType() != null) {
+            newMeta.setContentType(srcMeta.getContentType());
+        }
+        if (srcMeta.getUserMetadata() != null && !srcMeta.getUserMetadata().isEmpty()) {
+            newMeta.setUserMetadata(srcMeta.getUserMetadata());
+        }
+        if (sse != null) {
+            newMeta = applySse(newMeta, sse);
+        }
+
+        InitiateMultipartUploadRequest initiateRequest =
+                new InitiateMultipartUploadRequest(dstBucket, dstKey);
+        initiateRequest.setObjectMetadata(newMeta);
+        InitiateMultipartUploadResult initiateResult =
+                ossClient.initiateMultipartUpload(initiateRequest);
+        String uploadId = initiateResult.getUploadId();
+
+        List<PartETag> partETags = new ArrayList<>();
+        try {
+            long partSize = CROSS_BUCKET_COPY_PART_SIZE;
+            long remaining = contentLength;
+            long offset = 0;
+            int partNumber = 1;
+            // OSS requires every non-tail part to be >= 100KB; a single tail part may be smaller.
+            while (remaining > 0) {
+                long size = Math.min(partSize, remaining);
+                UploadPartCopyRequest partRequest =
+                        new UploadPartCopyRequest(srcBucket, srcKey, dstBucket, dstKey);
+                partRequest.setUploadId(uploadId);
+                partRequest.setPartSize(size);
+                partRequest.setBeginIndex(offset);
+                partRequest.setPartNumber(partNumber);
+                partETags.add(ossClient.uploadPartCopy(partRequest).getPartETag());
+                offset += size;
+                remaining -= size;
+                partNumber++;
+            }
+            ossClient.completeMultipartUpload(
+                    new CompleteMultipartUploadRequest(dstBucket, dstKey, uploadId, partETags));
+            return true;
+        } catch (Exception e) {
+            try {
+                ossClient.abortMultipartUpload(
+                        new AbortMultipartUploadRequest(dstBucket, dstKey, uploadId));
+            } catch (Exception abortException) {
+                LOG.warn(
+                        "Failed to abort multipart upload for {} -> {}",
+                        srcKey,
+                        dstKey,
+                        abortException);
+            }
+            throw new IOException(
+                    "Failed to multipart copy "
+                            + srcBucket
+                            + "/"
+                            + srcKey
+                            + " to "
+                            + dstBucket
+                            + "/"
+                            + dstKey,
+                    e);
+        }
+    }
+
+    /**
+     * Copy a directory (an OSS prefix) across buckets, mirroring {@code
+     * AliyunOSSFileSystem.copyDirectory}: create the empty-directory marker at the destination
+     * prefix, then enumerate every object under the source prefix and copy each one. Returns false
+     * if the destination would be a subdirectory of the source.
+     */
+    private boolean copyDirectoryCrossBucket(
+            OSSClient ossClient, String srcBucket, String dstBucket, Path srcPath, Path dstPath)
+            throws IOException {
+        String srcKey = maybeAddTrailingSlash(pathToObjectKey(srcPath.toUri()));
+        String dstKey = maybeAddTrailingSlash(pathToObjectKey(dstPath.toUri()));
+
+        // Cross-bucket: src and dst live in different buckets, so dst can never be a subdirectory
+        // of src (the same-bucket self-containment guard from AliyunOSSFileSystem.copyDirectory
+        // does not apply here and would false-positive when the two buckets share a key prefix).
+
+        // Create the empty-directory marker at the destination, like store.storeEmptyFile(dstKey).
+        storeEmptyDir(ossClient, dstBucket, dstKey);
+
+        String nextMarker = null;
+        do {
+            ListObjectsRequest request = new ListObjectsRequest(srcBucket);
+            request.setPrefix(srcKey);
+            request.setMaxKeys(1000);
+            if (nextMarker != null) {
+                request.setMarker(nextMarker);
+            }
+            ObjectListing listing = ossClient.listObjects(request);
+            for (OSSObjectSummary summary : listing.getObjectSummaries()) {
+                String childSrcKey = summary.getKey();
+                // Skip the directory marker object itself if present.
+                if (childSrcKey.equals(srcKey)) {
+                    continue;
+                }
+                String childDstKey = dstKey.concat(childSrcKey.substring(srcKey.length()));
+                copyFileCrossBucket(
+                        ossClient,
+                        srcBucket,
+                        childSrcKey,
+                        dstBucket,
+                        childDstKey,
+                        summary.getSize());
+            }
+            nextMarker = listing.getNextMarker();
+        } while (nextMarker != null);
+        return true;
+    }
+
+    /**
+     * Create a zero-length object with a trailing slash to act as an OSS directory marker,
+     * equivalent to {@code AliyunOSSFileSystemStore.storeEmptyFile}.
+     */
+    private void storeEmptyDir(OSSClient ossClient, String bucket, String key) throws IOException {
+        ObjectMetadata dirMeta = new ObjectMetadata();
+        dirMeta.setContentLength(0);
+        SseConfig sse = configuredSse();
+        if (sse != null) {
+            dirMeta = applySse(dirMeta, sse);
+        }
+        ossClient.putObject(bucket, key, new ByteArrayInputStream(new byte[0]), dirMeta);
     }
 
     @Override

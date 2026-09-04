@@ -18,8 +18,11 @@
 
 package org.apache.paimon.oss;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 
 import com.aliyun.oss.ClientConfiguration;
 import com.aliyun.oss.ClientException;
@@ -37,21 +40,28 @@ import com.aliyun.oss.internal.OSSUtils;
 import com.aliyun.oss.model.AbortMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.CopyObjectResult;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadResult;
+import com.aliyun.oss.model.OSSObjectSummary;
+import com.aliyun.oss.model.ObjectListing;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.UploadPartCopyRequest;
 import com.aliyun.oss.model.UploadPartCopyResult;
+import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -652,5 +662,307 @@ public class OSSFileIOTest {
         assertThatThrownBy(() -> OSSFileIO.resolveSse(" ", "", null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blank");
+    }
+
+    // ------------------------------------------------------------------------
+    //  Cross-bucket rename
+    // ------------------------------------------------------------------------
+
+    /** A file status with a known path, length and directory flag. */
+    private static FileStatus status(Path path, long len, boolean dir) {
+        return new FileStatus() {
+            @Override
+            public long getLen() {
+                return len;
+            }
+
+            @Override
+            public boolean isDir() {
+                return dir;
+            }
+
+            @Override
+            public Path getPath() {
+                return path;
+            }
+
+            @Override
+            public long getModificationTime() {
+                return 0;
+            }
+
+            @Override
+            public long getAccessTime() {
+                return 0;
+            }
+
+            @Override
+            public String getOwner() {
+                return "test";
+            }
+        };
+    }
+
+    /**
+     * A {@link OSSFileIO} that injects a mock {@link OSSClient} and stubs the FileIO-level
+     * filesystem probes ({@code getFileStatus}/{@code listStatus}/{@code delete}/{@code exists}) so
+     * the cross-bucket rename can be exercised without a real Hadoop filesystem.
+     */
+    private static final class RenameTestOSSFileIO extends OSSFileIO {
+        private final OSSClient client;
+        final Map<Path, FileStatus> statuses = new HashMap<>();
+        final Map<Path, FileStatus[]> listings = new HashMap<>();
+        final java.util.Set<Path> deleted = new java.util.HashSet<>();
+
+        private RenameTestOSSFileIO(OSSClient client) {
+            this.client = client;
+            // Initialize hadoopOptions so configuredSse()/rename do not NPE.
+            configure(CatalogContext.create(new Options(), new Configuration()));
+        }
+
+        @Override
+        OSSClient ossClient(Path path) {
+            return client;
+        }
+
+        @Override
+        public FileStatus getFileStatus(Path path) throws IOException {
+            FileStatus status = statuses.get(path);
+            if (status == null) {
+                throw new java.io.FileNotFoundException(path.toString());
+            }
+            return status;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            FileStatus[] statuses = listings.get(path);
+            if (statuses == null) {
+                throw new java.io.FileNotFoundException(path.toString());
+            }
+            return statuses;
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) {
+            deleted.add(path);
+            return true;
+        }
+
+        @Override
+        public boolean exists(Path path) {
+            return statuses.containsKey(path);
+        }
+    }
+
+    @Test
+    public void testCrossBucketRenameCopiesFileAndDeletesSource() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        when(client.copyObject(any(CopyObjectRequest.class))).thenReturn(new CopyObjectResult());
+
+        Path src = new Path("oss://src-bucket/dir/file.txt");
+        Path dst = new Path("oss://dst-bucket/dir/file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 5, false));
+        fileIO.statuses.put(dst.getParent(), status(dst.getParent(), 0, true));
+
+        boolean renamed = fileIO.rename(src, dst);
+
+        assertThat(renamed).isTrue();
+        ArgumentCaptor<CopyObjectRequest> captor = ArgumentCaptor.forClass(CopyObjectRequest.class);
+        verify(client).copyObject(captor.capture());
+        assertThat(captor.getValue().getSourceBucketName()).isEqualTo("src-bucket");
+        assertThat(captor.getValue().getSourceKey()).isEqualTo("dir/file.txt");
+        assertThat(captor.getValue().getDestinationBucketName()).isEqualTo("dst-bucket");
+        assertThat(captor.getValue().getDestinationKey()).isEqualTo("dir/file.txt");
+        assertThat(fileIO.deleted).contains(src);
+    }
+
+    @Test
+    public void testCrossBucketRenameSameBucketFallsBackToSuper() throws Exception {
+        // Same bucket must NOT reach the cross-bucket OSSClient copy path.
+        OSSClient client = mock(OSSClient.class);
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+
+        Path src = new Path("oss://bucket/a.txt");
+        Path dst = new Path("oss://bucket/b.txt");
+
+        // The super.rename path needs a real filesystem; we only assert it does not invoke the
+        // OSSClient copy (it throws before that because no fs is configured, which is fine).
+        assertThatThrownBy(() -> fileIO.rename(src, dst)).isInstanceOf(Exception.class);
+        verify(client, never()).copyObject(any(CopyObjectRequest.class));
+    }
+
+    @Test
+    public void testCrossBucketRenameRejectsRoot() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+
+        Path src = new Path("oss://src-bucket/");
+        Path dst = new Path("oss://dst-bucket/child");
+
+        boolean renamed = fileIO.rename(src, dst);
+
+        assertThat(renamed).isFalse();
+        verify(client, never()).copyObject(any(CopyObjectRequest.class));
+    }
+
+    @Test
+    public void testCrossBucketRenameExistingFileThrows() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        Path src = new Path("oss://src-bucket/file.txt");
+        Path dst = new Path("oss://dst-bucket/file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 5, false));
+        fileIO.statuses.put(dst, status(dst, 5, false));
+
+        assertThatThrownBy(() -> fileIO.rename(src, dst))
+                .isInstanceOf(org.apache.hadoop.fs.FileAlreadyExistsException.class)
+                .hasMessageContaining("file already exists");
+        verify(client, never()).copyObject(any(CopyObjectRequest.class));
+        assertThat(fileIO.deleted).doesNotContain(src);
+    }
+
+    @Test
+    public void testCrossBucketRenameIntoDirectoryBecomesSubdir() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        when(client.copyObject(any(CopyObjectRequest.class))).thenReturn(new CopyObjectResult());
+
+        Path src = new Path("oss://src-bucket/file.txt");
+        Path existingDstDir = new Path("oss://dst-bucket/existing-dir");
+        Path rewritten = new Path(existingDstDir, "file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 5, false));
+        fileIO.statuses.put(existingDstDir, status(existingDstDir, 0, true));
+        // dst/srcName does not exist yet and is empty.
+        fileIO.listings.put(rewritten, new FileStatus[0]);
+
+        boolean renamed = fileIO.rename(src, existingDstDir);
+
+        assertThat(renamed).isTrue();
+        ArgumentCaptor<CopyObjectRequest> captor = ArgumentCaptor.forClass(CopyObjectRequest.class);
+        verify(client).copyObject(captor.capture());
+        assertThat(captor.getValue().getDestinationKey()).isEqualTo("existing-dir/file.txt");
+        assertThat(captor.getValue().getSourceBucketName()).isEqualTo("src-bucket");
+        assertThat(captor.getValue().getDestinationBucketName()).isEqualTo("dst-bucket");
+    }
+
+    @Test
+    public void testCrossBucketRenameIntoNonEmptyDirectoryThrows() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        Path src = new Path("oss://src-bucket/file.txt");
+        Path existingDstDir = new Path("oss://dst-bucket/existing-dir");
+        Path rewritten = new Path(existingDstDir, "file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 5, false));
+        fileIO.statuses.put(existingDstDir, status(existingDstDir, 0, true));
+        // dst/srcName already holds a file -> not empty.
+        fileIO.listings.put(rewritten, new FileStatus[] {status(rewritten, 1, false)});
+
+        assertThatThrownBy(() -> fileIO.rename(src, existingDstDir))
+                .isInstanceOf(org.apache.hadoop.fs.FileAlreadyExistsException.class)
+                .hasMessageContaining("not empty");
+        verify(client, never()).copyObject(any(CopyObjectRequest.class));
+    }
+
+    @Test
+    public void testCrossBucketRenameFailsWhenDstParentMissing() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        Path src = new Path("oss://src-bucket/file.txt");
+        Path dst = new Path("oss://dst-bucket/missing-parent/file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 5, false));
+        // dst and dst.getParent() both absent.
+
+        assertThatThrownBy(() -> fileIO.rename(src, dst)).isInstanceOf(IOException.class);
+        verify(client, never()).copyObject(any(CopyObjectRequest.class));
+        assertThat(fileIO.deleted).doesNotContain(src);
+    }
+
+    @Test
+    public void testCrossBucketRenameDirectoryCopiesEachChild() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        when(client.copyObject(any(CopyObjectRequest.class))).thenReturn(new CopyObjectResult());
+
+        Path srcDir = new Path("oss://src-bucket/dir");
+        Path dstDir = new Path("oss://dst-bucket/dir");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(srcDir, status(srcDir, 0, true));
+        fileIO.statuses.put(dstDir.getParent(), status(dstDir.getParent(), 0, true));
+
+        // The directory copy lists children directly via the OSSClient.
+        OSSObjectSummary childA = new OSSObjectSummary();
+        childA.setKey("dir/a.txt");
+        childA.setSize(1);
+        OSSObjectSummary childB = new OSSObjectSummary();
+        childB.setKey("dir/b.txt");
+        childB.setSize(2);
+        ObjectListing listing = mock(ObjectListing.class);
+        when(listing.getObjectSummaries())
+                .thenReturn(new ArrayList<>(java.util.Arrays.asList(childA, childB)));
+        when(listing.getNextMarker()).thenReturn(null);
+        when(client.listObjects(any(com.aliyun.oss.model.ListObjectsRequest.class)))
+                .thenReturn(listing);
+
+        boolean renamed = fileIO.rename(srcDir, dstDir);
+
+        assertThat(renamed).isTrue();
+        ArgumentCaptor<CopyObjectRequest> captor = ArgumentCaptor.forClass(CopyObjectRequest.class);
+        verify(client, times(2)).copyObject(captor.capture());
+        List<String> dstKeys =
+                captor.getAllValues().stream()
+                        .map(CopyObjectRequest::getDestinationKey)
+                        .collect(java.util.stream.Collectors.toList());
+        assertThat(dstKeys).containsExactlyInAnyOrder("dir/a.txt", "dir/b.txt");
+        // Directory marker is created at the destination prefix.
+        verify(client)
+                .putObject(
+                        eq("dst-bucket"),
+                        eq("dir/"),
+                        any(java.io.InputStream.class),
+                        any(ObjectMetadata.class));
+        assertThat(fileIO.deleted).contains(srcDir);
+    }
+
+    @Test
+    public void testCrossBucketRenameFallsBackToMultipartCopy() throws Exception {
+        OSSClient client = mock(OSSClient.class);
+        // Single copy fails -> multipart copy path.
+        when(client.copyObject(any(CopyObjectRequest.class)))
+                .thenThrow(
+                        new OSSException("msg", "RequestError", "req", "host", null, null, "PUT"));
+        InitiateMultipartUploadResult init = new InitiateMultipartUploadResult();
+        init.setUploadId("upload-id");
+        when(client.initiateMultipartUpload(any(InitiateMultipartUploadRequest.class)))
+                .thenReturn(init);
+        ObjectMetadata srcMeta = new ObjectMetadata();
+        srcMeta.setContentLength(10);
+        srcMeta.setContentType("text/plain");
+        when(client.getObjectMetadata("src-bucket", "dir/file.txt")).thenReturn(srcMeta);
+        com.aliyun.oss.model.UploadPartCopyResult partResult =
+                new com.aliyun.oss.model.UploadPartCopyResult();
+        partResult.setPartNumber(1);
+        partResult.setETag("etag-1");
+        when(client.uploadPartCopy(any(UploadPartCopyRequest.class))).thenReturn(partResult);
+
+        Path src = new Path("oss://src-bucket/dir/file.txt");
+        Path dst = new Path("oss://dst-bucket/dir/file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, 10, false));
+        fileIO.statuses.put(dst.getParent(), status(dst.getParent(), 0, true));
+
+        boolean renamed = fileIO.rename(src, dst);
+
+        assertThat(renamed).isTrue();
+        verify(client).initiateMultipartUpload(any(InitiateMultipartUploadRequest.class));
+        verify(client).uploadPartCopy(any(UploadPartCopyRequest.class));
+        verify(client).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
     }
 }
