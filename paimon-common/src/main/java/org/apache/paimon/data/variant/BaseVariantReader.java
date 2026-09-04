@@ -195,9 +195,12 @@ public class BaseVariantReader {
             List<DataField> targetFields = targetType.getFields();
             this.fieldInputIndices = new int[targetFields.size()];
             for (int i = 0; i < targetFields.size(); i++) {
+                // A target field may live in the untyped value under partial shredding;
+                // Map.get returns null for it and unboxing would NPE.
                 fieldInputIndices[i] =
                         schema.objectSchemaMap != null
-                                ? schema.objectSchemaMap.get(targetFields.get(i).name())
+                                ? schema.objectSchemaMap.getOrDefault(
+                                        targetFields.get(i).name(), -1)
                                 : -1;
             }
 
