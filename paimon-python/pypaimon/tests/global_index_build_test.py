@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 import os
@@ -47,6 +48,8 @@ from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
 )
 from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
@@ -54,6 +57,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
+from pypaimon.write.commit_message import CommitMessage
 
 
 class _FakeFile:
@@ -223,6 +227,8 @@ class GlobalIndexBuildTest(
         entries = IndexFileHandler(table).scan(snapshot)
         self.assertEqual(2, len(entries))
         self.assertEqual({'btree'}, {e.index_file.index_type for e in entries})
+        self.assertEqual(
+            {table.table_schema.id}, {e.schema_id for e in entries})
         self.assertEqual({0}, {e.index_file.global_index_meta.row_range_start for e in entries})
         self.assertEqual({3}, {e.index_file.global_index_meta.row_range_end for e in entries})
 
@@ -518,6 +524,145 @@ class GlobalIndexBuildTest(
             len(IndexFileHandler(table).scan(
                 table.snapshot_manager().get_latest_snapshot())),
         )
+
+    def test_create_global_index_replaces_legacy_schema_id(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [3, 1, 2, 2],
+                'name': ['c', 'a', 'b1', 'b2'],
+                'age': [30, 10, 20, 21],
+                'city': ['z', 'x', 'y', 'y2'],
+            },
+            schema=self.pa_schema,
+        ))
+        options = {'sorted-index.records-per-range': '2'}
+        self.assertEqual(2, table.create_global_index('id', options=options))
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        current_entries = IndexFileHandler(table).scan(snapshot)
+        current_schema_id = table.table_schema.id
+        rewrite = CommitMessage(
+            partition=(),
+            bucket=0,
+            new_files=[],
+            index_deletes=[
+                IndexManifestEntry(
+                    kind=1,
+                    partition=entry.partition,
+                    bucket=entry.bucket,
+                    index_file=replace(entry.index_file),
+                    schema_id=current_schema_id,
+                )
+                for entry in current_entries
+            ],
+            index_adds=[
+                IndexManifestEntry(
+                    kind=0,
+                    partition=entry.partition,
+                    bucket=entry.bucket,
+                    index_file=replace(entry.index_file),
+                    schema_id=None,
+                )
+                for entry in current_entries
+            ],
+        )
+        commit = table.new_batch_write_builder().new_commit()
+        commit.commit([rewrite])
+        commit.close()
+
+        legacy_entries = IndexFileHandler(table).scan(
+            table.snapshot_manager().get_latest_snapshot())
+        self.assertTrue(legacy_entries)
+        self.assertEqual({None}, {entry.schema_id for entry in legacy_entries})
+
+        messages = GlobalIndexBuilder(table, 'id', options=options).build()
+        self.assertEqual(
+            {entry.index_file.file_name for entry in legacy_entries},
+            {
+                entry.index_file.file_name
+                for message in messages
+                for entry in message.index_deletes
+            },
+        )
+        self.assertEqual(
+            [Range(0, 3)],
+            Range.sort_and_merge_overlap(
+                [
+                    Range(
+                        entry.index_file.global_index_meta.row_range_start,
+                        entry.index_file.global_index_meta.row_range_end,
+                    )
+                    for message in messages
+                    for entry in message.index_adds
+                ],
+                True,
+            ),
+        )
+
+        commit = table.new_batch_write_builder().new_commit()
+        commit.commit(messages)
+        commit.close()
+        replacement_entries = IndexFileHandler(table).scan(
+            table.snapshot_manager().get_latest_snapshot())
+        self.assertTrue(replacement_entries)
+        self.assertEqual(
+            {current_schema_id},
+            {entry.schema_id for entry in replacement_entries},
+        )
+        self.assertTrue(
+            {entry.index_file.file_name for entry in legacy_entries}.isdisjoint(
+                {entry.index_file.file_name for entry in replacement_entries})
+        )
+
+    def test_create_global_index_replaces_changed_indexed_type(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2],
+                'name': ['a', 'b'],
+                'age': [10, 20],
+                'city': ['x', 'y'],
+            },
+            schema=self.pa_schema,
+        ))
+        self.assertEqual(1, table.create_global_index('id'))
+        old_entries = IndexFileHandler(table).scan(
+            table.snapshot_manager().get_latest_snapshot())
+        old_file_names = {
+            entry.index_file.file_name for entry in old_entries
+        }
+
+        table_name = table.identifier.get_full_name()
+        self.catalog.alter_table(
+            table_name,
+            [SchemaChange.update_column_type('id', AtomicType('BIGINT'))],
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        messages = GlobalIndexBuilder(table, 'id').build()
+        self.assertEqual(
+            old_file_names,
+            {
+                entry.index_file.file_name
+                for message in messages
+                for entry in message.index_deletes
+            },
+        )
+        self.assertTrue(any(message.index_adds for message in messages))
+
+        commit = table.new_batch_write_builder().new_commit()
+        commit.commit(messages)
+        commit.close()
+        replacement_entries = IndexFileHandler(table).scan(
+            table.snapshot_manager().get_latest_snapshot())
+        self.assertTrue(replacement_entries)
+        self.assertEqual(
+            {table.table_schema.id},
+            {entry.schema_id for entry in replacement_entries},
+        )
+        self.assertTrue(old_file_names.isdisjoint(
+            {entry.index_file.file_name for entry in replacement_entries}))
 
     def test_create_btree_global_index_for_java_scalar_types(self):
         schema = pa.schema([

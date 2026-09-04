@@ -474,6 +474,34 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullModeFallsBackForLegacyIndex() throws Exception {
+        catalog.createTable(
+                identifier("full_search_legacy_vector_index_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_legacy_vector_index_table"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors, false);
+
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+
+        assertThat(indexVectorSearchSplits(plan.splits())).isEmpty();
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(0, 1));
+        assertThat(builder.newVectorRead().read(plan).results()).containsExactly(0L, 1L);
+    }
+
+    @Test
     public void testVectorSearchFullModeScansUnindexedData() throws Exception {
         catalog.createTable(
                 identifier("full_search_cosine_table"),
@@ -1797,6 +1825,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitIndex(FileStoreTable table, String fieldName, float[][] vectors)
             throws Exception {
+        buildAndCommitIndex(table, fieldName, vectors, true);
+    }
+
+    private void buildAndCommitIndex(
+            FileStoreTable table, String fieldName, float[][] vectors, boolean includeSchemaId)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(fieldName);
 
@@ -1821,7 +1855,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
+        if (!includeSchemaId) {
+            List<IndexFileMeta> legacyIndexFiles = new ArrayList<>(indexFiles.size());
+            for (IndexFileMeta indexFile : indexFiles) {
+                legacyIndexFiles.add(indexFile.withSchemaId(null));
+            }
+            indexFiles = legacyIndexFiles;
+        }
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -1863,7 +1905,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange1,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries1);
+                        entries1,
+                        table.schema().id());
 
         // Build second index file covering rows [mid, end)
         GlobalIndexSingleColumnWriter writer2 =
@@ -1886,7 +1929,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange2,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries2);
+                        entries2,
+                        table.schema().id());
 
         // Combine all index files and commit together
         List<IndexFileMeta> allIndexFiles = new ArrayList<>();
@@ -2060,7 +2104,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        null);
+                        null,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -2098,7 +2143,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         idField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -2139,7 +2185,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

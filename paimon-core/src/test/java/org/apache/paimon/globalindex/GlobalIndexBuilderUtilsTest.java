@@ -108,7 +108,8 @@ class GlobalIndexBuilderUtilsTest {
                         fields,
                         "test-type",
                         entries,
-                        null);
+                        null,
+                        11L);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -136,7 +137,8 @@ class GlobalIndexBuilderUtilsTest {
                         fields,
                         "test-type",
                         entries,
-                        null);
+                        null,
+                        11L);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);
@@ -157,9 +159,11 @@ class GlobalIndexBuilderUtilsTest {
                         Collections.singletonList(field),
                         "lumina",
                         createDummyResultEntries(),
-                        sourceMeta);
+                        sourceMeta,
+                        11L);
 
         assertThat(metas.get(0).globalIndexMeta().sourceMeta()).containsExactly(sourceMeta);
+        assertThat(metas.get(0).schemaId()).isEqualTo(11L);
     }
 
     // Test: 3 columns (title + vec + id), primary column title is indexFieldId, rest in
@@ -183,7 +187,8 @@ class GlobalIndexBuilderUtilsTest {
                         fields,
                         "test-type",
                         entries,
-                        null);
+                        null,
+                        11L);
 
         assertThat(metas).hasSize(1);
         assertThat(metas.get(0).globalIndexMeta().indexFieldId()).isEqualTo(1);

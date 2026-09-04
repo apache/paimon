@@ -554,7 +554,8 @@ public class GenericIndexTopoBuilder {
                         indexFields,
                         indexType,
                         resultEntries,
-                        sourceMeta);
+                        sourceMeta,
+                        table.schema().id());
         return new CommitMessageImpl(
                 partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement());
     }

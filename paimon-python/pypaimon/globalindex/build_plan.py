@@ -17,7 +17,7 @@
 
 """Reusable global index build planning helpers."""
 
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.split import DataSplit
@@ -65,9 +65,32 @@ def indexed_row_ranges(
     index_field_id: int,
     index_type: str,
 ) -> List[Range]:
+    from pypaimon.globalindex.global_index_schema_compatibility import (
+        filter_compatible_global_indexes,
+    )
+
+    entries = current_index_entries(
+        table, snapshot, partition_filter, index_field_id, index_type)
+    ranges = [
+        Range(
+            entry.index_file.global_index_meta.row_range_start,
+            entry.index_file.global_index_meta.row_range_end,
+        )
+        for entry in filter_compatible_global_indexes(table, entries)
+    ]
+    return Range.sort_and_merge_overlap(ranges, True)
+
+
+def current_index_entries(
+    table,
+    snapshot,
+    partition_filter,
+    index_field_id: int,
+    index_type: str,
+) -> List:
     from pypaimon.index.index_file_handler import IndexFileHandler
 
-    ranges = []
+    entries = []
     for entry in IndexFileHandler(table).scan(snapshot):
         if getattr(entry, "kind", 0) != 0:
             continue
@@ -84,8 +107,47 @@ def indexed_row_ranges(
             or meta.extra_field_ids
         ):
             continue
-        ranges.append(Range(meta.row_range_start, meta.row_range_end))
-    return Range.sort_and_merge_overlap(ranges, True)
+        entries.append(entry)
+    return entries
+
+
+def index_rebuild_plan(
+    table,
+    snapshot,
+    partition_filter,
+    index_field_id: int,
+    index_type: str,
+) -> Tuple[List[Range], List]:
+    from pypaimon.globalindex.global_index_schema_compatibility import (
+        partition_global_indexes_by_compatibility,
+    )
+
+    current_indexes = current_index_entries(
+        table, snapshot, partition_filter, index_field_id, index_type)
+    compatible, incompatible = partition_global_indexes_by_compatibility(
+        table, current_indexes)
+
+    next_row_id = getattr(snapshot, "next_row_id", None)
+    ranges_to_build = []
+    if snapshot is not None and next_row_id is not None and next_row_id > 0:
+        indexed_ranges = [
+            Range(
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.global_index_meta.row_range_end,
+            )
+            for entry in compatible
+        ]
+        ranges_to_build.extend(
+            Range(0, next_row_id - 1).exclude(
+                Range.sort_and_merge_overlap(indexed_ranges, True)))
+    ranges_to_build.extend(
+        Range(
+            entry.index_file.global_index_meta.row_range_start,
+            entry.index_file.global_index_meta.row_range_end,
+        )
+        for entry in incompatible
+    )
+    return Range.sort_and_merge_overlap(ranges_to_build, True), incompatible
 
 
 def split_by_contiguous_row_range(splits):

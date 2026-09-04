@@ -38,7 +38,11 @@ def build_index_delete_msgs(entries) -> list:
         key = tuple(e.partition.values)
         by_partition.setdefault(key, []).append(
             IndexManifestEntry(
-                kind=1, partition=e.partition, bucket=e.bucket, index_file=e.index_file
+                kind=1,
+                partition=e.partition,
+                bucket=e.bucket,
+                index_file=e.index_file,
+                schema_id=e.schema_id,
             )
         )
     return [

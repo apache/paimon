@@ -22,7 +22,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.schema.TableSchema;
@@ -32,8 +35,12 @@ import org.apache.commons.io.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for copy files. */
 public class CopyFilesUtil {
@@ -98,7 +105,48 @@ public class CopyFilesUtil {
                 null);
     }
 
-    public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {
+    public static IndexFileMeta toNewIndexFileMeta(
+            IndexFileMeta oldFileMeta, String newFileName, @Nullable Long newSchemaId) {
+        return toNewIndexFileMeta(
+                oldFileMeta, newFileName, newSchemaId, oldFileMeta.globalIndexMeta());
+    }
+
+    public static IndexFileMeta toNewPrimaryKeyIndexFileMeta(
+            IndexFileMeta oldFileMeta,
+            String newFileName,
+            Map<String, String> dataFileNameMapping) {
+        PrimaryKeyIndexSourceMeta oldSourceMeta =
+                PrimaryKeyIndexSourceMeta.fromIndexFile(oldFileMeta);
+        ArrayList<PrimaryKeyIndexSourceFile> newSourceFiles = new ArrayList<>();
+        for (PrimaryKeyIndexSourceFile sourceFile : oldSourceMeta.sourceFiles()) {
+            String newSourceFileName = dataFileNameMapping.get(sourceFile.fileName());
+            checkArgument(
+                    newSourceFileName != null,
+                    "Cannot find copied data file for primary-key index source %s.",
+                    sourceFile.fileName());
+            newSourceFiles.add(
+                    new PrimaryKeyIndexSourceFile(newSourceFileName, sourceFile.rowCount()));
+        }
+
+        GlobalIndexMeta oldGlobalIndexMeta = oldFileMeta.globalIndexMeta();
+        GlobalIndexMeta newGlobalIndexMeta =
+                new GlobalIndexMeta(
+                        oldGlobalIndexMeta.rowRangeStart(),
+                        oldGlobalIndexMeta.rowRangeEnd(),
+                        oldGlobalIndexMeta.indexFieldId(),
+                        oldGlobalIndexMeta.extraFieldIds(),
+                        oldGlobalIndexMeta.indexMeta(),
+                        new PrimaryKeyIndexSourceMeta(oldSourceMeta.dataLevel(), newSourceFiles)
+                                .serialize());
+        return toNewIndexFileMeta(
+                oldFileMeta, newFileName, oldFileMeta.schemaId(), newGlobalIndexMeta);
+    }
+
+    private static IndexFileMeta toNewIndexFileMeta(
+            IndexFileMeta oldFileMeta,
+            String newFileName,
+            @Nullable Long newSchemaId,
+            @Nullable GlobalIndexMeta newGlobalIndexMeta) {
         String newExternalPath =
                 externalPathDir(oldFileMeta.externalPath())
                         .map(dir -> dir + "/" + newFileName)
@@ -109,7 +157,9 @@ public class CopyFilesUtil {
                 oldFileMeta.fileSize(),
                 oldFileMeta.rowCount(),
                 oldFileMeta.dvRanges(),
-                newExternalPath);
+                newExternalPath,
+                newGlobalIndexMeta,
+                newSchemaId);
     }
 
     public static Optional<String> externalPathDir(String externalPath) {

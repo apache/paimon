@@ -438,6 +438,7 @@ class DynamicBucketIndexMaintainer:
                         partition=old_entry.partition,
                         bucket=old_entry.bucket,
                         index_file=old_entry.index_file,
+                        schema_id=old_entry.schema_id,
                     )
                 ] if old_entry is not None else [],
             )

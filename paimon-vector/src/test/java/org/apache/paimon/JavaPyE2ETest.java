@@ -177,7 +177,8 @@ public class JavaPyE2ETest {
                         rowRange,
                         embeddingField.id(),
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -287,7 +288,8 @@ public class JavaPyE2ETest {
                         rowRange,
                         embeddingField.id(),
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

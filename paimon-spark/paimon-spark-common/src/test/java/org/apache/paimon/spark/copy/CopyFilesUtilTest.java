@@ -19,6 +19,10 @@
 package org.apache.paimon.spark.copy;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -29,6 +33,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -135,5 +141,48 @@ public class CopyFilesUtilTest {
 
         assertThat(copied.schemaId()).isEqualTo(9L);
         assertThat(copied.writeCols()).containsExactly("id", "blob", "name");
+    }
+
+    @Test
+    void testPreserveGlobalIndexMetaAndRebindSchemaId() {
+        GlobalIndexMeta globalIndexMeta =
+                new GlobalIndexMeta(0L, 9L, 1, null, new byte[] {1, 2}, new byte[] {3, 4});
+        IndexFileMeta source =
+                new IndexFileMeta(
+                        "btree", "source.idx", 100L, 10L, null, null, globalIndexMeta, 5L);
+
+        IndexFileMeta copied = CopyFilesUtil.toNewIndexFileMeta(source, "copied.idx", 8L);
+
+        assertThat(copied.fileName()).isEqualTo("copied.idx");
+        assertThat(copied.globalIndexMeta()).isEqualTo(globalIndexMeta);
+        assertThat(copied.schemaId()).isEqualTo(8L);
+    }
+
+    @Test
+    void testRemapPrimaryKeyIndexSourceFiles() {
+        PrimaryKeyIndexSourceMeta sourceMeta =
+                new PrimaryKeyIndexSourceMeta(
+                        1,
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1.parquet", 2L),
+                                new PrimaryKeyIndexSourceFile("data-2.parquet", 3L)));
+        GlobalIndexMeta globalIndexMeta =
+                new GlobalIndexMeta(0L, 4L, 1, null, null, sourceMeta.serialize());
+        IndexFileMeta source =
+                new IndexFileMeta(
+                        "btree", "source.idx", 100L, 5L, null, null, globalIndexMeta, null);
+        Map<String, String> dataFileNameMapping = new HashMap<>();
+        dataFileNameMapping.put("data-1.parquet", "copied-1.parquet");
+        dataFileNameMapping.put("data-2.parquet", "copied-2.parquet");
+
+        IndexFileMeta copied =
+                CopyFilesUtil.toNewPrimaryKeyIndexFileMeta(
+                        source, "copied.idx", dataFileNameMapping);
+
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(copied).sourceFiles())
+                .containsExactly(
+                        new PrimaryKeyIndexSourceFile("copied-1.parquet", 2L),
+                        new PrimaryKeyIndexSourceFile("copied-2.parquet", 3L));
+        assertThat(copied.schemaId()).isNull();
     }
 }

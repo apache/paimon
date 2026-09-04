@@ -30,6 +30,8 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -55,6 +57,7 @@ public class IndexManifestEntry {
     public static final String DELETION_VECTORS_RANGES = "_DELETIONS_VECTORS_RANGES";
     public static final String EXTERNAL_PATH = "_EXTERNAL_PATH";
     public static final String GLOBAL_INDEX = "_GLOBAL_INDEX";
+    public static final String SCHEMA_ID = "_SCHEMA_ID";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -72,7 +75,8 @@ public class IndexManifestEntry {
                                     DELETION_VECTORS_RANGES,
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(8, EXTERNAL_PATH, newStringType(true)),
-                            new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA)));
+                            new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA),
+                            new DataField(10, SCHEMA_ID, new BigIntType(true))));
 
     public static final RowType MANIFEST_ROW_TYPE =
             ManifestSchemaUtils.withFormatIdentifier(SCHEMA);
@@ -81,18 +85,29 @@ public class IndexManifestEntry {
     private final BinaryRow partition;
     private final int bucket;
     private final IndexFileMeta indexFile;
+    @Nullable private final Long schemaId;
 
     public IndexManifestEntry(
             FileKind kind, BinaryRow partition, int bucket, IndexFileMeta indexFile) {
+        this(kind, partition, bucket, indexFile, indexFile.schemaId());
+    }
+
+    public IndexManifestEntry(
+            FileKind kind,
+            BinaryRow partition,
+            int bucket,
+            IndexFileMeta indexFile,
+            @Nullable Long schemaId) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
-        this.indexFile = indexFile;
+        this.indexFile = indexFile.withSchemaId(schemaId);
+        this.schemaId = schemaId;
     }
 
     public IndexManifestEntry toDeleteEntry() {
         checkArgument(kind == FileKind.ADD);
-        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, indexFile);
+        return new IndexManifestEntry(FileKind.DELETE, partition, bucket, indexFile, schemaId);
     }
 
     public FileKind kind() {
@@ -111,6 +126,11 @@ public class IndexManifestEntry {
         return indexFile;
     }
 
+    @Nullable
+    public Long schemaId() {
+        return schemaId;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -123,12 +143,13 @@ public class IndexManifestEntry {
         return bucket == entry.bucket
                 && kind == entry.kind
                 && Objects.equals(partition, entry.partition)
-                && Objects.equals(indexFile, entry.indexFile);
+                && Objects.equals(indexFile, entry.indexFile)
+                && Objects.equals(schemaId, entry.schemaId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, partition, bucket, indexFile);
+        return Objects.hash(kind, partition, bucket, indexFile, schemaId);
     }
 
     @Override
@@ -142,6 +163,8 @@ public class IndexManifestEntry {
                 + bucket
                 + ", indexFile="
                 + indexFile
+                + ", schemaId="
+                + schemaId
                 + '}';
     }
 }

@@ -35,9 +35,9 @@ from pypaimon.globalindex.bitmap.bitmap_index_writer import (
 )
 from pypaimon.globalindex.build_plan import (
     filter_non_indexable_splits as _filter_non_indexable_splits,
+    index_rebuild_plan as _index_rebuild_plan,
     split_by_contiguous_unindexed_row_range as _split_by_contiguous_unindexed_row_range,
     split_by_global_index_shard as _split_by_global_index_shard,
-    unindexed_row_ranges as _unindexed_row_ranges,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
@@ -167,7 +167,7 @@ class GlobalIndexBuilder:
 
         index_field = self._table.field_dict[self._index_columns[0]]
         snapshot = self._snapshot_for_plan(plan)
-        unindexed_ranges = _unindexed_row_ranges(
+        unindexed_ranges, incompatible_indexes = _index_rebuild_plan(
             self._table,
             snapshot,
             partition_filter,
@@ -195,10 +195,13 @@ class GlobalIndexBuilder:
         index_path = index_path_factory.global_index_root_path()
 
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
-            return self._build_sorted_index(
+            messages = self._build_sorted_index(
                 splits, unindexed_ranges, index_field, table_read, index_path)
-        return self._build_generic_index(
-            splits, unindexed_ranges, index_field, table_read, index_path)
+        else:
+            messages = self._build_generic_index(
+                splits, unindexed_ranges, index_field, table_read, index_path)
+        messages.extend(_index_delete_messages(incompatible_indexes))
+        return messages
 
     def _snapshot_for_plan(self, plan):
         snapshot_id = getattr(plan, "snapshot_id", None)
@@ -502,6 +505,31 @@ def _to_index_manifest_entries(
                 partition=partition,
                 bucket=0,
                 index_file=index_file,
+                schema_id=table.table_schema.id,
             )
         )
     return entries
+
+
+def _index_delete_messages(entries) -> List[CommitMessage]:
+    by_partition = {}
+    for entry in entries:
+        partition = tuple(entry.partition.values)
+        by_partition.setdefault(partition, []).append(
+            IndexManifestEntry(
+                kind=1,
+                partition=entry.partition,
+                bucket=entry.bucket,
+                index_file=entry.index_file,
+                schema_id=entry.schema_id,
+            )
+        )
+    return [
+        CommitMessage(
+            partition=partition,
+            bucket=0,
+            new_files=[],
+            index_deletes=deletes,
+        )
+        for partition, deletes in by_partition.items()
+    ]
