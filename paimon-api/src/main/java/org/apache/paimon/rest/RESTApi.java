@@ -46,6 +46,7 @@ import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
 import org.apache.paimon.rest.requests.CommitTableRequest;
+import org.apache.paimon.rest.requests.CommitTransactionRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
@@ -707,6 +708,15 @@ public class RESTApi {
                         CommitTableResponse.class,
                         restAuthFunction);
         return response.isSuccess();
+    }
+
+    /** Commit snapshots of multiple tables atomically. */
+    public void commitTransaction(List<CommitTableRequest> tableChanges) {
+        checkArgument(!tableChanges.isEmpty(), "Table changes cannot be empty.");
+        client.post(
+                resourcePaths.commitTransaction(),
+                new CommitTransactionRequest(tableChanges),
+                restAuthFunction);
     }
 
     /**

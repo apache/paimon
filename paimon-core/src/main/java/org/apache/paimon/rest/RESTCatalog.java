@@ -42,6 +42,8 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.PreparedSnapshotCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -50,8 +52,10 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
+import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -64,12 +68,14 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.format.FormatTablePartitionPathResolver;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
@@ -85,6 +91,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -115,6 +122,36 @@ public class RESTCatalog implements Catalog {
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
     private final @Nullable LocalCacheManager cacheManager;
+
+    private static class TransactionTableCommit {
+
+        private final Identifier identifier;
+        private final String tableUuid;
+        private final ManifestCommittable committable;
+        private final TableCommitImpl tableCommit;
+        @Nullable private PreparedSnapshotCommit preparedCommit;
+
+        private TransactionTableCommit(
+                Identifier identifier,
+                String tableUuid,
+                ManifestCommittable committable,
+                TableCommitImpl tableCommit) {
+            this.identifier = identifier;
+            this.tableUuid = tableUuid;
+            this.committable = committable;
+            this.tableCommit = tableCommit;
+        }
+
+        private CommitTableRequest toRequest() {
+            PreparedSnapshotCommit prepared = Objects.requireNonNull(preparedCommit);
+            return new CommitTableRequest(
+                    identifier,
+                    tableUuid,
+                    prepared.baseSnapshotUuid(),
+                    prepared.snapshot(),
+                    prepared.statistics());
+        }
+    }
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -495,6 +532,180 @@ public class RESTCatalog implements Catalog {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    /**
+     * Commit changes to multiple tables atomically through the REST transaction endpoint.
+     *
+     * <p>APPEND and OVERWRITE snapshots are prepared locally and published in one REST request.
+     * COMPACT changes are excluded from the transaction and committed best-effort afterwards.
+     * Failed transactions leave prepared metadata for orphan-file cleanup.
+     */
+    @Experimental
+    public void commitTransaction(
+            String commitUser, Map<Identifier, ManifestCommittable> committables)
+            throws TableNotExistException {
+        commitTransaction(commitUser, committables, false);
+    }
+
+    /**
+     * Commit changes to multiple tables atomically through the REST transaction endpoint.
+     *
+     * @param checkAppendFiles whether to check conflicts for appended files
+     */
+    @Experimental
+    public void commitTransaction(
+            String commitUser,
+            Map<Identifier, ManifestCommittable> committables,
+            boolean checkAppendFiles)
+            throws TableNotExistException {
+        if (committables.isEmpty()) {
+            return;
+        }
+
+        List<Map.Entry<Identifier, ManifestCommittable>> entries =
+                new ArrayList<>(committables.entrySet());
+        entries.sort(
+                Comparator.comparing(
+                                (Map.Entry<Identifier, ManifestCommittable> entry) ->
+                                        entry.getKey().getDatabaseName())
+                        .thenComparing(entry -> entry.getKey().getObjectName()));
+
+        List<TransactionTableCommit> transactionCommits = new ArrayList<>(entries.size());
+        try {
+            for (Map.Entry<Identifier, ManifestCommittable> entry : entries) {
+                prepareTransactionCommit(
+                        commitUser,
+                        entry.getKey(),
+                        entry.getValue(),
+                        checkAppendFiles,
+                        transactionCommits);
+            }
+
+            List<CommitTableRequest> tableChanges =
+                    transactionCommits.stream()
+                            .filter(commit -> commit.preparedCommit != null)
+                            .map(TransactionTableCommit::toRequest)
+                            .collect(Collectors.toList());
+            if (!tableChanges.isEmpty()) {
+                try {
+                    api.commitTransaction(tableChanges);
+                } catch (AlreadyExistsException e) {
+                    throw e;
+                } catch (NoSuchResourceException e) {
+                    throw new TableNotExistException(
+                            transactionIdentifier(
+                                    transactionCommits, e.resourceName(), e.getMessage()),
+                            e);
+                } catch (ForbiddenException e) {
+                    throw new TableNoPermissionException(
+                            transactionIdentifier(transactionCommits, null, e.getMessage()), e);
+                } catch (BadRequestException e) {
+                    throw new IllegalArgumentException(e.getMessage(), e);
+                } catch (NotAuthorizedException | NotImplementedException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    // A transport or server failure may have happened after the atomic publish.
+                    markPreparedCommitsUnknown(transactionCommits, e);
+                    throw e;
+                }
+
+                RuntimeException completionFailure = null;
+                for (TransactionTableCommit commit : transactionCommits) {
+                    if (commit.preparedCommit == null) {
+                        continue;
+                    }
+                    try {
+                        commit.tableCommit.completeTransactionCommit(commit.preparedCommit);
+                    } catch (RuntimeException e) {
+                        if (completionFailure == null) {
+                            completionFailure = e;
+                        } else {
+                            completionFailure.addSuppressed(e);
+                        }
+                    }
+                }
+                if (completionFailure != null) {
+                    throw completionFailure;
+                }
+            }
+
+            RuntimeException maintenanceFailure = null;
+            for (TransactionTableCommit commit : transactionCommits) {
+                commit.tableCommit.commitTransactionCompaction(commit.committable);
+                try {
+                    commit.tableCommit.maintainTransaction(commit.committable.identifier());
+                } catch (RuntimeException e) {
+                    if (maintenanceFailure == null) {
+                        maintenanceFailure = e;
+                    } else {
+                        maintenanceFailure.addSuppressed(e);
+                    }
+                }
+            }
+            if (maintenanceFailure != null) {
+                throw maintenanceFailure;
+            }
+        } finally {
+            for (TransactionTableCommit commit : transactionCommits) {
+                commit.tableCommit.close();
+            }
+        }
+    }
+
+    private void prepareTransactionCommit(
+            String commitUser,
+            Identifier identifier,
+            ManifestCommittable committable,
+            boolean checkAppendFiles,
+            List<TransactionTableCommit> transactionCommits)
+            throws TableNotExistException {
+        Table loadedTable = getTable(identifier);
+        if (!(loadedTable instanceof FileStoreTable)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table %s does not support snapshot transactions.",
+                            identifier.getFullName()));
+        }
+
+        FileStoreTable table = (FileStoreTable) loadedTable;
+        TableCommitImpl commit = table.newCommit(commitUser);
+        TransactionTableCommit tableCommit =
+                new TransactionTableCommit(identifier, table.uuid(), committable, commit);
+        transactionCommits.add(tableCommit);
+
+        tableCommit.preparedCommit =
+                commit.prepareTransactionCommit(committable, checkAppendFiles).orElse(null);
+    }
+
+    private Identifier transactionIdentifier(
+            List<TransactionTableCommit> transactionCommits,
+            @Nullable String resourceName,
+            @Nullable String message) {
+        for (TransactionTableCommit commit : transactionCommits) {
+            Identifier identifier = commit.identifier;
+            if (Objects.equals(resourceName, identifier.getFullName())
+                    || Objects.equals(resourceName, identifier.getObjectName())
+                    || Objects.equals(resourceName, identifier.getTableName())
+                    || (message != null && message.contains(identifier.getFullName()))) {
+                return identifier;
+            }
+        }
+        return transactionCommits.get(0).identifier;
+    }
+
+    private void markPreparedCommitsUnknown(
+            List<TransactionTableCommit> transactionCommits, RuntimeException failure) {
+        for (TransactionTableCommit commit : transactionCommits) {
+            if (commit.preparedCommit == null) {
+                continue;
+            }
+            try {
+                commit.tableCommit.markTransactionCommitUnknown(commit.preparedCommit);
+            } catch (RuntimeException stateFailure) {
+                failure.addSuppressed(stateFailure);
+            }
         }
     }
 

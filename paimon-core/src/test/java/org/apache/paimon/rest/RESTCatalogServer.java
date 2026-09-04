@@ -237,7 +237,7 @@ public class RESTCatalogServer {
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new ConcurrentHashMap<>();
-    private final Map<String, TableMetadata> tableMetadataStore = new ConcurrentHashMap<>();
+    final Map<String, TableMetadata> tableMetadataStore = new ConcurrentHashMap<>();
     private final RESTPermissionStore permissionStore = new RESTPermissionStore();
     private final Map<PolicyKey, DataPolicy> policyStore = new ConcurrentHashMap<>();
     private final Map<String, Object> tablePolicyLocks = new ConcurrentHashMap<>();
@@ -256,10 +256,10 @@ public class RESTCatalogServer {
 
     private final Map<String, List<Partition>> tablePartitionsStore = new ConcurrentHashMap<>();
     private final Map<String, View> viewStore = new ConcurrentHashMap<>();
-    private final Map<String, TableSnapshot> tableLatestSnapshotStore = new HashMap<>();
+    final Map<String, TableSnapshot> tableLatestSnapshotStore = new HashMap<>();
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
-    private final List<String> noPermissionTables = new ArrayList<>();
+    final List<String> noPermissionTables = new ArrayList<>();
     private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new ConcurrentHashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
@@ -474,6 +474,9 @@ public class RESTCatalogServer {
                     } else if ("POST".equals(request.getMethod())
                             && resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
+                    } else if (RESTCatalogTransactionHandler.matches(request, resourcePaths)) {
+                        return RESTCatalogTransactionHandler.handle(
+                                RESTCatalogServer.this, restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
                     } else if ("GET".equals(request.getMethod())
@@ -3230,7 +3233,7 @@ public class RESTCatalogServer {
 
     public static volatile boolean commitSuccessThrowException = false;
 
-    private synchronized MockResponse commitSnapshot(
+    synchronized MockResponse commitSnapshot(
             Identifier identifier,
             String tableId,
             @Nullable String baseSnapshotUuid,
@@ -3408,7 +3411,7 @@ public class RESTCatalogServer {
         }
     }
 
-    private MockResponse mockResponse(RESTResponse response, int httpCode) {
+    MockResponse mockResponse(RESTResponse response, int httpCode) {
         try {
             return new MockResponse()
                     .setResponseCode(httpCode)

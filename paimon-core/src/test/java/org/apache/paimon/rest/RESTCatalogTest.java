@@ -46,6 +46,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -73,6 +74,7 @@ import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
+import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
 import org.apache.paimon.rest.responses.DropPartitionsResponse;
@@ -2338,6 +2340,219 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 Collections.emptyList()))
                 .isTrue();
         assertThat(restCatalog.loadSnapshot(identifier).get().snapshot()).isEqualTo(second);
+    }
+
+    @Test
+    void testCommitTransactionAtomically() throws Exception {
+        Identifier first = Identifier.create("transaction_db", "first");
+        Identifier second = Identifier.create("transaction_db", "second");
+        createTable(first, Collections.emptyMap(), Collections.emptyList());
+        createTable(second, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable firstTable = (FileStoreTable) catalog.getTable(first);
+        FileStoreTable secondTable = (FileStoreTable) catalog.getTable(second);
+
+        Map<Identifier, ManifestCommittable> changes = new HashMap<>();
+        changes.put(first, transactionCommittable(firstTable, "transaction-user", 1L, 11));
+        changes.put(second, transactionCommittable(secondTable, "transaction-user", 1L, 22));
+
+        restCatalog.commitTransaction("transaction-user", changes);
+
+        assertThat(firstTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+        assertThat(secondTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+        assertThat(readTransactionValues(firstTable)).containsExactly(11);
+        assertThat(readTransactionValues(secondTable)).containsExactly(22);
+    }
+
+    @Test
+    void testCommitTransactionConflictPublishesNothing() throws Exception {
+        Identifier first = Identifier.create("transaction_conflict_db", "first");
+        Identifier second = Identifier.create("transaction_conflict_db", "second");
+        createTable(first, Collections.emptyMap(), Collections.emptyList());
+        createTable(second, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable firstTable = (FileStoreTable) catalog.getTable(first);
+        FileStoreTable secondTable = (FileStoreTable) catalog.getTable(second);
+
+        Map<Identifier, ManifestCommittable> changes = new HashMap<>();
+        changes.put(first, transactionCommittable(firstTable, "transaction-user", 1L, 11));
+        changes.put(second, transactionCommittable(secondTable, "transaction-user", 1L, 22));
+        RESTCatalogTransactionHandler.commitConflict = true;
+
+        assertThatThrownBy(() -> restCatalog.commitTransaction("transaction-user", changes))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("Transaction commit conflict");
+        assertThat(firstTable.snapshotManager().latestSnapshot()).isNull();
+        assertThat(secondTable.snapshotManager().latestSnapshot()).isNull();
+        assertManifestDirectoryNotEmpty(firstTable);
+        assertManifestDirectoryNotEmpty(secondTable);
+    }
+
+    @Test
+    void testUnknownTransactionResultKeepsPublishedMetadata() throws Exception {
+        Identifier first = Identifier.create("transaction_unknown_db", "first");
+        Identifier second = Identifier.create("transaction_unknown_db", "second");
+        createTable(first, Collections.emptyMap(), Collections.emptyList());
+        createTable(second, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable firstTable = (FileStoreTable) catalog.getTable(first);
+        FileStoreTable secondTable = (FileStoreTable) catalog.getTable(second);
+
+        Map<Identifier, ManifestCommittable> changes = new HashMap<>();
+        changes.put(first, transactionCommittable(firstTable, "transaction-user", 1L, 11));
+        changes.put(second, transactionCommittable(secondTable, "transaction-user", 1L, 22));
+        RESTCatalogTransactionHandler.commitSuccessThrowException = true;
+
+        assertThatThrownBy(() -> restCatalog.commitTransaction("transaction-user", changes))
+                .isInstanceOf(ServiceUnavailableException.class)
+                .hasMessageContaining("Unknown transaction commit state");
+        assertThat(firstTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+        assertThat(secondTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+        assertThat(readTransactionValues(firstTable)).containsExactly(11);
+        assertThat(readTransactionValues(secondTable)).containsExactly(22);
+
+        // Retrying an unknown result reconciles the committed identifiers instead of publishing
+        // another pair of snapshots.
+        restCatalog.commitTransaction("transaction-user", changes);
+        assertThat(firstTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+        assertThat(secondTable.snapshotManager().latestSnapshot().id()).isEqualTo(1L);
+    }
+
+    @Test
+    void testCommitTransactionRejectsMissingDataFiles() throws Exception {
+        Identifier identifier = Identifier.create("transaction_recovery_db", "table");
+        createTable(identifier, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ManifestCommittable committable = transactionCommittable(table, "transaction-user", 1L, 11);
+        CommitMessageImpl message = (CommitMessageImpl) committable.fileCommittables().get(0);
+        DataFileMeta dataFile = message.newFilesIncrement().newFiles().get(0);
+        Path dataPath =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(message.partition(), message.bucket())
+                        .toPath(dataFile);
+        table.fileIO().delete(dataPath, false);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.commitTransaction(
+                                        "transaction-user",
+                                        Collections.singletonMap(identifier, committable)))
+                .hasMessageContaining(
+                        "Cannot recover from this checkpoint because some files in the snapshot");
+        assertThat(table.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    void testMissingCompactionFilesDoNotFailTransaction() throws Exception {
+        Identifier identifier = Identifier.create("transaction_compaction_db", "table");
+        createTable(identifier, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ManifestCommittable written = transactionCommittable(table, "transaction-user", 1L, 11);
+        CommitMessageImpl writtenMessage = (CommitMessageImpl) written.fileCommittables().get(0);
+        DataFileMeta compactedFile = writtenMessage.newFilesIncrement().newFiles().get(0);
+        Path compactedPath =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(
+                                writtenMessage.partition(), writtenMessage.bucket())
+                        .toPath(compactedFile);
+        table.fileIO().delete(compactedPath, false);
+
+        ManifestCommittable compaction = new ManifestCommittable(1L);
+        compaction.addFileCommittable(
+                new CommitMessageImpl(
+                        writtenMessage.partition(),
+                        writtenMessage.bucket(),
+                        writtenMessage.totalBuckets(),
+                        DataIncrement.emptyIncrement(),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(compactedFile),
+                                Collections.emptyList())));
+
+        restCatalog.commitTransaction(
+                "transaction-user", Collections.singletonMap(identifier, compaction));
+        assertThat(table.snapshotManager().latestSnapshot()).isNull();
+    }
+
+    @Test
+    void testCommitTransactionRunsTableMaintenance() throws Exception {
+        Identifier identifier = Identifier.create("transaction_maintenance_db", "table");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        createTable(identifier, options, Collections.emptyList());
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        for (long commitIdentifier = 1L; commitIdentifier <= 3L; commitIdentifier++) {
+            ManifestCommittable committable =
+                    transactionCommittable(
+                            table, "transaction-user", commitIdentifier, (int) commitIdentifier);
+            restCatalog.commitTransaction(
+                    "transaction-user", Collections.singletonMap(identifier, committable));
+        }
+
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+        assertThat(table.snapshotManager().snapshotExists(1L)).isFalse();
+        assertThat(table.snapshotManager().snapshotExists(2L)).isFalse();
+    }
+
+    @Test
+    void testCommitTransactionTranslatesRestErrors() throws Exception {
+        Identifier first = Identifier.create("transaction_error_db", "first");
+        Identifier second = Identifier.create("transaction_error_db", "second");
+        createTable(first, Collections.emptyMap(), Collections.emptyList());
+        createTable(second, Collections.emptyMap(), Collections.emptyList());
+        FileStoreTable firstTable = (FileStoreTable) catalog.getTable(first);
+        FileStoreTable secondTable = (FileStoreTable) catalog.getTable(second);
+        Map<Identifier, ManifestCommittable> changes = new HashMap<>();
+        changes.put(first, transactionCommittable(firstTable, "transaction-user", 1L, 11));
+        changes.put(second, transactionCommittable(secondTable, "transaction-user", 1L, 22));
+
+        RESTCatalogTransactionHandler.missingTable = second.getFullName();
+        Catalog.TableNotExistException missing =
+                assertThrows(
+                        Catalog.TableNotExistException.class,
+                        () -> restCatalog.commitTransaction("transaction-user", changes));
+        assertThat(missing.identifier()).isEqualTo(second);
+
+        RESTCatalogTransactionHandler.forbiddenTable = second.getFullName();
+        Catalog.TableNoPermissionException forbidden =
+                assertThrows(
+                        Catalog.TableNoPermissionException.class,
+                        () -> restCatalog.commitTransaction("transaction-user", changes));
+        assertThat(forbidden.identifier()).isEqualTo(second);
+
+        RESTCatalogTransactionHandler.badRequest = true;
+        assertThatThrownBy(() -> restCatalog.commitTransaction("transaction-user", changes))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid transaction");
+    }
+
+    private ManifestCommittable transactionCommittable(
+            FileStoreTable table, String commitUser, long identifier, int value) throws Exception {
+        ManifestCommittable committable = new ManifestCommittable(identifier);
+        try (StreamTableWrite write = table.newWrite(commitUser)) {
+            write.write(GenericRow.of(value));
+            for (CommitMessage message : write.prepareCommit(false, identifier)) {
+                committable.addFileCommittable(message);
+            }
+        }
+        return committable;
+    }
+
+    private List<Integer> readTransactionValues(Table table) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        return collectRows(
+                        readBuilder.newRead().createReader(readBuilder.newScan().plan().splits()),
+                        table.rowType())
+                .stream()
+                .map(row -> row.getInt(0))
+                .collect(Collectors.toList());
+    }
+
+    private void assertManifestDirectoryNotEmpty(FileStoreTable table) throws Exception {
+        Path manifestPath = table.store().pathFactory().manifestPath();
+        assertThat(table.fileIO().exists(manifestPath)).isTrue();
+        assertThat(table.fileIO().listStatus(manifestPath)).isNotEmpty();
     }
 
     @Test

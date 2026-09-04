@@ -46,6 +46,7 @@ public class ResourcePaths {
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
+    protected static final String TRANSACTIONS = "transactions";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -150,6 +151,10 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 "commit");
+    }
+
+    public String commitTransaction() {
+        return SLASH.join(V1, prefix, TRANSACTIONS, "commit");
     }
 
     public String rollbackTable(String databaseName, String objectName) {

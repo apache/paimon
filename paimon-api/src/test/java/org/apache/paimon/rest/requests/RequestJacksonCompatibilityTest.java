@@ -165,6 +165,7 @@ public class RequestJacksonCompatibilityTest {
                             AlterTableRequest.class,
                             AlterViewRequest.class,
                             CommitTableRequest.class,
+                            CommitTransactionRequest.class,
                             CreateFunctionRequest.class,
                             CreatePartitionsRequest.class,
                             CreateTableRequest.class,

@@ -138,7 +138,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * must be thrown to restart the job. It is recommended to run FileStoreCommitTest thousands of
  * times to make sure that your changes are correct.
  */
-public class FileStoreCommitImpl implements FileStoreCommit {
+public class FileStoreCommitImpl implements FileStoreCommit, TransactionalFileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
@@ -172,6 +172,53 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
     @Nullable private IOManager ioManager;
+
+    static final class PrepareCommitResult {
+
+        @Nullable private final PreparedSnapshotCommit preparedCommit;
+        @Nullable private final CommitResult commitResult;
+
+        private PrepareCommitResult(
+                @Nullable PreparedSnapshotCommit preparedCommit,
+                @Nullable CommitResult commitResult) {
+            this.preparedCommit = preparedCommit;
+            this.commitResult = commitResult;
+        }
+
+        static PrepareCommitResult prepared(PreparedSnapshotCommit preparedCommit) {
+            return new PrepareCommitResult(preparedCommit, null);
+        }
+
+        static PrepareCommitResult completed(CommitResult commitResult) {
+            return new PrepareCommitResult(null, commitResult);
+        }
+
+        boolean isPrepared() {
+            return preparedCommit != null;
+        }
+
+        PreparedSnapshotCommit preparedCommit() {
+            return checkNotNull(preparedCommit);
+        }
+
+        CommitResult commitResult() {
+            return checkNotNull(commitResult);
+        }
+    }
+
+    private static final class DataCommitSpec {
+
+        private final CommitKind commitKind;
+        private final boolean allowRollback;
+        private final boolean detectConflicts;
+
+        private DataCommitSpec(
+                CommitKind commitKind, boolean allowRollback, boolean detectConflicts) {
+            this.commitKind = commitKind;
+            this.allowRollback = allowRollback;
+            this.detectConflicts = detectConflicts;
+        }
+    }
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -341,36 +388,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         ManifestEntryChanges changes = collectChanges(commitMessages);
         Set<Pair<BinaryRow, Integer>> materializedBuckets = materializedBuckets(commitMessages);
         try {
-            List<SimpleFileEntry> appendSimpleEntries =
-                    SimpleFileEntry.from(changes.appendTableFiles);
-            if (!ignoreEmptyCommit
-                    || !changes.appendTableFiles.isEmpty()
-                    || !changes.appendChangelog.isEmpty()
-                    || !changes.appendIndexFiles.isEmpty()) {
-                CommitKind commitKind = CommitKind.APPEND;
-                if (appendCommitCheckConflict) {
-                    checkAppendFiles = true;
-                }
-
-                boolean allowRollback = false;
-                if (conflictDetection.shouldBeOverwriteCommit(
-                        appendSimpleEntries, changes.appendIndexFiles)) {
-                    commitKind = CommitKind.OVERWRITE;
-                    checkAppendFiles = true;
-                    allowRollback = true;
-                }
-                if (conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)) {
-                    checkAppendFiles = true;
-                    allowRollback = true;
-                }
-                if (changes.appendIndexFiles.stream()
-                        .anyMatch(
-                                entry ->
-                                        entry.kind() == FileKind.ADD
-                                                && entry.indexFile().globalIndexMeta() != null)) {
-                    checkAppendFiles = true;
-                }
-
+            DataCommitSpec dataCommitSpec = createDataCommitSpec(changes, checkAppendFiles);
+            if (dataCommitSpec != null) {
                 attempts +=
                         tryCommit(
                                 CommitChangesProvider.provider(
@@ -380,26 +399,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                commitKind,
-                                allowRollback,
-                                checkAppendFiles,
+                                dataCommitSpec.commitKind,
+                                dataCommitSpec.allowRollback,
+                                dataCommitSpec.detectConflicts,
                                 null);
                 generatedSnapshot += 1;
             }
 
-            if (!changes.compactTableFiles.isEmpty()
-                    || !changes.compactChangelog.isEmpty()
-                    || !changes.compactIndexFiles.isEmpty()) {
-                attempts +=
-                        tryCommit(
-                                compactChangesProvider(changes, materializedBuckets),
-                                committable.identifier(),
-                                committable.watermark(),
-                                committable.properties(),
-                                CommitKind.COMPACT,
-                                false,
-                                true,
-                                null);
+            int compactAttempts = tryCommitCompaction(changes, materializedBuckets, committable);
+            if (compactAttempts > 0) {
+                attempts += compactAttempts;
                 generatedSnapshot += 1;
             }
         } finally {
@@ -421,6 +430,124 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
         return generatedSnapshot;
+    }
+
+    @Nullable
+    private DataCommitSpec createDataCommitSpec(
+            ManifestEntryChanges changes, boolean checkAppendFiles) {
+        if (ignoreEmptyCommit
+                && changes.appendTableFiles.isEmpty()
+                && changes.appendChangelog.isEmpty()
+                && changes.appendIndexFiles.isEmpty()) {
+            return null;
+        }
+
+        CommitKind commitKind = CommitKind.APPEND;
+        if (appendCommitCheckConflict) {
+            checkAppendFiles = true;
+        }
+
+        boolean allowRollback = false;
+        List<SimpleFileEntry> appendSimpleEntries = SimpleFileEntry.from(changes.appendTableFiles);
+        if (conflictDetection.shouldBeOverwriteCommit(
+                appendSimpleEntries, changes.appendIndexFiles)) {
+            commitKind = CommitKind.OVERWRITE;
+            checkAppendFiles = true;
+            allowRollback = true;
+        }
+        if (conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)) {
+            checkAppendFiles = true;
+            allowRollback = true;
+        }
+        if (changes.appendIndexFiles.stream()
+                .anyMatch(
+                        entry ->
+                                entry.kind() == FileKind.ADD
+                                        && entry.indexFile().globalIndexMeta() != null)) {
+            checkAppendFiles = true;
+        }
+
+        return new DataCommitSpec(commitKind, allowRollback, checkAppendFiles);
+    }
+
+    private int tryCommitCompaction(
+            ManifestEntryChanges changes,
+            Set<Pair<BinaryRow, Integer>> materializedBuckets,
+            ManifestCommittable committable) {
+        if (changes.compactTableFiles.isEmpty()
+                && changes.compactChangelog.isEmpty()
+                && changes.compactIndexFiles.isEmpty()) {
+            return 0;
+        }
+
+        return tryCommit(
+                compactChangesProvider(changes, materializedBuckets),
+                committable.identifier(),
+                committable.watermark(),
+                committable.properties(),
+                CommitKind.COMPACT,
+                false,
+                true,
+                null);
+    }
+
+    @Override
+    public Optional<PreparedSnapshotCommit> prepareCommit(
+            ManifestCommittable committable, boolean checkAppendFiles) {
+        ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
+        DataCommitSpec dataCommitSpec = createDataCommitSpec(changes, checkAppendFiles);
+        if (dataCommitSpec == null) {
+            return Optional.empty();
+        }
+
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        PrepareCommitResult preparation =
+                prepareCommitOnce(
+                        null,
+                        changes.appendTableFiles,
+                        changes.appendChangelog,
+                        changes.appendIndexFiles,
+                        committable.identifier(),
+                        committable.watermark(),
+                        committable.properties(),
+                        dataCommitSpec.commitKind,
+                        // A table-local rollback would escape the multi-table transaction.
+                        false,
+                        latestSnapshot,
+                        dataCommitSpec.detectConflicts,
+                        null);
+        checkArgument(
+                preparation.isPrepared(),
+                "Preparing transaction commit for table %s unexpectedly completed without a snapshot.",
+                tableName);
+        return Optional.of(preparation.preparedCommit());
+    }
+
+    @Override
+    public void completeCommit(PreparedSnapshotCommit preparedCommit) {
+        completePreparedCommit(preparedCommit);
+    }
+
+    @Override
+    public void markCommitUnknown(PreparedSnapshotCommit preparedCommit) {
+        markPreparedCommitUnknown(preparedCommit);
+    }
+
+    @Override
+    public void commitCompaction(ManifestCommittable committable) {
+        try {
+            ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
+            tryCommitCompaction(
+                    changes, materializedBuckets(committable.fileCommittables()), committable);
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Best-effort compaction commit failed for table {} by user {} with identifier {}."
+                            + " The transaction data snapshot is unaffected.",
+                    tableName,
+                    commitUser,
+                    committable.identifier(),
+                    e);
+        }
     }
 
     private void reportCommit(
@@ -976,6 +1103,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot latestSnapshot,
             boolean detectConflicts,
             @Nullable String newStatsFileName) {
+        PrepareCommitResult preparation =
+                prepareCommitOnce(
+                        retryResult,
+                        deltaFiles,
+                        changelogFiles,
+                        indexFiles,
+                        identifier,
+                        watermark,
+                        properties,
+                        commitKind,
+                        allowRollback,
+                        latestSnapshot,
+                        detectConflicts,
+                        newStatsFileName);
+        return preparation.isPrepared()
+                ? publishPreparedCommit(preparation.preparedCommit())
+                : preparation.commitResult();
+    }
+
+    @VisibleForTesting
+    PrepareCommitResult prepareCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
         // Check if the commit has been completed. At this point, there will be no more repeated
@@ -998,7 +1158,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         && snapshot.commitIdentifier() == identifier
                         && snapshot.commitKind() == commitKind) {
                     lastCommittedSnapshotId = snapshot.id();
-                    return new SuccessCommitResult();
+                    return PrepareCommitResult.completed(new SuccessCommitResult());
                 }
             }
         }
@@ -1087,7 +1247,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (exception.isPresent()) {
                 if (allowRollback && rollback != null) {
                     if (rollback.tryToRollback(latestSnapshot)) {
-                        return RetryCommitResult.forRollback(exception.get());
+                        return PrepareCommitResult.completed(
+                                RetryCommitResult.forRollback(exception.get()));
                     }
                 }
                 throw exception.get();
@@ -1256,63 +1417,115 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     e);
         }
 
-        boolean success;
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
         commitPreCallbacks.forEach(
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+
+        return PrepareCommitResult.prepared(
+                new PreparedSnapshotCommit(
+                        latestSnapshot,
+                        newSnapshot,
+                        options.branch(),
+                        toPartitionStatistics(deltaPartitionEntries),
+                        finalBaseFiles,
+                        finalDeltaFiles,
+                        indexFiles,
+                        identifier,
+                        mergeBeforeManifests,
+                        mergeAfterManifests,
+                        skipManifestMergeOnRetry,
+                        startMillis));
+    }
+
+    @VisibleForTesting
+    CommitResult publishPreparedCommit(PreparedSnapshotCommit preparedCommit) {
+        checkArgument(
+                preparedCommit.state == PreparedSnapshotCommit.State.PREPARED,
+                "Prepared snapshot %s is in state %s and cannot be published.",
+                preparedCommit.snapshot.id(),
+                preparedCommit.state);
+
+        boolean success;
         try {
-            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
+            success =
+                    commitSnapshotWithStatistics(
+                            preparedCommit.baseSnapshot,
+                            preparedCommit.snapshot,
+                            preparedCommit.branch,
+                            preparedCommit.statistics);
         } catch (Exception e) {
+            markPreparedCommitUnknown(preparedCommit);
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn(
                     "Retry commit for exception when committing snapshot #{} for table {} by user {}.",
-                    newSnapshotId,
+                    preparedCommit.snapshot.id(),
                     tableName,
                     commitUser,
                     e);
-            return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e, null);
+            return RetryCommitResult.forCommitFail(
+                    preparedCommit.baseSnapshot, preparedCommit.baseDataFiles, e, null);
         }
 
         if (!success) {
-            long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
+            long commitTime = (System.currentTimeMillis() - preparedCommit.startedMillis) / 1000;
             LOG.warn(
                     "Atomic commit failed for snapshot #{} for table {} by user {} "
                             + "with identifier {} and kind {} after {} seconds. "
                             + "Skip clean up and try again.",
-                    newSnapshotId,
+                    preparedCommit.snapshot.id(),
                     tableName,
                     commitUser,
-                    identifier,
-                    commitKind.name(),
+                    preparedCommit.snapshot.commitIdentifier(),
+                    preparedCommit.snapshot.commitKind().name(),
                     commitTime);
             return RetryCommitResult.forCommitFail(
-                    latestSnapshot,
-                    baseDataFiles,
+                    preparedCommit.baseSnapshot,
+                    preparedCommit.baseDataFiles,
                     null,
-                    skipManifestMergeOnRetry
+                    preparedCommit.skipManifestMergeOnRetry
                             ? null
-                            : new ManifestMergeResult(mergeBeforeManifests, mergeAfterManifests));
+                            : new ManifestMergeResult(
+                                    preparedCommit.mergeBeforeManifests,
+                                    preparedCommit.mergeAfterManifests));
         }
+
+        completePreparedCommit(preparedCommit);
+        return new SuccessCommitResult();
+    }
+
+    private void markPreparedCommitUnknown(PreparedSnapshotCommit preparedCommit) {
+        checkArgument(
+                preparedCommit.state == PreparedSnapshotCommit.State.PREPARED
+                        || preparedCommit.state == PreparedSnapshotCommit.State.UNKNOWN,
+                "Prepared snapshot %s is in state %s and cannot be marked unknown.",
+                preparedCommit.snapshot.id(),
+                preparedCommit.state);
+        preparedCommit.state = PreparedSnapshotCommit.State.UNKNOWN;
+    }
+
+    @VisibleForTesting
+    void completePreparedCommit(PreparedSnapshotCommit preparedCommit) {
+        if (preparedCommit.state == PreparedSnapshotCommit.State.FINALIZED) {
+            return;
+        }
+        preparedCommit.state = PreparedSnapshotCommit.State.PUBLISHED;
 
         LOG.info(
                 "Successfully commit snapshot {} to table {} by user {} "
                         + "with identifier {} and kind {}.",
-                newSnapshotId,
+                preparedCommit.snapshot.id(),
                 tableName,
                 commitUser,
-                identifier,
-                commitKind.name());
+                preparedCommit.snapshot.commitIdentifier(),
+                preparedCommit.snapshot.commitKind().name());
         if (strictModeChecker != null) {
-            strictModeChecker.update(newSnapshotId);
+            strictModeChecker.update(preparedCommit.snapshot.id());
         }
-        lastCommittedSnapshotId = newSnapshotId;
-        CommitCallback.Context context =
-                new CommitCallback.Context(
-                        finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
-        commitCallbacks.forEach(callback -> callback.call(context));
-        return new SuccessCommitResult();
+        lastCommittedSnapshotId = preparedCommit.snapshot.id();
+        commitCallbacks.forEach(callback -> callback.call(preparedCommit.callbackContext));
+        preparedCommit.state = PreparedSnapshotCommit.State.FINALIZED;
     }
 
     @Nullable
@@ -1667,15 +1880,32 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Snapshot baseSnapshot,
             Snapshot newSnapshot,
             List<PartitionEntry> deltaPartitionEntries) {
+        return commitSnapshotWithStatistics(
+                baseSnapshot,
+                newSnapshot,
+                options.branch(),
+                toPartitionStatistics(deltaPartitionEntries));
+    }
+
+    private List<PartitionStatistics> toPartitionStatistics(
+            List<PartitionEntry> deltaPartitionEntries) {
+        List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
+        for (PartitionEntry entry : deltaPartitionEntries) {
+            statistics.add(entry.toPartitionStatistics(partitionComputer));
+        }
+        return statistics;
+    }
+
+    private boolean commitSnapshotWithStatistics(
+            @Nullable Snapshot baseSnapshot,
+            Snapshot newSnapshot,
+            String branch,
+            List<PartitionStatistics> statistics) {
         try {
-            List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
-            for (PartitionEntry entry : deltaPartitionEntries) {
-                statistics.add(entry.toPartitionStatistics(partitionComputer));
-            }
             return snapshotCommit.commit(
                     baseSnapshot == null ? null : baseSnapshot.uuid(),
                     newSnapshot,
-                    options.branch(),
+                    branch,
                     statistics);
         } catch (Throwable e) {
             // exception when performing the atomic rename,

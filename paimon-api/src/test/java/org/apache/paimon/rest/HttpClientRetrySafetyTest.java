@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
+import org.apache.paimon.rest.requests.CommitTransactionRequest;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.responses.CreatePartitionsResponse;
 
@@ -91,6 +92,15 @@ public class HttpClientRetrySafetyTest {
                 .isInstanceOf(ServiceUnavailableException.class);
 
         // Retrying would add the same increment a second time.
+        assertThat(requests.get()).isEqualTo(1);
+    }
+
+    @Test
+    public void testTransactionCommitIsNotRetried() {
+        assertThatThrownBy(() -> post(new CommitTransactionRequest(Collections.emptyList())))
+                .isInstanceOf(ServiceUnavailableException.class);
+
+        // A retry can observe the newly committed snapshots as a conflict.
         assertThat(requests.get()).isEqualTo(1);
     }
 

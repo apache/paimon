@@ -53,6 +53,12 @@ public class ResourcePathsTest {
     }
 
     @Test
+    public void testCommitTransactionUsesPrefix() {
+        ResourcePaths resourcePaths = new ResourcePaths("catalog/id");
+        assertEquals("/v1/catalog%2Fid/transactions/commit", resourcePaths.commitTransaction());
+    }
+
+    @Test
     public void testPoliciesAreNestedUnderAttachmentResource() {
         ResourcePaths paths = new ResourcePaths("catalog/id");
         PermissionResource catalog =

@@ -62,6 +62,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -1573,6 +1574,269 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testPrepareDoesNotPublishOrInvokePostCallback() throws Exception {
+        TestFileStore store = createStore(false);
+        AtomicReference<CommitCallback.Context> callbackContext = new AtomicReference<>();
+        CommitCallback callback =
+                new CommitCallback() {
+                    @Override
+                    public void call(Context context) {
+                        callbackContext.set(context);
+                    }
+
+                    @Override
+                    public void retry(ManifestCommittable committable) {}
+
+                    @Override
+                    public void close() {}
+                };
+
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        "prepare-publish",
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        Collections.singletonList(callback))) {
+            FileStoreCommitImpl.PrepareCommitResult result =
+                    commit.prepareCommitOnce(
+                            null,
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            31L,
+                            null,
+                            Collections.emptyMap(),
+                            Snapshot.CommitKind.APPEND,
+                            false,
+                            null,
+                            true,
+                            null);
+
+            assertThat(result.isPrepared()).isTrue();
+            PreparedSnapshotCommit prepared = result.preparedCommit();
+            assertThat(store.snapshotManager().latestSnapshot()).isNull();
+            assertThat(callbackContext).hasNullValue();
+
+            assertThat(commit.publishPreparedCommit(prepared).isSuccess()).isTrue();
+            assertThat(store.snapshotManager().latestSnapshot()).isEqualTo(prepared.snapshot());
+            assertThat(callbackContext.get().snapshot).isEqualTo(prepared.snapshot());
+        }
+    }
+
+    @Test
+    public void testTransactionalPrepareExcludesCompaction() throws Exception {
+        TestFileStore store = createStore(false);
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1}, "value"));
+        DataFileMeta newFile = addFile(partition, 0, 1, 1).file();
+        DataFileMeta compactedFile = addFile(partition, 0, 1, 2).file();
+        ManifestCommittable committable = new ManifestCommittable(34L);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        1,
+                        new DataIncrement(
+                                Collections.singletonList(newFile),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.singletonList(newFile),
+                                Collections.singletonList(compactedFile),
+                                Collections.emptyList())));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            PreparedSnapshotCommit prepared =
+                    commit.prepareCommit(committable, false).orElseThrow(AssertionError::new);
+            List<ManifestEntry> transactionDelta = readDeltaEntries(store, prepared.snapshot());
+            assertThat(transactionDelta)
+                    .extracting(entry -> entry.file().fileName())
+                    .containsExactly(newFile.fileName());
+
+            try (SnapshotCommit publisher =
+                    new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty())) {
+                assertThat(
+                                publisher.commit(
+                                        prepared.baseSnapshotUuid(),
+                                        prepared.snapshot(),
+                                        prepared.branch(),
+                                        prepared.statistics()))
+                        .isTrue();
+            }
+            commit.completeCommit(prepared);
+            commit.commitCompaction(committable);
+        }
+
+        Snapshot appendSnapshot = store.snapshotManager().snapshot(1L);
+        Snapshot compactSnapshot = store.snapshotManager().snapshot(2L);
+        assertThat(appendSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(compactSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(readDeltaEntries(store, compactSnapshot))
+                .extracting(entry -> entry.file().fileName())
+                .containsExactlyInAnyOrder(newFile.fileName(), compactedFile.fileName());
+    }
+
+    private List<ManifestEntry> readDeltaEntries(TestFileStore store, Snapshot snapshot) {
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+        return store.manifestListFactory().create().readDeltaManifests(snapshot).stream()
+                .flatMap(meta -> manifestFile.read(meta.fileName()).stream())
+                .collect(Collectors.toList());
+    }
+
+    @Test
+    public void testUnknownPublishKeepsPreparedMetadata() throws Exception {
+        TestFileStore store = createStore(false);
+        SnapshotCommit unknownCommit =
+                new SnapshotCommit() {
+                    @Override
+                    public boolean commit(
+                            @Nullable String baseSnapshotUuid,
+                            Snapshot snapshot,
+                            String branch,
+                            List<org.apache.paimon.partition.PartitionStatistics> statistics) {
+                        throw new RuntimeException("unknown publish result");
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "unknown-publish", unknownCommit)) {
+            PreparedSnapshotCommit prepared =
+                    commit.prepareCommitOnce(
+                                    null,
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    33L,
+                                    null,
+                                    Collections.emptyMap(),
+                                    Snapshot.CommitKind.APPEND,
+                                    false,
+                                    null,
+                                    true,
+                                    null)
+                            .preparedCommit();
+            Path deltaManifestList =
+                    store.pathFactory().toManifestListPath(prepared.snapshot().deltaManifestList());
+
+            assertThat(commit.publishPreparedCommit(prepared).isSuccess()).isFalse();
+            assertThat(store.fileIO().exists(deltaManifestList)).isTrue();
+            assertThat(store.snapshotManager().latestSnapshot()).isNull();
+        }
+    }
+
+    @Test
+    public void testExternalUnknownPublishCanBeCompleted() throws Exception {
+        TestFileStore store = createStore(false);
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            PreparedSnapshotCommit prepared =
+                    commit.prepareCommitOnce(
+                                    null,
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    Collections.emptyList(),
+                                    35L,
+                                    null,
+                                    Collections.emptyMap(),
+                                    Snapshot.CommitKind.APPEND,
+                                    false,
+                                    null,
+                                    true,
+                                    null)
+                            .preparedCommit();
+            Path deltaManifestList =
+                    store.pathFactory().toManifestListPath(prepared.snapshot().deltaManifestList());
+
+            // Simulate a successful catalog commit whose response is lost to the caller.
+            try (SnapshotCommit publisher =
+                    new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty())) {
+                assertThat(
+                                publisher.commit(
+                                        prepared.baseSnapshotUuid(),
+                                        prepared.snapshot(),
+                                        prepared.branch(),
+                                        prepared.statistics()))
+                        .isTrue();
+            }
+            commit.markCommitUnknown(prepared);
+            commit.markCommitUnknown(prepared);
+
+            assertThat(store.fileIO().exists(deltaManifestList)).isTrue();
+
+            // The transaction coordinator can finalize after reconciling the catalog state.
+            commit.completeCommit(prepared);
+            assertThat(store.snapshotManager().latestSnapshot()).isEqualTo(prepared.snapshot());
+        }
+    }
+
+    @Test
+    public void testTransactionalCompactionIsBestEffort() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false, Collections.singletonMap(CoreOptions.COMMIT_MAX_RETRIES.key(), "0"));
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1}, "value"));
+        DataFileMeta newFile = addFile(partition, 0, 1, 3).file();
+        DataFileMeta compactedFile = addFile(partition, 0, 1, 4).file();
+        ManifestCommittable committable = new ManifestCommittable(36L);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        1,
+                        new DataIncrement(
+                                Collections.singletonList(newFile),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.singletonList(newFile),
+                                Collections.singletonList(compactedFile),
+                                Collections.emptyList())));
+        SnapshotCommit failingCommit =
+                new SnapshotCommit() {
+                    @Override
+                    public boolean commit(
+                            @Nullable String baseSnapshotUuid,
+                            Snapshot snapshot,
+                            String branch,
+                            List<org.apache.paimon.partition.PartitionStatistics> statistics) {
+                        throw new RuntimeException("compaction publish failed");
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "best-effort-compact", failingCommit)) {
+            PreparedSnapshotCommit prepared =
+                    commit.prepareCommit(committable, false).orElseThrow(AssertionError::new);
+            try (SnapshotCommit publisher =
+                    new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty())) {
+                assertThat(
+                                publisher.commit(
+                                        prepared.baseSnapshotUuid(),
+                                        prepared.snapshot(),
+                                        prepared.branch(),
+                                        prepared.statistics()))
+                        .isTrue();
+            }
+            commit.completeCommit(prepared);
+
+            // A failed COMPACT must not fail the already committed transaction data snapshot.
+            commit.commitCompaction(committable);
+        }
+
+        Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.id()).isEqualTo(1L);
+        assertThat(latestSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        assertThat(readDeltaEntries(store, latestSnapshot))
+                .extracting(entry -> entry.file().fileName())
+                .containsExactly(newFile.fileName());
+    }
+
+    @Test
     public void testCommitRetryAfterFalseSuccessDoesNotCleanManifest() throws Exception {
         TestFileStore store = createStore(false);
         KeyValue kv = gen.next();
@@ -2003,6 +2267,20 @@ public class FileStoreCommitTest {
                 store.options().dataEvolutionEnabled());
     }
 
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            List<CommitCallback> commitCallbacks) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                store.options(),
+                store.options().dataEvolutionEnabled(),
+                commitCallbacks);
+    }
+
     private ManifestEntry addFile(
             BinaryRow partition, int bucket, int totalBuckets, long maxSequenceNumber) {
         return ManifestEntry.create(
@@ -2033,6 +2311,22 @@ public class FileStoreCommitTest {
             SnapshotCommit snapshotCommit,
             CoreOptions options,
             boolean dataEvolutionEnabled) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                options,
+                dataEvolutionEnabled,
+                Collections.emptyList());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled,
+            List<CommitCallback> commitCallbacks) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -2051,7 +2345,7 @@ public class FileStoreCommitTest {
                 store.newStatsFileHandler(),
                 store.bucketMode(),
                 Collections.emptyList(),
-                Collections.emptyList(),
+                commitCallbacks,
                 scanner ->
                         ConflictDetection.create(
                                 tableName,

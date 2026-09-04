@@ -31,6 +31,8 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.operation.PreparedSnapshotCommit;
+import org.apache.paimon.operation.TransactionalFileStoreCommit;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.Tag;
@@ -59,6 +61,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -333,13 +336,71 @@ public class TableCommitImpl implements InnerTableCommit {
         List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
 
         if (!retryCommittables.isEmpty()) {
-            checkFilesExistence(retryCommittables);
+            checkFilesExistence(retryCommittables, true, true);
             commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
     }
 
-    private void checkFilesExistence(List<ManifestCommittable> committables) {
+    /** Prepare one data snapshot for a catalog-managed multi-table transaction. */
+    public Optional<PreparedSnapshotCommit> prepareTransactionCommit(
+            ManifestCommittable committable, boolean checkAppendFiles) {
+        List<ManifestCommittable> retryCommittables =
+                commit.filterCommitted(singletonList(committable));
+        if (retryCommittables.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // COMPACT is excluded from the transaction and checked independently before its
+        // best-effort commit.
+        checkFilesExistence(retryCommittables, true, false);
+        return transactionalCommit().prepareCommit(committable, checkAppendFiles);
+    }
+
+    /** Complete local callbacks after the catalog has published a transaction snapshot. */
+    public void completeTransactionCommit(PreparedSnapshotCommit preparedCommit) {
+        transactionalCommit().completeCommit(preparedCommit);
+    }
+
+    /** Record that the catalog publish result is unknown. */
+    public void markTransactionCommitUnknown(PreparedSnapshotCommit preparedCommit) {
+        transactionalCommit().markCommitUnknown(preparedCommit);
+    }
+
+    /** Commit transaction-excluded COMPACT changes without failing the data transaction. */
+    public void commitTransactionCompaction(ManifestCommittable committable) {
+        try {
+            checkFilesExistence(singletonList(committable), false, true);
+            transactionalCommit().commitCompaction(committable);
+        } catch (RuntimeException e) {
+            LOG.warn(
+                    "Best-effort compaction validation failed for table {} with identifier {}."
+                            + " The transaction data snapshot is unaffected.",
+                    tableName,
+                    committable.identifier(),
+                    e);
+        }
+    }
+
+    /** Run the same maintenance lifecycle as a regular table commit. */
+    public void maintainTransaction(long identifier) {
+        // A REST transaction owns this short-lived commit object, so maintenance must finish before
+        // close() shuts its executor down.
+        maintain(identifier, true);
+    }
+
+    private TransactionalFileStoreCommit transactionalCommit() {
+        checkState(
+                commit instanceof TransactionalFileStoreCommit,
+                "File store commit for table %s does not support transactions.",
+                tableName);
+        return (TransactionalFileStoreCommit) commit;
+    }
+
+    private void checkFilesExistence(
+            List<ManifestCommittable> committables,
+            boolean includeDataFiles,
+            boolean includeCompactionFiles) {
         List<Path> files = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
         IndexFilePathFactories indexFactories = new IndexFilePathFactories(commit.pathFactory());
@@ -351,15 +412,20 @@ public class TableCommitImpl implements InnerTableCommit {
                 IndexPathFactory indexFileFactory =
                         indexFactories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
-                msg.newFilesIncrement().newFiles().forEach(collector);
-                msg.newFilesIncrement().changelogFiles().forEach(collector);
-                msg.newFilesIncrement().newIndexFiles().stream()
-                        .map(indexFileFactory::toPath)
-                        .forEach(files::add);
-                msg.compactIncrement().compactAfter().forEach(collector);
-                msg.compactIncrement().newIndexFiles().stream()
-                        .map(indexFileFactory::toPath)
-                        .forEach(files::add);
+                if (includeDataFiles) {
+                    msg.newFilesIncrement().newFiles().forEach(collector);
+                    msg.newFilesIncrement().changelogFiles().forEach(collector);
+                    msg.newFilesIncrement().newIndexFiles().stream()
+                            .map(indexFileFactory::toPath)
+                            .forEach(files::add);
+                }
+                if (includeCompactionFiles) {
+                    msg.compactIncrement().compactAfter().forEach(collector);
+                    msg.compactIncrement().changelogFiles().forEach(collector);
+                    msg.compactIncrement().newIndexFiles().stream()
+                            .map(indexFileFactory::toPath)
+                            .forEach(files::add);
+                }
 
                 // skip compact before files, deleted index files
             }
@@ -461,7 +527,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         commit.close();
         maintainExecutor.shutdownNow();
     }
