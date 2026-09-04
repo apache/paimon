@@ -22,6 +22,8 @@ import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -89,6 +91,30 @@ public class VideoFrameDescriptorTest {
         assertThatThrownBy(() -> new VideoFrameDescriptor("file:/video.mp4", 0, 9, -1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("non-negative");
+
+        // A uriLength near Integer.MAX_VALUE: uriLength + 3 * Long.BYTES wrapped negative,
+        // so the length check passed and deserialize went on to allocate ~2GB.
+        byte[] hostileUriLength = descriptor.serialize();
+        ByteBuffer.wrap(hostileUriLength)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(Byte.BYTES + Long.BYTES, Integer.MAX_VALUE - 23);
+        assertThatThrownBy(() -> VideoFrameDescriptor.deserialize(hostileUriLength))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("URI length exceeds data size");
+
+        byte[] negativeUriLength = descriptor.serialize();
+        ByteBuffer.wrap(negativeUriLength)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(Byte.BYTES + Long.BYTES, -1);
+        assertThatThrownBy(() -> VideoFrameDescriptor.deserialize(negativeUriLength))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("negative URI length");
+
+        byte[] truncated =
+                Arrays.copyOf(descriptor.serialize(), descriptor.serialize().length - Long.BYTES);
+        assertThatThrownBy(() -> VideoFrameDescriptor.deserialize(truncated))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("missing offset/length/frame index");
     }
 
     private static byte[] fromHex(String hex) {
