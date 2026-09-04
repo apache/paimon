@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
@@ -37,16 +38,74 @@ public final class GlobalIndexSchemaCompatibility {
 
     public static List<IndexManifestEntry> filterCompatible(
             FileStoreTable table, Collection<IndexManifestEntry> entries) {
-        RowType currentRowType = table.rowType();
-        Map<Long, RowType> historicalRowTypes = new HashMap<>();
-        historicalRowTypes.put(table.schema().id(), currentRowType);
-        Set<Long> missingSchemaIds = new HashSet<>();
+        return partitionByCompatibility(table, entries).compatible();
+    }
+
+    public static CompatibilityResult partitionByCompatibility(
+            FileStoreTable table, Collection<IndexManifestEntry> entries) {
+        CompatibilityChecker checker = new CompatibilityChecker(table);
         List<IndexManifestEntry> compatible = new ArrayList<>();
+        List<IndexManifestEntry> incompatible = new ArrayList<>();
         for (IndexManifestEntry entry : entries) {
-            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-            Long schemaId = entry.schemaId();
+            if (checker.isCompatible(entry.indexFile(), entry.schemaId())) {
+                compatible.add(entry);
+            } else {
+                incompatible.add(entry);
+            }
+        }
+        return new CompatibilityResult(compatible, incompatible);
+    }
+
+    public static List<IndexFileMeta> filterCompatibleFiles(
+            FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
+        CompatibilityChecker checker = new CompatibilityChecker(table);
+        List<IndexFileMeta> compatible = new ArrayList<>();
+        for (IndexFileMeta indexFile : indexFiles) {
+            if (checker.isCompatible(indexFile, indexFile.schemaId())) {
+                compatible.add(indexFile);
+            }
+        }
+        return compatible;
+    }
+
+    /** Global index manifest entries grouped by compatibility with the current table schema. */
+    public static final class CompatibilityResult {
+
+        private final List<IndexManifestEntry> compatible;
+        private final List<IndexManifestEntry> incompatible;
+
+        private CompatibilityResult(
+                List<IndexManifestEntry> compatible, List<IndexManifestEntry> incompatible) {
+            this.compatible = compatible;
+            this.incompatible = incompatible;
+        }
+
+        public List<IndexManifestEntry> compatible() {
+            return compatible;
+        }
+
+        public List<IndexManifestEntry> incompatible() {
+            return incompatible;
+        }
+    }
+
+    private static class CompatibilityChecker {
+
+        private final FileStoreTable table;
+        private final RowType currentRowType;
+        private final Map<Long, RowType> historicalRowTypes = new HashMap<>();
+        private final Set<Long> missingSchemaIds = new HashSet<>();
+
+        private CompatibilityChecker(FileStoreTable table) {
+            this.table = table;
+            this.currentRowType = table.rowType();
+            historicalRowTypes.put(table.schema().id(), currentRowType);
+        }
+
+        private boolean isCompatible(IndexFileMeta indexFile, Long schemaId) {
+            GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
             if (globalIndex == null || schemaId == null) {
-                continue;
+                return false;
             }
 
             RowType historicalRowType = historicalRowTypes.get(schemaId);
@@ -59,12 +118,9 @@ public final class GlobalIndexSchemaCompatibility {
                     missingSchemaIds.add(schemaId);
                 }
             }
-            if (historicalRowType != null
-                    && compatibleIndexedFields(globalIndex, historicalRowType, currentRowType)) {
-                compatible.add(entry);
-            }
+            return historicalRowType != null
+                    && compatibleIndexedFields(globalIndex, historicalRowType, currentRowType);
         }
-        return compatible;
     }
 
     private static boolean compatibleIndexedFields(

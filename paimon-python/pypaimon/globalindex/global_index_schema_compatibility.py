@@ -17,49 +17,78 @@
 
 """Validates global indexes against the current table schema."""
 
-from typing import Collection, Dict, List, Set
+from typing import Collection, Dict, List, Set, Tuple
 
 from pypaimon.schema.data_types import DataTypeParser
 
 
 def filter_compatible_global_indexes(table, entries: Collection) -> List:
     """Keep entries whose indexed fields have the same logical types."""
-    current_schema = table.table_schema
-    current_fields = _fields_by_id(current_schema.fields)
-    historical_fields = {current_schema.id: current_fields}
-    missing_schema_ids: Set[int] = set()
-    compatibility_cache = {}
+    return partition_global_indexes_by_compatibility(table, entries)[0]
+
+
+def partition_global_indexes_by_compatibility(
+    table, entries: Collection
+) -> Tuple[List, List]:
+    """Group manifest entries by compatibility with the current schema."""
+    checker = _CompatibilityChecker(table)
     compatible = []
+    incompatible = []
 
     for entry in entries:
-        global_index = entry.index_file.global_index_meta
-        schema_id = entry.schema_id
-        if global_index is None or schema_id is None:
-            continue
+        target = (compatible if checker.is_compatible(
+            entry.index_file, entry.schema_id) else incompatible)
+        target.append(entry)
+    return compatible, incompatible
 
-        fields = historical_fields.get(schema_id)
-        if fields is None and schema_id not in missing_schema_ids:
-            historical_schema = table.schema_manager.get_schema(schema_id)
+
+def filter_compatible_global_index_files(table, index_files: Collection) -> List:
+    """Keep index files compatible with the current schema."""
+    checker = _CompatibilityChecker(table)
+    return [
+        index_file for index_file in index_files
+        if checker.is_compatible(
+            index_file, getattr(index_file, "schema_id", None))
+    ]
+
+
+class _CompatibilityChecker:
+
+    def __init__(self, table):
+        self._table = table
+        current_schema = table.table_schema
+        self._current_fields = _fields_by_id(current_schema.fields)
+        self._historical_fields = {
+            current_schema.id: self._current_fields,
+        }
+        self._missing_schema_ids: Set[int] = set()
+        self._compatibility_cache = {}
+
+    def is_compatible(self, index_file, schema_id) -> bool:
+        global_index = index_file.global_index_meta
+        if global_index is None or schema_id is None:
+            return False
+
+        fields = self._historical_fields.get(schema_id)
+        if fields is None and schema_id not in self._missing_schema_ids:
+            historical_schema = self._table.schema_manager.get_schema(schema_id)
             if historical_schema is None:
-                missing_schema_ids.add(schema_id)
+                self._missing_schema_ids.add(schema_id)
             else:
                 fields = _fields_by_id(historical_schema.fields)
-                historical_fields[schema_id] = fields
+                self._historical_fields[schema_id] = fields
 
         if fields is None:
-            continue
+            return False
         field_ids = tuple(
             [global_index.index_field_id]
             + list(global_index.extra_field_ids or [])
         )
         cache_key = (schema_id, field_ids)
-        if cache_key not in compatibility_cache:
-            compatibility_cache[cache_key] = _compatible_indexed_fields(
-                field_ids, fields, current_fields)
-        if compatibility_cache[cache_key]:
-            compatible.append(entry)
-
-    return compatible
+        if cache_key not in self._compatibility_cache:
+            self._compatibility_cache[cache_key] = _compatible_indexed_fields(
+                field_ids, fields, self._current_fields)
+        return self._compatibility_cache[cache_key]
 
 
 def _compatible_indexed_fields(field_ids, historical_fields, current_fields):

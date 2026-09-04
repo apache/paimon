@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.generic;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -139,19 +140,27 @@ public class GenericGlobalIndexScanner implements Serializable {
         List<IndexManifestEntry> currentIndexes =
                 currentIndexEntries(
                         table, scanSnapshot, indexType, indexFields, partitionPredicate);
+        GlobalIndexSchemaCompatibility.CompatibilityResult compatibility =
+                GlobalIndexSchemaCompatibility.partitionByCompatibility(table, currentIndexes);
+        List<IndexManifestEntry> compatibleIndexes = compatibility.compatible();
         List<Range> rangesToBuild =
-                new ArrayList<>(unindexedRowRanges(scanSnapshot, currentIndexes));
-        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
+                new ArrayList<>(unindexedRowRanges(scanSnapshot, compatibleIndexes));
+        List<IndexManifestEntry> deletedIndexEntries =
+                new ArrayList<>(compatibility.incompatible());
+        for (IndexManifestEntry entry : compatibility.incompatible()) {
+            rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
+        }
         Options mergedOptions = new Options(table.options(), options.toMap());
         if (mergedOptions.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
                 == CoreOptions.GlobalIndexColumnUpdateAction.IGNORE) {
-            deletedIndexEntries =
+            List<IndexManifestEntry> indexesToRefresh =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
                             table.schemaManager(),
                             scanResult.entries(),
-                            currentIndexes,
+                            compatibleIndexes,
                             indexFields);
-            for (IndexManifestEntry entry : deletedIndexEntries) {
+            deletedIndexEntries.addAll(indexesToRefresh);
+            for (IndexManifestEntry entry : indexesToRefresh) {
                 rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
             }
         }

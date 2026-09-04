@@ -228,7 +228,9 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             Collection<IndexFileMeta> indexFiles) {
-        List<IndexFileMeta> globalIndexFiles = globalIndexFiles(indexFiles);
+        List<IndexFileMeta> globalIndexFiles =
+                GlobalIndexSchemaCompatibility.filterCompatibleFiles(
+                        table, globalIndexFiles(indexFiles));
         if (globalIndexFiles.isEmpty()) {
             return Optional.empty();
         }

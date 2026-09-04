@@ -26,8 +26,10 @@ import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.NestedSchemaUtils;
@@ -117,6 +119,10 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         write(table, GenericRow.of(1, array(-1)));
         long firstBuildSchemaId = table.schema().id();
         buildIndex(table);
+        List<IndexFileMeta> firstIndexFiles =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(java.util.stream.Collectors.toList());
 
         catalog.alterTable(identifier(), SchemaChange.addColumn("note", DataTypes.STRING()), false);
         table = (FileStoreTable) catalog.getTable(identifier());
@@ -134,6 +140,7 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         table.schemaManager().commitChanges(schemaChanges);
         table = table.copyWithLatestSchema();
         write(table, GenericRow.of(2, array(-1L), null));
+        assertThat(DataEvolutionGlobalIndexScanner.create(table, firstIndexFiles)).isEmpty();
         buildIndex(table);
 
         fullSearchTable = fullSearchTable(table.copyWithLatestSchema());
@@ -143,13 +150,17 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                 DataEvolutionGlobalIndexScanner.create(fullSearchTable, null, evolvedTypePredicate)
                         .get()) {
             assertThat(scanner.scan(evolvedTypePredicate).get().results().toRangeList())
-                    .containsExactly(new Range(1, 1));
-            assertThat(scanner.unindexedRows(evolvedTypePredicate).results().toRangeList())
-                    .containsExactly(new Range(0, 0));
+                    .containsExactly(new Range(0, 1));
+            assertThat(scanner.unindexedRows(evolvedTypePredicate).results().isEmpty()).isTrue();
         }
         assertThat(readIdsWithoutSplitAssertion(fullSearchTable, evolvedTypePredicate))
                 .containsExactly(1, 2);
         assertThat(firstBuildSchemaId).isNotEqualTo(fullSearchTable.schema().id());
+        long currentSchemaId = fullSearchTable.schema().id();
+        assertThat(fullSearchTable.store().newIndexFileHandler().scanEntries())
+                .isNotEmpty()
+                .allSatisfy(entry -> assertThat(entry.schemaId()).isEqualTo(currentSchemaId))
+                .noneMatch(entry -> firstIndexFiles.contains(entry.indexFile()));
     }
 
     private void buildIndex(FileStoreTable table) throws Exception {

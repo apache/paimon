@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -31,6 +31,9 @@ class IndexManifestEntry:
     bucket: int
     index_file: IndexFileMeta
     schema_id: Optional[int] = None
+
+    def __post_init__(self):
+        self.index_file = replace(self.index_file, schema_id=self.schema_id)
 
     def __eq__(self, other):
         if not isinstance(other, IndexManifestEntry):

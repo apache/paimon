@@ -2469,6 +2469,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         )
 
         self.assertIsNone(scanner)
+        self.assertIsNone(DataEvolutionGlobalIndexScanner.create(
+            table,
+            index_files=[entry.index_file],
+            snapshot=snapshot,
+        ))
 
     def test_scanner_create_selects_extra_field_indexes(self):
         from pypaimon.globalindex.data_evolution_global_index_scanner import (

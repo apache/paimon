@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -138,6 +140,129 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon copy files procedure: primary-key index payloads") {
+    val random = ThreadLocalRandom.current().nextInt(100000)
+    val source = s"source_tbl$random"
+    val target = s"target_tbl$random"
+    withTable(source, target) {
+      sql(
+        s"""
+           |CREATE TABLE $source (
+           |  id INT,
+           |  score INT,
+           |  content STRING,
+           |  embedding ARRAY<FLOAT>)
+           |TBLPROPERTIES (
+           |  'primary-key' = 'id',
+           |  'bucket' = '1',
+           |  'deletion-vectors.enabled' = 'true',
+           |  'deletion-vectors.merge-on-read' = 'false',
+           |  'index-file-in-data-file-dir' = 'true',
+           |  'pk-btree.index.columns' = 'score',
+           |  'pk-full-text.index.columns' = 'content',
+           |  'pk-vector.index.columns' = 'embedding',
+           |  'fields.embedding.pk-vector.index.type' = '${TestVectorGlobalIndexerFactory.IDENTIFIER}',
+           |  'fields.embedding.pk-vector.distance.metric' = 'l2',
+           |  'vector-field' = 'embedding',
+           |  'field.embedding.vector-dim' = '2',
+           |  'test.vector.dimension' = '2',
+           |  'test.vector.metric' = 'l2')
+           |""".stripMargin)
+
+      sql(s"""
+             |INSERT INTO $source VALUES
+             |  (1, 10, 'paimon lake format', array(1.0f, 0.0f)),
+             |  (2, 20, 'apache paimon storage', array(2.0f, 0.0f)),
+             |  (3, 30, 'other engine', array(3.0f, 0.0f))
+             |""".stripMargin)
+      sql(s"CALL sys.compact(table => '$source')")
+
+      val sourcePayloads = loadTable(source)
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(
+          entry =>
+            entry.indexFile().globalIndexMeta() != null &&
+              entry.indexFile().globalIndexMeta().sourceMeta() != null)
+      val expectedIndexTypes =
+        Set("btree", "full-text", TestVectorGlobalIndexerFactory.IDENTIFIER)
+      assert(sourcePayloads.map(_.indexFile().indexType()).toSet == expectedIndexTypes)
+
+      checkAnswer(
+        sql(s"CALL sys.copy(source_table => '$source', target_table => '$target')"),
+        Row(true) :: Nil
+      )
+
+      val targetTable = loadTable(target)
+      val targetPayloads = targetTable
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(
+          entry =>
+            entry.indexFile().globalIndexMeta() != null &&
+              entry.indexFile().globalIndexMeta().sourceMeta() != null)
+      assert(targetPayloads.map(_.indexFile().indexType()).toSet == expectedIndexTypes)
+      assert(targetPayloads.size == sourcePayloads.size)
+      targetPayloads.foreach(
+        entry => assert(targetTable.store().newIndexFileHandler().existsIndexFile(entry)))
+      val targetDataFiles = targetTable
+        .newSnapshotReader()
+        .readFileIterator()
+        .asScala
+        .map(_.file().fileName())
+        .toSet
+      targetPayloads.foreach {
+        entry =>
+          val sourceFiles = PrimaryKeyIndexSourceMeta
+            .fromIndexFile(entry.indexFile())
+            .sourceFiles()
+            .asScala
+          assert(sourceFiles.forall(file => targetDataFiles.contains(file.fileName())))
+      }
+
+      checkAnswer(
+        sql(s"SELECT id FROM $target WHERE score = 20"),
+        sql(s"SELECT id FROM $source WHERE score = 20")
+      )
+      checkAnswer(
+        sql(s"""
+               |SELECT id
+               |FROM full_text_search(
+               |  '$target',
+               |  'content',
+               |  '{"match":{"column":"content","terms":"paimon"}}',
+               |  10)
+               |ORDER BY id
+               |""".stripMargin),
+        sql(s"""
+               |SELECT id
+               |FROM full_text_search(
+               |  '$source',
+               |  'content',
+               |  '{"match":{"column":"content","terms":"paimon"}}',
+               |  10)
+               |ORDER BY id
+               |""".stripMargin)
+      )
+      checkAnswer(
+        sql(s"""
+               |SELECT id
+               |FROM vector_search('$target', 'embedding', array(0.0f, 0.0f), 2)
+               |ORDER BY id
+               |""".stripMargin),
+        sql(s"""
+               |SELECT id
+               |FROM vector_search('$source', 'embedding', array(0.0f, 0.0f), 2)
+               |ORDER BY id
+               |""".stripMargin)
+      )
+    }
+  }
+
   test("Paimon copy files procedure: schema change") {
     val random = ThreadLocalRandom.current().nextInt(100000);
     withTable(s"tbl$random") {
@@ -194,7 +319,7 @@ class CopyFilesProcedureTest extends PaimonSparkTestBase {
       assert(sourceEntries.nonEmpty)
       val buildSchemaId = sourceEntries.head.schemaId().longValue()
 
-      sql(s"ALTER TABLE $source RENAME COLUMN payload_at_build TO payload_after_build")
+      sql(s"ALTER TABLE $source ADD COLUMN added_after_build STRING")
       assert(loadTable(source).schema().id() != buildSchemaId)
 
       checkAnswer(

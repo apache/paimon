@@ -39,8 +39,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** List index files. */
@@ -58,7 +60,8 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
             Identifier sourceIdentifier,
             Identifier targetIdentifier,
             Snapshot snapshot,
-            @Nullable PartitionPredicate partitionPredicate)
+            @Nullable PartitionPredicate partitionPredicate,
+            List<CopyFileInfo> dataFiles)
             throws Exception {
         if (snapshot == null) {
             return null;
@@ -74,13 +77,20 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
         FileStorePathFactory targetFileStorePathFactory = targetTable.store().pathFactory();
         List<IndexManifestEntry> indexManifestEntries =
                 sourceIndexHandler.readManifestWithIOException(snapshot.indexManifest());
+        List<IndexManifestEntry> dataEvolutionIndexes = new ArrayList<>();
+        for (IndexManifestEntry entry : indexManifestEntries) {
+            if (isDataEvolutionIndex(sourceTable, entry)) {
+                dataEvolutionIndexes.add(entry);
+            }
+        }
         Set<IndexManifestEntry> compatibleGlobalIndexes =
                 new HashSet<>(
                         GlobalIndexSchemaCompatibility.filterCompatible(
-                                sourceTable, indexManifestEntries));
+                                sourceTable, dataEvolutionIndexes));
+        Map<String, String> dataFileNameMapping = dataFileNameMapping(dataFiles);
         for (IndexManifestEntry indexManifestEntry : indexManifestEntries) {
-            boolean globalIndex = indexManifestEntry.indexFile().globalIndexMeta() != null;
-            if (globalIndex && !compatibleGlobalIndexes.contains(indexManifestEntry)) {
+            boolean dataEvolutionIndex = isDataEvolutionIndex(sourceTable, indexManifestEntry);
+            if (dataEvolutionIndex && !compatibleGlobalIndexes.contains(indexManifestEntry)) {
                 continue;
             }
             if (partitionPredicate == null
@@ -90,7 +100,10 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
                                 indexManifestEntry,
                                 sourceFileStorePathFactory,
                                 targetFileStorePathFactory,
-                                globalIndex ? targetTable.schema().id() : null);
+                                dataEvolutionIndex,
+                                isPrimaryKeyPayload(sourceTable, indexManifestEntry),
+                                dataEvolutionIndex ? targetTable.schema().id() : null,
+                                dataFileNameMapping);
                 indexFiles.add(indexFile);
             }
         }
@@ -101,18 +114,26 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
             IndexManifestEntry indexManifestEntry,
             FileStorePathFactory sourceFileStorePathFactory,
             FileStorePathFactory targetFileStorePathFactory,
-            @Nullable Long targetSchemaId)
+            boolean dataEvolutionIndex,
+            boolean primaryKeyPayload,
+            @Nullable Long targetSchemaId,
+            Map<String, String> dataFileNameMapping)
             throws IOException {
         IndexFileMeta fileMeta = indexManifestEntry.indexFile();
         IndexPathFactory sourceIndexPathFactory =
-                indexPathFactory(sourceFileStorePathFactory, indexManifestEntry);
+                indexPathFactory(
+                        sourceFileStorePathFactory, indexManifestEntry, dataEvolutionIndex);
         IndexPathFactory targetIndexPathFactory =
-                indexPathFactory(targetFileStorePathFactory, indexManifestEntry);
+                indexPathFactory(
+                        targetFileStorePathFactory, indexManifestEntry, dataEvolutionIndex);
         Path indexFilePath = sourceIndexPathFactory.toPath(fileMeta);
         Path targetIndexFilePath = targetIndexPathFactory.newPath();
         IndexFileMeta targetFileMeta =
-                CopyFilesUtil.toNewIndexFileMeta(
-                        fileMeta, targetIndexFilePath.getName(), targetSchemaId);
+                primaryKeyPayload
+                        ? CopyFilesUtil.toNewPrimaryKeyIndexFileMeta(
+                                fileMeta, targetIndexFilePath.getName(), dataFileNameMapping)
+                        : CopyFilesUtil.toNewIndexFileMeta(
+                                fileMeta, targetIndexFilePath.getName(), targetSchemaId);
         return new CopyFileInfo(
                 indexFilePath.toString(),
                 targetIndexFilePath.toString(),
@@ -122,9 +143,32 @@ public class ListIndexFilesOperator extends CopyFilesOperator {
     }
 
     private static IndexPathFactory indexPathFactory(
-            FileStorePathFactory pathFactory, IndexManifestEntry entry) {
-        return entry.indexFile().globalIndexMeta() == null
-                ? pathFactory.indexFileFactory(entry.partition(), entry.bucket())
-                : pathFactory.globalIndexFileFactory();
+            FileStorePathFactory pathFactory,
+            IndexManifestEntry entry,
+            boolean dataEvolutionIndex) {
+        return dataEvolutionIndex
+                ? pathFactory.globalIndexFileFactory()
+                : pathFactory.indexFileFactory(entry.partition(), entry.bucket());
+    }
+
+    private static boolean isDataEvolutionIndex(FileStoreTable table, IndexManifestEntry entry) {
+        return table.coreOptions().dataEvolutionEnabled()
+                && entry.indexFile().globalIndexMeta() != null;
+    }
+
+    private static boolean isPrimaryKeyPayload(FileStoreTable table, IndexManifestEntry entry) {
+        return !table.schema().primaryKeys().isEmpty()
+                && entry.indexFile().globalIndexMeta() != null
+                && entry.indexFile().globalIndexMeta().sourceMeta() != null;
+    }
+
+    private static Map<String, String> dataFileNameMapping(List<CopyFileInfo> dataFiles) {
+        Map<String, String> mapping = new HashMap<>();
+        for (CopyFileInfo dataFile : dataFiles) {
+            mapping.put(
+                    new Path(dataFile.sourceFilePath()).getName(),
+                    new Path(dataFile.targetFilePath()).getName());
+        }
+        return mapping;
     }
 }

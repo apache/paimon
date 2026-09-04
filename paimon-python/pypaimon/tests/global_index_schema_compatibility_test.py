@@ -20,7 +20,9 @@ import unittest
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.global_index_schema_compatibility import (
+    filter_compatible_global_index_files,
     filter_compatible_global_indexes,
+    partition_global_indexes_by_compatibility,
 )
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
@@ -98,6 +100,29 @@ class GlobalIndexSchemaCompatibilityTest(unittest.TestCase):
             [entry.index_file.file_name for entry in result],
         )
         self.assertEqual([1, 99], schema_lookups)
+
+        compatible_entries, incompatible_entries = (
+            partition_global_indexes_by_compatibility(table, [
+                compatible, current_schema, changed_primary, legacy,
+            ])
+        )
+        self.assertEqual(
+            ['compatible', 'current'],
+            [entry.index_file.file_name for entry in compatible_entries],
+        )
+        self.assertEqual(
+            ['changed-primary', 'legacy'],
+            [entry.index_file.file_name for entry in incompatible_entries],
+        )
+        self.assertEqual(
+            ['compatible', 'current'],
+            [index_file.file_name for index_file in
+             filter_compatible_global_index_files(
+                 table,
+                 [compatible.index_file, current_schema.index_file,
+                  changed_primary.index_file, legacy.index_file],
+             )],
+        )
 
 
 if __name__ == '__main__':

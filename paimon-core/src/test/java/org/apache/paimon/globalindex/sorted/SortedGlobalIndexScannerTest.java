@@ -35,7 +35,9 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySlice;
@@ -248,6 +250,51 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
     }
 
     @Test
+    public void testIncrementalScanReplacesLegacyIndex() throws Exception {
+        FileStoreTable table = writeSinglePartitionRows(10);
+        ManifestEntry dataEntry = table.store().newScan().plan().files().get(0);
+        IndexFileMeta legacyIndex = globalIndex("legacy-index", null);
+        commitIndexes(
+                table,
+                dataEntry.partition(),
+                dataEntry.bucket(),
+                Collections.singletonList(legacyIndex),
+                Collections.emptyList());
+
+        ScanResult<DataSplit> scanResult =
+                new SortedGlobalIndexScanner(table, "btree")
+                        .withIndexField("f0")
+                        .incrementalScan()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected legacy index replacement plan."));
+
+        assertThat(scanResult.rowRangeIndex().ranges()).containsExactly(new Range(0, 9));
+        assertThat(scanResult.deletedIndexEntries())
+                .extracting(entry -> entry.indexFile().fileName())
+                .containsExactly("legacy-index");
+
+        IndexFileMeta replacement = globalIndex("replacement-index", table.schema().id());
+        commitIndexes(
+                table,
+                dataEntry.partition(),
+                dataEntry.bucket(),
+                Collections.singletonList(replacement),
+                scanResult.deletedIndexEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList()));
+
+        List<IndexManifestEntry> currentIndexes =
+                table.store()
+                        .newIndexFileHandler()
+                        .scan(table.snapshotManager().latestSnapshot(), "btree");
+        assertThat(currentIndexes).hasSize(1);
+        assertThat(currentIndexes.get(0).indexFile().fileName()).isEqualTo("replacement-index");
+        assertThat(currentIndexes.get(0).schemaId()).isEqualTo(table.schema().id());
+    }
+
+    @Test
     public void testIncrementalScanWithNewData() throws Exception {
         write();
         createIndex(null);
@@ -350,6 +397,62 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
                 CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION,
                 CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
         return new SortedGlobalIndexScanner(table, "btree", options);
+    }
+
+    private FileStoreTable writeSinglePartitionRows(int rowCount) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString("f1_" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        return table;
+    }
+
+    private IndexFileMeta globalIndex(String fileName, Long schemaId) {
+        return new IndexFileMeta(
+                "btree",
+                fileName,
+                1L,
+                10L,
+                null,
+                null,
+                new GlobalIndexMeta(0, 9, 1, null, null),
+                schemaId);
+    }
+
+    private void commitIndexes(
+            FileStoreTable table,
+            BinaryRow partition,
+            int bucket,
+            List<IndexFileMeta> additions,
+            List<IndexFileMeta> deletions)
+            throws Exception {
+        DataIncrement increment =
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        additions,
+                        deletions);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    partition,
+                                    bucket,
+                                    null,
+                                    increment,
+                                    CompactIncrement.emptyIncrement())));
+        }
     }
 
     private DataFileMeta updateColumnAndCompact(String column, int updateRound) throws Exception {
