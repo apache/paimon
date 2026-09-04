@@ -20,6 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
@@ -29,13 +30,19 @@ import java.util.Objects
 case class PaimonPartitionReaderFactory(
     readBuilder: ReadBuilder,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty,
-    blobAsDescriptor: Boolean)
+    blobAsDescriptor: Boolean,
+    uriReaderFactory: UriReaderFactory = null)
   extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
-        PaimonPartitionReader(readBuilder, paimonInputPartition, metadataColumns, blobAsDescriptor)
+        PaimonPartitionReader(
+          readBuilder,
+          paimonInputPartition,
+          metadataColumns,
+          blobAsDescriptor,
+          uriReaderFactory)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }

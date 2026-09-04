@@ -25,7 +25,7 @@ import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSpli
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
-import org.apache.paimon.table.{SpecialFields, Table}
+import org.apache.paimon.table.{BlobDescriptorReaderFactory, FileStoreTable, SpecialFields, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
@@ -144,7 +144,16 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   override def toBatch: Batch = {
     val metadataColumns = metadataFields.map(
       field => PaimonMetadataColumn.get(field.name, SparkTypeUtils.toSparkPartitionType(table)))
-    PaimonBatch(inputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
+    val uriReaderFactory = table match {
+      case fileStoreTable: FileStoreTable => BlobDescriptorReaderFactory.create(fileStoreTable)
+      case _ => null
+    }
+    new PaimonBatch(
+      inputPartitions,
+      readBuilder,
+      coreOptions.blobAsDescriptor(),
+      metadataColumns,
+      uriReaderFactory)
   }
 
   def estimateStatistics: Statistics = {
