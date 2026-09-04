@@ -34,6 +34,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class DateTimeUtilsTest {
 
     @Test
+    public void testParseDateAndTimeOverflowReturnsNull() {
+        // A component too large for an int is an invalid date or time, not a crash: the
+        // contract of parseDate/parseTime is null for unparseable input. 2147483648 is
+        // Integer.MAX_VALUE + 1, the smallest ten-digit value that does not fit.
+        assertThat(DateTimeUtils.parseDate("2147483648-01-01")).isNull();
+        assertThat(DateTimeUtils.parseDate("2147483647-01-01"))
+                .isNull(); // in range, but not a year
+        assertThat(DateTimeUtils.parseDate("99999999999-01-01")).isNull();
+        assertThat(DateTimeUtils.parseDate("2024-99999999999-01")).isNull();
+        assertThat(DateTimeUtils.parseDate("2024-01-99999999999")).isNull();
+        assertThat(DateTimeUtils.parseTime("99999999999:00:00")).isNull();
+
+        // Sanity: valid values still parse.
+        assertThat(DateTimeUtils.parseDate("2024-01-15")).isNotNull();
+        assertThat(DateTimeUtils.parseTime("12:30:00")).isNotNull();
+    }
+
+    @Test
     public void testFormatLocalDateTime() {
         LocalDateTime time = LocalDateTime.of(2023, 8, 30, 12, 30, 59, 999_999_999);
         String[] expectations = new String[10];
