@@ -1637,8 +1637,8 @@ public class CoreOptions implements Serializable {
                             "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
                                     + "dedicated internal streaming scan.");
 
-    public static final ConfigOption<CompactionInitialScanMode> COMPACTION_INITIAL_SCAN_MODE =
-            key("compaction.initial-scan-mode")
+    public static final ConfigOption<CompactionInitialScanMode> CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE =
+            key("continuous-compaction.initial-scan-mode")
                     .enumType(CompactionInitialScanMode.class)
                     .defaultValue(CompactionInitialScanMode.EARLIEST)
                     .withDescription(

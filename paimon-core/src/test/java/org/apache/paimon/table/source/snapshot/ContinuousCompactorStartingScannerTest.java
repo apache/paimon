@@ -93,7 +93,7 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
         options.set(CoreOptions.WRITE_ONLY, true);
         options.set(CoreOptions.STREAM_SCAN_MODE, CoreOptions.StreamScanMode.COMPACT_BUCKET_TABLE);
         options.set(
-                CoreOptions.COMPACTION_INITIAL_SCAN_MODE,
+                CoreOptions.CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE,
                 CoreOptions.CompactionInitialScanMode.LATEST);
         createAppendOnlyTable(options);
         StreamTableWrite write = table.newWrite(commitUser);
