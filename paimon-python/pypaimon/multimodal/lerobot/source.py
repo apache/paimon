@@ -16,7 +16,9 @@
 
 """LeRobot source resolution for local, Hub, and FileIO datasets."""
 
+from array import array
 import json
+import logging
 import posixpath
 from bisect import bisect_right
 from contextlib import closing, contextmanager
@@ -39,6 +41,9 @@ from pypaimon.multimodal.source_utils import (
 from pypaimon.multimodal.lerobot.loader import _encode_media_frame
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class _LeRobotSource:
     path: str
@@ -50,8 +55,39 @@ class _LeRobotSource:
 @dataclass(frozen=True)
 class _RemoteLeRobotMeta:
     info: dict
-    episodes: list
+    episodes: object
     tasks: list
+
+
+class _RemoteEpisodeIndex:
+
+    def __init__(self):
+        self.starts = array("q")
+        self._ends = array("q")
+        self._chunk_indices = array("q")
+        self._file_indices = array("q")
+
+    def append(self, begin, end, chunk_index, file_index):
+        self.starts.append(begin)
+        self._ends.append(end)
+        self._chunk_indices.append(chunk_index)
+        self._file_indices.append(file_index)
+
+    def __len__(self):
+        return len(self.starts)
+
+    def __getitem__(self, index):
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        return {
+            "episode_index": index,
+            "dataset_from_index": self.starts[index],
+            "dataset_to_index": self._ends[index],
+            "data/chunk_index": self._chunk_indices[index],
+            "data/file_index": self._file_indices[index],
+        }
 
 
 @contextmanager
@@ -103,7 +139,14 @@ def _resolved_source(source, source_options):
             info,
         )
     finally:
-        source_file_io.close()
+        _close_quietly(source_file_io, "source FileIO")
+
+
+def _close_quietly(resource, name):
+    try:
+        resource.close()
+    except Exception:
+        _LOGGER.warning("Failed to close LeRobot %s.", name, exc_info=True)
 
 
 def _local_source(root, display_path=None):
@@ -195,10 +238,7 @@ class _RemoteLeRobotDataset:
         self._episodes = self._load_episodes(info)
         self._tasks = self._load_tasks(info)
         self.meta = _RemoteLeRobotMeta(info, self._episodes, self._tasks)
-        self._episode_starts = [
-            int(episode["dataset_from_index"])
-            for episode in self._episodes
-        ]
+        self._episode_starts = self._episodes.starts
         self._data_ranges = self._build_data_ranges(info)
         self._cached_data_path = None
         self._cached_data_table = None
@@ -257,35 +297,52 @@ class _RemoteLeRobotDataset:
             return []
         directory = _remote_path(self.source.path, "meta/episodes")
         paths = _remote_parquet_files(self._file_io, directory)
-        rows = []
+        episodes = _RemoteEpisodeIndex()
         for path in paths:
-            rows.extend(_read_remote_parquet(
+            table = _read_remote_parquet(
                 self._file_io,
                 path,
                 columns=self._EPISODE_COLUMNS,
-            ).to_pylist())
-        rows.sort(key=lambda row: int(row["episode_index"]))
-        if len(rows) != episode_count:
+            )
+            columns = {
+                name: table.column(name)
+                for name in self._EPISODE_COLUMNS
+            }
+            for offset in range(table.num_rows):
+                episode_index = int(
+                    columns["episode_index"][offset].as_py())
+                if episode_index != len(episodes):
+                    raise ValueError(
+                        "LeRobot Episode metadata must be ordered by "
+                        "episode_index.")
+                episodes.append(
+                    int(columns["dataset_from_index"][offset].as_py()),
+                    int(columns["dataset_to_index"][offset].as_py()),
+                    int(columns["data/chunk_index"][offset].as_py()),
+                    int(columns["data/file_index"][offset].as_py()),
+                )
+        if len(episodes) != episode_count:
             raise ValueError(
                 "LeRobot metadata reports %d Episodes but %d were found."
-                % (episode_count, len(rows)))
-        return rows
+                % (episode_count, len(episodes)))
+        return episodes
 
     def _load_tasks(self, info):
         task_count = int(info.get("total_tasks", 0))
         if task_count == 0:
             return []
         path = _remote_path(self.source.path, "meta/tasks.parquet")
-        rows = _read_remote_parquet(self._file_io, path).to_pylist()
+        table = _read_remote_parquet(self._file_io, path)
+        name_column = _pandas_index_column(table.schema, "task")
+        rows = table.select(["task_index", name_column]).to_pylist()
         tasks = [None] * task_count
         for row in rows:
             index = int(row["task_index"])
-            name = row.get("__index_level_0__")
-            if name is None:
-                name = row.get("task", row.get("name"))
-            if index < 0 or index >= task_count or name is None:
+            name = row[name_column]
+            if index < 0 or index >= task_count \
+                    or not isinstance(name, str) or not name:
                 raise ValueError("LeRobot task metadata is invalid: %s" % row)
-            tasks[index] = str(name)
+            tasks[index] = name
         if any(task is None for task in tasks):
             raise ValueError(
                 "LeRobot metadata reports %d tasks but %d were found."
@@ -330,6 +387,28 @@ class _RemoteLeRobotDataset:
 
 def _remote_path(root, relative_path):
     return "%s/%s" % (root.rstrip("/"), relative_path.lstrip("/"))
+
+
+def _pandas_index_column(schema, component):
+    encoded = (schema.metadata or {}).get(b"pandas")
+    try:
+        pandas_metadata = json.loads(encoded.decode("utf-8"))
+        index_columns = pandas_metadata["index_columns"]
+    except (AttributeError, KeyError, TypeError, ValueError,
+            UnicodeDecodeError) as error:
+        raise ValueError(
+            "LeRobot %s metadata must contain a Pandas index."
+            % component
+        ) from error
+    if not isinstance(index_columns, list) \
+            or len(index_columns) != 1 \
+            or not isinstance(index_columns[0], str) \
+            or index_columns[0] not in schema.names \
+            or index_columns[0] == component + "_index":
+        raise ValueError(
+            "LeRobot %s metadata must contain one text Pandas index."
+            % component)
+    return index_columns[0]
 
 
 def _relative_dataset_path(path, name):
@@ -455,6 +534,17 @@ def _read_remote_parquet(source_file_io, path, columns=None):
                 % (path, error)) from error
 
 
+def _read_remote_parquet_schema(source_file_io, path):
+    stream = source_file_io.new_input_stream(path)
+    with closing(stream) as source_stream:
+        try:
+            return pq.read_schema(source_stream)
+        except (OSError, ValueError, pa.ArrowException) as error:
+            raise ValueError(
+                "Cannot read LeRobot Parquet schema %s: %s"
+                % (path, error)) from error
+
+
 def _remote_parquet_files(source_file_io, directory):
     try:
         statuses = source_file_io.list_status(directory)
@@ -470,8 +560,3 @@ def _remote_parquet_files(source_file_io, directory):
         elif status.type == pafs.FileType.File and path.endswith(".parquet"):
             paths.append(path)
     return sorted(paths)
-
-
-def _has_tasks(dataset, info):
-    return int(info.get("total_tasks", 0)) > 0 \
-        and getattr(dataset.meta, "tasks", None) is not None

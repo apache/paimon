@@ -869,6 +869,31 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testTimestampToNumericPreEpoch() {
+        CastExecutor<?, ?> cast =
+                CastExecutors.resolve(new TimestampType(3), new BigIntType(false));
+
+        // pre-epoch 1969-12-31 23:59:58.500 is -1500 millis, whose epoch second is -2
+        compareCastResult(cast, Timestamp.fromEpochMillis(-1500), -2L);
+        compareCastResult(cast, Timestamp.fromEpochMillis(-1000), -1L);
+
+        // post-epoch 1970-01-01 00:00:01.500 -> 1 (unchanged behavior)
+        compareCastResult(cast, Timestamp.fromEpochMillis(1500), 1L);
+    }
+
+    @Test
+    public void testTimestampToTimestampPreEpoch() {
+        CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(6), new TimestampType(0));
+
+        // narrowing 1969-12-31 23:59:59.999999 must drop the fraction, not cross the epoch
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(
+                        LocalDateTime.of(1969, 12, 31, 23, 59, 59, 999_999_000)),
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 12, 31, 23, 59, 59)));
+    }
+
+    @Test
     public void testDateToTimestamp() {
         String date = "2023-06-06";
         compareCastResult(

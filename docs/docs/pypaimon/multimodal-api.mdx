@@ -617,26 +617,31 @@ orphan files for normal Paimon cleanup.
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
 repository. It derives the schema from `meta/info.json`, writes one row per
-frame, and commits once.
+frame, and creates a LeRobot dataset backed by the frame table,
+`<table>__versions`, `<table>__episodes`, `<table>__tasks`, and an optional
+`<table>__subtasks`. Task text remains in the metadata table; frames retain
+`task_index`. After all components are committed and tagged with the same
+numeric `version_id`, one row is appended to `<table>__versions` to publish the
+version.
 
 ```shell
 pip install 'pypaimon[lerobot]'
 ```
 
 ```python
-snapshot_id = conn.load_from_lerobot(
+version_id = conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(snapshot_id)
+print(version_id)
 ```
 
-The return value is `None` when the source has no frames.
+The returned `version_id` is the common tag name for all dataset components.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
-snapshot_id = conn.load_from_lerobot(
+version_id = conn.load_from_lerobot(
     "robot_data",
     "oss://source-bucket/lerobot_dataset",
     source_options={
@@ -647,13 +652,14 @@ snapshot_id = conn.load_from_lerobot(
 )
 ```
 
-Missing tables are created from metadata; existing tables use strict schema
-validation and append semantics. Scalars map to scalar types, vectors to
-`VECTOR`, higher-rank tensors to nested `ARRAY`, and images to `BLOB`. Images
-keep their compressed bytes.
+A row in `<table>__versions` identifies a published release. Readers must first
+resolve that row, then read every required component through its matching tag;
+a missing tag is an error and must not fall back to the latest snapshot.
+The component tags are immutable and must be retained or deleted together.
+The one-time importer requires a new target table.
 
-Only v3 is supported. Video features, `uint64`, and language event structures
-are rejected.
+Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
+`ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
 
 ## Overwrite
 

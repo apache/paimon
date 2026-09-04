@@ -25,16 +25,21 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.DirectByteBufferAllocator;
 import org.apache.parquet.column.values.Utils;
+import org.apache.parquet.column.values.delta.DeltaBinaryPackingValuesWriterForInteger;
 import org.apache.parquet.column.values.deltalengthbytearray.DeltaLengthByteArrayValuesWriter;
+import org.apache.parquet.io.ParquetDecodingException;
 import org.apache.parquet.io.api.Binary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for delta length byte array encoding. */
 public class DeltaLengthByteArrayEncodingTest {
@@ -125,6 +130,36 @@ public class DeltaLengthByteArrayEncodingTest {
         for (int i = 0; i < values.length; i++) {
             assertEquals(values[i].length(), writableColumnVector.getInt(i));
         }
+    }
+
+    @Test
+    public void testSkipPastEndOfPage() throws Exception {
+        writeData(writer, values);
+        byte[] page = writer.getBytes().toByteArray();
+        // Drop three bytes of data. The lengths at the front of the page still add up to
+        // more than the page holds, which is what a truncated page looks like.
+        byte[] truncated = Arrays.copyOf(page, page.length - 3);
+        reader.initFromPage(values.length, ByteBufferInputStream.wrap(ByteBuffer.wrap(truncated)));
+
+        ParquetDecodingException e =
+                assertThrows(
+                        ParquetDecodingException.class, () -> reader.skipBinary(values.length));
+        assertEquals("Failed to skip " + values[2].length() + " bytes", e.getMessage());
+    }
+
+    @Test
+    public void testSkipNegativeLength() throws Exception {
+        // A length section that decodes to a negative value cannot be produced by the
+        // writer, so write one directly and append no data at all.
+        DeltaBinaryPackingValuesWriterForInteger lengthWriter =
+                new DeltaBinaryPackingValuesWriterForInteger(
+                        64 * 1024, 64 * 1024, new DirectByteBufferAllocator());
+        lengthWriter.writeInteger(-1);
+        reader.initFromPage(1, lengthWriter.getBytes().toInputStream());
+
+        ParquetDecodingException e =
+                assertThrows(ParquetDecodingException.class, () -> reader.skipBinary(1));
+        assertEquals("Negative byte array length: -1", e.getMessage());
     }
 
     private void writeData(DeltaLengthByteArrayValuesWriter writer, String[] values) {

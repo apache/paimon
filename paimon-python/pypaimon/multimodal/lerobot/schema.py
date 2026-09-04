@@ -37,6 +37,14 @@ _SCALAR_DTYPES = {
     "string": pa.string(),
 }
 
+_V3_REQUIRED_FEATURE_DTYPES = {
+    "timestamp": "float32",
+    "frame_index": "int64",
+    "episode_index": "int64",
+    "index": "int64",
+    "task_index": "int64",
+}
+
 
 def _require_v3(info, source):
     version = str(info.get("codebase_version", ""))
@@ -47,22 +55,32 @@ def _require_v3(info, source):
             % (source, version or None))
 
 
-def _schema_from_info(info, include_task):
+def _schema_from_info(info):
     features = info.get("features")
     if not isinstance(features, dict) or not features:
         raise ValueError("LeRobot metadata features must be a non-empty object.")
 
-    fields = []
-    for name, feature in features.items():
-        fields.append(_feature_field(name, feature))
-    if include_task:
-        fields.append(pa.field(
-            "task",
-            pa.string(),
-            nullable=False,
-            metadata={b"description": b"LeRobot task"},
-        ))
-    return pa.schema(fields)
+    return pa.schema([
+        _feature_field(name, feature)
+        for name, feature in features.items()
+    ])
+
+
+def _validate_v3_required_features(info):
+    features = info.get("features")
+    if not isinstance(features, dict):
+        raise ValueError("LeRobot metadata features must be an object.")
+    expected = dict(_V3_REQUIRED_FEATURE_DTYPES)
+    if "subtask_index" in features:
+        expected["subtask_index"] = "int64"
+    for name, dtype in expected.items():
+        feature = features.get(name)
+        if not isinstance(feature, dict) \
+                or str(feature.get("dtype", "")) != dtype \
+                or _feature_shape(feature, name) != (1,):
+            raise ValueError(
+                "LeRobot V3 required feature %s must have dtype=%s and "
+                "shape=[1]." % (name, dtype))
 
 
 def _validate_lerobot_schema(source_schema, target_schema, source):

@@ -99,6 +99,7 @@ import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.spark.SparkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.spark.SparkCatalogOptions.V1FUNCTION_ENABLED;
 import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_METADATA_KEY;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
@@ -129,6 +130,7 @@ public class SparkCatalog extends SparkBaseCatalog
 
     private Catalog catalog;
     private String defaultDatabase;
+    private boolean disableCreateTableInDefaultDatabase;
     private boolean v1FunctionEnabled;
     @Nullable private PaimonV1FunctionRegistry v1FunctionRegistry;
 
@@ -144,22 +146,28 @@ public class SparkCatalog extends SparkBaseCatalog
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
+        this.disableCreateTableInDefaultDatabase =
+                options.getBoolean(
+                        DISABLE_CREATE_TABLE_IN_DEFAULT_DB.key(),
+                        DISABLE_CREATE_TABLE_IN_DEFAULT_DB.defaultValue());
         this.v1FunctionEnabled =
                 options.getBoolean(V1FUNCTION_ENABLED.key(), V1FUNCTION_ENABLED.defaultValue())
                         && DelegateCatalog.rootCatalog(catalog) instanceof RESTCatalog;
         if (v1FunctionEnabled) {
             this.v1FunctionRegistry = new PaimonV1FunctionRegistry(sparkSession);
         }
-        try {
-            catalog.getDatabase(defaultDatabase);
-        } catch (Catalog.DatabaseNotExistException e) {
-            LOG.info(
-                    "Default database '{}' does not exist, caused by: {}, start to create it",
-                    defaultDatabase,
-                    ExceptionUtils.stringifyException(e));
+        if (!disableCreateTableInDefaultDatabase) {
             try {
-                createNamespace(defaultNamespace(), new HashMap<>());
-            } catch (NamespaceAlreadyExistsException ignored) {
+                catalog.getDatabase(defaultDatabase);
+            } catch (Catalog.DatabaseNotExistException e) {
+                LOG.info(
+                        "Default database '{}' does not exist, caused by: {}, start to create it",
+                        defaultDatabase,
+                        ExceptionUtils.stringifyException(e));
+                try {
+                    createNamespace(defaultNamespace(), new HashMap<>());
+                } catch (NamespaceAlreadyExistsException ignored) {
+                }
             }
         }
     }
@@ -374,6 +382,12 @@ public class SparkCatalog extends SparkBaseCatalog
             Transform[] partitions,
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
+        if (disableCreateTableInDefaultDatabase
+                && ident.namespace().length == 1
+                && ident.namespace()[0].equals(defaultDatabase)) {
+            throw new UnsupportedOperationException(
+                    "Creating table in default database is disabled, please specify a database name.");
+        }
         try {
             catalog.createTable(
                     toIdentifier(ident, catalogName),

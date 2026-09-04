@@ -36,12 +36,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -95,6 +97,38 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                         DataTypes.ARRAY(DataTypes.STRING()),
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()),
                         DataTypes.ROW(DataTypes.INT(), DataTypes.ARRAY(DataTypes.DOUBLE()))));
+    }
+
+    @Test
+    public void testUnresolvableCastFailsWithClearMessage() throws Exception {
+        JsonFileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+
+        Path testFile = new Path(parent, "unresolvable_cast_" + UUID.randomUUID() + ".json");
+        try (PositionOutputStream out = fileIO.newOutputStream(testFile, true)) {
+            out.write("{\"f0\":{\"a\":1}}".getBytes(StandardCharsets.UTF_8));
+        }
+
+        // MULTISET has no cast rule from STRING. A format table is created without going
+        // through SchemaValidation, so such a column reaches the reader.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.MULTISET(DataTypes.STRING())},
+                        new String[] {"f0"});
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
+            assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
+                    .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                    .hasRootCauseMessage("Unsupported data type for JSON format: MULTISET<STRING>");
+        }
     }
 
     @Test

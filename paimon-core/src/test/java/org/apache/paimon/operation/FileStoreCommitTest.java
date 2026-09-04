@@ -37,6 +37,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -1125,6 +1126,66 @@ public class FileStoreCommitTest {
         assertThat(store.fileIO().exists(compactNewPath)).isFalse();
         assertThat(store.fileIO().exists(dataDeletedPath)).isTrue();
         assertThat(store.fileIO().exists(compactDeletedPath)).isTrue();
+    }
+
+    @Test
+    public void testAbortDataFileWithExtraFiles() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+        DataFilePathFactory pathFactory =
+                store.pathFactory().createDataFilePathFactory(partition, 0);
+
+        Path dataNewPath = pathFactory.newPath();
+        DataFileMeta dataNew = createDataFileWithExtraFile(store, dataNewPath, false);
+        Path compactNewPath = new Path(tempDir.resolve("external-compact-new.orc").toUri());
+        DataFileMeta compactNew = createDataFileWithExtraFile(store, compactNewPath, true);
+
+        CommitMessage commitMessage =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        store.options().bucket(),
+                        new DataIncrement(
+                                Collections.singletonList(dataNew),
+                                Collections.emptyList(),
+                                Collections.emptyList()),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.singletonList(compactNew),
+                                Collections.emptyList()));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.abort(Collections.singletonList(commitMessage));
+        }
+
+        for (Path path : dataNew.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).isFalse();
+        }
+        for (Path path : compactNew.collectFiles(pathFactory)) {
+            assertThat(store.fileIO().exists(path)).isFalse();
+        }
+    }
+
+    private static DataFileMeta createDataFileWithExtraFile(
+            TestAppendFileStore store, Path path, boolean external) throws Exception {
+        store.fileIO().newOutputStream(path, false).close();
+        Path extraPath = new Path(path.getParent(), path.getName() + ".index");
+        store.fileIO().newOutputStream(extraPath, false).close();
+        return DataFileMeta.forAppend(
+                path.getName(),
+                0,
+                0,
+                EMPTY_STATS,
+                0,
+                0,
+                0,
+                Collections.singletonList(extraPath.getName()),
+                null,
+                null,
+                null,
+                external ? path.toString() : null,
+                null,
+                null);
     }
 
     private static IndexFileMeta createIndexFile(

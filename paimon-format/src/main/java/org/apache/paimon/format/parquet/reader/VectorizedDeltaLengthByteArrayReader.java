@@ -81,9 +81,16 @@ public class VectorizedDeltaLengthByteArrayReader extends VectorizedReaderBase
     @Override
     public void skipBinary(int total) {
         for (int i = 0; i < total; i++) {
-            int remaining = lengthsVector.getInt(currentRow + i);
-            while (remaining > 0) {
-                remaining -= in.skip(remaining);
+            int length = lengthsVector.getInt(currentRow + i);
+            // A corrupt length can be negative, and skipFully would then move the stream
+            // backwards instead of forwards.
+            if (length < 0) {
+                throw new ParquetDecodingException("Negative byte array length: " + length);
+            }
+            try {
+                in.skipFully(length);
+            } catch (IOException e) {
+                throw new ParquetDecodingException("Failed to skip " + length + " bytes", e);
             }
         }
         currentRow += total;
