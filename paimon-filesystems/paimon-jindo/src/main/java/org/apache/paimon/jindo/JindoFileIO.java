@@ -35,6 +35,7 @@ import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
 import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import com.aliyun.jindodata.oss.auth.SimpleCredentialsProvider;
+import com.aliyun.jindodata.store.JindoMpuStore;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.OSSClientBuilder;
 import org.apache.hadoop.conf.Configuration;
@@ -214,8 +215,15 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         Pair<JindoHadoopSystem, String> pair = getFileSystemPair(hadoopPath, false);
         JindoHadoopSystem fs = pair.getKey();
+        JindoMpuStore mpuStore = fs.getMpuStore(hadoopPath);
+        if (mpuStore == null) {
+            LOG.debug(
+                    "Jindo multipart upload is unavailable for {}, falling back to rename commit.",
+                    path);
+            return super.newTwoPhaseOutputStream(path, overwrite);
+        }
         return new JindoTwoPhaseOutputStream(
-                new JindoMultiPartUpload(fs, hadoopPath), hadoopPath, path);
+                new JindoMultiPartUpload(mpuStore, fs.getWorkingDirectory()), hadoopPath, path);
     }
 
     @Override
