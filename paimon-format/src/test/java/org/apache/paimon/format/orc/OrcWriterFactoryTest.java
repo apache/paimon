@@ -35,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -98,5 +99,18 @@ class OrcWriterFactoryTest {
 
         @Override
         public void addedRow(int rows) {}
+    }
+
+    @Test
+    void testWriterOptionsNotSharedBetweenCalls() {
+        // create() writes per-file state into the options, so each caller needs its own.
+        OrcWriterFactory factory =
+                new OrcWriterFactory(
+                        new RowDataVectorizer(
+                                TypeDescription.createString(),
+                                Collections.singletonList(
+                                        new DataField(0, "f0", DataTypes.STRING())),
+                                false));
+        assertThat(factory.getWriterOptions()).isNotSameAs(factory.getWriterOptions());
     }
 }

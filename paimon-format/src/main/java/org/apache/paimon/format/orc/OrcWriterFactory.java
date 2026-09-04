@@ -62,8 +62,6 @@ public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingW
     private final Properties writerProperties;
     private final Map<String, String> confMap;
     private final boolean legacyTimestampLtzType;
-
-    private OrcFile.WriterOptions writerOptions;
     private final int writeBatchSize;
     private final MemorySize writeBatchMemory;
 
@@ -169,11 +167,10 @@ public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingW
 
     @VisibleForTesting
     protected OrcFile.WriterOptions getWriterOptions() {
-        if (null == writerOptions) {
-            writerOptions = OrcFile.writerOptions(writerProperties, configuration());
-            writerOptions.setSchema(this.vectorizer.getSchema());
-        }
-
+        // create() writes per-file state into the returned options, so it cannot be cached.
+        OrcFile.WriterOptions writerOptions =
+                OrcFile.writerOptions(writerProperties, configuration());
+        writerOptions.setSchema(this.vectorizer.getSchema());
         return writerOptions;
     }
 
