@@ -103,8 +103,17 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
     @Override
     public void setRowIdCheckFromSnapshot(@Nullable Long rowIdCheckFromSnapshot) {
+        String uuid = null;
+        if (rowIdCheckFromSnapshot != null) {
+            try {
+                Snapshot snapshot = snapshotManager.snapshot(rowIdCheckFromSnapshot);
+                uuid = snapshot.uuid();
+            } catch (RuntimeException e) {
+                // snapshot file missing, leave uuid as null
+            }
+        }
         setRowIdCheckFromSnapshot(
-                rowIdCheckFromSnapshot, null, DataEvolutionDmlRowIdConflictCheck.INSTANCE);
+                rowIdCheckFromSnapshot, uuid, DataEvolutionDmlRowIdConflictCheck.INSTANCE);
     }
 
     @Override
