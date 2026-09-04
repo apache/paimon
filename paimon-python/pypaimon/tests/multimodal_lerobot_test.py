@@ -1448,7 +1448,13 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(2, dataset.num_episodes)
         self.assertIsNotNone(dataset.meta.stats)
         self.assertEqual(["pick", "place"], list(dataset.meta.tasks.index))
-        self.assertEqual(2, len(dataset.meta.episodes))
+        episodes = dataset.meta.episodes
+        self.assertEqual(2, len(episodes))
+        self.assertEqual([0, 2], list(episodes["dataset_from_index"]))
+        self.assertEqual([2, 5], list(episodes["dataset_to_index"]))
+        self.assertFalse(any(
+            name.startswith("stats/")
+            for name in episodes.column_names))
         self.assertIsNone(dataset._dataset._data)
 
         from pypaimon.multimodal.blob_read import fetch_blob_bodies

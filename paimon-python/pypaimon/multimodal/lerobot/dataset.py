@@ -442,10 +442,9 @@ def _load_published_version(table, version_id):
     frames = _tagged_table(catalog, raw_table, tag)
     episodes_table = _tagged_table(
         catalog, catalog.get_table(identifiers["episodes"]), tag)
+    episodes = _episode_dataset(episodes_table)
     tasks_table = _tagged_table(
         catalog, catalog.get_table(identifiers["tasks"]), tag)
-    episodes = _read_arrow(episodes_table).sort_by(
-        "episode_index").to_pylist()
     tasks = _component_dataframe(tasks_table, "task_index")
     subtasks = None
     if manifest["has_subtasks"]:
@@ -497,10 +496,28 @@ def _tagged_table(catalog, table, tag):
     return _time_travel_table(table, tag_name=tag)
 
 
-def _read_arrow(table):
+def _read_arrow(table, projection=None):
     builder = table.new_read_builder()
+    if projection is not None:
+        builder = builder.with_projection(projection)
     plan = builder.new_scan().plan()
     return builder.new_read().to_arrow(plan.splits())
+
+
+def _episode_dataset(table):
+    try:
+        from datasets import Dataset
+    except ImportError as error:
+        raise ImportError(
+            "PaimonLeRobotDataset requires datasets from "
+            "'pypaimon[lerobot]'.") from error
+
+    projection = [
+        name for name in _target_schema(table).names
+        if not name.startswith("stats/")
+    ]
+    data = _read_arrow(table, projection).sort_by("episode_index")
+    return Dataset(data)
 
 
 def _component_dataframe(table, index_field):
