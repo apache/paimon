@@ -1127,6 +1127,98 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
+    public void testNullablePredicateThreeValuedLogic() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT", "flag BOOLEAN"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList());
+
+        insertInto(
+                table,
+                "(1, CAST(NULL AS INT), CAST(NULL AS BOOLEAN))",
+                "(2, 1, TRUE)",
+                "(3, 2, FALSE)",
+                "(4, 3, CAST(NULL AS BOOLEAN))",
+                "(5, 4, TRUE)");
+
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v BETWEEN 1 AND 3"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 3), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN 1 AND 3"),
+                Collections.singletonList(changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 3), changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v IN (1, NULL, 3)"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, NULL, 3)"), Collections.emptyList());
+        testBatchRead(
+                buildQuery(table, "id", "WHERE flag IS TRUE"),
+                Arrays.asList(changelogRow("+I", 2), changelogRow("+I", 5)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE flag IS NOT TRUE"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3), changelogRow("+I", 4)));
+        testBatchRead(
+                buildQuery(table, "id", "WHERE NOT (flag IS TRUE)"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3), changelogRow("+I", 4)));
+    }
+
+    @Test
+    public void testNotBetweenWithNullBoundsThreeValuedLogic() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList());
+
+        insertInto(table, "(1, 12)", "(2, 16)", "(3, 8)", "(4, CAST(NULL AS INT))");
+
+        // 12 NOT BETWEEN 15 AND NULL = 12 < 15 OR 12 > NULL = TRUE
+        // 16 NOT BETWEEN 15 AND NULL = UNKNOWN (dropped by WHERE)
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN 15 AND NULL"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 3)));
+
+        // 12 NOT BETWEEN NULL AND 10 = 12 < NULL OR 12 > 10 = TRUE
+        // 8 NOT BETWEEN NULL AND 10 = UNKNOWN
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT BETWEEN NULL AND 10"),
+                Arrays.asList(changelogRow("+I", 1), changelogRow("+I", 2)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file-index.bsi.columns", "file-index.range-bitmap.columns"})
+    public void testNotInNullWithFileIndex(String indexOption) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(indexOption, "v");
+        options.put("file-index.in-manifest-threshold", "1B");
+        String table =
+                createTable(
+                        Arrays.asList("id INT", "v INT"),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        options);
+
+        insertInto(table, "(1, CAST(NULL AS INT))", "(2, 1)", "(3, 2)", "(4, 3)", "(5, 4)");
+
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, NULL, 3)"), Collections.emptyList());
+        testBatchRead(
+                buildQuery(table, "id", "WHERE v NOT IN (1, 3)"),
+                Arrays.asList(changelogRow("+I", 3), changelogRow("+I", 5)));
+    }
+
+    @Test
     public void testUnsupportedPredicate() throws Exception {
         String table =
                 createTable(
