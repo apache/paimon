@@ -286,7 +286,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
-    val readSnapshot = table.snapshotManager().latestSnapshot()
+    val readSnapshot = TimeTravelUtil.tryTravelOrLatest(table)
     val snapshotReader = table.newSnapshotReader()
     if (readSnapshot != null) {
       snapshotReader.withSnapshot(readSnapshot)
