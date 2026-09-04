@@ -193,8 +193,6 @@ class TorchDataset(Dataset):
         self,
         table_read: TableRead,
         splits: List[Split],
-        *,
-        require_lazy: bool = False,
     ):
         """
         Initialize TorchDataset.
@@ -202,8 +200,17 @@ class TorchDataset(Dataset):
         Args:
             table_read: TableRead instance for reading data
             splits: List of splits to read
-            require_lazy: Fail instead of materializing unsupported reads
         """
+        self._initialize(table_read, splits, require_lazy=False)
+
+    @classmethod
+    def lazy(cls, table_read: TableRead, splits: List[Split]):
+        """Create a dataset which rejects materialization fallbacks."""
+        dataset = cls.__new__(cls)
+        dataset._initialize(table_read, splits, require_lazy=True)
+        return dataset
+
+    def _initialize(self, table_read, splits, require_lazy):
         self.table_read = table_read
         self.splits = splits
         self._data = None

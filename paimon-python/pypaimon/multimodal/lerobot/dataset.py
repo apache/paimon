@@ -751,7 +751,7 @@ def _lazy_torch_dataset_for_splits(read_table, projection, splits):
 
 def _required_lazy_torch_dataset(table_read, splits):
     from pypaimon.read.datasource.torch_dataset import TorchDataset
-    return TorchDataset(table_read, splits, require_lazy=True)
+    return TorchDataset.lazy(table_read, splits)
 
 
 def _semantic_index_mapping(
