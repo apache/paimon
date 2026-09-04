@@ -73,7 +73,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     matchedCondition: Expression,
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction],
-    notMatchedBySourceActions: Seq[MergeAction])
+    notMatchedBySourceActions: Seq[MergeAction],
+    allowPinnedSelfMergeShortcut: Boolean = false)
   extends PaimonRowLevelCommand
   with Logging {
 
@@ -157,7 +158,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def passthroughSourceRelation(plan: LogicalPlan): Option[DataSourceV2Relation] = {
     EliminateSubqueryAliases(plan) match {
-      case relation: DataSourceV2Relation if isPaimonRelationWithoutTimeTravel(relation) =>
+      case relation: DataSourceV2Relation if isEligibleSelfMergeSource(relation) =>
         Some(relation)
       case Project(projectList, child) if isPassthroughProject(projectList, child) =>
         passthroughSourceRelation(child)
@@ -166,10 +167,13 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private def isPaimonRelationWithoutTimeTravel(relation: DataSourceV2Relation): Boolean =
+  private def isEligibleSelfMergeSource(relation: DataSourceV2Relation): Boolean =
     relation.table match {
       case sparkTable: SparkTable =>
-        !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(sparkTable.getTable.options()))
+        !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(sparkTable.getTable.options())) ||
+        // Reference equality proves that both sides use the exact same pinned table and snapshot.
+        // Keep this exception scoped to callers that explicitly construct such a self-merge.
+        (allowPinnedSelfMergeShortcut && (sparkTable eq targetSparkTable))
       case _ => false
     }
 

@@ -1691,7 +1691,13 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
         sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
 
-        sql("UPDATE t SET b = 22 WHERE id = 2")
+        val (mergeRowsPlans, _) =
+          executeMergeIntoAndCollectPlans("UPDATE t SET b = 22 WHERE id = 2")
+        assert(
+          mergeRowsPlans.exists(_.collectFirst { case _: Join => true }.nonEmpty),
+          s"Expected conditional UPDATE to use the general MERGE plan, but got: " +
+            mergeRowsPlans.mkString("\n")
+        )
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
@@ -1794,13 +1800,48 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
         sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
 
-        sql("UPDATE t SET b = 22")
+        val (mergeRowsPlans, _) = executeMergeIntoAndCollectPlans("UPDATE t SET b = 22")
+        assertSelfMergeShortcut(mergeRowsPlans)
         checkAnswer(
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(2, 22, 2, 0, 2), Row(3, 22, 3, 1, 2))
         )
       }
     }
+  }
+
+  test("Data Evolution: V1 update with user-specified snapshot uses self-merge shortcut") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 10), (2, 20)")
+        val snapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+        sql("INSERT INTO t VALUES (3, 30)")
+
+        var mergeRowsPlans = Seq.empty[LogicalPlan]
+        withSparkSQLConf("spark.paimon.scan.snapshot-id" -> snapshotId.toString) {
+          mergeRowsPlans = executeMergeIntoAndCollectPlans("UPDATE t SET b = 100")._1
+        }
+        assertSelfMergeShortcut(mergeRowsPlans)
+
+        checkAnswer(
+          sql("SELECT id, b FROM t ORDER BY id"),
+          Seq(Row(1, 100), Row(2, 100), Row(3, 30)))
+      }
+    }
+  }
+
+  private def assertSelfMergeShortcut(mergeRowsPlans: Seq[LogicalPlan]): Unit = {
+    assert(mergeRowsPlans.nonEmpty, "Expected a MergeRows plan for V1 UPDATE.")
+    assert(
+      mergeRowsPlans.forall(_.collectFirst {
+        case p: Join => p
+        case p: Sort => p
+        case p: RepartitionByExpression => p
+      }.isEmpty),
+      s"Found unexpected Join/Sort/Exchange in plans: ${mergeRowsPlans.mkString("\n")}"
+    )
   }
 
   test("Data Evolution: V1 update retries concurrent update conflicts") {
