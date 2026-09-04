@@ -30,9 +30,9 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.PreparedSnapshotCommit;
-import org.apache.paimon.operation.TransactionalFileStoreCommit;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.tag.Tag;
@@ -389,12 +389,12 @@ public class TableCommitImpl implements InnerTableCommit {
         maintain(identifier, true);
     }
 
-    private TransactionalFileStoreCommit transactionalCommit() {
+    private FileStoreCommitImpl transactionalCommit() {
         checkState(
-                commit instanceof TransactionalFileStoreCommit,
+                commit instanceof FileStoreCommitImpl,
                 "File store commit for table %s does not support transactions.",
                 tableName);
-        return (TransactionalFileStoreCommit) commit;
+        return (FileStoreCommitImpl) commit;
     }
 
     private void checkFilesExistence(

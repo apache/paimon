@@ -138,7 +138,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * must be thrown to restart the job. It is recommended to run FileStoreCommitTest thousands of
  * times to make sure that your changes are correct.
  */
-public class FileStoreCommitImpl implements FileStoreCommit, TransactionalFileStoreCommit {
+public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
@@ -491,7 +491,6 @@ public class FileStoreCommitImpl implements FileStoreCommit, TransactionalFileSt
                 null);
     }
 
-    @Override
     public Optional<PreparedSnapshotCommit> prepareCommit(
             ManifestCommittable committable, boolean checkAppendFiles) {
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
@@ -523,17 +522,14 @@ public class FileStoreCommitImpl implements FileStoreCommit, TransactionalFileSt
         return Optional.of(preparation.preparedCommit());
     }
 
-    @Override
     public void completeCommit(PreparedSnapshotCommit preparedCommit) {
         completePreparedCommit(preparedCommit);
     }
 
-    @Override
     public void markCommitUnknown(PreparedSnapshotCommit preparedCommit) {
         markPreparedCommitUnknown(preparedCommit);
     }
 
-    @Override
     public void commitCompaction(ManifestCommittable committable) {
         try {
             ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
