@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
@@ -26,6 +27,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -61,6 +65,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -262,6 +267,55 @@ public class TableWriteTest {
         StreamTableScan scan = table.newStreamScan();
         TableRead read = table.newRead();
         assertThat(streamingRead(scan, read, latestSnapshotId)).hasSize(2);
+    }
+
+    @Test
+    public void testDropStatsOnlyForDeleteManifestEntries() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS, true);
+
+        FileStoreTable table = createFileStoreTable(conf);
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 1, 10L));
+        write.write(GenericRow.of(1, 2, 20L));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        write = table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        commit = table.newCommit(commitUser);
+        write.compact(partition(1), 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> manifests =
+                table.manifestListReader().read(snapshot.deltaManifestList());
+        assertThat(manifests).hasSize(1);
+        List<ManifestEntry> entries = table.manifestFileReader().read(manifests.get(0).fileName());
+        assertThat(entries).hasSize(2);
+
+        ManifestEntry addEntry = null;
+        ManifestEntry deleteEntry = null;
+        for (ManifestEntry entry : entries) {
+            if (entry.kind() == FileKind.ADD) {
+                addEntry = entry;
+            } else if (entry.kind() == FileKind.DELETE) {
+                deleteEntry = entry;
+            }
+        }
+
+        assertThat(addEntry).isNotNull();
+        assertThat(deleteEntry).isNotNull();
+        assertThat(addEntry.file().fileName()).isEqualTo(deleteEntry.file().fileName());
+        assertThat(addEntry.file().level()).isGreaterThan(deleteEntry.file().level());
+        assertThat(addEntry.file().valueStats()).isNotEqualTo(EMPTY_STATS);
+        assertThat(deleteEntry.file().valueStats()).isEqualTo(EMPTY_STATS);
     }
 
     @Test
