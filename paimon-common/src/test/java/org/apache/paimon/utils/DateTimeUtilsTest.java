@@ -158,4 +158,28 @@ public class DateTimeUtilsTest {
         assertThat(DateTimeUtils.truncate(full, 9).toLocalDateTime().getNano())
                 .isEqualTo(123_456_789);
     }
+
+    @Test
+    public void testTruncatePreEpoch() {
+        // A pre-epoch value has a negative millisecond, so dropping the sub-precision digits has
+        // to floor: rounding toward zero would move the value forward in time instead.
+        Timestamp preEpoch =
+                Timestamp.fromLocalDateTime(
+                        LocalDateTime.of(1969, 12, 31, 23, 59, 59, 999_999_000));
+        assertThat(preEpoch.getMillisecond()).isEqualTo(-1);
+
+        assertThat(DateTimeUtils.truncate(preEpoch, 0).toLocalDateTime())
+                .isEqualTo(LocalDateTime.of(1969, 12, 31, 23, 59, 59));
+        assertThat(DateTimeUtils.truncate(preEpoch, 2).toLocalDateTime())
+                .isEqualTo(LocalDateTime.of(1969, 12, 31, 23, 59, 59, 990_000_000));
+    }
+
+    @Test
+    public void testUnixTimestampPreEpoch() {
+        // -1500 epoch millis is 1969-12-31 23:59:58.500, whose epoch second is -2.
+        assertThat(DateTimeUtils.unixTimestamp(-1500)).isEqualTo(-2);
+        assertThat(DateTimeUtils.unixTimestamp(-1000)).isEqualTo(-1);
+        assertThat(DateTimeUtils.unixTimestamp(-1)).isEqualTo(-1);
+        assertThat(DateTimeUtils.unixTimestamp(1500)).isEqualTo(1);
+    }
 }
