@@ -1447,6 +1447,10 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual(5, len(dataset))
         self.assertEqual(2, dataset.num_episodes)
         self.assertIsNotNone(dataset.meta.stats)
+        self.assertTrue(all(
+            isinstance(feature["shape"], tuple)
+            for feature in dataset.features.values()
+        ))
         self.assertEqual(["pick", "place"], list(dataset.meta.tasks.index))
         episodes = dataset.meta.episodes
         self.assertEqual(2, len(episodes))

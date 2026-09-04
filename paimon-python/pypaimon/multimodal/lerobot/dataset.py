@@ -453,6 +453,8 @@ def _load_published_version(table, version_id):
         subtasks = _component_dataframe(subtasks_table, "subtask_index")
 
     info = _json_object(manifest["info_json"], "info_json")
+    for feature in info.get("features", {}).values():
+        feature["shape"] = tuple(feature["shape"])
     stats = None if manifest["stats_json"] is None else _numpy_stats(
         _json_object(manifest["stats_json"], "stats_json"))
     metadata = _PaimonLeRobotMetadata(
