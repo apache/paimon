@@ -872,6 +872,64 @@ Notes:
   few large reads); scattered point reads coalesce less.
 - Blob reads are available only on `scan()`, not on the `search()` queries.
 
+### Contiguous windows for PyTorch
+
+Install the `torch` extra, then use `to_contiguous_window_dataset` to expose
+map-style windows without loading the selected rows or BLOB payloads into Python
+memory up front. The Dataset builds a compact index from the group column, order
+column, and Paimon row IDs. Each `__getitem__` call fetches only that window from
+the snapshot recorded in `dataset.snapshot_id`.
+
+```shell
+pip install pypaimon[torch]
+```
+
+```python
+import torch
+
+
+def float32_window(values):
+    return torch.tensor(values, dtype=torch.float32)
+
+
+windows = (
+    frames.scan()
+    .where("split = 'train'")
+    .to_contiguous_window_dataset(
+        window_size=16,
+        columns=["state", "action"],
+        group_key="episode_id",
+        order_key="step_idx",
+        tail="pad",
+        column_transforms={
+            "state": float32_window,
+            "action": float32_window,
+        },
+    )
+)
+
+sample = windows[0]
+assert sample["action"].shape == (16, action_size)
+assert sample["is_pad"].shape == (16,)
+```
+
+The group and order keys in a sample identify the window anchor. Every projected
+column contains the whole window. With `tail="drop"`, only full windows are
+exposed. With `tail="pad"`, every real row is an anchor; missing suffix values
+repeat the last real value by default and `is_pad` is `True` exactly at those
+positions. With `tail="error"`, construction fails if any scheduled anchor is
+incomplete. Use `pad_values` to override the repeated value for individual
+columns. Anchors advance by `stride`, which defaults to one row.
+
+`column_transforms` receive one padded Python list per projected column. This is
+where applications define tensor dtype and shape or decode BLOB bytes. The
+optional `adapter` receives the resulting sample mapping and can rename or
+combine fields for a model-specific batch contract. The core Dataset does not
+know model field names, image formats, or normalization rules. Top-level
+functions and callable classes are recommended for transforms and adapters so
+the Dataset remains picklable by multi-worker `torch.utils.data.DataLoader`
+instances.
+
 ### Distributed BLOB processing with Ray
 
 For larger jobs, read descriptors with `to_ray()`, then fetch and process BLOB

@@ -164,6 +164,70 @@ class ScanQuery:
             max_buffer_input_splits=max_buffer_input_splits,
         )
 
+    def to_contiguous_window_dataset(
+            self,
+            *,
+            window_size,
+            columns=None,
+            anchor_columns=None,
+            group_key="episode_id",
+            order_key="step_idx",
+            stride=1,
+            tail="drop",
+            column_transforms=None,
+            pad_values=None,
+            adapter=None,
+            blob_parallelism=64):
+        """Build a snapshot-pinned, map-style Dataset of contiguous rows.
+
+        The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
+        IDs, then reads projected values on demand. Columns listed in
+        ``anchor_columns`` are provided to ``column_transforms`` as one-element
+        lists read from the first row of each window; ``adapter`` receives the
+        transformed values. ``order_key`` must contain non-null integers that
+        increase by exactly one within each group. The Dataset sorts rows within
+        each group and never creates a window across groups.
+
+        Args:
+            window_size: Number of rows in a complete window.
+            columns: Value columns to return, excluding the group and order
+                keys. The scan projection is used when omitted.
+            anchor_columns: Subset of ``columns`` read only from the window's
+                first row.
+            group_key: Column identifying an independent row sequence.
+            order_key: Integer position column within each group.
+            stride: Distance between scheduled window starts.
+            tail: Handling for incomplete final windows: ``drop``, ``pad``, or
+                ``error``.
+            column_transforms: Per-column callables applied to value lists.
+            pad_values: Optional replacement values used by ``tail='pad'``.
+            adapter: Callable that converts the complete sample mapping.
+            blob_parallelism: Maximum concurrent BLOB body reads per fetch.
+
+        Returns:
+            A snapshot-pinned ``ContiguousWindowDataset``. See that class for
+            padding, mask, transform, and adapter result semantics.
+        """
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_contiguous_window_dataset is only supported on scan(), "
+                "not search queries.")
+        from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+        return ContiguousWindowDataset(
+            self,
+            window_size=window_size,
+            columns=columns,
+            anchor_columns=anchor_columns,
+            group_key=group_key,
+            order_key=order_key,
+            stride=stride,
+            tail=tail,
+            column_transforms=column_transforms,
+            pad_values=pad_values,
+            adapter=adapter,
+            blob_parallelism=blob_parallelism,
+        )
+
     def to_ray(
             self,
             *,
