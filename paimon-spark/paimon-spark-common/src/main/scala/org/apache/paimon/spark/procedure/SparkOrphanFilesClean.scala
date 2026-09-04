@@ -34,12 +34,13 @@ import org.apache.spark.sql.catalyst.SQLConfHelper
 
 import java.util
 import java.util.Collections
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import java.util.function.Consumer
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.util.control.NonFatal
 
 case class SparkOrphanFilesClean(
     specifiedTable: FileStoreTable,
@@ -51,7 +52,19 @@ case class SparkOrphanFilesClean(
   with SQLConfHelper
   with Logging {
 
-  def doOrphanClean(): (Dataset[(Long, Long)], Dataset[BranchAndManifestFile]) = {
+  def doOrphanClean(): (Dataset[(Long, Long)], Seq[Dataset[_]]) = {
+    val cachedDatasets = new ArrayBuffer[Dataset[_]]()
+    try {
+      doOrphanClean(cachedDatasets)
+    } catch {
+      case NonFatal(t) =>
+        cachedDatasets.foreach(_.unpersist())
+        throw t
+    }
+  }
+
+  private def doOrphanClean(
+      cachedDatasets: ArrayBuffer[Dataset[_]]): (Dataset[(Long, Long)], Seq[Dataset[_]]) = {
     import spark.implicits._
 
     val branches = validBranches()
@@ -69,29 +82,57 @@ case class SparkOrphanFilesClean(
     val usedManifestFiles = spark.sparkContext
       .parallelize(branches.asScala.toSeq, maxBranchParallelism)
       .mapPartitions(_.flatMap {
-        branch => safelyGetAllSnapshots(branch).asScala.map(snapshot => (branch, snapshot.toJson))
+        branch =>
+          val liveSnapshots = safelyGetLiveSnapshots(branch)
+          snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots).asScala.map(
+            snapshot => (branch, snapshot.toJson, liveSnapshots.contains(snapshot)))
       })
       .repartition(parallelism)
       .flatMap {
-        case (branch, snapshotJson) =>
+        case (branch, snapshotJson, isLive) =>
           val usedFileBuffer = new ArrayBuffer[BranchAndManifestFile]()
           val usedFileConsumer =
             new Consumer[org.apache.paimon.utils.Pair[String, java.lang.Boolean]] {
               override def accept(pair: utils.Pair[String, java.lang.Boolean]): Unit = {
-                usedFileBuffer.append(BranchAndManifestFile(branch, pair.getLeft, pair.getRight))
+                usedFileBuffer.append(
+                  BranchAndManifestFile(
+                    branch,
+                    pair.getLeft,
+                    pair.getRight,
+                    isMissing = false,
+                    isLiveSnapshot = isLive))
               }
             }
+          val missingManifest = if (isLive) new AtomicBoolean(false) else null
           val snapshot = Snapshot.fromJson(snapshotJson)
-          collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileConsumer)
+          collectWithoutDataFileWithManifestFlag(
+            branch,
+            snapshot,
+            usedFileConsumer,
+            missingManifest)
+          if (missingManifest != null && missingManifest.get()) {
+            usedFileBuffer.append(
+              BranchAndManifestFile(branch, "", isManifestFile = false, isMissing = true))
+          }
           usedFileBuffer
       }
       .toDS()
       .cache()
+    cachedDatasets += usedManifestFiles
 
-    // find all data files
-    val dataFiles = usedManifestFiles
-      .filter(_.isManifestFile)
-      .distinct()
+    if (!usedManifestFiles.filter(_.isMissing).isEmpty) {
+      logWarning("Detected missing manifest during used-files collection, aborting clean.")
+      return (
+        spark.createDataset(
+          Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
+        cachedDatasets.toSeq)
+    }
+
+    val dataFilesWithFlag = usedManifestFiles
+      .filter(f => f.isManifestFile && !f.isMissing)
+      .groupByKey(f => (f.branch, f.manifestName))
+      .reduceGroups((a, b) => a.copy(isLiveSnapshot = a.isLiveSnapshot || b.isLiveSnapshot))
+      .map(_._2)
       .mapPartitions {
         it =>
           val branchManifests = new util.HashMap[String, ManifestFile]
@@ -102,18 +143,42 @@ case class SparkOrphanFilesClean(
                 (key: String) =>
                   specifiedTable.switchToBranch(key).store.manifestFileFactory.create)
 
-              retryReadingFiles(
+              val manifestMissing =
+                if (branchAndManifestFile.isLiveSnapshot) new AtomicBoolean(false) else null
+              val entries = retryReadingFiles(
                 () => manifestFile.readWithIOException(branchAndManifestFile.manifestName),
-                Collections.emptyList[ManifestEntry]
-              ).asScala.flatMap {
-                manifestEntry =>
-                  manifestEntry.fileName() +: manifestEntry.file().extraFiles().asScala
+                Collections.emptyList[ManifestEntry],
+                manifestMissing
+              ).asScala
+              if (manifestMissing != null && manifestMissing.get()) {
+                Iterator.single(("", true))
+              } else {
+                entries
+                  .flatMap {
+                    manifestEntry =>
+                      manifestEntry.fileName() +: manifestEntry.file().extraFiles().asScala
+                  }
+                  .map(name => (name, false))
+                  .iterator
               }
           }
       }
+      .cache()
+    cachedDatasets += dataFilesWithFlag
+
+    if (!dataFilesWithFlag.filter(_._2).isEmpty) {
+      logWarning("Detected missing manifest while collecting data files, aborting clean.")
+      return (
+        spark.createDataset(
+          Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get()))),
+        cachedDatasets.toSeq)
+    }
+
+    val dataFiles = dataFilesWithFlag.filter(!_._2).map(_._1)
 
     // union manifest and data files
     val usedFiles = usedManifestFiles
+      .filter(!_.isMissing)
       .map(_.manifestName)
       .union(dataFiles)
       .toDF("used_name")
@@ -181,7 +246,7 @@ case class SparkOrphanFilesClean(
         deleted
       }
 
-    (finalDeletedDataset, usedManifestFiles)
+    (finalDeletedDataset, cachedDatasets.toSeq)
   }
 }
 
@@ -193,7 +258,12 @@ case class SparkOrphanFilesClean(
  * @param isManifestFile
  *   If it is the manifest file
  */
-case class BranchAndManifestFile(branch: String, manifestName: String, isManifestFile: Boolean)
+case class BranchAndManifestFile(
+    branch: String,
+    manifestName: String,
+    isManifestFile: Boolean,
+    isMissing: Boolean = false,
+    isLiveSnapshot: Boolean = false)
 
 object SparkOrphanFilesClean extends SQLConfHelper {
   def executeDatabaseOrphanFiles(
@@ -227,17 +297,22 @@ object SparkOrphanFilesClean extends SQLConfHelper {
     if (tables.isEmpty) {
       return new CleanOrphanFilesResult(0, 0)
     }
-    val (deleted, waitToRelease) = tables.map {
-      table =>
-        new SparkOrphanFilesClean(
-          table,
-          olderThanMillis,
-          parallelism,
-          dryRun,
-          spark
-        ).doOrphanClean()
-    }.unzip
+    val deleted = new ArrayBuffer[Dataset[(Long, Long)]]()
+    val waitToRelease = new ArrayBuffer[Dataset[_]]()
     try {
+      tables.foreach {
+        table =>
+          val (deletedDataset, cachedDatasets) = new SparkOrphanFilesClean(
+            table,
+            olderThanMillis,
+            parallelism,
+            dryRun,
+            spark
+          ).doOrphanClean()
+          deleted += deletedDataset
+          waitToRelease ++= cachedDatasets
+      }
+
       val result = deleted
         .reduce((l, r) => l.union(r))
         .toDF("deletedFilesCount", "deletedFilesLenInBytes")
