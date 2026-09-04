@@ -32,6 +32,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     private final List<String> partitionKeys;
 
     private final Map<String, String> partitions;
+    private boolean contradiction = false;
 
     public OnlyPartitionKeyEqualVisitor(List<String> partitionKeys) {
         this.partitionKeys = partitionKeys;
@@ -111,7 +112,13 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     public Boolean visitEqual(FieldRef fieldRef, Object literal) {
         boolean contains = partitionKeys.contains(fieldRef.name());
         if (contains) {
-            partitions.put(fieldRef.name(), literal.toString());
+            String value = literal.toString();
+            String existing = partitions.put(fieldRef.name(), value);
+            if (existing != null && !existing.equals(value)) {
+                // Contradictory condition on the same key (pt = 'a' AND pt = 'b'):
+                // no partition can match, so the delete must not drop anything.
+                contradiction = true;
+            }
             return true;
         }
         return false;
@@ -134,6 +141,12 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     @Override
     public Boolean visitAnd(List<Boolean> children) {
+        if (contradiction) {
+            // Two equals on the same partition key carried different literals, so the
+            // conjunction matches nothing; dropping the partition would delete rows
+            // the predicate never selected.
+            return false;
+        }
         return children.stream().reduce((first, second) -> first && second).get();
     }
 
