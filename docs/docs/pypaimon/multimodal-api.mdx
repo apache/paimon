@@ -670,17 +670,14 @@ from pypaimon.multimodal import PaimonLeRobotDataset
 dataset = PaimonLeRobotDataset(
     conn.get_table("robot_data"),
     version_id=version_id,
-    blob_parallelism=8,
 )
 loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 ```
 
-If `version_id` is omitted, the latest published version is used. Its info,
-episodes, tasks, subtasks, and stats are available through `dataset.meta`.
-Payload columns remain lazy. Pass
+If `version_id` is omitted, the latest published version is used. Metadata is
+available through `dataset.meta`. Payload columns remain lazy. Pass
 `index_mapping=dataset.index_mapping` to readers of the same table snapshot to
-avoid rescanning the control columns. The first version supports image-backed datasets;
-video-backed reads remain a follow-up.
+avoid rescanning the control columns.
 
 ## Overwrite
 
