@@ -289,7 +289,7 @@ class PaimonLeRobotDataset:
             self._delta_dataset, delta_indices, self._index_positions) \
             if delta_indices else {}
 
-        _materialize_images(
+        _resolve_image_blobs(
             self._file_io,
             [base_rows, delta_rows],
             self._image_keys,
@@ -935,7 +935,7 @@ def _duplicate_indices(plans):
     return duplicates
 
 
-def _materialize_images(
+def _resolve_image_blobs(
         file_io, row_groups, image_keys, parallelism):
     from pypaimon.multimodal.blob_read import fetch_blob_bodies
 
