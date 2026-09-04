@@ -393,6 +393,12 @@ under the License.
             <td>When incremental size is bigger than this threshold, force a full compaction.</td>
         </tr>
         <tr>
+            <td><h5>continuous-compaction.initial-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">earliest</td>
+            <td><p>Enum</p></td>
+            <td>Initial snapshot mode for dedicated streaming compaction. When set to 'earliest' (the default), compaction starts from the earliest available snapshot if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. When set to 'latest', the latest snapshot is read in ALL mode as the initial baseline and subsequent scans start from the next snapshot. The 'latest' mode skips historical snapshot changes and should only be used when historical changelog replay is not required.<br /><br />Possible values:<ul><li>"earliest": Read snapshots from the earliest available snapshot.</li><li>"latest": Read the latest snapshot as the initial full baseline.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
