@@ -214,7 +214,11 @@ public class TableSchema implements Serializable {
         if (StringUtils.isNullOrWhitespaceOnly(key)) {
             return Collections.emptyList();
         }
-        List<String> bucketKeys = Arrays.asList(key.split(","));
+        List<String> bucketKeys =
+                Arrays.stream(key.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
         if (notContainsAll(fieldNames(), bucketKeys)) {
             throw new RuntimeException(
                     String.format(
