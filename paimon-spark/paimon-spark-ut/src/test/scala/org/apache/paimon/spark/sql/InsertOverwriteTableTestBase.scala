@@ -884,4 +884,64 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
         .saveAsTable("badTable")
     }.getMessage.contains("Not a supported type: void"))
   }
+
+  test("Paimon Insert: column list resolves nested structs positionally") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  s STRUCT<x: INT, y: INT>,
+            |  arr ARRAY<STRUCT<x: INT, y: INT>>,
+            |  map_value MAP<STRING, STRUCT<x: INT, y: INT>>,
+            |  map_key MAP<STRUCT<x: INT, y: INT>, STRING>,
+            |  deep ARRAY<STRUCT<nested: ARRAY<STRUCT<x: INT, y: INT>>>>
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t (s, arr, map_value, map_key, deep)
+            |SELECT
+            |  named_struct('y', 20, 'x', 10),
+            |  array(named_struct('y', 20, 'x', 10)),
+            |  map('k', named_struct('y', 20, 'x', 10)),
+            |  map(named_struct('y', 20, 'x', 10), 'v'),
+            |  array(named_struct(
+            |    'nested', array(named_struct('y', 20, 'x', 10))))
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        Row(
+          Row(20, 10),
+          Seq(Row(20, 10)),
+          Map("k" -> Row(20, 10)),
+          Map(Row(20, 10) -> "v"),
+          Seq(Row(Seq(Row(20, 10))))))
+    }
+  }
+
+  test("Paimon Insert: column list resolves unequal nested structs positionally") {
+    withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+      withTable("t") {
+        sql("CREATE TABLE t (arr ARRAY<STRUCT<x: INT, y: INT, z: INT>>)")
+        sql("""
+              |INSERT INTO t (arr)
+              |SELECT array(named_struct('y', 20, 'x', 10))
+              |""".stripMargin)
+        checkAnswer(sql("SELECT * FROM t"), Row(Seq(Row(20, 10, null))))
+      }
+    }
+  }
+
+  test("Paimon Insert: by name resolves nested structs by name") {
+    if (gteqSpark3_5) {
+      withTable("t") {
+        sql("CREATE TABLE t (arr ARRAY<STRUCT<x: INT, y: INT>>)")
+        sql("""
+              |INSERT INTO t BY NAME
+              |SELECT array(named_struct('y', 20, 'x', 10)) AS arr
+              |""".stripMargin)
+        checkAnswer(sql("SELECT * FROM t"), Row(Seq(Row(10, 20))))
+      }
+    }
+  }
 }
