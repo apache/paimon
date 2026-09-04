@@ -42,6 +42,13 @@ class _Decoder:
         self._calls.append("close")
 
 
+class _FailingCloseDecoder(_Decoder):
+
+    def close(self):
+        super().close()
+        raise RuntimeError("decoder close failed")
+
+
 class VideoFrameCollatorTest(unittest.TestCase):
 
     def setUp(self):
@@ -135,6 +142,42 @@ class VideoFrameCollatorTest(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(ValueError, "VideoFrameDescriptor"):
                     collator([{"episode_id": 0, "video": value}])
+
+    def test_close_releases_all_resources_after_decoder_failure(self):
+        descriptors = [
+            self._descriptor("episode-%d.mp4" % index, bytes([index]), index)
+            for index in range(2)
+        ]
+        calls = []
+        created = []
+
+        def factory(stream):
+            decoder = (
+                _FailingCloseDecoder(stream, calls)
+                if not created
+                else _Decoder(stream, calls)
+            )
+            created.append(decoder)
+            return decoder
+
+        collator = VideoFrameCollator(
+            self.table,
+            video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda decoder, frame, row: decoder.decode(frame),
+            collate_fn=lambda rows: rows,
+        )
+        collator([
+            {"episode_id": index, "video": descriptor}
+            for index, descriptor in enumerate(descriptors)
+        ])
+
+        with self.assertRaisesRegex(RuntimeError, "decoder close failed"):
+            collator.close()
+
+        self.assertEqual(2, calls.count("close"))
+        self.assertTrue(all(decoder.closed for decoder in created))
+        self.assertEqual(0, len(collator._decoders))
 
     def test_reuses_resolved_table_file_io(self):
         class ResolvedFileIO:

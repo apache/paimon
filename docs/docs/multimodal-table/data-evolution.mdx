@@ -117,6 +117,24 @@ commit.close()
 
 </Tabs>
 
+### Compact Write-Column Metadata
+
+Tables with dedicated BLOB or vector files normally repeat the complete list of
+non-dedicated columns in every normal file's metadata. For wide tables, you can
+omit this redundant list by setting
+`data-evolution.write-cols-optimization.enabled` to `true`. A missing
+`writeCols` value then means that the file contains every non-dedicated column;
+dedicated files continue to record their columns explicitly.
+
+The option affects only new writes and is disabled by default. Readers support
+both representations without a read option. Before enabling it, upgrade every
+reader and maintenance job that accesses the table to a version that supports
+the compact representation, because older readers interpret a missing
+`writeCols` value as all table columns. Persist the option with `ALTER TABLE` (or
+set it when creating the table) so that file schema versions record the compact
+representation. Before rolling readers back to an older version, rewrite files
+produced with this option or keep those readers upgraded.
+
 ## Partial Updates
 
 You can update selected columns with Spark SQL `UPDATE` or `MERGE INTO`, the

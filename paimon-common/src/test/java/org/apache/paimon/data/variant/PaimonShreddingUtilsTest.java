@@ -65,6 +65,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class PaimonShreddingUtilsTest {
 
     @Test
+    void testBuildVariantSchemaAcceptsEmptyInnerStruct() {
+        // An empty typed_value struct shreds no field, and stays a legal schema.
+        RowType physicalType = variantShreddingSchema(RowType.of(new DataType[0], new String[0]));
+        assertThat(buildVariantSchema(physicalType).objectSchema).isEmpty();
+    }
+
+    @Test
+    void testBuildVariantSchemaRejectsNonStructInnerField() {
+        RowType physicalType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.BYTES(),
+                            DataTypes.BYTES(),
+                            RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"x"})
+                        },
+                        new String[] {"metadata", "value", "typed_value"});
+        // Everything except the inner field's type is valid here, and the message is what
+        // separates the two outcomes: before, the cast below raised a bare ClassCastException.
+        assertThatThrownBy(() -> buildVariantSchema(physicalType))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Invalid variant shredding schema");
+    }
+
+    @Test
     void testAssembleColumnarShreddedVariant() {
         RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
         RowType physicalType = variantShreddingSchema(shreddedType);

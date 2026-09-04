@@ -145,6 +145,15 @@ abstract class SplitEnumerator {
 
     List<Split> createSplits(FileIO fileIO, Path path, @Nullable BinaryRow partition)
             throws IOException {
+        return createSplits(fileIO, path, partition, false);
+    }
+
+    List<Split> createSplits(
+            FileIO fileIO,
+            Path path,
+            @Nullable BinaryRow partition,
+            boolean useCatalogContextFileIO)
+            throws IOException {
         List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
         // The listed directory is a single partition, or the table itself when unpartitioned.
         List<FileStatus> files = FormatTableScan.listDataFiles(fileIO, path);
@@ -159,7 +168,7 @@ abstract class SplitEnumerator {
                         segments,
                         file -> Math.max(file.readSize(), openFileCost),
                         targetSplitSize)) {
-            splits.add(new FormatDataSplit(bin, partition));
+            splits.add(new FormatDataSplit(bin, partition, useCatalogContextFileIO));
         }
         return splits;
     }

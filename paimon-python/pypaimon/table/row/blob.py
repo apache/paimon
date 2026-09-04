@@ -28,6 +28,8 @@ from pypaimon.common.uri_reader import UriReader, FileUriReader
 class BlobDescriptor:
     CURRENT_VERSION = 2
     MAGIC = 0x424C4F4244455343  # "BLOBDESC"
+    # v1 wire: version (1) + uri_length (4) + offset (8) + length (8)
+    _V1_MIN_WIRE_SIZE = 1 + 4 + 16
 
     def __init__(self, uri: str, offset: int, length: int):
         self._version = self.CURRENT_VERSION
@@ -54,24 +56,23 @@ class BlobDescriptor:
     def serialize(self) -> bytes:
         uri_bytes = self._uri.encode('utf-8')
         uri_length = len(uri_bytes)
-        data = struct.pack('<B', self._version)  # version (1 byte)
-        if self._version > 1:
-            data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
-        data += struct.pack('<I', uri_length)  # uri length (4 bytes)
-        data += uri_bytes  # uri bytes
-        data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
-        data += struct.pack('<q', self._length)  # length (8 bytes, signed)
+        # Always write CURRENT_VERSION with magic, matching Java BlobDescriptor.serialize().
+        data = struct.pack('<B', self.CURRENT_VERSION)
+        data += struct.pack('<Q', self.MAGIC)
+        data += struct.pack('<i', uri_length)
+        data += uri_bytes
+        data += struct.pack('<q', self._offset)
+        data += struct.pack('<q', self._length)
         return data
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
-        video_type = globals().get('VideoFrameDescriptor')
-        if (
-            cls is BlobDescriptor
-            and video_type is not None
-            and video_type.is_video_frame_descriptor(data)
-        ):
-            return video_type.deserialize(data)
+        if cls is BlobDescriptor:
+            return BlobDescriptorSerde.deserialize(data)
+        return cls._deserialize(data)
+
+    @classmethod
+    def _deserialize(cls, data: bytes) -> 'BlobDescriptor':
         if len(data) < 5:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
@@ -101,8 +102,12 @@ class BlobDescriptor:
         # Read URI length
         if offset + 4 > len(data):
             raise ValueError("Invalid BlobDescriptor data: too short")
-        uri_length = struct.unpack('<I', data[offset:offset + 4])[0]
+        uri_length = struct.unpack('<i', data[offset:offset + 4])[0]
         offset += 4
+        if uri_length < 0:
+            raise ValueError(
+                f"Invalid BlobDescriptor data: negative URI length: {uri_length}"
+            )
 
         # Read URI bytes
         if offset + uri_length > len(data):
@@ -124,6 +129,51 @@ class BlobDescriptor:
         descriptor = cls(uri, blob_offset, blob_length)
         descriptor._version = version
         return descriptor
+
+    @classmethod
+    def parse_if_serialized(cls, data: bytes) -> Optional['BlobDescriptor']:
+        """Parse when data is exactly a serialized descriptor (no trailing bytes).
+
+        Dispatches through :class:`BlobDescriptorSerde` so an exact
+        :class:`VideoFrameDescriptor` is accepted before the ordinary v1/v2
+        BlobDescriptor length check. Unlike :meth:`is_blob_descriptor` (v2
+        magic header only), this accepts v1 descriptors without a magic
+        prefix. Unlike ordinary :meth:`deserialize`, the encoded length must
+        match the buffer exactly. Still heuristic: arbitrary inline blob
+        bytes could theoretically match.
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            return None
+        return BlobDescriptorSerde.parse_if_serialized(bytes(data))
+
+    @classmethod
+    def _parse_ordinary_if_serialized(cls, raw: bytes) -> Optional['BlobDescriptor']:
+        if len(raw) < cls._V1_MIN_WIRE_SIZE:
+            return None
+        try:
+            offset = 0
+            version = raw[offset]
+            offset += 1
+            if version < 1 or version > cls.CURRENT_VERSION:
+                return None
+            if version > 1:
+                if offset + 8 > len(raw):
+                    return None
+                magic = struct.unpack('<Q', raw[offset:offset + 8])[0]
+                if magic != cls.MAGIC:
+                    return None
+                offset += 8
+            if offset + 4 > len(raw):
+                return None
+            uri_length = struct.unpack('<i', raw[offset:offset + 4])[0]
+            if uri_length < 0:
+                return None
+            total = offset + 4 + uri_length + 16
+            if total != len(raw):
+                return None
+            return cls._deserialize(raw)
+        except (ValueError, struct.error, UnicodeDecodeError):
+            return None
 
     @classmethod
     def is_blob_descriptor(cls, data: bytes) -> bool:
@@ -279,6 +329,36 @@ class VideoFrameDescriptor(BlobDescriptor):
             "VideoFrameDescriptor(payload=%s, frame_index=%s)"
             % (self.payload_descriptor, self.frame_index)
         )
+
+
+class BlobDescriptorSerde:
+    """Single dispatch point for persisted BlobDescriptor wire types."""
+
+    @staticmethod
+    def is_descriptor(data: bytes) -> bool:
+        return (
+            VideoFrameDescriptor.is_video_frame_descriptor(data)
+            or BlobDescriptor.is_blob_descriptor(data)
+        )
+
+    @staticmethod
+    def deserialize(data: bytes) -> BlobDescriptor:
+        if VideoFrameDescriptor.is_video_frame_descriptor(data):
+            return VideoFrameDescriptor.deserialize(data)
+        return BlobDescriptor._deserialize(data)
+
+    @staticmethod
+    def parse_if_serialized(data: bytes) -> Optional[BlobDescriptor]:
+        """Exact-length parse for any persisted BlobDescriptor wire type."""
+        if not isinstance(data, (bytes, bytearray)):
+            return None
+        raw = bytes(data)
+        if VideoFrameDescriptor.is_video_frame_descriptor(raw):
+            try:
+                return VideoFrameDescriptor.deserialize(raw)
+            except (ValueError, struct.error, UnicodeDecodeError):
+                return None
+        return BlobDescriptor._parse_ordinary_if_serialized(raw)
 
 
 class BlobViewStruct:
@@ -505,6 +585,49 @@ class Blob(ABC):
         return BlobRef(uri_reader, descriptor)
 
     @staticmethod
+    def _blob_ref_from_descriptor(
+            descriptor: 'BlobDescriptor', file_io=None, uri_reader_factory=None,
+    ) -> 'BlobRef':
+        if uri_reader_factory is None:
+            if file_io is None:
+                raise ValueError("file_io is required to resolve BlobDescriptor bytes")
+            uri_reader = UriReader.from_file(file_io)
+        else:
+            uri_reader = uri_reader_factory.create(descriptor.uri)
+        return BlobRef(uri_reader, descriptor)
+
+    @staticmethod
+    def from_descriptor_bytes(
+            data: Optional[bytes], file_io=None, uri_reader_factory=None,
+    ) -> Optional['Blob']:
+        """Build a Blob from bytes known to contain a descriptor.
+
+        Version 1 descriptors have no magic header, so they cannot be
+        distinguished safely from arbitrary payload bytes. Callers which know
+        from schema or storage context that a value is a descriptor must use
+        this method instead of the heuristic :meth:`from_bytes` entry point.
+
+        Parsing uses :meth:`BlobDescriptor.deserialize`, matching Java: a
+        valid v1/v2 prefix is accepted and trailing bytes after that prefix
+        are ignored. This is not a detector; garbage that happens to look
+        like a v1 prefix can produce a BlobRef with a nonsense URI.
+        Bytes that are not a parseable prefix raise :class:`ValueError`.
+        """
+        if data is None:
+            return None
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError(
+                f"Blob.from_descriptor_bytes expects bytes, got {type(data)}")
+
+        try:
+            descriptor = BlobDescriptor.deserialize(bytes(data))
+        except (ValueError, struct.error, UnicodeDecodeError) as exc:
+            raise ValueError(
+                "Expected BlobDescriptor bytes, got raw bytes") from exc
+        return Blob._blob_ref_from_descriptor(
+            descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
+
+    @staticmethod
     def from_view(view_struct: BlobViewStruct) -> 'BlobView':
         return BlobView(view_struct)
 
@@ -519,25 +642,16 @@ class Blob(ABC):
         data = bytes(data)
         if BlobViewStruct.is_blob_view_struct(data):
             return Blob.from_view(BlobViewStruct.deserialize(data))
-        is_video_frame = VideoFrameDescriptor.is_video_frame_descriptor(data)
-        is_descriptor = is_video_frame or BlobDescriptor.is_blob_descriptor(data)
-        if not allow_blob_data and not is_descriptor:
-            raise ValueError(
-                "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
-            )
-        if is_descriptor:
-            descriptor = (
-                VideoFrameDescriptor.deserialize(data)
-                if is_video_frame
-                else BlobDescriptor.deserialize(data)
-            )
-            if uri_reader_factory is None:
-                if file_io is None:
-                    raise ValueError("file_io is required to resolve BlobDescriptor bytes")
-                uri_reader = UriReader.from_file(file_io)
-            else:
-                uri_reader = uri_reader_factory.create(descriptor.uri)
-            return BlobRef(uri_reader, descriptor)
+        if BlobDescriptorSerde.is_descriptor(data) or not allow_blob_data:
+            try:
+                descriptor = BlobDescriptor.deserialize(data)
+            except (ValueError, struct.error, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    "Expected BlobDescriptor bytes, got raw bytes"
+                    + ("" if allow_blob_data else " (allow_blob_data=False)")
+                ) from exc
+            return Blob._blob_ref_from_descriptor(
+                descriptor, file_io=file_io, uri_reader_factory=uri_reader_factory)
         return BlobData(data)
 
 
@@ -626,6 +740,11 @@ class BlobRef(Blob):
     def to_descriptor(self) -> BlobDescriptor:
         return self._descriptor
 
+    @property
+    def uri_reader(self) -> UriReader:
+        """UriReader used to fetch this blob's payload."""
+        return self._uri_reader
+
     def new_input_stream(self) -> BinaryIO:
         uri = self._descriptor.uri
         offset = self._descriptor.offset
@@ -644,6 +763,26 @@ class BlobRef(Blob):
 
     def __hash__(self) -> int:
         return hash(self._descriptor)
+
+
+def video_payload_descriptor(value) -> Optional[BlobDescriptor]:
+    """Return the physical payload identity represented by a video frame value."""
+    if hasattr(value, 'as_py'):
+        value = value.as_py()
+    if value is None or value is Blob.PLACE_HOLDER:
+        return None
+    if type(value) is BlobRef:
+        descriptor = value.to_descriptor()
+        return (
+            descriptor.payload_descriptor
+            if isinstance(descriptor, VideoFrameDescriptor)
+            else None
+        )
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if VideoFrameDescriptor.is_video_frame_descriptor(raw):
+            return VideoFrameDescriptor.deserialize(raw).payload_descriptor
+    return None
 
 
 BlobConsumer = Callable[[str, Optional[BlobDescriptor]], bool]

@@ -54,11 +54,62 @@ for batch_idx, batch_data in enumerate(dataloader):
 #   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
 ```
 
-When the `streaming` parameter is true, it will iteratively read;
-when it is false, it will read the full amount of data into memory.
+When the `streaming` parameter is true, it will iteratively read. When it is
+false, eligible data-evolution reads fetch each DataLoader batch lazily by row
+ID; other reads retain an Arrow table in memory for map-style access.
 
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
+
+### Distributed Sharding
+
+Streaming reads shard splits across DDP ranks and DataLoader workers:
+
+```python
+def main():
+    dataset = table_read.to_torch(
+        splits,
+        streaming=True,
+        auto_detect_rank=True,
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,
+        num_workers=2,
+        multiprocessing_context="spawn",
+    )
+
+    with model.join():
+        for batch in dataloader:
+            train(batch)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Automatic rank sharding is opt-in. Enable it only when every rank receives the
+same ordered, complete splits from one snapshot; leave it disabled for splits
+already sharded by the application.
+Automatic detection uses the default process group. For subgroup DDP, resolve
+the context from the group before creating the DataLoader:
+
+```python
+import torch.distributed as dist
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    sharding_rank=dist.get_rank(ddp_group),
+    sharding_world_size=dist.get_world_size(ddp_group),
+)
+```
+
+With multi-worker DDP, use `spawn` (or `forkserver`) and create and iterate the
+DataLoader through an `if __name__ == "__main__":` guarded entry point.
+A rank may receive fewer rows because splits have different sizes; `join()`
+keeps DDP collectives aligned while preserving every row without duplication.
+A limit that may truncate the input is rejected when multiple ranks are active.
 
 ### Batch Streaming
 

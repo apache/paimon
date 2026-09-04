@@ -28,6 +28,7 @@ from pypaimon.index.pk.primary_key_index_definition import (
     PrimaryKeyIndexDefinition, PrimaryKeyIndexFamily)
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
+from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -85,6 +86,110 @@ class PrimaryKeySortedIndexScanTest(unittest.TestCase):
         self.assertEqual(1, len(created))
         self.assertEqual([1], evaluated.files[0].result.results().to_list())
         self.assertEqual([1], evaluated.files[1].result.results().to_list())
+
+    def test_retired_source_offsets_and_new_source_falls_back(self):
+        field = DataField(3, "value", AtomicType("INT"))
+        definition = PrimaryKeyIndexDefinition(
+            "value", 3, "btree", Options.from_none(), PrimaryKeyIndexFamily.BTREE)
+        files = [
+            SimpleNamespace(file_name="b", row_count=3, level=1, file_source=1),
+            SimpleNamespace(file_name="c", row_count=4, level=1, file_source=1),
+        ]
+        partition = GenericRow([], [])
+        split = DataSplit(files, partition, 0, raw_convertible=True)
+        source_meta = PrimaryKeyIndexSourceMeta(
+            1, [PrimaryKeyIndexSourceFile("a", 2),
+                PrimaryKeyIndexSourceFile("b", 3)]).serialize()
+        payload = IndexFileMeta(
+            "btree", "index", 1, 5,
+            global_index_meta=GlobalIndexMeta(0, 4, 3, source_meta=source_meta))
+        planned = scan.plan(
+            9, [split], [definition],
+            [IndexManifestEntry(0, partition, 0, payload)])
+
+        self.assertEqual((PrimaryKeyIndexSourceFile("a", 2),
+                          PrimaryKeyIndexSourceFile("b", 3)),
+                         planned.files[0].groups[3].source_files)
+        self.assertNotIn(3, planned.files[1].groups)
+
+        created = []
+
+        def reader_factory(*ignored):
+            created.append(_Reader([Range(2, 2), Range(4, 4)]))
+            return created[-1]
+
+        evaluated = scan.evaluate(
+            planned, [field], PredicateBuilder([field]).equal("value", 1),
+            [definition], reader_factory)
+
+        self.assertEqual(1, len(created))
+        self.assertEqual([0, 2], evaluated.files[0].result.results().to_list())
+        self.assertIsNone(evaluated.files[1].result)
+
+    def test_source_at_another_level_does_not_inherit_group(self):
+        definition = PrimaryKeyIndexDefinition(
+            "value", 3, "btree", Options.from_none(), PrimaryKeyIndexFamily.BTREE)
+        files = [
+            SimpleNamespace(file_name="a", row_count=2, level=1, file_source=1),
+            SimpleNamespace(file_name="b", row_count=3, level=2, file_source=1),
+        ]
+        partition = GenericRow([], [])
+        split = DataSplit(files, partition, 0, raw_convertible=True)
+        source_meta = PrimaryKeyIndexSourceMeta(
+            1, [PrimaryKeyIndexSourceFile("a", 2),
+                PrimaryKeyIndexSourceFile("b", 3)]).serialize()
+        payload = IndexFileMeta(
+            "btree", "index", 1, 5,
+            global_index_meta=GlobalIndexMeta(0, 4, 3, source_meta=source_meta))
+
+        planned = scan.plan(
+            9, [split], [definition],
+            [IndexManifestEntry(0, partition, 0, payload)])
+
+        self.assertIn(3, planned.files[0].groups)
+        self.assertNotIn(3, planned.files[1].groups)
+
+    def test_bucket_state_keeps_invalid_payloads_uncovered(self):
+        active = SimpleNamespace(
+            file_name="a", row_count=2, level=1, file_source=1)
+
+        def payload(name, level, sources, source_meta=None):
+            row_count = sum(source.row_count for source in sources)
+            serialized = source_meta
+            if serialized is None:
+                serialized = PrimaryKeyIndexSourceMeta(level, sources).serialize()
+            return IndexFileMeta(
+                "btree", name, 1, row_count,
+                global_index_meta=GlobalIndexMeta(
+                    0, row_count - 1, 3, source_meta=serialized))
+
+        invalid_payloads = [
+            payload("wrong-level", 2, [PrimaryKeyIndexSourceFile("a", 2)]),
+            payload("no-active", 1, [PrimaryKeyIndexSourceFile("b", 2)]),
+            payload("wrong-row-count", 1, [PrimaryKeyIndexSourceFile("a", 3)]),
+            payload(
+                "misordered", 1,
+                [PrimaryKeyIndexSourceFile("b", 1),
+                 PrimaryKeyIndexSourceFile("a", 2)]),
+            payload(
+                "malformed", 1, [PrimaryKeyIndexSourceFile("a", 2)], b"\x00"),
+        ]
+        for invalid in invalid_payloads:
+            with self.subTest(payload=invalid.file_name):
+                state = PkSortedBucketIndexState.from_active_data_files(
+                    3, "btree", [active], [invalid])
+                self.assertFalse(state.groups)
+                self.assertEqual(
+                    (PrimaryKeyIndexSourceFile("a", 2),),
+                    state.uncovered_source_files)
+                self.assertEqual((invalid,), state.rejected_payloads)
+
+        first = payload("first", 1, [PrimaryKeyIndexSourceFile("a", 2)])
+        second = payload("second", 1, [PrimaryKeyIndexSourceFile("a", 2)])
+        duplicate_state = PkSortedBucketIndexState.from_active_data_files(
+            3, "btree", [active], [first, second])
+        self.assertFalse(duplicate_state.groups)
+        self.assertEqual((first, second), duplicate_state.rejected_payloads)
 
     def test_shared_result_is_partitioned_only_once(self):
         class CountingResult(GlobalIndexResult):

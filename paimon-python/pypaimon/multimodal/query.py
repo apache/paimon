@@ -72,6 +72,19 @@ class ScanQuery:
         plan = scan.plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
+    def to_arrow_batch_reader(self, *, blob_parallelism=None):
+        """Stream this scan as Arrow batches without collecting a table."""
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_arrow_batch_reader is only supported on scan(), "
+                "not search queries."
+            )
+
+        read_builder = self._configured_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read()._to_managed_arrow_batch_reader(
+            splits, blob_parallelism=blob_parallelism)
+
     def _configured_read_builder(self, table=None):
         read_builder = (
             self._table if table is None else table
@@ -398,6 +411,12 @@ class _PreFilterQuery(ScanQuery):
 
     def to_ray(self, *args, **kwargs):
         raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+    def to_arrow_batch_reader(self, *args, **kwargs):
+        raise TypeError(
+            "to_arrow_batch_reader is only supported on scan(), "
+            "not search queries."
+        )
 
 
 class VectorQuery(_PreFilterQuery):

@@ -735,7 +735,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return result;
     }
 
-    /** VARIANT needs Iceberg row lineage, which Paimon Iceberg compatibility cannot publish. */
+    /** VARIANT is an Iceberg format-version-3 type; reject publishing it into v2 metadata. */
     static void checkVariantNotPublishable(RowType rowType) {
         Collection<String> variantFields = new LinkedHashSet<>();
         for (DataField field : rowType.getFields()) {
@@ -743,9 +743,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         Preconditions.checkArgument(
                 variantFields.isEmpty(),
-                "Columns %s use the VARIANT type, which Paimon Iceberg compatibility cannot "
-                        + "publish: it is an Iceberg format-version-3 type that requires row "
-                        + "lineage.",
+                "Columns %s use the VARIANT type, which requires Iceberg format version 3. "
+                        + "Set 'metadata.iceberg.format-version' = '3' to publish this table.",
                 variantFields);
     }
 
@@ -2145,8 +2144,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     schemaId,
                     id -> {
                         TableSchema schema = schemaManager.schema(id);
-                        // backstop: reject variant on each schema as it is emitted
-                        checkVariantNotPublishable(schema.logicalRowType());
+                        if (formatVersion < IcebergMetadata.FORMAT_VERSION_V3) {
+                            // VARIANT is an Iceberg format-version-3 type; v2 metadata cannot
+                            // represent it
+                            checkVariantNotPublishable(schema.logicalRowType());
+                        }
                         SchemaValidation.validateIcebergGeospatialTypes(
                                 schema.logicalRowType(), table.coreOptions());
                         SchemaValidation.validateIcebergTimestampPrecisions(

@@ -376,6 +376,8 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.format("%03d", j), PART));
         }
         writer.sync();
+        assertThat(Files.walk(tempDir).filter(Files::isRegularFile))
+                .anyMatch(path -> path.getFileName().toString().endsWith(".index"));
 
         // writer closed unexpectedly
         writer.close();
@@ -1092,7 +1094,9 @@ public class AppendOnlyWriterTest {
                 false,
                 context.options.dataEvolutionEnabled(),
                 null,
-                blobContext);
+                blobContext,
+                FileSource.APPEND,
+                false);
     }
 
     private DataFileMeta writeSharedShreddingFile(AppendOnlyWriter writer, InternalRow... rows)
@@ -1305,7 +1309,9 @@ public class AppendOnlyWriterTest {
                         false,
                         options.dataEvolutionEnabled(),
                         null,
-                        BlobFileContext.create(writeSchema, options));
+                        BlobFileContext.create(writeSchema, options),
+                        FileSource.APPEND,
+                        false);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -1317,6 +1323,8 @@ public class AppendOnlyWriterTest {
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
         Path path = pathFactory.newPath("compact-");
         LocalFileIO.create().newOutputStream(path, false).close();
+        Path extraPath = new Path(path.getParent(), path.getName() + ".index");
+        LocalFileIO.create().newOutputStream(extraPath, false).close();
         return DataFileMeta.forAppend(
                 path.getName(),
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
@@ -1346,7 +1354,7 @@ public class AppendOnlyWriterTest {
                 minSeq,
                 maxSeq,
                 toCompact.get(0).schemaId(),
-                Collections.emptyList(),
+                Collections.singletonList(extraPath.getName()),
                 null,
                 FileSource.APPEND,
                 null,

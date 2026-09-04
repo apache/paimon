@@ -40,6 +40,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
@@ -52,6 +53,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -290,6 +292,45 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             Assertions.assertThat(codecs)
                     .containsEntry("id", CompressionCodecName.ZSTD)
                     .containsEntry("name", CompressionCodecName.UNCOMPRESSED);
+        }
+    }
+
+    @Test
+    public void testWriteByteStreamSplit() throws Exception {
+        Options options = new Options();
+        options.set("parquet.enable.dictionary", "false");
+        options.set("parquet.enable.bytestreamsplit", "true");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "float_value", DataTypes.FLOAT()),
+                        DataTypes.FIELD(1, "double_value", DataTypes.DOUBLE()));
+
+        write(
+                format.createWriterFactory(rowType),
+                file,
+                GenericRow.of(1.25f, 2.5d),
+                GenericRow.of(3.75f, 5.0d));
+
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            for (ColumnChunkMetaData column : reader.getFooter().getBlocks().get(0).getColumns()) {
+                Assertions.assertThat(column.getEncodings()).contains(Encoding.BYTE_STREAM_SPLIT);
+            }
+        }
+
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, java.util.Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+            List<InternalRow> rows = new ArrayList<>();
+            reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+            Assertions.assertThat(rows)
+                    .containsExactly(GenericRow.of(1.25f, 2.5d), GenericRow.of(3.75f, 5.0d));
         }
     }
 }

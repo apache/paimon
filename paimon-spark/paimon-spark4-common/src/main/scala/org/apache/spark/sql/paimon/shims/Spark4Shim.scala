@@ -353,6 +353,9 @@ class Spark4Shim extends SparkShim {
     new GenericVariant(v.getValue, v.getMetadata)
   }
 
+  override def toSparkVariant(variant: Variant): Object =
+    new VariantVal(variant.value(), variant.metadata())
+
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean =
     dataType.isInstanceOf[VariantType]
 

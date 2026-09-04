@@ -176,6 +176,11 @@ class MultimodalTable:
             raise ValueError(
                 "add_video requires table option 'video-frame-field'."
             )
+        if requested is None and len(configured) > 1:
+            raise ValueError(
+                "video_column is required when 'video-frame-field' configures "
+                "multiple fields."
+            )
         column = requested or next(iter(configured))
         if column not in configured:
             raise ValueError(
@@ -256,12 +261,12 @@ class MultimodalTable:
     def update(self, where, values):
         video_columns = self.raw_table.options.video_frame_fields()
         if isinstance(values, Mapping):
-            updated_video_columns = video_columns.intersection(values)
-            if updated_video_columns:
+            assigned_video_columns = video_columns.intersection(values)
+            if assigned_video_columns:
                 raise ValueError(
                     "update() cannot write video-frame-field %r; use "
                     "replace_video() with a complete encoded video."
-                    % sorted(updated_video_columns)
+                    % sorted(assigned_video_columns)[0]
                 )
         query = self.scan().where(where)
         predicate = query._predicate
@@ -411,7 +416,8 @@ class MultimodalTable:
         return VectorQuery(
             read_table,
             vector=vector,
-            vector_column=column or _infer_vector_column(schema, "column"),
+            vector_column=_resolve_vector_column(
+                schema, column, len(vector)),
             vector_options=options,
             pre_filter=pre_filter,
         )
@@ -429,7 +435,13 @@ class MultimodalTable:
             self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
         schema = _target_schema(read_table)
         vectors = _coerce_vectors(vectors)
-        vector_column = column or _infer_vector_column(schema, "column")
+        dimension = len(vectors[0])
+        if any(len(vector) != dimension for vector in vectors):
+            raise ValueError(
+                "search_vectors requires all query vectors to have the same "
+                "dimension.")
+        vector_column = _resolve_vector_column(
+            schema, column, dimension)
         return BatchVectorQuery(
             read_table,
             vectors=vectors,
@@ -1130,13 +1142,47 @@ def _coerce_full_text_query(query, method, schema, column=None):
     raise ValueError("%s requires a text string or query mapping." % method)
 
 
-def _infer_vector_column(schema: pa.Schema, parameter: str = "vector_column"):
-    columns = [
-        field.name
+def _resolve_vector_column(
+        schema: pa.Schema,
+        column: Optional[str],
+        dimension: int) -> str:
+    if column is not None:
+        try:
+            field = schema.field(column)
+        except KeyError as e:
+            raise ValueError(
+                "Vector column '%s' not found in table schema." % column) from e
+        if not pa.types.is_fixed_size_list(field.type):
+            raise ValueError(
+                "Column '%s' is not a fixed-size vector column." % column)
+        if field.type.list_size != dimension:
+            raise ValueError(
+                "Vector dimension %d does not match column '%s' dimension %d."
+                % (dimension, column, field.type.list_size))
+        return column
+
+    candidates = [
+        (field.name, field.type.list_size)
         for field in schema
         if pa.types.is_fixed_size_list(field.type)
     ]
-    return _infer_single_column(columns, "vector", parameter)
+    matches = [
+        name
+        for name, column_dimension in candidates
+        if column_dimension == dimension
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        available = ", ".join(
+            "%s(%d)" % candidate for candidate in candidates) or "none"
+        raise ValueError(
+            "No vector column found with dimension %d; available vector "
+            "columns: %s."
+            % (dimension, available))
+    raise ValueError(
+        "Multiple vector columns found with dimension %d: %s; pass column."
+        % (dimension, ", ".join(matches)))
 
 
 def _infer_text_column(schema: pa.Schema, parameter: str = "text_column"):

@@ -47,6 +47,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -82,6 +83,7 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
@@ -106,6 +108,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -533,7 +536,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -585,7 +588,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -635,7 +638,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -689,7 +692,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.dropColumn("w"));
 
@@ -735,7 +738,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -794,7 +797,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -837,7 +840,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -892,7 +895,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.addColumn("y", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
@@ -948,7 +951,7 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write.close();
@@ -1705,10 +1708,18 @@ public class IcebergCompatibilityTest {
                 .hasMessageContaining("precision from 3 to 6");
     }
 
+    /** Below the floor, and above the ceiling in both timestamp families. */
+    static Stream<DataType> unpublishableTimestampTypes() {
+        return Stream.of(
+                DataTypes.TIMESTAMP(2),
+                DataTypes.TIMESTAMP(9),
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+    }
+
     @ParameterizedTest
-    @ValueSource(ints = {2, 9})
-    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(int precision)
-            throws Exception {
+    @MethodSource("unpublishableTimestampTypes")
+    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(
+            DataType timestampType) throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path warehouse = new Path(tempDir.toString());
         Options options = new Options();
@@ -1716,8 +1727,7 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.FILE_FORMAT, "parquet");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(precision)},
-                        new String[] {"k", "ts"});
+                        new DataType[] {DataTypes.INT(), timestampType}, new String[] {"k", "ts"});
         Schema schema =
                 new Schema(
                         rowType.getFields(),
@@ -1743,7 +1753,7 @@ public class IcebergCompatibilityTest {
         }
 
         Path tablePath = new Path(warehouse, "mydb.db/t");
-        TableSchema latest = new SchemaManager(fileIO, tablePath).latest().get();
+        TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
         Map<String, String> upgraded = new HashMap<>(latest.options());
         upgraded.put(
                 IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
@@ -1782,7 +1792,7 @@ public class IcebergCompatibilityTest {
         }
 
         table.branchManager().createBranch("b1");
-        new SchemaManager(table.fileIO(), table.location(), "b1")
+        new FileSystemSchemaManager(table.fileIO(), table.location(), "b1")
                 .commitChanges(SchemaChange.addColumn("branch_only", DataTypes.INT()));
 
         FileStoreTable branchTable = table.switchToBranch("b1");

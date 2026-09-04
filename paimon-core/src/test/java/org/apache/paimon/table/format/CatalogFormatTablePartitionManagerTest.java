@@ -395,6 +395,58 @@ class CatalogFormatTablePartitionManagerTest {
     }
 
     @Test
+    void testPartitionOptionsStayAlignedAcrossBatches() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2500);
+        List<Map<String, String>> options = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            options.add(Collections.singletonMap("marker", Integer.toString(i)));
+        }
+
+        partitionManager(catalog).createPartitions(specs, true, null, false, options);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> specCaptor = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> optionCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(catalog, times(3))
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        specCaptor.capture(),
+                        eq(true),
+                        isNull(),
+                        eq(false),
+                        optionCaptor.capture());
+        assertThat(specCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 500);
+        assertThat(optionCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 500);
+        assertThat(flatten(specCaptor.getAllValues())).isEqualTo(specs);
+        assertThat(flatten(optionCaptor.getAllValues())).isEqualTo(options);
+    }
+
+    @Test
+    void testMisalignedPartitionOptionsAreRejectedBeforeCatalogAccess() {
+        Catalog catalog = mock(Catalog.class);
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager(catalog)
+                                        .createPartitions(
+                                                specs(2),
+                                                true,
+                                                null,
+                                                false,
+                                                Collections.singletonList(Collections.emptyMap())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must align");
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
     void testDropIsSplitIntoRequests() throws Exception {
         Catalog catalog = mock(Catalog.class);
         List<Map<String, String>> specs = specs(2500);
@@ -463,7 +515,7 @@ class CatalogFormatTablePartitionManagerTest {
                         statistics(specs.get(1000), 3L),
                         statistics(specs.get(2499), 4L));
 
-        partitionManager(catalog).createPartitions(specs, true, statistics, false);
+        partitionManager(catalog).createPartitions(specs, true, statistics, false, null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Map<String, String>>> specCaptor = ArgumentCaptor.forClass(List.class);
@@ -476,7 +528,8 @@ class CatalogFormatTablePartitionManagerTest {
                         specCaptor.capture(),
                         eq(true),
                         statisticsCaptor.capture(),
-                        eq(false));
+                        eq(false),
+                        isNull());
         List<List<Map<String, String>>> requestedSpecs = specCaptor.getAllValues();
         List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
         assertThat(requestedSpecs).extracting(List::size).containsExactly(1000, 1000, 500);
@@ -501,14 +554,19 @@ class CatalogFormatTablePartitionManagerTest {
         List<PartitionStatistics> statistics =
                 Arrays.asList(statistics(specs.get(0), 1L), statistics(specs.get(999), 2L));
 
-        partitionManager(catalog).createPartitions(specs, true, statistics, false);
+        partitionManager(catalog).createPartitions(specs, true, statistics, false, null);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<PartitionStatistics>> statisticsCaptor =
                 ArgumentCaptor.forClass(List.class);
         verify(catalog, times(3))
                 .createPartitions(
-                        eq(IDENTIFIER), anyList(), eq(true), statisticsCaptor.capture(), eq(false));
+                        eq(IDENTIFIER),
+                        anyList(),
+                        eq(true),
+                        statisticsCaptor.capture(),
+                        eq(false),
+                        isNull());
         List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
         assertThat(requestedStatistics.get(0)).containsExactlyElementsOf(statistics);
         // Null would mean "this client does not report", which is the call that predates
@@ -524,9 +582,9 @@ class CatalogFormatTablePartitionManagerTest {
         List<PartitionStatistics> statistics =
                 Arrays.asList(statistics(specs.get(0), 1L), statistics(specs.get(2499), 2L));
 
-        partitionManager(catalog).createPartitions(specs, false, statistics, true);
+        partitionManager(catalog).createPartitions(specs, false, statistics, true, null);
 
-        verify(catalog).createPartitions(IDENTIFIER, specs, false, statistics, true);
+        verify(catalog).createPartitions(IDENTIFIER, specs, false, statistics, true, null);
     }
 
     @Test
@@ -538,7 +596,10 @@ class CatalogFormatTablePartitionManagerTest {
         List<PartitionStatistics> statistics =
                 Collections.singletonList(statistics(spec("2025", "02"), 7L));
 
-        assertThatThrownBy(() -> partitionManager.createPartitions(specs, true, statistics, false))
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        specs, true, statistics, false, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not register")
                 .hasMessageContaining("month=02")
@@ -559,7 +620,7 @@ class CatalogFormatTablePartitionManagerTest {
         assertThatThrownBy(
                         () ->
                                 partitionManager.createPartitions(
-                                        Collections.emptyList(), true, statistics, false))
+                                        Collections.emptyList(), true, statistics, false, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not register")
                 .hasMessageContaining("catalog_partition_db.catalog_partition_table");
@@ -574,7 +635,8 @@ class CatalogFormatTablePartitionManagerTest {
         Catalog catalog = mock(Catalog.class);
 
         partitionManager(catalog)
-                .createPartitions(Collections.emptyList(), true, Collections.emptyList(), false);
+                .createPartitions(
+                        Collections.emptyList(), true, Collections.emptyList(), false, null);
 
         verifyNoInteractions(catalog);
     }
@@ -588,7 +650,10 @@ class CatalogFormatTablePartitionManagerTest {
                 Arrays.asList(repeated, spec("2025", "02"), spec("2025", "01"));
         List<PartitionStatistics> statistics = Collections.singletonList(statistics(repeated, 7L));
 
-        assertThatThrownBy(() -> partitionManager.createPartitions(specs, true, statistics, false))
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        specs, true, statistics, false, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("registered twice")
                 .hasMessageContaining("month=01")
@@ -608,7 +673,11 @@ class CatalogFormatTablePartitionManagerTest {
         assertThatThrownBy(
                         () ->
                                 partitionManager.createPartitions(
-                                        Collections.singletonList(spec), true, statistics, false))
+                                        Collections.singletonList(spec),
+                                        true,
+                                        statistics,
+                                        false,
+                                        null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("reported twice")
                 .hasMessageContaining("month=01")
@@ -708,7 +777,7 @@ class CatalogFormatTablePartitionManagerTest {
         RuntimeException failure = new IllegalStateException("catalog unavailable");
         doThrow(failure)
                 .when(catalog)
-                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean());
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
         Throwable thrown = catchThrowable(() -> partitionManager.createPartitions(specs(1), true));
@@ -751,7 +820,12 @@ class CatalogFormatTablePartitionManagerTest {
         ArgumentCaptor<List<Map<String, String>>> captor = ArgumentCaptor.forClass(List.class);
         verify(catalog, times(expectedRequests))
                 .createPartitions(
-                        eq(IDENTIFIER), captor.capture(), eq(ignoreIfExists), isNull(), eq(false));
+                        eq(IDENTIFIER),
+                        captor.capture(),
+                        eq(ignoreIfExists),
+                        isNull(),
+                        eq(false),
+                        isNull());
         return captor.getAllValues();
     }
 

@@ -760,6 +760,130 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "primary keys"):
             self.conn.get_table("pk")
 
+    def test_create_table_ignores_invalid_options_when_table_exists(self):
+        schema = _schema({"id": pa.int32()})
+        expected = self.conn.create_table("existing", schema=schema)
+
+        actual = self.conn.create_table(
+            "existing",
+            schema=_schema({
+                "id": pa.int32(),
+                "embedding": _vector(3),
+            }),
+            options={"data-evolution.enabled": "false"},
+            ignore_if_exists=True,
+        )
+
+        self.assertEqual(expected.identifier, actual.identifier)
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            raced = self.conn.create_table(
+                "existing",
+                schema=_schema({
+                    "id": pa.int32(),
+                    "embedding": _vector(3),
+                }),
+                options={"data-evolution.enabled": "false"},
+                ignore_if_exists=True,
+            )
+        self.assertEqual(expected.identifier, raced.identifier)
+
+    def test_create_table_handles_concurrent_delete_when_ignoring(self):
+        schema = _schema({"id": pa.int32()})
+        self.conn.create_table("deleted", schema=schema)
+        original_get = self.conn.get_table
+        deleted = [False]
+
+        def delete_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table("default.deleted", False)
+            return original_get(name)
+
+        with patch.object(
+                self.conn, "get_table", side_effect=delete_once):
+            table = self.conn.create_table(
+                "deleted",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
+        self.assertEqual("default.deleted", table.identifier)
+        self.assertEqual(
+            [1, 2, 3], table.scan().to_arrow()["id"].to_pylist())
+
+        self.conn.create_table("fallback_deleted", schema=schema)
+        deleted[0] = False
+
+        def delete_fallback_once(name):
+            if not deleted[0]:
+                deleted[0] = True
+                self.conn.catalog.drop_table(
+                    "default.fallback_deleted", False)
+            return original_get(name)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            with patch.object(
+                    self.conn,
+                    "get_table",
+                    side_effect=delete_fallback_once):
+                with self.assertRaisesRegex(
+                        ValueError, "data-evolution.enabled"):
+                    self.conn.create_table(
+                        "fallback_deleted",
+                        schema=schema,
+                        options={"data-evolution.enabled": "false"},
+                        ignore_if_exists=True,
+                    )
+
+    def test_create_table_does_not_add_data_to_concurrent_winner(self):
+        schema = _schema({"id": pa.int32()})
+        winner = self.conn.create_table("winner", schema=schema)
+
+        with patch(
+                "pypaimon.multimodal.connection._table_exists",
+                return_value=False):
+            actual = self.conn.create_table(
+                "winner",
+                data=pa.table({"id": [1, 2, 3]}),
+                schema=schema,
+                ignore_if_exists=True,
+            )
+
+        self.assertEqual(winner.identifier, actual.identifier)
+        self.assertEqual([], actual.scan().to_arrow().to_pylist())
+
+    def test_create_table_preserves_unknown_create_error(self):
+        schema = _schema({"id": pa.int32()})
+        create = self.conn.catalog.create_table
+        create_error = TimeoutError("create response lost")
+
+        def create_then_lose_response(*args, **kwargs):
+            create(*args, **kwargs)
+            raise create_error
+
+        with patch.object(
+                self.conn.catalog,
+                "create_table",
+                side_effect=create_then_lose_response):
+            with self.assertRaises(TimeoutError) as context:
+                self.conn.create_table(
+                    "failed_create",
+                    data=pa.table({"id": [1, 2, 3]}),
+                    schema=schema,
+                    ignore_if_exists=True,
+                )
+
+        self.assertIs(create_error, context.exception)
+        self.assertEqual(
+            [],
+            self.conn.get_table("failed_create")
+            .scan().to_arrow().to_pylist(),
+        )
+
     def test_create_table_can_add_initial_data_and_get_by_short_name(self):
         self.conn.create_table(
             "users",
@@ -809,6 +933,69 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["id", "name"], result.column_names)
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
+
+    def test_scan_to_arrow_batch_reader(self):
+        users = self.conn.create_table(
+            "batch_users",
+            data=[
+                {"id": 1, "age": 20},
+                {"id": 2, "age": 30},
+                {"id": 3, "age": 40},
+            ],
+            schema=_schema({"id": pa.int32(), "age": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        reader = (
+            users.scan()
+            .where("age >= 30")
+            .select("id")
+            .to_arrow_batch_reader()
+        )
+
+        self.assertEqual([{"id": 2}, {"id": 3}], reader.read_all().to_pylist())
+
+        closed = []
+
+        def batches(*args):
+            try:
+                yield pa.record_batch(
+                    [pa.array([1], type=pa.int32())], names=["id"])
+                yield pa.record_batch(
+                    [pa.array([2], type=pa.int32())], names=["id"])
+            finally:
+                closed.append(True)
+
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches), patch(
+                    "pypaimon.read.table_read."
+                    "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        closed.clear()
+        with patch(
+                "pypaimon.read.table_read.TableRead._arrow_batch_generator",
+                new=batches):
+            reader = users.scan().select("id").to_arrow_batch_reader()
+            reader.read_next_batch()
+            reader.close()
+        self.assertEqual([True], closed)
+
+        read_builder = users.raw_table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        with patch(
+                "pypaimon.read.table_read."
+                "_RECORD_BATCH_READER_FROM_STREAM", None):
+            reader = read_builder.new_read().to_arrow_batch_reader(splits)
+        self.assertIsInstance(reader, pa.RecordBatchReader)
+        reader.close()
+
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            users.search("thirty", column="id").to_arrow_batch_reader()
 
     def test_scan_with_row_id_returns_system_column(self):
         users = self.conn.create_table(
@@ -2073,6 +2260,98 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("equal", calls["pre_filter"].method)
         self.assertEqual("category", calls["pre_filter"].field)
         self.assertEqual(["lake"], calls["pre_filter"].literals)
+
+    def test_searches_infer_vector_column_by_query_dimension(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([
+            {
+                "id": 1,
+                "image_embedding": [1.0, 0.0],
+                "text_embedding": [1.0, 0.0, 0.0],
+            },
+            {
+                "id": 2,
+                "image_embedding": [0.0, 1.0],
+                "text_embedding": [0.0, 1.0, 0.0],
+            },
+        ])
+
+        result = (
+            docs.search([0.0, 1.0, 0.0])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+        batch_result = (
+            docs.search_vectors([[0.0, 1.0, 0.0]])
+            .select(["id"])
+            .limit(1)
+            .to_list()
+        )
+
+        self.assertEqual([{"id": 2}], result)
+        self.assertEqual([[{"id": 2}]], batch_result)
+
+    def test_search_reports_vector_column_dimension_errors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+                "image_embedding": _vector(2),
+                "text_embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"No vector column found with dimension 4;.*"
+                r"image_embedding\(2\).*text_embedding\(3\)"):
+            docs.search([1.0, 0.0, 0.0, 0.0])
+
+        with self.assertRaisesRegex(ValueError, "not found in table schema"):
+            docs.search([1.0, 0.0], column="missing")
+
+        with self.assertRaisesRegex(ValueError, "not a fixed-size vector"):
+            docs.search([1.0, 0.0], column="content")
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Vector dimension 3 does not match column "
+                "'image_embedding' dimension 2"):
+            docs.search([1.0, 0.0, 0.0], column="image_embedding")
+
+        with self.assertRaisesRegex(ValueError, "same dimension"):
+            docs.search_vectors([
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ])
+
+    def test_search_requires_column_for_same_dimension_vectors(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "title_embedding": _vector(2),
+                "body_embedding": _vector(2),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                r"Multiple vector columns found with dimension 2: "
+                r"title_embedding, body_embedding; pass column\."):
+            docs.search([1.0, 0.0])
 
     def test_search_pre_filter_rejects_predicate_object(self):
         docs = self.conn.create_table(

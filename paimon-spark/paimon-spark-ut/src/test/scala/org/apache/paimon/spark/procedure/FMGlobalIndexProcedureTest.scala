@@ -53,7 +53,7 @@ class FMGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
       val output = spark
         .sql(
           "CALL sys.create_global_index(" +
-            "table => 'test.T', index_column => 'content', index_type => 'fmindex', " +
+            "table => 'test.T', index_column => 'content', index_type => 'fm', " +
             "options => 'fm-index.partition-row-count=2')")
         .collect()
         .head
@@ -65,7 +65,7 @@ class FMGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         .scanEntries()
         .asScala
         .map(_.indexFile())
-        .filter(_.indexType() == "fmindex")
+        .filter(_.indexType() == "fm")
       assert(entries.nonEmpty)
       assert(entries.map(_.rowCount()).sum == 7L)
 
@@ -111,7 +111,7 @@ class FMGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
       val output = spark
         .sql(
           "CALL sys.create_global_index(" +
-            "table => 'test.T', index_column => 'content', index_type => 'fmindex', " +
+            "table => 'test.T', index_column => 'content', index_type => 'fm', " +
             "options => 'fm-index.partition-row-count=2')")
         .collect()
         .head
@@ -123,7 +123,7 @@ class FMGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         .scanEntries()
         .asScala
         .map(_.indexFile())
-        .filter(_.indexType() == "fmindex")
+        .filter(_.indexType() == "fm")
       assert(entries.nonEmpty)
       // The index retains the stable physical row-id range, including rows hidden by DVs.
       assert(entries.map(_.rowCount()).sum == 7L)

@@ -967,6 +967,22 @@ physical length index. For logical row `r` in a run beginning at logical row `s`
 `run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
 Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
 
+The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
+wire layout. All numeric values are little endian:
+
+| Field | Size | Description |
+| --- | ---: | --- |
+| Version | 1 byte | Descriptor version, currently `1` |
+| Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
+| URI length | 4 bytes | UTF-8 URI byte length |
+| URI | variable | URI of the containing `.video` file |
+| Offset | 8 bytes | Start of the complete encoded-video payload |
+| Length | 8 bytes | Encoded-video payload length |
+| Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+
+Descriptor bytes are independently versioned from the `.video` container. Java and Python share
+canonical descriptor and container fixtures to keep both implementations byte-compatible.
+
 Readers validate footer and index bounds, positive physical lengths, full coverage of the payload
 region, equal run-index counts, positive run lengths, physical ordinals, and non-negative first
 frames. The format currently supports one scalar BLOB field per file. Physical video reuse uses

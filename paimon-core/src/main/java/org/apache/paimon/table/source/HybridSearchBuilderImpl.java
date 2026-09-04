@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.HybridSearchRanker;
@@ -128,6 +129,7 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
 
     @Override
     public List<Route> routeBuilders() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         validateSearch();
 
         Snapshot snapshot = null;

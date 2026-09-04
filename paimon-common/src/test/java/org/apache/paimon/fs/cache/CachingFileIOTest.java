@@ -139,6 +139,23 @@ class CachingFileIOTest {
     }
 
     @Test
+    void testShortRemoteReadIsNotCachedAsZeroPaddedBlock() throws IOException {
+        byte[] data = "truncated".getBytes();
+        MockFileIO delegate = new MockFileIO();
+        // the status says 8 bytes more than the stream can hand out
+        delegate.addTruncatedFile("snapshot-1", data, data.length + 8);
+
+        LocalDiskCacheManager cache = new LocalDiskCacheManager(cacheDir, Long.MAX_VALUE, 64);
+        CachingFileIO cachingIO = newCachingFileIO(delegate, cache, EnumSet.of(FileType.META), 64);
+
+        try (SeekableInputStream s = cachingIO.newInputStream(new Path("snapshot-1"))) {
+            assertThatThrownBy(() -> readAll(s, data.length + 8))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Premature EOF");
+        }
+    }
+
+    @Test
     void testMetaFileIsCached() throws IOException {
         byte[] data = "snapshot data".getBytes();
         MockFileIO delegate = new MockFileIO();
@@ -976,6 +993,7 @@ class CachingFileIOTest {
                 new ConcurrentHashMap<>();
 
         private final Map<String, byte[]> files = new HashMap<>();
+        private final Map<String, Long> reportedLengths = new HashMap<>();
         // concurrent so the thread-safety tests below can count from several reader threads
         private final Map<String, Integer> fileStatusCalls = new ConcurrentHashMap<>();
         private final Map<String, Integer> newInputStreamCalls = new ConcurrentHashMap<>();
@@ -1022,6 +1040,12 @@ class CachingFileIOTest {
 
         void addFile(String name, byte[] data) {
             files.put(name, data);
+        }
+
+        /** Reports a length beyond the bytes on hand, the way a truncated remote file does. */
+        void addTruncatedFile(String name, byte[] data, long reportedLength) {
+            files.put(name, data);
+            reportedLengths.put(name, reportedLength);
         }
 
         int getFileStatusCallCount(String name) {
@@ -1084,7 +1108,7 @@ class CachingFileIOTest {
             return new FileStatus() {
                 @Override
                 public long getLen() {
-                    return data.length;
+                    return reportedLengths.getOrDefault(name, (long) data.length);
                 }
 
                 @Override

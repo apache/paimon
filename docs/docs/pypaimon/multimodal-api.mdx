@@ -197,10 +197,10 @@ docs.add([
 
 ## Video Frame Storage
 
-For a frame table, set `video-frame-field` on one scalar BLOB column. Paimon
-stores the frame ordinal in `VideoFrameDescriptor` and the compact `.video`
-index, so the normal data file does not need a `frame_index` or
-`frame_timestamp` column:
+For a frame table, set `video-frame-field` to one or more comma-separated
+scalar BLOB columns. Paimon stores frame ordinals in `VideoFrameDescriptor`
+and compact `.video` indexes, so the normal data file does not need a
+`frame_index` or `frame_timestamp` column:
 
 ```python
 import pyarrow as pa
@@ -257,10 +257,12 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-The writer deduplicates exact payload descriptor identity inside one `.video`
-file and delays a pending roll until the current video group ends. A later
-call, checkpoint, or earlier file roll can create another physical copy of the
-same source video. The normal `.blob` format is unchanged.
+The writer deduplicates exact payload descriptor identity inside each `.video`
+file. Payload boundaries may be nested across configured video columns, but
+every change must occur at an episode boundary. When a file target is reached
+within an episode, normal, BLOB, and vector rolling waits for the next payload
+boundary and closes the aligned file group together. A single large episode
+may therefore exceed the target. The normal `.blob` format is unchanged.
 
 ### Update frame rows and replace a video
 
@@ -518,6 +520,147 @@ HDF5 core itself has no Ray dependency.
 provenance columns, maintain a source ledger, skip prior inputs, or detect
 source drift. Calling it again with the same input appends the rows again.
 
+## Load ROSBag
+
+`MultimodalConnection.load_from_rosbag` imports ROS1 `.bag`, ROS2 SQLite3 or
+MCAP recording directories, and standalone ROS2 `.mcap` files through a user
+Arrow transform. It requires Python 3.10 or newer:
+
+```shell
+pip install 'pypaimon[rosbag]'
+```
+
+```python
+import pyarrow as pa
+
+
+schema = pa.schema([
+    pa.field("source", pa.string(), nullable=False),
+    pa.field("timestamp", pa.int64(), nullable=False),
+    pa.field("value", pa.string(), nullable=False),
+])
+conn.create_table("messages", schema=schema)
+
+
+def transform(reader, source):
+    rows = []
+    for connection, timestamp, rawdata in reader.messages():
+        message = reader.deserialize(rawdata, connection.msgtype)
+        rows.append({
+            "source": source.name,
+            "timestamp": timestamp,
+            "value": message.data,
+        })
+    return pa.Table.from_pylist(rows)
+
+
+result = conn.load_from_rosbag(
+    "messages",
+    "/data/recordings",
+    transform=transform,
+)
+print(result.source_count, result.row_count, result.snapshot_id)
+```
+
+A transform receives an open `rosbags.highlevel.AnyReader` and a
+`RosbagSource`. The source exposes the original normalized `uri`, the temporary
+or original `local_path`, `format`, `name`, `stem`, and `is_remote`. Reader and
+local staging paths are valid only while the transform is running. A transform
+returns an Arrow table, record batch, or an iterable of either.
+
+Directories are searched recursively, but a directory containing
+`metadata.yaml` is one ROS2 logical source and is not searched below that
+point. Standalone `.db3` files are rejected because they may be one split of a
+larger recording. Set `allow_storage_fragment=True` only when importing exactly
+that SQLite storage fragment is intentional; the loader performs a SQLite
+integrity check but cannot prove that other recording splits are absent.
+
+Local paths and `file://`, `oss://`, `s3://`, `hdfs://`, `viewfs://`, and
+`gs://` URIs use PyPaimon FileIO. Pass source credentials through
+`source_options`; target warehouse options are not inherited. Unlike HDF5,
+`rosbags` requires local paths, so remote files are copied in bounded chunks to
+an attempt-scoped temporary directory. ROS2 metadata member paths are checked
+for traversal and normalization collisions before copying.
+
+Before Paimon creates a writer, the loader:
+
+1. validates every source manifest and checks for active or recovery sidecars;
+2. scans every recording to EOF and compares declared and readable messages;
+3. executes each transform once and applies strict target Arrow schema checks;
+4. stores all validated output in a temporary Arrow IPC file.
+
+This front-loaded validation normally reads each recording twice and needs
+temporary disk capacity, but a source, transform, or schema failure does not
+create Paimon data files. Source size, modification time, and ROS2 directory
+members are compared during the call. These checks detect observable changes;
+without a versioned URI they are not a transactional snapshot of an object
+store directory.
+
+Use `RosbagStagingConfig` to choose the local temporary directory, reserve free
+space with `min_free_bytes`, cap serial temporary usage with `max_bytes`, and
+set the remote copy chunk size with `copy_buffer_bytes`. In Ray mode,
+`max_bytes` applies to each worker's raw ROSBag staging; Arrow output capacity
+is controlled by Ray object-store and spill settings.
+
+For Ray, install `pypaimon[ray,rosbag]` and call
+`pypaimon.ray.load_from_rosbag`. The driver discovers manifests, each worker
+materializes and validates complete sources locally, and the transformed Ray
+Dataset is explicitly `materialize()`d before `write_paimon`. Success uses one
+coordinator commit. Ray may retry a transform, so transforms must be
+deterministic and free of non-idempotent external side effects.
+
+Both APIs are append-only and not retry-safe after a commit exception. A
+successful call creates one snapshot; write-stage failures may leave uncommitted
+orphan files for normal Paimon cleanup.
+
+## Load LeRobot Dataset v3
+
+`load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
+repository. It derives the schema from `meta/info.json`, writes one row per
+frame, and creates a LeRobot dataset backed by the frame table,
+`<table>__versions`, `<table>__episodes`, `<table>__tasks`, and an optional
+`<table>__subtasks`. Task text remains in the metadata table; frames retain
+`task_index`. After all components are committed and tagged with the same
+numeric `version_id`, one row is appended to `<table>__versions` to publish the
+version.
+
+```shell
+pip install 'pypaimon[lerobot]'
+```
+
+```python
+version_id = conn.load_from_lerobot(
+    "robot_data",
+    "/data/lerobot_dataset",
+)
+print(version_id)
+```
+
+The returned `version_id` is the common tag name for all dataset components.
+
+For FileIO URIs, pass credentials through `source_options`:
+
+```python
+version_id = conn.load_from_lerobot(
+    "robot_data",
+    "oss://source-bucket/lerobot_dataset",
+    source_options={
+        "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+        "fs.oss.accessKeyId": "SOURCE_ACCESS_KEY_ID",
+        "fs.oss.accessKeySecret": "SOURCE_ACCESS_KEY_SECRET",
+    },
+)
+```
+
+A row in `<table>__versions` identifies a published release. Readers must first
+resolve that row, then read every required component through its matching tag;
+a missing tag is an error and must not fall back to the latest snapshot.
+The component tags are immutable and must be retained or deleted together.
+The one-time importer requires a new target table.
+
+Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
+`ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
+
 ## Overwrite
 
 `overwrite` accepts the same input formats as `add` and replaces existing data
@@ -663,6 +806,15 @@ result = (
     .limit(10)
     .to_pandas()
 )
+```
+
+Use `to_arrow_batch_reader()` to consume an ordinary scan without collecting
+all rows into one Arrow table:
+
+```python
+with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
+    for batch in reader:
+        consume(batch)
 ```
 
 ### Reading BLOB columns

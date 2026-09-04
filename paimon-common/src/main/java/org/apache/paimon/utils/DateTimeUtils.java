@@ -617,7 +617,7 @@ public class DateTimeUtils {
 
     /** Returns the value of the timestamp to seconds since '1970-01-01 00:00:00' UTC. */
     public static long unixTimestamp(long ts) {
-        return ts / 1000;
+        return Math.floorDiv(ts, MILLIS_PER_SECOND);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -680,7 +680,7 @@ public class DateTimeUtils {
 
     private static long zeroLastDigits(long l, int n) {
         long tenToTheN = (long) Math.pow(10, n);
-        return (l / tenToTheN) * tenToTheN;
+        return Math.floorDiv(l, tenToTheN) * tenToTheN;
     }
 
     private static String pad(int length, long v) {

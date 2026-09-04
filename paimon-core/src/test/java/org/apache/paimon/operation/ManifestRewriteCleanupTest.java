@@ -41,7 +41,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestFileMetaTestBase;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.testutils.assertj.PaimonAssertions;
 import org.apache.paimon.types.DataTypes;
@@ -647,7 +647,7 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
         Path tablePath = new Path(tempDir.toString());
         return new ManifestFile.Factory(
                         fileIO,
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         PARTITION_TYPE,
                         avro,
                         "zstd",

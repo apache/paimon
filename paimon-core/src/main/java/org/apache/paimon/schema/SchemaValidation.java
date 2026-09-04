@@ -53,6 +53,7 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
@@ -124,7 +125,13 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
 
-    /** The precisions {@code IcebergDataField} maps to the Iceberg timestamp types. */
+    /** The ceiling {@code IcebergDataField} converts. */
+    private static final int MAX_ICEBERG_TIME_PRECISION = 3;
+
+    /**
+     * The timestamp precisions the mirror can publish, narrower than the 3 to 9 {@code
+     * IcebergDataField} names a type for.
+     */
     private static final int MIN_ICEBERG_TIMESTAMP_PRECISION = 3;
 
     private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
@@ -162,6 +169,10 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
+        // reject here rather than only at create time, so ALTER cannot turn the option on for a
+        // table type that ignores it
+        validateQueryAuthTableType(options.type(), options.queryAuthEnabled());
+
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
                     String.format(
@@ -241,6 +252,7 @@ public class SchemaValidation {
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
         validateIcebergTimestampPrecisions(tableRowType, options);
+        validateIcebergTimePrecisions(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -408,6 +420,20 @@ public class SchemaValidation {
         validateManifestSort(schema, options);
     }
 
+    /**
+     * Only a file-store table reads through the auth reader; anywhere else the rules would be
+     * accepted and then silently not applied.
+     */
+    public static void validateQueryAuthTableType(TableType tableType, boolean queryAuthEnabled) {
+        checkArgument(
+                !queryAuthEnabled
+                        || tableType == TableType.TABLE
+                        || tableType == TableType.MATERIALIZED_TABLE,
+                "%s is not supported on a %s: its read does not apply row filters or column masks.",
+                CoreOptions.QUERY_AUTH_ENABLED.key(),
+                tableType);
+    }
+
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
         String fallbackBranch = schema.options().get(CoreOptions.SCAN_FALLBACK_BRANCH.key());
         String primaryBranch = schema.options().get(CoreOptions.SCAN_PRIMARY_BRANCH.key());
@@ -541,10 +567,10 @@ public class SchemaValidation {
     }
 
     /**
-     * Refuses the timestamp precisions the Iceberg mirror cannot publish, matching the range {@link
-     * org.apache.paimon.iceberg.metadata.IcebergDataField} converts. A higher precision is written
-     * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
-     * nanoseconds the column declares, so the two disagree about the data.
+     * Refuses the timestamp precisions the Iceberg mirror cannot publish. A higher precision is
+     * written as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than
+     * the nanoseconds the column declares, so the two disagree about the data. The refusal belongs
+     * here rather than in the type mapping, which does not know who writes the files.
      */
     public static void validateIcebergTimestampPrecisions(DataType dataType, CoreOptions options) {
         if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
@@ -561,6 +587,31 @@ public class SchemaValidation {
                 MIN_ICEBERG_TIMESTAMP_PRECISION,
                 MAX_ICEBERG_TIMESTAMP_PRECISION,
                 IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    /**
+     * Refuses the time precisions the mirror cannot publish: it writes whole milliseconds into
+     * Iceberg's microsecond time values, and the conversion enforcing that would only fail once the
+     * snapshot is durable.
+     */
+    public static void validateIcebergTimePrecisions(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableTime),
+                "Time columns must have a precision of %s or less when Iceberg metadata is "
+                        + "enabled, the only precisions Iceberg compatibility can publish. Use a "
+                        + "precision of %s or less, or disable '%s'.",
+                MAX_ICEBERG_TIME_PRECISION,
+                MAX_ICEBERG_TIME_PRECISION,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    private static boolean isUnpublishableTime(DataType dataType) {
+        return dataType instanceof TimeType
+                && ((TimeType) dataType).getPrecision() > MAX_ICEBERG_TIME_PRECISION;
     }
 
     private static boolean isUnpublishableTimestamp(DataType dataType) {
@@ -589,6 +640,7 @@ public class SchemaValidation {
         for (TableSchema schema : history.get()) {
             validateIcebergGeospatialTypes(schema.logicalRowType(), options);
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
+            validateIcebergTimePrecisions(schema.logicalRowType(), options);
         }
     }
 
@@ -1540,6 +1592,14 @@ public class SchemaValidation {
                     "Data evolution config must disabled with clustering.incremental");
         }
 
+        if (options.dataEvolutionNestedFieldEnabled()) {
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "%s requires %s=true.",
+                    CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(),
+                    CoreOptions.DATA_EVOLUTION_ENABLED.key());
+        }
+
         List<DataField> fields = schema.fields();
         List<String> blobNames =
                 fields.stream()
@@ -1666,12 +1726,7 @@ public class SchemaValidation {
             CoreOptions options,
             Set<String> blobDescriptorFields,
             Set<String> blobViewFields) {
-        Set<String> configured = options.videoFrameField();
-        checkArgument(
-                configured.size() <= 1,
-                "'%s' currently supports exactly one field, but found %s.",
-                CoreOptions.VIDEO_FRAME_FIELD.key(),
-                configured);
+        Set<String> configured = options.videoFrameFields();
         for (String field : configured) {
             checkArgument(
                     rowType.containsField(field)

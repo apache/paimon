@@ -213,6 +213,18 @@ under the License.
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>changelog-producer.ignore-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore delete records in the changelog. When set to true, DELETE (-D) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.ignore-update-before</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore update-before records in the changelog. When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -513,6 +525,12 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.nested-field.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable sub-field-level data evolution for nested (struct) columns. When enabled, an update that only touches some sub-fields of a nested column writes an incremental file containing just those sub-fields (aligned by row id); when disabled, the whole top-level column is rewritten. Requires data-evolution.enabled=true. Mixed-version compatibility warning: once a file's write columns record a nested sub-field path (e.g. 'nest.a'), a reader, writer, compactor, or other maintenance job on an older version cannot reconstruct it. Every such component reading or writing this table must be upgraded before enabling this option, and downgrading the binary is unsafe once such files have been committed. This option may only be enabled through a persisted table-option change; dynamic overrides and disabling or removing the option after it has been enabled are not supported.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.reassign.skip-contiguous-row-count</h5></td>
             <td style="word-wrap: break-word;">1000000000</td>
             <td>Long</td>
@@ -541,6 +559,12 @@ under the License.
             <td style="word-wrap: break-word;">0.05</td>
             <td>Double</td>
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to omit write columns from data file metadata when a data evolution file contains all non-dedicated columns. Readers always support the omitted metadata, but writing it is disabled by default for compatibility with older readers.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
@@ -1895,7 +1919,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>video-frame-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specifies one scalar BLOB field whose logical rows are video frames. Complete encoded videos and embedded frame-run indexes are packed into '.video' files. The first version supports append-only data-evolution tables and exact VideoFrameDescriptor input.</td>
+            <td>Specifies comma-separated scalar BLOB fields whose logical rows are video frames. Complete encoded videos and embedded frame-run indexes are packed into '.video' files. Payload boundaries may be nested across fields, but every change must occur at a logical episode boundary. The first version supports append-only data-evolution tables and exact VideoFrameDescriptor input.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.check-interval</h5></td>

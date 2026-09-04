@@ -346,19 +346,17 @@ public class PaimonShreddingUtils {
                     typedIdx = i;
                     switch (field.type().getTypeRoot()) {
                         case ROW:
-                            if (!(dataType instanceof RowType)) {
-                                throw invalidVariantShreddingSchema(rowType);
-                            }
                             RowType r = (RowType) dataType;
                             List<DataField> rFields = r.getFields();
-                            // The struct must not be empty or contain duplicate field names.
-                            if (fields.isEmpty()
-                                    || fields.stream().distinct().count() != fields.size()) {
-                                throw invalidVariantShreddingSchema(rowType);
-                            }
+                            // Every field of an object's typed_value is itself a
+                            // value/typed_value struct. An empty struct shreds nothing and
+                            // stays legal.
                             objectSchema = new VariantSchema.ObjectField[rFields.size()];
                             for (int index = 0; index < rFields.size(); index++) {
                                 DataField f = rFields.get(index);
+                                if (!(f.type() instanceof RowType)) {
+                                    throw invalidVariantShreddingSchema(rowType);
+                                }
                                 objectSchema[index] =
                                         new VariantSchema.ObjectField(
                                                 f.name(),

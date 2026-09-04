@@ -57,7 +57,8 @@ class EvolutionStatsCache {
 
     private static ProjectedFileSchema projectFileSchema(
             Function<Long, TableSchema> scanTableSchema, CacheKey key) {
-        TableSchema dataFileSchema = scanTableSchema.apply(key.schemaId).project(key.writeColumns);
+        TableSchema dataFileSchema =
+                scanTableSchema.apply(key.schemaId).dataFileSchema(key.writeColumns);
         TableSchema dataFileSchemaWithStats = dataFileSchema.project(key.valueStatsColumns);
         List<DataField> fields = dataFileSchema.fields();
         Map<Integer, FileFieldStats> fieldStats = new HashMap<>(fields.size() * 2);

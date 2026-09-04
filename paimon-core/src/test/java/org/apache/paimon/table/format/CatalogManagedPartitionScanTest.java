@@ -20,14 +20,18 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -64,12 +68,14 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_SCAN_LIST_PARALLELISM;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -84,8 +90,7 @@ class CatalogManagedPartitionScanTest {
     @Test
     void testLeadingPatternResidualFilterAndUnregisteredDirectory() throws Exception {
         Catalog catalog = mock(Catalog.class);
-        // The residual predicate beyond the prefix goes to the filter endpoint; the filter is a
-        // hint, so returning a superset here is legal and the plan still filters per partition.
+        // The filter endpoint may return a superset, so the scan still checks every candidate.
         when(catalog.listPartitionsByFilterPaged(
                         eq(IDENTIFIER),
                         any(Predicate.class),
@@ -124,6 +129,7 @@ class CatalogManagedPartitionScanTest {
                         eq("year=2025/%"));
         assertThat(pushedFilter.getValue().test(GenericRow.of(2025, 11))).isTrue();
         assertThat(pushedFilter.getValue().test(GenericRow.of(2025, 10))).isFalse();
+        verify(catalog, never()).listPartitionsPaged(any(), any(), any(), any());
     }
 
     @Test
@@ -158,20 +164,76 @@ class CatalogManagedPartitionScanTest {
     }
 
     @Test
-    void testListPartitionEntriesUsesCatalogVisibility() throws Exception {
+    void testUnextractablePartitionFilterDoesNotReloadFullRegistry() throws Exception {
+        TrackingLocalFileIO fileIO = new TrackingLocalFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path novemberFile = writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table =
+                createTable(
+                        fileIO,
+                        tablePath,
+                        recordingCatalog(
+                                Arrays.asList(partition("2025", "10"), partition("2025", "11"))),
+                        false);
+        PartitionPredicate filter =
+                PartitionPredicate.fromMultiple(
+                        table.partitionType(),
+                        Collections.singletonList(
+                                new InternalRowSerializer(table.partitionType())
+                                        .toBinaryRow(GenericRow.of(2025, 11))));
+
+        List<Path> plannedFiles =
+                plannedFiles(new FormatTableScan(table, filter, null).plan().splits());
+
+        assertThat(plannedFiles).containsExactly(novemberFile);
+        assertThat(requestedPrefixes).containsExactly(Collections.emptyMap());
+        assertThat(requestedFilters).containsExactly((Predicate) null);
+    }
+
+    @Test
+    void testFindPartitionsPushesFilterAndAppliesItLocally() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTable table =
+                createTable(
+                        fileIO,
+                        tablePath,
+                        recordingCatalog(
+                                Arrays.asList(partition("2025", "10"), partition("2025", "11"))),
+                        false);
+        Predicate predicate = new PredicateBuilder(table.partitionType()).equal(1, 11);
+        PartitionPredicate filter =
+                PartitionPredicate.fromPredicate(table.partitionType(), predicate);
+
+        assertThat(new FormatTableScan(table, filter, null).findPartitions())
+                .extracting(partition -> partition.getKey().get("month"))
+                .containsExactly("11");
+        assertThat(requestedPrefixes).containsExactly(Collections.emptyMap());
+        assertThat(requestedFilters).hasSize(1);
+        assertThat(requestedFilters.get(0)).isNotNull();
+    }
+
+    @Test
+    void testListPartitionEntriesPushesFilterAndAppliesItLocally() throws Exception {
         Catalog catalog = mock(Catalog.class);
-        Partition catalogPartition =
+        Partition october = new Partition(partition("2025", "10").spec(), 7L, 8L, 1L, 9L, 2, false);
+        Partition november =
                 new Partition(partition("2025", "11").spec(), 11L, 22L, 3L, 44L, 5, false);
-        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
-                .thenReturn(new PagedList<>(Collections.singletonList(catalogPartition), null));
+        when(catalog.listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(Predicate.class), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Arrays.asList(october, november), null));
         TrackingLocalFileIO fileIO = new TrackingLocalFileIO();
         Path tablePath = new Path(tempDir.toUri());
         writeDataFile(fileIO, tablePath, "year=2025/month=11");
         writeDataFile(fileIO, tablePath, "year=2025/month=12");
         FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
 
+        Predicate predicate = new PredicateBuilder(table.partitionType()).equal(1, 11);
+        PartitionPredicate filter =
+                PartitionPredicate.fromPredicate(table.partitionType(), predicate);
+
         List<PartitionEntry> entries =
-                new FormatTableScan(table, null, null).listPartitionEntries();
+                new FormatTableScan(table, filter, null).listPartitionEntries();
 
         assertThat(entries)
                 .extracting(
@@ -183,6 +245,10 @@ class CatalogManagedPartitionScanTest {
         assertThat(entries.get(0).lastFileCreationTime()).isEqualTo(44L);
         assertThat(entries.get(0).totalBuckets()).isEqualTo(5);
         assertThat(fileIO.listedPaths).isEmpty();
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(Predicate.class), eq(1000), isNull(), any());
+        verify(catalog, never()).listPartitionsPaged(any(), any(), any(), any());
     }
 
     @Test
@@ -303,6 +369,8 @@ class CatalogManagedPartitionScanTest {
         // '_' has no special meaning in the prefix contract; it must not widen the match.
         assertThat(plannedFiles).isEmpty();
         assertThat(requestedPrefixes).containsExactly(Collections.singletonMap("year", "a_b"));
+        assertThat(requestedFilters).hasSize(1);
+        assertThat(requestedFilters.get(0)).isNotNull();
     }
 
     @Test
@@ -339,6 +407,142 @@ class CatalogManagedPartitionScanTest {
                 plannedFiles(new FormatTableScan(table, null, null).plan().splits());
 
         assertThat(plannedFiles).containsExactly(dataFile);
+    }
+
+    @Test
+    void testUnrelatedPartitionOptionUsesDefaultLocation() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path dataFile = writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        Catalog catalog = mock(Catalog.class);
+        Partition partition =
+                partitionWithOptions(
+                        "2025", "11", Collections.singletonMap("owner", "data-platform"));
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Collections.singletonList(partition), null));
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        assertThat(plannedFiles(new FormatTableScan(table, null, null).plan().splits()))
+                .containsExactly(dataFile);
+    }
+
+    @Test
+    void testDifferentPartitionsCannotShareACustomLocation() throws Exception {
+        Path externalPath = new Path(tempDir.resolve("external").toUri());
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(
+                        new PagedList<>(
+                                Arrays.asList(
+                                        partition("2025", "10", externalPath.toString()),
+                                        partition("2025", "11", externalPath.toString())),
+                                null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        writeDataFile(fileIO, externalPath, "files");
+        Path tablePath = new Path(tempDir.resolve("table").toUri());
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("overlapping locations")
+                .hasMessageContaining(IDENTIFIER.getFullName());
+    }
+
+    @Test
+    void testFilteredListingReadsSelectedCustomLocation() throws Exception {
+        LocalFileIO clientFileIO = LocalFileIO.create();
+        Path externalPath = new Path(tempDir.resolve("external").toUri());
+        Path selectedFile = writeDataFile(clientFileIO, externalPath, "files");
+        Path tablePath = new Path(tempDir.resolve("table").toUri());
+        TableRootOnlyLocalFileIO tableFileIO = new TableRootOnlyLocalFileIO(tablePath);
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(Predicate.class), eq(1000), isNull(), isNull()))
+                .thenReturn(
+                        new PagedList<>(
+                                Arrays.asList(
+                                        partition("2025", "10"),
+                                        partition("2025", "11", externalPath.toString())),
+                                null));
+        FileIOLoader clientLoader =
+                new FileIOLoader() {
+                    @Override
+                    public String getScheme() {
+                        return "file";
+                    }
+
+                    @Override
+                    public LocalFileIO load(Path path) {
+                        return clientFileIO;
+                    }
+                };
+        FormatTable table =
+                createTable(
+                        tableFileIO,
+                        tablePath,
+                        partitionManager(catalog),
+                        false,
+                        CatalogContext.create(new Options(), clientLoader, null));
+        Predicate predicate = new PredicateBuilder(table.partitionType()).equal(1, 11);
+        PartitionPredicate filter =
+                PartitionPredicate.fromPredicate(table.partitionType(), predicate);
+
+        List<Split> splits = new FormatTableScan(table, filter, null).plan().splits();
+
+        assertThat(plannedFiles(splits)).containsExactly(selectedFile);
+        assertThat(splits)
+                .allSatisfy(
+                        split ->
+                                assertThat(((FormatDataSplit) split).useCatalogContextFileIO())
+                                        .isTrue());
+        assertThat(tableFileIO.listedPaths).isEmpty();
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(Predicate.class), eq(1000), isNull(), isNull());
+        verify(catalog, never()).listPartitionsPaged(any(), any(), any(), any());
+    }
+
+    @Test
+    void testCustomLocationOutsideTableUsesCatalogContextFileIOForPlanning() throws Exception {
+        LocalFileIO clientFileIO = LocalFileIO.create();
+        Path externalPath = new Path(tempDir.resolve("external").toUri());
+        Path dataFile = writeDataFile(clientFileIO, externalPath, "files");
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(
+                        new PagedList<>(
+                                Collections.singletonList(
+                                        partition("2025", "11", externalPath.toString())),
+                                null));
+        Path tablePath = new Path(tempDir.resolve("table").toUri());
+        TableRootOnlyLocalFileIO tableFileIO = new TableRootOnlyLocalFileIO(tablePath);
+        FileIOLoader clientLoader =
+                new FileIOLoader() {
+                    @Override
+                    public String getScheme() {
+                        return "file";
+                    }
+
+                    @Override
+                    public LocalFileIO load(Path path) {
+                        return clientFileIO;
+                    }
+                };
+        CatalogContext catalogContext = CatalogContext.create(new Options(), clientLoader, null);
+        FormatTable table =
+                createTable(
+                        tableFileIO, tablePath, partitionManager(catalog), false, catalogContext);
+
+        List<Split> splits = new FormatTableScan(table, null, null).plan().splits();
+        List<Path> plannedFiles = plannedFiles(splits);
+
+        assertThat(plannedFiles).containsExactly(dataFile);
+        assertThat(splits)
+                .allSatisfy(
+                        split ->
+                                assertThat(((FormatDataSplit) split).useCatalogContextFileIO())
+                                        .isTrue());
+        assertThat(tableFileIO.listedPaths).isEmpty();
     }
 
     @Test
@@ -505,7 +709,8 @@ class CatalogManagedPartitionScanTest {
                     List<Map<String, String>> partitions,
                     boolean ignoreIfExists,
                     @Nullable List<PartitionStatistics> statistics,
-                    boolean replaceStatistics) {
+                    boolean replaceStatistics,
+                    @Nullable List<Map<String, String>> partitionOptions) {
                 throw new UnsupportedOperationException();
             }
 
@@ -521,25 +726,38 @@ class CatalogManagedPartitionScanTest {
             Path tablePath,
             FormatTablePartitionManager partitionManager,
             boolean valueOnlyPath) {
+        return createTable(fileIO, tablePath, partitionManager, valueOnlyPath, null);
+    }
+
+    private FormatTable createTable(
+            LocalFileIO fileIO,
+            Path tablePath,
+            FormatTablePartitionManager partitionManager,
+            boolean valueOnlyPath,
+            @Nullable CatalogContext catalogContext) {
         RowType rowType =
                 RowType.builder()
                         .field("year", DataTypes.INT())
                         .field("month", DataTypes.INT())
                         .field("id", DataTypes.INT())
                         .build();
-        return FormatTable.builder()
-                .fileIO(fileIO)
-                .identifier(IDENTIFIER)
-                .rowType(rowType)
-                .partitionKeys(Arrays.asList("year", "month"))
-                .location(tablePath.toString())
-                .format(FormatTable.Format.CSV)
-                .options(
-                        Collections.singletonMap(
-                                FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
-                                Boolean.toString(valueOnlyPath)))
-                .partitionManager(partitionManager)
-                .build();
+        FormatTable.Builder builder =
+                FormatTable.builder()
+                        .fileIO(fileIO)
+                        .identifier(IDENTIFIER)
+                        .rowType(rowType)
+                        .partitionKeys(Arrays.asList("year", "month"))
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(
+                                Collections.singletonMap(
+                                        FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
+                                        Boolean.toString(valueOnlyPath)))
+                        .partitionManager(partitionManager);
+        if (catalogContext != null) {
+            builder.catalogContext(catalogContext);
+        }
+        return builder.build();
     }
 
     private FormatTable createStringPartitionTable(
@@ -584,10 +802,22 @@ class CatalogManagedPartitionScanTest {
     }
 
     private static Partition partition(String year, String month) {
+        return partition(year, month, null);
+    }
+
+    private static Partition partition(String year, String month, @Nullable String location) {
+        return partitionWithOptions(
+                year,
+                month,
+                location == null ? null : Collections.singletonMap(PATH.key(), location));
+    }
+
+    private static Partition partitionWithOptions(
+            String year, String month, @Nullable Map<String, String> options) {
         Map<String, String> spec = new LinkedHashMap<>();
         spec.put("year", year);
         spec.put("month", month);
-        return new Partition(spec, 0, 0, 0, 0, -1, false);
+        return new Partition(spec, 0, 0, 0, 0, -1, false, null, null, null, null, options);
     }
 
     private static List<Path> plannedFiles(List<Split> splits) {
@@ -600,11 +830,28 @@ class CatalogManagedPartitionScanTest {
 
     private static class TrackingLocalFileIO extends LocalFileIO {
 
-        private final List<Path> listedPaths = new ArrayList<>();
+        protected final List<Path> listedPaths = new ArrayList<>();
 
         @Override
         public FileStatus[] listStatus(Path path) throws IOException {
             listedPaths.add(path);
+            return super.listStatus(path);
+        }
+    }
+
+    private static class TableRootOnlyLocalFileIO extends TrackingLocalFileIO {
+
+        private final Path tableRoot;
+
+        private TableRootOnlyLocalFileIO(Path tableRoot) {
+            this.tableRoot = tableRoot;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            if (!FormatTablePartitionPathResolver.isWithin(path, tableRoot)) {
+                throw new AssertionError("The table FileIO must not list an external location.");
+            }
             return super.listStatus(path);
         }
     }

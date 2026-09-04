@@ -28,7 +28,7 @@ import unittest
 import zlib
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
@@ -41,7 +41,16 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
-from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobData,
+    BlobRef,
+    BlobDescriptor,
+    BlobDescriptorSerde,
+    BlobViewStruct,
+    BlobView,
+    VideoFrameDescriptor,
+)
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.utils.range import Range
@@ -82,6 +91,24 @@ def _to_url(path):
         else:
             return f"file://{path_str}"
     return str(path) if path else path
+
+
+def _fake_blob_values(reader, positions):
+    values = []
+    for position in positions:
+        length = reader.blob_lengths[position]
+        if length == -1:
+            values.append(None)
+        elif length == -2:
+            values.append(Blob.PLACE_HOLDER)
+        else:
+            values.append(Blob.from_file(
+                reader._file_io,
+                reader.file_path,
+                reader.blob_offsets[position] + 4,
+                length - 16,
+            ))
+    return values
 
 
 class RowUtilsTest(unittest.TestCase):
@@ -347,6 +374,9 @@ class BlobTest(unittest.TestCase):
                 self._input_stream = None
                 self.closed = False
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 self.closed = True
 
@@ -412,6 +442,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
                 self.closed = False
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 self.closed = True
@@ -496,6 +529,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = [offset]
                 self._input_stream = None
                 self.closed = False
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 self.closed = True
@@ -590,6 +626,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_offsets = [0]
                 self._input_stream = None
 
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
+
             def close(self):
                 pass
 
@@ -647,6 +686,9 @@ class BlobTest(unittest.TestCase):
                 self.blob_lengths = blob_lengths
                 self.blob_offsets = blob_offsets
                 self._input_stream = None
+
+            def read_values_at(self, positions):
+                return _fake_blob_values(self, positions)
 
             def close(self):
                 pass
@@ -1249,6 +1291,14 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor.deserialize(incomplete_data)
         self.assertIn("URI length exceeds data size", str(context.exception))
 
+        # Java reads uri length as a signed int and rejects negatives.
+        negative_uri = bytearray(valid_descriptor.serialize())
+        struct.pack_into('<i', negative_uri, 1 + 8, -1)
+        with self.assertRaises(ValueError) as context:
+            BlobDescriptor.deserialize(bytes(negative_uri))
+        self.assertIn("negative URI length", str(context.exception))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(bytes(negative_uri)))
+
     def test_blob_descriptor_equality_and_hashing(self):
         """Test BlobDescriptor equality and hashing."""
         # Create identical descriptors
@@ -1378,6 +1428,16 @@ class BlobTest(unittest.TestCase):
         )
         random_bytes = b"not-a-descriptor"
         fake_v1_prefix = b"\x01not-a-descriptor"
+        # v1-shaped inline payload: passes len/version/uri-length checks but fails
+        # exact total-length match, so it must not be parsed as a descriptor.
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+            + b"\xff"
+        )
         v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
 
         self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
@@ -1387,6 +1447,210 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(b"tiny"))
+
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v1_bytes))
+        self.assertIsNotNone(BlobDescriptor.parse_if_serialized(descriptor_v2.serialize()))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(random_bytes))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(fake_v1_prefix))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(v1_shaped_inline))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(b"tiny"))
+
+        video = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2)
+        video_bytes = video.serialize()
+        self.assertEqual(video_bytes, BlobDescriptor.deserialize(video_bytes).serialize())
+        self.assertEqual(video, BlobDescriptor.parse_if_serialized(video_bytes))
+        self.assertEqual(video, BlobDescriptorSerde.parse_if_serialized(video_bytes))
+        self.assertIsNone(BlobDescriptor.parse_if_serialized(video_bytes + b"x"))
+
+    def test_from_descriptor_bytes_rejects_non_descriptor_bytes(self):
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_descriptor_bytes(b"hello blob", file_io=LocalFileIO())
+        self.assertIn("Expected BlobDescriptor bytes", str(ctx.exception))
+
+    def test_from_descriptor_bytes_accepts_v1_descriptor_with_trailing_bytes(self):
+        uri = b"file:///tmp/blob.bin"
+        serialized_v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        padded = serialized_v1 + b"extra"
+        blob = Blob.from_descriptor_bytes(padded, file_io=LocalFileIO())
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_descriptor().uri, "file:///tmp/blob.bin")
+
+    def test_from_descriptor_bytes_accepts_v2_descriptor_with_trailing_bytes(self):
+        descriptor = BlobDescriptor("file:///tmp/blob.bin", 0, 10)
+        padded = descriptor.serialize() + b"extra"
+        blob = Blob.from_descriptor_bytes(padded, file_io=LocalFileIO())
+        self.assertIsInstance(blob, BlobRef)
+        self.assertEqual(blob.to_descriptor().uri, descriptor.uri)
+
+    def test_from_bytes_allow_blob_data_false_rejects_raw_bytes(self):
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_bytes(b"hello blob", allow_blob_data=False)
+        self.assertIn("Expected BlobDescriptor bytes", str(ctx.exception))
+        self.assertIn("allow_blob_data=False", str(ctx.exception))
+
+    def test_from_bytes_allow_blob_data_false_requires_file_io_for_valid_descriptor(self):
+        descriptor = BlobDescriptor("file:///tmp/blob.bin", 0, 10)
+        with self.assertRaises(ValueError) as ctx:
+            Blob.from_bytes(descriptor.serialize(), allow_blob_data=False)
+        self.assertIn("file_io is required", str(ctx.exception))
+        self.assertNotIn("allow_blob_data=False", str(ctx.exception))
+
+    def test_from_bytes_allow_blob_data_false_accepts_v1_descriptor(self):
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_bytes(serialized_v1, file_io=file_io, allow_blob_data=False)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_from_descriptor_bytes_with_v1_descriptor_bytes(self):
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            blob_path = os.path.join(tmp_dir, "blob.bin")
+            with open(blob_path, 'wb') as f:
+                f.write(data)
+            uri = blob_path.encode('utf-8')
+            serialized_v1 = (
+                bytes([1])
+                + struct.pack('<I', len(uri))
+                + uri
+                + struct.pack('<q', 0)
+                + struct.pack('<q', len(data))
+            )
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_descriptor_bytes(serialized_v1, file_io)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+    def test_from_bytes_does_not_misparse_v1_shaped_inline_payload(self):
+        # Exact-length inline bytes that match the v1 descriptor wire layout must
+        # stay as BlobData when parsed via the heuristic from_bytes entry point.
+        v1_shaped_inline = (
+            bytes([1])
+            + struct.pack('<I', 5)
+            + b"hello"
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 5)
+        )
+        blob = Blob.from_bytes(v1_shaped_inline)
+        self.assertIsInstance(blob, BlobData)
+        self.assertEqual(blob.to_data(), v1_shaped_inline)
+
+    def test_blob_descriptor_serialize_uses_current_version(self):
+        uri = b"file:///tmp/blob.bin"
+        serialized_v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        descriptor = BlobDescriptor.deserialize(serialized_v1)
+        self.assertEqual(descriptor.version, 1)
+
+        serialized = descriptor.serialize()
+        self.assertEqual(serialized[0], BlobDescriptor.CURRENT_VERSION)
+        self.assertTrue(BlobDescriptor.is_blob_descriptor(serialized))
+        self.assertEqual(
+            BlobDescriptor.deserialize(serialized),
+            BlobDescriptor("file:///tmp/blob.bin", 0, 10),
+        )
+
+    def test_blob_descriptor_fields_ignores_legacy_stored_key(self):
+        from pypaimon.common.options.core_options import CoreOptions
+
+        # Python master ignored this key and wrote dedicated .blob files.
+        # A global fallback would break rolling upgrades.
+        legacy_only = CoreOptions(
+            Options({"blob.stored-descriptor-fields": "legacy_col"}))
+        self.assertEqual(set(), legacy_only.blob_descriptor_fields())
+
+        canonical_wins = CoreOptions(Options({
+            "blob-descriptor-field": "canon",
+            "blob.stored-descriptor-fields": "legacy_col",
+        }))
+        self.assertEqual({"canon"}, canonical_wins.blob_descriptor_fields())
+
+        blank_canonical = CoreOptions(Options({
+            "blob-descriptor-field": "",
+            "blob.stored-descriptor-fields": "legacy_col",
+        }))
+        self.assertEqual(set(), blank_canonical.blob_descriptor_fields())
+
+    def test_dedicated_writer_accepts_exact_v1_descriptor_bytes(self):
+        from pypaimon.write.writer.dedicated_format_writer import (
+            DedicatedFormatWriter)
+
+        uri = b"file:///tmp/blob.bin"
+        v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 10)
+        )
+        writer = object.__new__(DedicatedFormatWriter)
+        writer.blob_inline_fields = {'payload'}
+        writer.blob_descriptor_fields = {'payload'}
+        writer.blob_view_fields = set()
+        v2 = BlobDescriptor("file:///tmp/blob.bin", 0, 10).serialize()
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v2], type=pa.large_binary())], names=['payload']))
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v1], type=pa.large_binary())], names=['payload']))
+
+        padded = pa.RecordBatch.from_arrays(
+            [pa.array([v1 + b"x"], type=pa.large_binary())], names=['payload'])
+        with self.assertRaisesRegex(ValueError, "trailing bytes"):
+            writer._validate_inline_stored_fields_input(padded)
+
+        v0 = bytes([0]) + v1[1:]
+        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 0"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([v0], type=pa.large_binary())], names=['payload']))
+
+        v3 = bytes([3]) + v2[1:]
+        with self.assertRaisesRegex(ValueError, r"in \[1, 2\], but found 3"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([v3], type=pa.large_binary())], names=['payload']))
+
+        # write_row() keeps raw bytes from _normal_row_value(); the same
+        # validator must accept exact v1 and reject padding.
+        self.assertEqual(writer._normal_row_value("payload", v1), v1)
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([v1], type=pa.large_binary())], names=["payload"]))
+
+        video_bytes = VideoFrameDescriptor("file:///v.mp4", 0, 10, 2).serialize()
+        writer._validate_inline_stored_fields_input(
+            pa.RecordBatch.from_arrays(
+                [pa.array([video_bytes], type=pa.large_binary())], names=["payload"]))
+        with self.assertRaisesRegex(ValueError, "serialized"):
+            writer._validate_inline_stored_fields_input(
+                pa.RecordBatch.from_arrays(
+                    [pa.array([video_bytes + b"x"], type=pa.large_binary())],
+                    names=["payload"]))
 
 
 class BlobEndToEndTest(unittest.TestCase):
@@ -1528,6 +1792,51 @@ class BlobEndToEndTest(unittest.TestCase):
                 [b"value"], reader.read_arrow_batch().column(0).to_pylist())
         finally:
             reader.close()
+
+    def test_blob_readers_reuse_index_by_path(self):
+        from pypaimon.read.reader.format_blob_reader import _BLOB_INDEX_CACHE
+
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = os.path.join(self.temp_dir, "cached-index.blob")
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        self._write_single_blob(path, field, b"cached-value")
+        _BLOB_INDEX_CACHE.clear()
+        input_streams = []
+        new_input_stream = file_io.new_input_stream
+
+        def counting_input_stream(file_path):
+            stream = Mock(wraps=new_input_stream(file_path))
+            input_streams.append(stream)
+            return stream
+
+        try:
+            with patch.object(
+                    file_io,
+                    "new_input_stream",
+                    side_effect=counting_input_stream,
+            ), patch.object(
+                    DeltaVarintCompressor,
+                    "decompress",
+                    wraps=DeltaVarintCompressor.decompress,
+            ) as decompress:
+                for _ in range(2):
+                    reader = FormatBlobReader(
+                        file_io,
+                        path,
+                        [field.name],
+                        [field],
+                        None,
+                        True,
+                    )
+                    reader.close()
+
+                self.assertEqual(1, decompress.call_count)
+                self.assertEqual(
+                    [2, 0],
+                    [stream.read.call_count for stream in input_streams],
+                )
+        finally:
+            _BLOB_INDEX_CACHE.clear()
 
     def test_blob_reader_falls_back_to_file_size_lookup(self):
         field = DataField(0, "blob_field", AtomicType("BLOB"))

@@ -394,12 +394,6 @@ def _validate_blob_fields(
     descriptor_fields = core_options.blob_descriptor_fields()
     view_fields = core_options.blob_view_fields()
     video_fields = core_options.video_frame_fields()
-
-    if len(video_fields) > 1:
-        raise ValueError(
-            "'video-frame-field' currently supports exactly one field, but found "
-            f"{sorted(video_fields)}."
-        )
     non_scalar_video_fields = video_fields.difference(scalar_blob_field_names)
     if non_scalar_video_fields:
         raise ValueError(

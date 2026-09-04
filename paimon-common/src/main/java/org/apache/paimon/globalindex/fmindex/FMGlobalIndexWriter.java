@@ -290,7 +290,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
         if (output != null) {
             return;
         }
-        fileName = fileWriter.newFileName("fmindex");
+        fileName = fileWriter.newFileName("fm");
         stream = fileWriter.newOutputStream(fileName);
         output = new DataOutputStream(stream);
     }

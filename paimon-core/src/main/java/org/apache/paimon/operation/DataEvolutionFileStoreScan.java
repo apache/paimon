@@ -127,14 +127,14 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     @Override
     public FileStoreScan withReadType(RowType readType) {
-        if (readType != null) {
-            List<DataField> nonSystemFields =
-                    readType.getFields().stream()
-                            .filter(f -> !SpecialFields.isSystemField(f.id()))
-                            .collect(Collectors.toList());
-            if (!nonSystemFields.isEmpty()) {
-                this.readType = readType;
-            }
+        // a type without user columns prunes nothing; assign unconditionally, this method
+        // may be recalled
+        if (readType != null
+                && readType.getFields().stream()
+                        .anyMatch(f -> !SpecialFields.isSystemField(f.id()))) {
+            this.readType = readType;
+        } else {
+            this.readType = null;
         }
         return this;
     }
@@ -257,7 +257,10 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     private Set<Integer> fileFieldIdsForEntry(ManifestEntry entry) {
         return fileFieldIdsCache.computeIfAbsent(
                 Pair.of(entry.file().schemaId(), entry.file().writeCols()),
-                pair -> fileFieldIds(this::scanTableSchema, entry.file()));
+                pair -> {
+                    TableSchema fileSchema = scanTableSchema(entry.file().schemaId());
+                    return fileFieldIds(fileSchema, entry.file());
+                });
     }
 
     @VisibleForTesting
@@ -354,6 +357,12 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             EvolutionStatsCache.FileFieldStats fileStats =
                     projectedSchemas[provider].fieldStats(allFields[j]);
             Range fileRange = file.nonNullRowIdRange();
+            // A sub-field-level data evolution file may store only part of a nested struct
+            // (e.g. nest<a> of nest<a,b>); its file type then does not equal the full target
+            // struct and fails the type check below. Skipping stats for such a field is
+            // intentional: it is left as "no stats" so no file is wrongly pruned, rather than
+            // composing partial-struct stats across files. Struct columns rarely carry useful
+            // min/max and data evolution does not push predicates down, so little is lost.
             if (tiedLatestProviders[j]
                     || !fileStats.hasStats()
                     || !fileStats.type().equalsIgnoreFieldId(targetTypes[j])

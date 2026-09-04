@@ -34,8 +34,7 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import (
     Blob,
     BlobConsumer,
-    BlobRef,
-    VideoFrameDescriptor,
+    video_payload_descriptor,
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.row_utils import (
@@ -44,6 +43,7 @@ from pypaimon.write.row_utils import (
     row_values_to_arrow_table,
 )
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.video_group import VideoGroupRollingPolicy
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 logger = logging.getLogger(__name__)
@@ -76,14 +76,8 @@ class DedicatedFormatWriter(DataWriter):
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
         self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
-        self.video_frame_fields = CoreOptions.video_frame_fields(self.options)
+        configured_video_fields = CoreOptions.video_frame_fields(self.options)
         self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
-
-        if len(self.video_frame_fields) > 1:
-            raise ValueError("'video-frame-field' currently supports exactly one field.")
-        self.video_frame_column = (
-            next(iter(self.video_frame_fields)) if self.video_frame_fields else None
-        )
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
             set(self.blob_column_names)
@@ -137,19 +131,33 @@ class DedicatedFormatWriter(DataWriter):
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set
             ]
-        if self.video_frame_column not in self.blob_file_column_names:
-            self.video_frame_column = None
+        self.video_frame_columns = [
+            column for column in self.blob_file_column_names
+            if column in configured_video_fields
+        ]
         normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
             field for field in self.table.table_schema.fields if field.name in normal_name_set
         ]
-        self.write_cols = self.normal_column_names
+        all_normal_column_names = [
+            col for col in all_column_names if col not in dedicated_set
+        ]
+        self.write_cols = (
+            None
+            if options.data_evolution_enabled(False)
+            and options.data_evolution_write_cols_optimization_enabled(False)
+            and self.normal_column_names == all_normal_column_names
+            else self.normal_column_names
+        )
 
         # State management for blob writer
         self.record_count = 0
         self.closed = False
-        self._current_video_group = None
-        self._pending_video_group_roll = False
+        self._video_group_policy = (
+            VideoGroupRollingPolicy()
+            if self.video_frame_columns
+            else None
+        )
 
         # Normal columns are buffered separately from the blob and vector
         # columns, which their own writers own.
@@ -172,7 +180,7 @@ class DedicatedFormatWriter(DataWriter):
                 blob_column=blob_column,
                 options=options,
                 blob_consumer=blob_consumer,
-                video=blob_column in self.video_frame_fields,
+                video=blob_column in configured_video_fields,
             )
 
         # Initialize vector writer when vector.file.format is configured.
@@ -227,26 +235,11 @@ class DedicatedFormatWriter(DataWriter):
         # writer, or the unfinished flush would lose its chance to be retried.
         self._require_finished_flush()
         try:
-            if self.video_frame_column is not None:
-                for index in range(data.num_rows):
-                    row = data.slice(index, 1)
-                    next_group = self._video_payload_descriptor_from_batch(row)
-                    self._roll_before_video_group(next_group)
-                    self._current_video_group = next_group
-                    self._write_batch(row)
+            if self.video_frame_columns:
+                self._write_video_batches(data)
                 return
 
-            offset = 0
-            # _write_batch keeps normal/blob/vector pending rows in lockstep
-            # and closes all writers when the common row limit is reached.
-            while offset < data.num_rows:
-                capacity = self.target_file_row_num - self.pending_row_count
-                if capacity <= 0:
-                    self._close_current_writers()
-                    capacity = self.target_file_row_num
-                length = min(capacity, data.num_rows - offset)
-                self._write_batch(data.slice(offset, length))
-                offset += length
+            self._write_bounded_batches(data)
 
         except Exception as e:
             logger.error("Exception occurs when writing data. Cleaning up.", exc_info=e)
@@ -293,12 +286,13 @@ class DedicatedFormatWriter(DataWriter):
             )
             require_columns(values_by_name, required_columns, "write_row")
 
-            if self.video_frame_column is not None:
-                next_group = self._video_payload_descriptor(
-                    values_by_name[self.video_frame_column]
+            if self.video_frame_columns:
+                next_group = self._video_group(
+                    values_by_name[column]
+                    for column in self.video_frame_columns
                 )
                 self._roll_before_video_group(next_group)
-                self._current_video_group = next_group
+                self._video_group_policy.record(next_group)
 
             if self.normal_column_names:
                 normal_values = dict(values_by_name)
@@ -311,6 +305,7 @@ class DedicatedFormatWriter(DataWriter):
                     self.table.table_schema.fields,
                     self.normal_column_names,
                 ).to_batches()[0]
+                self._validate_inline_stored_fields_input(normal_data)
                 processed_normal = self._process_normal_data(normal_data)
                 if processed_normal is not None:
                     self._normal_buffer.append(processed_normal)
@@ -340,8 +335,6 @@ class DedicatedFormatWriter(DataWriter):
 
     def _normal_row_value(self, field_name: str, value):
         if field_name in self.blob_descriptor_fields and value is not None:
-            from pypaimon.table.row.blob import Blob
-
             if isinstance(value, Blob):
                 try:
                     return value.to_descriptor().serialize()
@@ -453,16 +446,26 @@ class DedicatedFormatWriter(DataWriter):
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     )
+                descriptor_bytes = bytes(value)
+                if descriptor_bytes:
+                    version = descriptor_bytes[0]
+                    if version < 1 or version > BlobDescriptor.CURRENT_VERSION:
+                        raise ValueError(
+                            f"blob-descriptor-field requires BlobDescriptor version "
+                            f"in [1, {BlobDescriptor.CURRENT_VERSION}], but found "
+                            f"{version}."
+                        )
                 try:
-                    descriptor_bytes = bytes(value)
-                    descriptor = BlobDescriptor.deserialize(descriptor_bytes)
-                    if descriptor.serialize() != descriptor_bytes:
-                        raise ValueError("Descriptor payload contains trailing bytes.")
+                    BlobDescriptor.deserialize(descriptor_bytes)
                 except Exception as e:
                     raise ValueError(
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
+                # serialize() always emits CURRENT_VERSION, so a round-trip
+                # would reject exact v1 bytes. Check exact wire length instead.
+                if BlobDescriptor.parse_if_serialized(descriptor_bytes) is None:
+                    raise ValueError("Descriptor payload contains trailing bytes.")
 
         for field_name in self.blob_view_fields:
             if field_name not in data.schema.names:
@@ -518,45 +521,69 @@ class DedicatedFormatWriter(DataWriter):
         return self._normal_buffer.nbytes > self.target_file_size
 
     def _roll_or_defer_for_video_group(self):
-        if (
-            self.video_frame_column is not None
-            and self._current_video_group is not None
-        ):
-            self._pending_video_group_roll = True
-        else:
-            self._close_current_writers()
+        if self._video_group_policy is not None and self._video_group_policy.defer_roll():
+            return
+        self._close_current_writers()
 
     def _roll_before_video_group(self, next_group):
         if (
-            self._pending_video_group_roll
-            and self._current_video_group != next_group
+            self._video_group_policy is not None
+            and self._video_group_policy.should_roll_before(next_group)
         ):
             self._close_current_writers()
 
-    def _video_payload_descriptor_from_batch(self, data: pa.RecordBatch):
-        column_index = data.schema.get_field_index(self.video_frame_column)
-        if column_index < 0:
-            raise KeyError(
-                f"Column '{self.video_frame_column}' was not found in the record batch."
-            )
-        return self._video_payload_descriptor(data.column(column_index)[0])
+    def _write_video_batches(self, data: pa.RecordBatch):
+        for batch, group in self._video_group_runs(data):
+            self._roll_before_video_group(group)
+            self._video_group_policy.record(group)
+            if group is None:
+                self._write_bounded_batches(batch)
+            else:
+                self._write_batch(batch)
+
+    def _write_bounded_batches(self, data: pa.RecordBatch):
+        offset = 0
+        # _write_batch keeps normal/blob/vector pending rows in lockstep
+        # and closes all writers when the common row limit is reached.
+        while offset < data.num_rows:
+            capacity = self.target_file_row_num - self.pending_row_count
+            if capacity <= 0:
+                self._close_current_writers()
+                capacity = self.target_file_row_num
+            length = min(capacity, data.num_rows - offset)
+            self._write_batch(data.slice(offset, length))
+            offset += length
+
+    def _video_group_runs(self, data: pa.RecordBatch):
+        column_indices = [
+            data.schema.get_field_index(column)
+            for column in self.video_frame_columns
+        ]
+        missing = [
+            column for column, index
+            in zip(self.video_frame_columns, column_indices)
+            if index < 0
+        ]
+        if missing:
+            raise KeyError(f"Video columns were not found in the record batch: {missing}")
+        if data.num_rows == 0:
+            return
+
+        columns = [data.column(index) for index in column_indices]
+        start = 0
+        current_group = self._video_group(column[0] for column in columns)
+        for index in range(1, data.num_rows):
+            next_group = self._video_group(column[index] for column in columns)
+            if next_group != current_group:
+                yield data.slice(start, index - start), current_group
+                start = index
+                current_group = next_group
+        yield data.slice(start, data.num_rows - start), current_group
 
     @staticmethod
-    def _video_payload_descriptor(value):
-        if hasattr(value, 'as_py'):
-            value = value.as_py()
-        if value is None or value is Blob.PLACE_HOLDER:
-            return None
-        if type(value) is BlobRef:
-            descriptor = value.to_descriptor()
-            if isinstance(descriptor, VideoFrameDescriptor):
-                return descriptor.payload_descriptor
-            return None
-        if isinstance(value, (bytes, bytearray)):
-            raw = bytes(value)
-            if VideoFrameDescriptor.is_video_frame_descriptor(raw):
-                return VideoFrameDescriptor.deserialize(raw).payload_descriptor
-        return None
+    def _video_group(values):
+        group = tuple(video_payload_descriptor(value) for value in values)
+        return group if any(value is not None for value in group) else None
 
     @property
     def pending_row_count(self) -> int:
@@ -628,8 +655,8 @@ class DedicatedFormatWriter(DataWriter):
 
         self._pending_normal_meta = None
         self.record_count = 0
-        self._current_video_group = None
-        self._pending_video_group_roll = False
+        if self._video_group_policy is not None:
+            self._video_group_policy.reset()
 
         if normal_meta is not None or blob_metas or vector_metas:
             normal_name = normal_meta.file_name if normal_meta is not None else '<none>'

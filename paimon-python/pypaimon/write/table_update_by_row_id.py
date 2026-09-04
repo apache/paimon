@@ -99,6 +99,7 @@ class TableUpdateByRowId:
         self.valid_row_id_ranges = info.valid_row_id_ranges
 
         self.commit_messages: List[CommitMessage] = []
+        self._updated_first_row_ids_by_column: Dict[str, Set[int]] = {}
 
     def _snapshot_files_info(self) -> _FilesInfo:
         """Return the already loaded snapshot file index for broadcast."""
@@ -219,7 +220,24 @@ class TableUpdateByRowId:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
         data_with_first_row_id = self._calculate_first_row_id(data)
+        first_row_ids = set(
+            data_with_first_row_id[self.FIRST_ROW_ID_COLUMN].to_pylist()
+        )
+        overlapping = {}
+        for col_name in column_names:
+            ids = first_row_ids.intersection(
+                self._updated_first_row_ids_by_column.get(col_name, set()))
+            if ids:
+                overlapping[col_name] = sorted(ids)
+        if overlapping:
+            raise ValueError(
+                "Input batches contain overlapping first_row_ids by column: "
+                f"{overlapping}"
+            )
         self._write_by_first_row_id(data_with_first_row_id, column_names)
+        for col_name in column_names:
+            self._updated_first_row_ids_by_column.setdefault(
+                col_name, set()).update(first_row_ids)
 
         return self.commit_messages
 
@@ -793,10 +811,7 @@ class TableUpdateByRowId:
                     0,
                     column_name,
                     self.table.options,
-                    video=(
-                        column_name
-                        in self.table.options.video_frame_fields()
-                    ),
+                    video=column_name in self.table.options.video_frame_fields(),
                 )
                 blob_writers.append(blob_writer)
                 arrow_type = original_data.schema.field(column_name).type
@@ -840,8 +855,8 @@ class TableUpdateByRowId:
         # BlobWriter.prepare_commit preserves write/rolling order, which is required
         # for assigning continuous row-id ranges to rolled blob files.
         for file in new_files:
-            file.write_cols = file.write_cols or column_names
             if DataFileMeta.is_blob_file(file.file_name):
+                file.write_cols = file.write_cols or column_names
                 if len(file.write_cols) != 1:
                     raise RuntimeError(
                         f"Blob update file {file.file_name} should contain "

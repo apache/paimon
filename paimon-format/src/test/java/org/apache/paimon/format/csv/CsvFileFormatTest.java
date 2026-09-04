@@ -212,7 +212,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                         GenericRow.of(1, BinaryString.fromString("Alice")),
                         GenericRow.of(2, BinaryString.fromString("Bob")));
 
-        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter"}) {
+        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter", "sep"}) {
             Options options = new Options();
             options.set(fallbackKey, ";");
 
@@ -464,16 +464,16 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
 
         String[] nullLiterals = {"", "NULL", "null"};
 
-        // Create test data with null values
-        List<InternalRow> testData =
-                Arrays.asList(
-                        GenericRow.of(1, BinaryString.fromString("Alice"), null),
-                        GenericRow.of(2, null, 100),
-                        GenericRow.of(3, BinaryString.fromString("Charlie"), 300));
-
         for (String nullLiteral : nullLiterals) {
             Options options = new Options();
             options.set(CsvOptions.NULL_LITERAL, nullLiteral);
+
+            List<InternalRow> testData =
+                    Arrays.asList(
+                            GenericRow.of(1, BinaryString.fromString("Alice"), null),
+                            GenericRow.of(2, null, 100),
+                            GenericRow.of(3, BinaryString.fromString("Charlie"), 300),
+                            GenericRow.of(4, BinaryString.fromString(nullLiteral), 400));
 
             List<InternalRow> result =
                     writeThenRead(
@@ -484,7 +484,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                             "test_null_literal_" + nullLiteral.hashCode());
 
             // Verify results
-            assertThat(result).hasSize(3);
+            assertThat(result).hasSize(4);
             assertThat(result.get(0).getInt(0)).isEqualTo(1);
             assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
             assertThat(result.get(0).isNullAt(2)).isTrue();
@@ -494,6 +494,9 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
             assertThat(result.get(2).getString(1).toString()).isEqualTo("Charlie");
             assertThat(result.get(2).getInt(2)).isEqualTo(300);
+            assertThat(result.get(3).getInt(0)).isEqualTo(4);
+            assertThat(result.get(3).getString(1).toString()).isEqualTo(nullLiteral);
+            assertThat(result.get(3).getInt(2)).isEqualTo(400);
         }
     }
 
@@ -634,6 +637,44 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
         assertThat(permissiveResult.get(3).getInt(0)).isEqualTo(4);
         assertThat(permissiveResult.get(3).getString(1).toString()).isEqualTo("Jack\"o\"n");
         assertThat(permissiveResult.get(3).getDouble(2)).isEqualTo(400.81);
+    }
+
+    @Test
+    public void testCsvPermissiveKeepsFieldsAfterMalformed() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.DOUBLE());
+        Options options = new Options();
+        options.set(CsvOptions.MODE, CsvOptions.Mode.PERMISSIVE);
+        FileFormat format =
+                new CsvFileFormatFactory().create(new FormatContext(options, 1024, 1024));
+        Path testFile = new Path(parent, "permissive_first_" + UUID.randomUUID() + ".csv");
+
+        // Malformed field in the first position: PERMISSIVE must null only the
+        // offending field and keep the valid fields after it.
+        fileIO.writeFile(testFile, "x,Alice,1.5\n3,Carol,3.5", false);
+        List<InternalRow> result = read(format, rowType, rowType, testFile);
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).isNullAt(0)).isTrue();
+        assertThat(result.get(0).getString(1)).isEqualTo(fromString("Alice"));
+        assertThat(result.get(0).getDouble(2)).isEqualTo(1.5);
+        assertThat(result.get(1).getInt(0)).isEqualTo(3);
+        assertThat(result.get(1).getString(1)).isEqualTo(fromString("Carol"));
+        assertThat(result.get(1).getDouble(2)).isEqualTo(3.5);
+
+        // PERMISSIVE is the default mode, so this format is built without setting csv.mode.
+        // Covers a malformed field in the middle and two malformed fields in one row.
+        RowType midRowType = DataTypes.ROW(DataTypes.INT(), DataTypes.DOUBLE(), DataTypes.STRING());
+        FileFormat defaultFormat =
+                new CsvFileFormatFactory().create(new FormatContext(new Options(), 1024, 1024));
+        Path midFile = new Path(parent, "permissive_middle_" + UUID.randomUUID() + ".csv");
+        fileIO.writeFile(midFile, "1,oops,world\ny,bad,keep", false);
+        List<InternalRow> midResult = read(defaultFormat, midRowType, midRowType, midFile);
+        assertThat(midResult).hasSize(2);
+        assertThat(midResult.get(0).getInt(0)).isEqualTo(1);
+        assertThat(midResult.get(0).isNullAt(1)).isTrue();
+        assertThat(midResult.get(0).getString(2)).isEqualTo(fromString("world"));
+        assertThat(midResult.get(1).isNullAt(0)).isTrue();
+        assertThat(midResult.get(1).isNullAt(1)).isTrue();
+        assertThat(midResult.get(1).getString(2)).isEqualTo(fromString("keep"));
     }
 
     @Test

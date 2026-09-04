@@ -18,8 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.data.BlobConsumer;
-import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -33,18 +31,16 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
-import javax.annotation.Nullable;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
@@ -65,36 +61,31 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             long targetFileSize,
-            @Nullable BlobConsumer blobConsumer,
-            Set<String> blobInlineFields,
-            Set<String> videoFrameFields,
-            boolean writeNullOnMissingFile,
-            boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize) {
-        RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
+            BlobFileContext context) {
+        RowType blobRowType =
+                new RowType(fieldsInBlobFile(writeSchema, context.blobInlineFields()));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            boolean video = videoFrameFields.contains(blobFieldName);
+            boolean video = context.videoFrameFields().contains(blobFieldName);
             FileFormat blobFileFormat;
             if (video) {
-                if (blobConsumer != null) {
+                if (context.blobConsumer() != null) {
                     throw new IllegalArgumentException(
                             "BlobConsumer is not supported for video frame field '"
                                     + blobFieldName
                                     + "'.");
                 }
-                VideoFileFormat format = new VideoFileFormat(copyBufferSize);
-                format.setWriteNullOnMissingFile(writeNullOnMissingFile);
-                format.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
-                format.setBlobFetchMetricReporter(blobFetchMetricReporter);
+                VideoFileFormat format = new VideoFileFormat(context.copyBufferSize());
+                format.setWriteNullOnMissingFile(context.writeNullOnMissingFile());
+                format.setWriteNullOnFetchFailure(context.writeNullOnFetchFailure());
+                format.setBlobFetchMetricReporter(context.blobFetchMetricReporter());
                 blobFileFormat = format;
             } else {
-                BlobFileFormat format = new BlobFileFormat(false, copyBufferSize);
-                format.setWriteConsumer(blobConsumer);
-                format.setWriteNullOnMissingFile(writeNullOnMissingFile);
-                format.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
-                format.setBlobFetchMetricReporter(blobFetchMetricReporter);
+                BlobFileFormat format = new BlobFileFormat(false, context.copyBufferSize());
+                format.setWriteConsumer(context.blobConsumer());
+                format.setWriteNullOnMissingFile(context.writeNullOnMissingFile());
+                format.setWriteNullOnFetchFailure(context.writeNullOnFetchFailure());
+                format.setBlobFetchMetricReporter(context.blobFetchMetricReporter());
                 blobFileFormat = format;
             }
             RowType fieldType = writeSchema.project(blobFieldName);
@@ -121,7 +112,7 @@ public class MultipleBlobFileWriter implements Closeable {
                                     singletonList(blobFieldName),
                                     null,
                                     null);
-            RollingFileWriter<InternalRow, DataFileMeta> rollingWriter =
+            RollingFileWriterImpl<InternalRow, DataFileMeta> rollingWriter =
                     video
                             ? new VideoRollingFileWriter<>(writerFactory, targetFileSize)
                             : new RollingFileWriterImpl<>(
@@ -170,20 +161,14 @@ public class MultipleBlobFileWriter implements Closeable {
 
     private static class BlobProjectedFileWriter
             extends ProjectedFileWriter<
-                    RollingFileWriter<InternalRow, DataFileMeta>, List<DataFileMeta>> {
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>> {
         public BlobProjectedFileWriter(
-                RollingFileWriter<InternalRow, DataFileMeta> writer, int[] projection) {
+                RollingFileWriterImpl<InternalRow, DataFileMeta> writer, int[] projection) {
             super(writer, projection);
         }
 
-        @SuppressWarnings("unchecked")
         private List<FileWriterAbortExecutor> drainAbortExecutors() {
-            RollingFileWriter<InternalRow, DataFileMeta> writer = writer();
-            if (writer instanceof RollingFileWriterImpl) {
-                return ((RollingFileWriterImpl<InternalRow, DataFileMeta>) writer)
-                        .drainAbortExecutors();
-            }
-            return ((VideoRollingFileWriter<DataFileMeta>) writer).drainAbortExecutors();
+            return writer().drainAbortExecutors();
         }
     }
 }

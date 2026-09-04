@@ -71,18 +71,35 @@ class MultimodalConnection:
         """Create a multimodal table and optionally add initial data."""
         identifier = self._identifier(name)
         already_exists = _table_exists(self.catalog, identifier)
-        paimon_schema = _to_paimon_schema(schema, data, options, partitioned)
+        if already_exists and ignore_if_exists:
+            try:
+                return self.get_table(name)
+            except (DatabaseNotExistException, TableNotExistException):
+                pass
+        try:
+            paimon_schema = _to_paimon_schema(
+                schema, data, options, partitioned)
+            _validate_multimodal_schema(paimon_schema, identifier)
+        except ValueError:
+            if ignore_if_exists:
+                try:
+                    return self.get_table(name)
+                except (DatabaseNotExistException, TableNotExistException):
+                    pass
+            raise
 
         self._create_database_for(identifier)
+        created = False
         try:
             self.catalog.create_table(
-                identifier, paimon_schema, ignore_if_exists)
+                identifier, paimon_schema, False)
+            created = True
         except TableAlreadyExistException:
             if not ignore_if_exists:
                 raise
 
         table = self.get_table(name)
-        if data is not None and not already_exists:
+        if data is not None and created:
             table.add(data)
         return table
 
@@ -115,6 +132,49 @@ class MultimodalConnection:
             paths,
             transform=transform,
             source_options=source_options,
+        )
+
+    def load_from_lerobot(
+            self,
+            table_name: str,
+            source,
+            *,
+            batch_size: int = 1024,
+            options=None,
+            source_options=None):
+        """Import LeRobot Dataset v3 into a new Paimon table group."""
+        from pypaimon.multimodal.lerobot import load_from_lerobot
+        return load_from_lerobot(
+            self,
+            table_name,
+            source,
+            batch_size=batch_size,
+            options=options,
+            source_options=source_options,
+        )
+
+    def load_from_rosbag(
+            self,
+            table_name: str,
+            paths,
+            *,
+            transform,
+            default_typestore=None,
+            typestore_factory=None,
+            source_options=None,
+            staging=None,
+            allow_storage_fragment: bool = False):
+        """Validate and append ROS1/ROS2 transforms in one commit."""
+        from pypaimon.multimodal.rosbag import load_from_rosbag
+        return load_from_rosbag(
+            self.get_table(table_name),
+            paths,
+            transform=transform,
+            default_typestore=default_typestore,
+            typestore_factory=typestore_factory,
+            source_options=source_options,
+            staging=staging,
+            allow_storage_fragment=allow_storage_fragment,
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
@@ -150,7 +210,10 @@ def _table_exists(catalog, identifier: str) -> bool:
 
 
 def _validate_multimodal_table(table, identifier: str):
-    table_schema = table.table_schema
+    _validate_multimodal_schema(table.table_schema, identifier)
+
+
+def _validate_multimodal_schema(table_schema, identifier: str):
     options = table_schema.options
     if str(options.get("data-evolution.enabled", "false")).lower() != "true":
         raise ValueError(

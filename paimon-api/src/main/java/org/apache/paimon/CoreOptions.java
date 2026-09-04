@@ -1084,6 +1084,24 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE =
+            key("changelog-producer.ignore-update-before")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore update-before records in the changelog. "
+                                    + "When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. "
+                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_IGNORE_DELETE =
+            key("changelog-producer.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore delete records in the changelog. "
+                                    + "When set to true, DELETE (-D) records will not be written to changelog files. "
+                                    + "This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
             key("changelog-producer.row-deduplicate")
                     .booleanType()
@@ -2503,6 +2521,37 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED =
+            key("data-evolution.write-cols-optimization.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to omit write columns from data file metadata when a data "
+                                    + "evolution file contains all non-dedicated columns. Readers "
+                                    + "always support the omitted metadata, but writing it is "
+                                    + "disabled by default for compatibility with older readers.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_NESTED_FIELD_ENABLED =
+            key("data-evolution.nested-field.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable sub-field-level data evolution for nested (struct) "
+                                    + "columns. When enabled, an update that only touches some "
+                                    + "sub-fields of a nested column writes an incremental file "
+                                    + "containing just those sub-fields (aligned by row id); when "
+                                    + "disabled, the whole top-level column is rewritten. Requires "
+                                    + "data-evolution.enabled=true. Mixed-version compatibility "
+                                    + "warning: once a file's write columns record a nested "
+                                    + "sub-field path (e.g. 'nest.a'), a reader, writer, compactor, "
+                                    + "or other maintenance job on an older version cannot "
+                                    + "reconstruct it. Every such component reading or writing this "
+                                    + "table must be upgraded before enabling this option, and "
+                                    + "downgrading the binary is unsafe once such files have been "
+                                    + "committed. This option may only be enabled through a persisted "
+                                    + "table-option change; dynamic overrides and disabling or removing "
+                                    + "the option after it has been enabled are not supported.");
+
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")
                     .longType()
@@ -2695,11 +2744,14 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Specifies one scalar BLOB field whose logical rows are video frames. "
+                            "Specifies comma-separated scalar BLOB fields whose logical rows are "
+                                    + "video frames. "
                                     + "Complete encoded videos and embedded frame-run indexes are "
-                                    + "packed into '.video' files. The first version supports "
-                                    + "append-only data-evolution tables and exact "
-                                    + "VideoFrameDescriptor input.");
+                                    + "packed into '.video' files. Payload boundaries may be "
+                                    + "nested across fields, but every change must occur at a "
+                                    + "logical episode boundary. The "
+                                    + "first version supports append-only data-evolution tables "
+                                    + "and exact VideoFrameDescriptor input.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
@@ -3598,9 +3650,25 @@ public class CoreOptions implements Serializable {
         return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
     }
 
-    /** Resolve the scalar BLOB field stored as frame runs in video pack files. */
-    public Set<String> videoFrameField() {
+    /** Resolve scalar BLOB fields stored as frame runs in video pack files. */
+    public Set<String> videoFrameFields() {
         return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+    }
+
+    /**
+     * Resolve the sole scalar BLOB field stored as frame runs in video pack files.
+     *
+     * @deprecated Use {@link #videoFrameFields()}.
+     */
+    @Deprecated
+    public Optional<String> videoFrameField() {
+        Set<String> fields = videoFrameFields();
+        checkArgument(
+                fields.size() <= 1,
+                "'%s' configures multiple fields %s; use videoFrameFields().",
+                VIDEO_FRAME_FIELD.key(),
+                fields);
+        return fields.stream().findFirst();
     }
 
     /**
@@ -3812,6 +3880,14 @@ public class CoreOptions implements Serializable {
                 changelogProducer().equals(ChangelogProducer.LOOKUP),
                 deletionVectorsEnabled(),
                 options.get(FORCE_LOOKUP));
+    }
+
+    public boolean changelogProducerIgnoreUpdateBefore() {
+        return options.get(CHANGELOG_PRODUCER_IGNORE_UPDATE_BEFORE);
+    }
+
+    public boolean changelogProducerIgnoreDelete() {
+        return options.get(CHANGELOG_PRODUCER_IGNORE_DELETE);
     }
 
     public boolean changelogRowDeduplicate() {
@@ -4339,6 +4415,14 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionWriteColsOptimizationEnabled() {
+        return options.get(DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED);
+    }
+
+    public boolean dataEvolutionNestedFieldEnabled() {
+        return options.get(DATA_EVOLUTION_NESTED_FIELD_ENABLED);
     }
 
     public long dataEvolutionReassignSkipContiguousRowCount() {

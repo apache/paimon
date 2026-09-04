@@ -48,6 +48,20 @@ import static org.mockito.Mockito.when;
 class RESTTokenFileIOTest {
 
     @Test
+    void testSetFileIOCacheMaximumSize() {
+        long originalMaximumSize = RESTTokenFileIO.fileIOCacheMaximumSize();
+        try {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(2000);
+            assertThat(RESTTokenFileIO.fileIOCacheMaximumSize()).isEqualTo(2000);
+            assertThatThrownBy(() -> RESTTokenFileIO.setFileIOCacheMaximumSize(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Maximum cache size must be positive.");
+        } finally {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(originalMaximumSize);
+        }
+    }
+
+    @Test
     void testCreateBlobPresignedUrlRequiresBoundRootAndDelegates() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         BlobDescriptor descriptor =

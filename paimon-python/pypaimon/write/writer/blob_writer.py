@@ -23,13 +23,12 @@ from typing import Optional, Tuple, Dict
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.table.row.blob import (
-    Blob,
     BlobConsumer,
-    BlobRef,
-    VideoFrameDescriptor,
+    video_payload_descriptor,
 )
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.blob_file_writer import BlobFileWriter
+from pypaimon.write.writer.video_group import VideoGroupRollingPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +67,7 @@ class BlobWriter(AppendOnlyDataWriter):
 
         self.file_uuid = str(uuid.uuid4())
         self.file_count = 0
-        self._current_video_group = None
-        self._pending_video_roll = False
+        self._video_group_policy = VideoGroupRollingPolicy() if video else None
 
         logger.info(f"Initialized BlobWriter with blob file format, blob_target_file_size={self.blob_target_file_size}")
 
@@ -85,16 +83,18 @@ class BlobWriter(AppendOnlyDataWriter):
         # in-memory serialized descriptor size.
         for i in range(pending.num_rows):
             row_data = pending.slice(i, 1)
-            next_group = self._video_payload_descriptor(row_data.column(0)[0])
+            next_group = video_payload_descriptor(row_data.column(0)[0])
             self._roll_before_video_group(next_group)
             self._write_row_to_file(row_data)
             self.record_count += 1
-            self._current_video_group = next_group
+            if self._video_group_policy is not None:
+                self._video_group_policy.record(next_group)
 
             if self.rolling_file():
-                if self.video and next_group is not None:
-                    self._pending_video_roll = True
-                else:
+                if (
+                    self._video_group_policy is None
+                    or not self._video_group_policy.defer_roll()
+                ):
                     self.close_current_writer()
 
     def _write_row_to_file(self, row_data: pa.Table):
@@ -110,7 +110,7 @@ class BlobWriter(AppendOnlyDataWriter):
         self.sequence_generator.next()
 
     def write_blob(self, value, arrow_type=pa.large_binary()):
-        next_group = self._video_payload_descriptor(value)
+        next_group = video_payload_descriptor(value)
         self._roll_before_video_group(next_group)
         if self.current_writer is None:
             self.open_current_writer()
@@ -118,12 +118,14 @@ class BlobWriter(AppendOnlyDataWriter):
         self.current_writer.write_blob(self.blob_column, arrow_type, value)
         self.sequence_generator.next()
         self.record_count += 1
-        self._current_video_group = next_group
+        if self._video_group_policy is not None:
+            self._video_group_policy.record(next_group)
 
         if self.rolling_file():
-            if self.video and next_group is not None:
-                self._pending_video_roll = True
-            else:
+            if (
+                self._video_group_policy is None
+                or not self._video_group_policy.defer_roll()
+            ):
                 self.close_current_writer()
 
     def open_current_writer(self):
@@ -166,34 +168,16 @@ class BlobWriter(AppendOnlyDataWriter):
 
         self.current_writer = None
         self.current_file_path = None
-        self._current_video_group = None
-        self._pending_video_roll = False
+        if self._video_group_policy is not None:
+            self._video_group_policy.reset()
 
     def _roll_before_video_group(self, next_group):
         if (
-            self.video
+            self._video_group_policy is not None
             and self.current_writer is not None
-            and self._pending_video_roll
-            and self._current_video_group != next_group
+            and self._video_group_policy.should_roll_before(next_group)
         ):
             self.close_current_writer()
-
-    @staticmethod
-    def _video_payload_descriptor(value):
-        if hasattr(value, 'as_py'):
-            value = value.as_py()
-        if value is None or value is Blob.PLACE_HOLDER:
-            return None
-        if type(value) is BlobRef:
-            descriptor = value.to_descriptor()
-            if isinstance(descriptor, VideoFrameDescriptor):
-                return descriptor.payload_descriptor
-            return None
-        if isinstance(value, (bytes, bytearray)):
-            raw = bytes(value)
-            if VideoFrameDescriptor.is_video_frame_descriptor(raw):
-                return VideoFrameDescriptor.deserialize(raw).payload_descriptor
-        return None
 
     def _write_data_to_file(self, data):
         """
@@ -310,8 +294,8 @@ class BlobWriter(AppendOnlyDataWriter):
                 logger.warning(f"Error aborting blob writer: {e}", exc_info=e)
             self.current_writer = None
             self.current_file_path = None
-        self._current_video_group = None
-        self._pending_video_roll = False
+        if self._video_group_policy is not None:
+            self._video_group_policy.reset()
         if not self.delete_file_upon_abort():
             self._buffer.reset()
             self.committed_files.clear()

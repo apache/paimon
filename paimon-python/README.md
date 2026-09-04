@@ -31,6 +31,31 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Load LeRobot Dataset v3
+
+Install the optional dependency, then import a local directory, FileIO URI, or
+Hugging Face repository:
+
+```commandline
+pip install 'pypaimon[lerobot]'
+```
+
+```python
+import pypaimon.multimodal as pmm
+
+connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
+version_id = connection.load_from_lerobot(
+    "robot_data",
+    "/data/lerobot_dataset",
+)
+print(version_id)
+```
+
+The source dataset must be non-empty. Its schema comes from `meta/info.json`.
+Each frame becomes one row; media uses BLOB columns. The import creates frame,
+Episode, task, and version tables and tags the three component tables with the
+returned `version_id`.
+
 # HDF5 to multimodal tables
 
 HDF5 loading requires Python 3.8 or newer. Install the optional dependency and
@@ -107,6 +132,69 @@ snapshot. The API is append-only: it does not add provenance columns, keep a
 source ledger, skip files, or detect drift. Repeating the same call appends the
 rows again. It is not retry-safe because an exception from the commit can have
 an unknown result; inspect table state before deciding whether to retry.
+
+# ROSBag to multimodal tables
+
+ROSBag loading requires Python 3.10 or newer:
+
+```commandline
+pip install 'pypaimon[rosbag]'
+```
+
+Create the target table, then map ROS messages with a user transform:
+
+```python
+import pyarrow as pa
+
+
+schema = pa.schema([
+    pa.field("source", pa.string(), nullable=False),
+    pa.field("timestamp", pa.int64(), nullable=False),
+    pa.field("value", pa.string(), nullable=False),
+])
+connection.create_table("messages", schema=schema)
+
+
+def transform(reader, source):
+    rows = []
+    for connection, timestamp, rawdata in reader.messages():
+        message = reader.deserialize(rawdata, connection.msgtype)
+        rows.append({
+            "source": source.name,
+            "timestamp": timestamp,
+            "value": message.data,
+        })
+    return pa.Table.from_pylist(rows)
+
+result = connection.load_from_rosbag(
+    "messages",
+    "s3://robot-data/recordings",
+    transform=transform,
+    source_options={"fs.s3.endpoint": "https://s3.example.com"},
+)
+```
+
+ROS1 `.bag`, ROS2 SQLite3/MCAP directories, and standalone ROS2 `.mcap`
+files are supported. OSS, S3, HDFS, ViewFS, and GCS URI sources use FileIO
+and are copied in bounded chunks to a local temporary directory because
+`rosbags` requires local paths. Standalone `.db3` files are rejected by
+default; `allow_storage_fragment=True` imports the one SQLite fragment without
+claiming that the complete recording is present.
+
+Every source is scanned to EOF before its transform runs. Transform output is
+strictly checked against the target Arrow schema and stored in a temporary
+Arrow IPC file. Paimon writers are created only after every source passes, so
+source, transform, and schema errors do not create Paimon data files. This
+front-loaded validation reads each recording twice and requires temporary disk
+space. A successful call commits all sources in one snapshot.
+
+Ray uses the same validation contract. Install both extras and call
+`pypaimon.ray.load_from_rosbag`; transformed output is fully materialized in
+Ray before `write_paimon` starts:
+
+```commandline
+pip install 'pypaimon[ray,rosbag]'
+```
 
 # HDFS without a local Hadoop install
 

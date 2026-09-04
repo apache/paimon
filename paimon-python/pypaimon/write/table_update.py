@@ -648,7 +648,12 @@ class BatchTableUpdate(TableUpdate):
     def update_by_arrow_batches_with_row_id(
             self, tables: Iterable[pa.Table]
     ) -> List[CommitMessage]:
-        """Apply row-id updates from batches using one target-file index."""
+        """Apply row-id updates from batches using one target-file index.
+
+        For each updated column, batches must target disjoint ``first_row_id``
+        file groups. Conflicting overlap is rejected and all files staged by
+        earlier batches are aborted.
+        """
         return self._update_by_arrow_batches_with_row_id(
             tables, BATCH_COMMIT_IDENTIFIER)
 

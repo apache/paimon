@@ -407,7 +407,7 @@ class SplitRead(ABC):
                 row_full_fields = self._create_key_value_fields(
                     file_schema.fields)
             else:
-                row_full_fields = file_schema.fields
+                row_full_fields = file_schema.data_file_fields(None)
             format_reader = FormatRowReader(
                 self.table.file_io, file_path, read_file_fields,
                 row_full_fields,
@@ -486,7 +486,7 @@ class SplitRead(ABC):
         if CoreOptions.blob_as_descriptor(self.table.options):
             return True
         video_fields = CoreOptions.video_frame_fields(self.table.options)
-        if any(field_name in video_fields for field_name in field_names):
+        if video_fields.intersection(field_names):
             return True
         deferred_fields = getattr(self, '_deferred_blob_fields', set())
         return any(field_name in deferred_fields for field_name in field_names)
@@ -1363,7 +1363,10 @@ class DataEvolutionSplitRead(SplitRead):
                 # the file's schema version, not the current table schema.
                 # The file only contains columns from when it was written.
                 file_schema = self._resolve_schema(first_file.schema_id)
-                field_ids = [field.id for field in file_schema.fields]
+                field_ids = [
+                    field.id
+                    for field in file_schema.data_file_fields(None)
+                ]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
 

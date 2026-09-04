@@ -23,7 +23,8 @@ from pathlib import Path
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.read.reader.format_blob_reader import FormatBlobReader, VideoFileMeta
+from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+from pypaimon.read.reader.video_format_reader import VideoFileMeta
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.blob import (
     Blob,
@@ -37,6 +38,18 @@ from pypaimon.write.video_format_writer import VideoFormatWriter
 
 
 class VideoFormatTest(unittest.TestCase):
+
+    REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+    DESCRIPTOR_FIXTURE = (
+        REPOSITORY_ROOT
+        / "paimon-common/src/test/resources/org/apache/paimon/data/"
+        "video-frame-descriptor-v1.hex"
+    )
+    VIDEO_FIXTURE = (
+        REPOSITORY_ROOT
+        / "paimon-format/src/test/resources/org/apache/paimon/format/blob/"
+        "video-v1.hex"
+    )
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -68,6 +81,13 @@ class VideoFormatTest(unittest.TestCase):
             VideoFrameDescriptor.deserialize(serialized + b"x")
         with self.assertRaisesRegex(ValueError, "non-negative"):
             VideoFrameDescriptor("x", 0, 1, -1)
+
+    def test_cross_language_descriptor_fixture(self):
+        fixture = self._fixture_bytes(self.DESCRIPTOR_FIXTURE)
+        expected = VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42)
+
+        self.assertEqual(fixture, expected.serialize())
+        self.assertEqual(expected, BlobDescriptor.deserialize(fixture))
 
     def test_pack_raw_videos_and_map_frame_runs(self):
         first_bytes = b"first-mp4"
@@ -111,6 +131,42 @@ class VideoFormatTest(unittest.TestCase):
         self.assertNotEqual(frames[0].payload_descriptor, frames[2].payload_descriptor)
         self.assertIsNone(values[4])
 
+    def test_cross_language_video_v1_fixture(self):
+        fixture = self._fixture_bytes(self.VIDEO_FIXTURE)
+        fixture_path = self.root / "fixture.video"
+        fixture_path.write_bytes(fixture)
+        target = fixture_path.as_uri()
+
+        with self.file_io.new_input_stream(target) as stream:
+            meta = VideoFileMeta(stream, len(fixture))
+        self.assertEqual(7, meta.record_count)
+        self.assertEqual((0, 3, 2), meta.frame(0))
+        self.assertEqual((0, 3, 3), meta.frame(1))
+        self.assertIsNone(meta.frame(2))
+        self.assertIs(Blob.PLACE_HOLDER, meta.frame(3))
+        self.assertEqual((3, 4, 7), meta.frame(4))
+        self.assertEqual((3, 4, 8), meta.frame(5))
+        self.assertEqual((0, 3, 10), meta.frame(6))
+
+        written_target = (self.root / "written.video").as_uri()
+        writer = VideoFormatWriter(
+            self.file_io.new_output_stream(written_target),
+            file_path=written_target,
+        )
+        values = (
+            self._source_frame("a.mp4", b"abc", 2),
+            self._source_frame("a.mp4", b"abc", 3),
+            None,
+            Blob.PLACE_HOLDER,
+            self._source_frame("b.mp4", b"WXYZ", 7),
+            self._source_frame("b.mp4", b"WXYZ", 8),
+            self._source_frame("a.mp4", b"abc", 10),
+        )
+        for value in values:
+            writer.add_element(GenericRow([value], [self.field], RowKind.INSERT))
+        writer.close()
+        self.assertEqual(fixture, (self.root / "written.video").read_bytes())
+
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))
@@ -151,6 +207,11 @@ class VideoFormatTest(unittest.TestCase):
             self.assertEqual(2, reader.record_count)
             self.assertEqual([], reader.blob_lengths)
             self.assertEqual([], reader.blob_offsets)
+            values = reader.read_values_at([0, 1])
+            self.assertEqual(
+                [1, 3],
+                [value.to_descriptor().frame_index for value in values],
+            )
         finally:
             reader.close()
 
@@ -226,6 +287,14 @@ class VideoFormatTest(unittest.TestCase):
         return Blob.from_descriptor(
             self.file_io.uri_reader_factory.create(descriptor.uri), descriptor
         )
+
+    @staticmethod
+    def _fixture_bytes(path):
+        hex_value = "".join(
+            line for line in path.read_text().splitlines()
+            if not line.startswith("#")
+        )
+        return bytes.fromhex(hex_value)
 
 
 if __name__ == '__main__':

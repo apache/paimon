@@ -209,7 +209,8 @@ public class ZIndexer implements Serializable {
                     return NULL_BYTES;
                 }
                 ZOrderByteUtils.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
-                reuse.put(0, (byte) (row.getBoolean(fieldIndex) ? -127 : 0));
+                // FALSE must not encode to the all-zero NULL_BYTES sentinel.
+                reuse.put(0, (byte) (row.getBoolean(fieldIndex) ? -127 : 1));
                 return reuse.array();
             };
         }

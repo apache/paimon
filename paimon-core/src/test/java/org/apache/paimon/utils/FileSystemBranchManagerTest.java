@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
@@ -61,7 +62,7 @@ class FileSystemBranchManagerTest {
                         .build();
 
         // Create schema manager and initialize schema
-        schemaManager = new SchemaManager(fileIO, tablePath);
+        schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.createTable(schema);
 
         // Create snapshot, tag, and branch managers

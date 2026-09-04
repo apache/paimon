@@ -43,7 +43,7 @@ Create the index on a Data Evolution table with row tracking enabled:
 CALL sys.create_global_index(
     table => 'db.documents',
     index_column => 'content',
-    index_type => 'fmindex',
+    index_type => 'fm',
     options => 'fm-index.partition-row-count=100000'
 );
 ```
@@ -54,7 +54,7 @@ Drop it with the same index type:
 CALL sys.drop_global_index(
     table => 'db.documents',
     index_column => 'content',
-    index_type => 'fmindex'
+    index_type => 'fm'
 );
 ```
 

@@ -88,9 +88,17 @@ class VideoFrameCollator:
         return self._collate(decoded_rows)
 
     def close(self):
-        while self._decoders:
-            _, resource = self._decoders.popitem(last=False)
-            self._close_resource(resource)
+        resources = list(self._decoders.values())
+        self._decoders.clear()
+        first_error = None
+        for resource in resources:
+            try:
+                self._close_resource(resource)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     def __getstate__(self):
         # DataLoader spawn workers must never inherit non-picklable decoder or
@@ -180,8 +188,10 @@ class VideoFrameCollator:
             return
         # A forked worker owns duplicate descriptors for any inherited file
         # handles. Closing them here affects only the worker's copies.
-        self.close()
-        self._owner_pid = pid
+        try:
+            self.close()
+        finally:
+            self._owner_pid = pid
 
     @staticmethod
     def _close_resource(resource):

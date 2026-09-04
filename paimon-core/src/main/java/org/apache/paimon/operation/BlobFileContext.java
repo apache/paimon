@@ -77,7 +77,7 @@ public class BlobFileContext {
         return new BlobFileContext(
                 descriptorFields,
                 inlineFields,
-                options.videoFrameField(),
+                options.videoFrameFields(),
                 options.blobWriteNullOnMissingFile(),
                 options.blobWriteNullOnFetchFailure(),
                 options.blobCopyBufferSize());

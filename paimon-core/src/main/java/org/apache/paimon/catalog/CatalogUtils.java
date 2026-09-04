@@ -32,6 +32,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -168,6 +169,8 @@ public class CatalogUtils {
         if (tableType.equals(TableType.FORMAT_TABLE)) {
             validateFormatTableOptions(options, dataTokenEnabled);
         }
+        SchemaValidation.validateQueryAuthTableType(
+                tableType, options.get(CoreOptions.QUERY_AUTH_ENABLED));
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
         }
