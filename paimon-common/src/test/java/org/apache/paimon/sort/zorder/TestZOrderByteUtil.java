@@ -18,14 +18,18 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 
 import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -92,6 +96,71 @@ public class TestZOrderByteUtil {
             substringIndex++;
         }
         return result.toString();
+    }
+
+    /** Decimal z-values must order by value and stay distinct from the null sentinel. */
+    @Test
+    public void testZIndexerDecimalOrdering() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new DecimalType(20, 2)),
+                                new DataField(1, "b", new DecimalType(20, 2))));
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        // Two rows whose decimal z-values must order by value: (-1, 0) then (0, 1).
+        // Old code fed minimal two's-complement arrays into unsigned comparison,
+        // making -1 > 1 and 0 collide with the null sentinel.
+        GenericRow row1 = new GenericRow(2);
+        row1.setField(0, Decimal.fromBigDecimal(new BigDecimal("-1.00"), 20, 2));
+        row1.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        GenericRow row2 = new GenericRow(2);
+        row2.setField(0, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        row2.setField(1, Decimal.fromBigDecimal(new BigDecimal("1.00"), 20, 2));
+
+        byte[] z1 = Arrays.copyOf(indexer.index(row1), 16);
+        byte[] z2 = Arrays.copyOf(indexer.index(row2), 16);
+        // Interleaved bits: column a dominates the high bits of the first 8 bytes.
+        assertThat(compareUnsigned(z1, z2)).isLessThan(0);
+
+        GenericRow rowNull = new GenericRow(2);
+        rowNull.setField(0, null);
+        rowNull.setField(1, null);
+        byte[] zNull = Arrays.copyOf(indexer.index(rowNull), 16);
+        // The null sentinel (all-zero bytes) sorts below every real value.
+        assertThat(compareUnsigned(zNull, z1)).isLessThan(0);
+        assertThat(compareUnsigned(zNull, z2)).isLessThan(0);
+
+        // An unscaled value that does not fit in a long clamps to the top of the range:
+        // 2^63 narrowed to a long would be Long.MIN_VALUE and sink to the bottom instead.
+        GenericRow big = new GenericRow(2);
+        big.setField(0, Decimal.fromBigDecimal(new BigDecimal("92233720368547758.08"), 20, 2));
+        big.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        byte[] zBig = Arrays.copyOf(indexer.index(big), 16);
+        assertThat(compareUnsigned(zBig, z2)).isGreaterThan(0);
+
+        // Clamping stops at Long.MIN_VALUE + 1, because Long.MIN_VALUE itself encodes to the
+        // all-zero null sentinel.
+        Decimal minUnscaled =
+                Decimal.fromBigDecimal(new BigDecimal("-92233720368547758.08"), 20, 2);
+        GenericRow negativeBig = new GenericRow(2);
+        negativeBig.setField(0, minUnscaled);
+        negativeBig.setField(1, minUnscaled);
+        byte[] zNegativeBig = Arrays.copyOf(indexer.index(negativeBig), 16);
+        assertThat(compareUnsigned(zNull, zNegativeBig)).isLessThan(0);
+        assertThat(compareUnsigned(zNegativeBig, z1)).isLessThan(0);
+    }
+
+    private static int compareUnsigned(byte[] left, byte[] right) {
+        for (int i = 0; i < left.length && i < right.length; i++) {
+            int a = left[i] & 0xFF;
+            int b = right[i] & 0xFF;
+            if (a != b) {
+                return Integer.compare(a, b);
+            }
+        }
+        return Integer.compare(left.length, right.length);
     }
 
     /**
