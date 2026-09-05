@@ -27,6 +27,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import pyarrow as pa
 from parameterized import parameterized
 import torch
@@ -38,7 +39,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     PaimonLeRobotDataset,
     _episode_ranges,
     _validate_component_metadata,
-    _validate_control_row,
+    _validate_arrow_timestamps,
 )
 from pypaimon.multimodal.lerobot.metadata import (
     _VERSIONS_SCHEMA,
@@ -774,27 +775,27 @@ class TorchReadTest(unittest.TestCase):
             'episode_tasks': (('pick',),),
             'timestamp_type': pa.float32(),
         }
-        _validate_control_row(
-            {
-                'episode_index': 0,
-                'frame_index': frame_index,
-                'timestamp': pa.scalar(
-                    frame_index / 30, type=pa.float32()).as_py(),
-                'task_index': 0,
-            },
-            frame_index,
+        semantic = np.asarray([frame_index], dtype=np.int64)
+        expected_frame = np.asarray([frame_index], dtype=np.int64)
+        valid = pa.record_batch({
+            'timestamp': pa.array(
+                [frame_index / 30], type=pa.float32()),
+        })
+        _validate_arrow_timestamps(
+            valid,
+            semantic,
+            expected_frame,
             contract,
             1e-4,
         )
         with self.assertRaisesRegex(ValueError, 'metadata expects'):
-            _validate_control_row(
-                {
-                    'episode_index': 0,
-                    'frame_index': frame_index,
-                    'timestamp': float('nan'),
-                    'task_index': 0,
-                },
-                frame_index,
+            _validate_arrow_timestamps(
+                pa.record_batch({
+                    'timestamp': pa.array(
+                        [float('nan')], type=pa.float32()),
+                }),
+                semantic,
+                expected_frame,
                 contract,
                 1e-4,
             )
