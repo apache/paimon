@@ -321,31 +321,25 @@ public class BinaryStringUtils {
         return DateTimeUtils.parseTimestampData(input.toString(), precision, timeZone);
     }
 
+    private static final long[] POW10 = {1L, 10L, 100L, 1_000L, 10_000L, 100_000L, 1_000_000L};
+
     // Helper method to convert epoch to Timestamp with the provided precision.
     private static Timestamp fromMillisToTimestamp(long epoch, int precision) {
-        // Calculate milliseconds and nanoseconds from epoch based on precision
+        if (precision < 0 || precision > 9) {
+            throw new RuntimeException("Unsupported precision: " + precision);
+        }
+
+        // epoch counts units of 10^-precision seconds, so one unit is 10^(3 - precision)
+        // milliseconds: seconds at precision 0, millis at 3, micros at 6, nanos at 9.
         long millis;
         int nanosOfMillis;
-
-        switch (precision) {
-            case 0: // seconds
-                millis = epoch * 1000;
-                nanosOfMillis = 0;
-                break;
-            case 3: // milliseconds
-                millis = epoch;
-                nanosOfMillis = 0;
-                break;
-            case 6: // microseconds
-                millis = epoch / 1000;
-                nanosOfMillis = (int) ((epoch % 1000) * 1000);
-                break;
-            case 9: // nanoseconds
-                millis = epoch / 1_000_000;
-                nanosOfMillis = (int) (epoch % 1_000_000);
-                break;
-            default:
-                throw new RuntimeException("Unsupported precision: " + precision);
+        if (precision > 3) {
+            long divisor = POW10[precision - 3];
+            millis = epoch / divisor;
+            nanosOfMillis = (int) ((epoch % divisor) * 1_000_000L / divisor);
+        } else {
+            millis = epoch * POW10[3 - precision];
+            nanosOfMillis = 0;
         }
 
         // If nanoseconds is negative, remove a millisecond

@@ -52,7 +52,19 @@ class BinaryStringUtilsTest {
         // One second and one nanosecond before epoch in nanoseconds
         // The negative nanosecond gets flipped and the milliseconds decremented
         "-1000000001, 9, -1001, 999999",
-        "-86400123456, 6, -86400124, 544000"
+        "-86400123456, 6, -86400124, 544000",
+        // Intermediate precisions scale the unit by ten per step from the anchors.
+        "36000000, 4, 3600000, 0", // one hour in 0.1 ms units
+        "360000000, 5, 3600000, 0", // one hour in 0.01 ms units
+        "36000000000, 7, 3600000, 0", // one hour in 100 ns units
+        "360000000000, 8, 3600000, 0", // one hour in 10 ns units
+        "36000, 1, 3600000, 0", // one hour in 0.1 s units
+        "360000, 2, 3600000, 0", // one hour in 0.01 s units
+        // A remainder below one millisecond becomes nanos-of-millisecond
+        "17000000001, 5, 170000000, 10000", // one 0.01 ms unit past the millisecond
+        "170000000012, 8, 1700000, 120", // twelve 10 ns units past the millisecond
+        // Negative epoch: the nanos-of-millisecond offset stays positive
+        "-1700000001, 7, -170001, 999900"
     })
     void testToTimestamp(String input, int precision, long expectedMillis, int expectedNanos) {
         BinaryString binaryInput = BinaryString.fromString(input);
@@ -63,7 +75,7 @@ class BinaryStringUtilsTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2, 4, 5, 7, 8, 10, -1})
+    @ValueSource(ints = {10, -1})
     void testInvalidPrecisions(int precision) {
         BinaryString input = BinaryString.fromString("1609459200");
 
