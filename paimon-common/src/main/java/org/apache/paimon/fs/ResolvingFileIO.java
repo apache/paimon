@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
@@ -134,7 +133,6 @@ public class ResolvingFileIO implements FileIO {
                                 .createBlobPresignedUrl(tableRoot, descriptor, validity));
     }
 
-    @VisibleForTesting
     public FileIO fileIO(Path path) throws IOException {
         CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
         return fileIOMap.computeIfAbsent(

@@ -110,6 +110,11 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
             RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
             fileIO = restTokenFileIO.fileIO();
         }
+        if (fileIO instanceof ResolvingFileIO) {
+            // The upload was started on the FileIO this resolver resolved to, and
+            // multiPartUploadStore casts to that concrete type, so resolve again here.
+            fileIO = ((ResolvingFileIO) fileIO).fileIO(targetPath());
+        }
         return multiPartUploadStore(fileIO, targetPath());
     }
 }
