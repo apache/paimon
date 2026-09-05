@@ -247,6 +247,7 @@ setup(
             # by LeRobot's media dependencies.
             'datasets>=4,<4.1; python_version>="3.10"',
             'pandas>=2.2.2,<3; python_version>="3.10"',
+            'torch>=2.3; python_version>="3.10"',
             'lerobot>=0.4.4,<0.5; python_version>="3.10"',
         ],
         'ray': [

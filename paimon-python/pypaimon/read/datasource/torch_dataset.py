@@ -189,7 +189,11 @@ class TorchDataset(Dataset):
     rows into Python objects.
     """
 
-    def __init__(self, table_read: TableRead, splits: List[Split]):
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+    ):
         """
         Initialize TorchDataset.
 
@@ -197,6 +201,16 @@ class TorchDataset(Dataset):
             table_read: TableRead instance for reading data
             splits: List of splits to read
         """
+        self._initialize(table_read, splits, require_lazy=False)
+
+    @classmethod
+    def lazy(cls, table_read: TableRead, splits: List[Split]):
+        """Create a dataset which rejects materialization fallbacks."""
+        dataset = cls.__new__(cls)
+        dataset._initialize(table_read, splits, require_lazy=True)
+        return dataset
+
+    def _initialize(self, table_read, splits, require_lazy):
         self.table_read = table_read
         self.splits = splits
         self._data = None
@@ -221,8 +235,16 @@ class TorchDataset(Dataset):
                     SpecialFields.ROW_ID.name).combine_chunks()
                 if pc.count_distinct(self._row_ids).as_py() != len(
                         self._row_ids):
+                    if require_lazy:
+                        raise ValueError(
+                            "Lazy TorchDataset requires visible and unique "
+                            "_ROW_ID values.")
                     self._materialize()
         else:
+            if require_lazy:
+                raise ValueError(
+                    "Lazy TorchDataset requires row tracking, data "
+                    "evolution, a visible _ROW_ID, and supported splits.")
             self._materialize()
 
     def _supports_lazy_row_id_read(self) -> bool:
@@ -232,7 +254,9 @@ class TorchDataset(Dataset):
             return False
         if self.table_read.include_row_kind:
             return False
-        if self.table_read.nested_name_paths:
+        if self.table_read.nested_name_paths and any(
+                len(path) > 1
+                for path in self.table_read.nested_name_paths):
             return False
         if any(self._row_id_is_masked(split) for split in self.splits):
             return False
