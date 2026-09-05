@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.options.CatalogOptions;
@@ -117,6 +116,15 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        // Forward to the resolved FileIO so implementations with native multipart
+        // commits (object storage) keep them; the interface default would wrap this
+        // resolver in a rename-based committer instead.
+        return wrap(() -> fileIO(path).newTwoPhaseOutputStream(path, overwrite));
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return wrap(
@@ -125,7 +133,6 @@ public class ResolvingFileIO implements FileIO {
                                 .createBlobPresignedUrl(tableRoot, descriptor, validity));
     }
 
-    @VisibleForTesting
     public FileIO fileIO(Path path) throws IOException {
         CacheKey cacheKey = new CacheKey(path.toUri().getScheme(), path.toUri().getAuthority());
         return fileIOMap.computeIfAbsent(
