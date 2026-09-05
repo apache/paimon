@@ -439,7 +439,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                 this.readBuf.limit(0); // empty initially
                 this.phase = phase;
                 this.lastLoggedPercent = -1;
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | Error e) {
                 // a caller's try-with-resources never sees an object whose construction failed,
                 // so this is the only chance to release the file handle
                 IOUtils.closeQuietly(raf);
