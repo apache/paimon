@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.format.parquet.ParquetListLayoutResolver;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
@@ -30,7 +31,6 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -47,34 +47,38 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToPaimonField;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
-import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
 /** Util for generating parquet readers. */
 public class ParquetReaderUtil {
 
     public static List<ParquetField> buildFieldsList(
-            DataField[] readFields, MessageColumnIO columnIO, MessageType requestedFileSchema) {
+            DataField[] readFields,
+            MessageColumnIO columnIO,
+            MessageType requestedSchema,
+            ParquetListLayoutResolver.LayoutContext listLayout) {
         List<ParquetField> list = new ArrayList<>();
         for (int i = 0; i < readFields.length; i++) {
             list.add(
                     constructField(
                             readFields[i],
                             lookupColumnByName(columnIO, readFields[i].name()),
-                            requestedFileSchema.getType(i)));
+                            requestedSchema.getType(i),
+                            listLayout));
         }
         return list;
     }
 
     private static ParquetField constructField(
-            DataField dataField, ColumnIO columnIO, Type parquetType) {
+            DataField dataField,
+            ColumnIO columnIO,
+            Type parquetType,
+            ParquetListLayoutResolver.LayoutContext listLayout) {
         boolean required = columnIO.getType().getRepetition() == REQUIRED;
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
         DataType type = dataField.type();
-        String fieldName = dataField.name();
         if (type instanceof RowType) {
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             RowType rowType = (RowType) type;
@@ -88,7 +92,8 @@ public class ParquetReaderUtil {
                         constructField(
                                 children.get(i),
                                 lookupColumnByName(groupColumnIO, childName),
-                                getTypeIgnoreCase(parquetType.asGroupType(), childName)));
+                                getTypeIgnoreCase(parquetType.asGroupType(), childName),
+                                listLayout));
             }
             GroupType parquetGroup = parquetType.asGroupType();
             for (int i = children.size(); i < parquetGroup.getFieldCount(); i++) {
@@ -98,7 +103,8 @@ public class ParquetReaderUtil {
                         constructField(
                                 extraField,
                                 lookupColumnByName(groupColumnIO, extraType.getName()),
-                                extraType));
+                                extraType,
+                                listLayout));
             }
 
             return new ParquetGroupField(
@@ -119,12 +125,14 @@ public class ParquetReaderUtil {
                     constructField(
                             new DataField(0, "", mapType.getKeyType()),
                             keyValueColumnIO.getChild(0),
-                            keyValueType.getKey());
+                            keyValueType.getKey(),
+                            listLayout);
             ParquetField valueField =
                     constructField(
                             new DataField(0, "", mapType.getValueType()),
                             keyValueColumnIO.getChild(1),
-                            keyValueType.getValue());
+                            keyValueType.getValue(),
+                            listLayout);
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -143,12 +151,14 @@ public class ParquetReaderUtil {
                     constructField(
                             new DataField(0, "", multisetType.getElementType()),
                             keyValueColumnIO.getChild(0),
-                            keyValueType.getKey());
+                            keyValueType.getKey(),
+                            listLayout);
             ParquetField valueField =
                     constructField(
                             new DataField(0, "", new IntType()),
                             keyValueColumnIO.getChild(1),
-                            keyValueType.getValue());
+                            keyValueType.getValue(),
+                            listLayout);
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -163,34 +173,26 @@ public class ParquetReaderUtil {
                     type instanceof ArrayType
                             ? ((ArrayType) type).getElementType()
                             : ((VectorType) type).getElementType();
-            ColumnIO elementTypeColumnIO;
-            if (columnIO instanceof GroupColumnIO) {
-                GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
-                if (!StringUtils.isNullOrWhitespaceOnly(fieldName)) {
-                    // Column lookup is case-insensitive; the wrapper-group names can
-                    // therefore differ in case from the requested field name.
-                    while (!groupColumnIO.getName().equalsIgnoreCase(fieldName)) {
-                        groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
-                    }
-                    elementTypeColumnIO = groupColumnIO;
-                } else {
-                    if (elementType instanceof RowType) {
-                        elementTypeColumnIO = groupColumnIO;
-                    } else {
-                        elementTypeColumnIO = groupColumnIO.getChild(0);
-                    }
-                }
-            } else if (columnIO instanceof PrimitiveColumnIO) {
-                elementTypeColumnIO = columnIO;
-            } else {
-                throw new RuntimeException(String.format("Unknown ColumnIO, %s", columnIO));
-            }
+            GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
+            GroupType requestedGroup = parquetType.asGroupType();
+
+            boolean threeLevel =
+                    listLayout.isThreeLevelList(requestedGroup, groupColumnIO.getFieldPath());
+            Type requestedElementType =
+                    threeLevel
+                            ? requestedGroup.getType(0).asGroupType().getType(0)
+                            : requestedGroup.getType(0);
+
+            ColumnIO middleColumnIO = groupColumnIO.getChild(0);
+            ColumnIO elementColumnIO =
+                    threeLevel ? ((GroupColumnIO) middleColumnIO).getChild(0) : middleColumnIO;
 
             ParquetField field =
                     constructField(
                             new DataField(0, "", elementType),
-                            getArrayElementColumn(elementTypeColumnIO),
-                            parquetListElementType(parquetType.asGroupType()));
+                            elementColumnIO,
+                            requestedElementType,
+                            listLayout);
             if (repetitionLevel == field.getRepetitionLevel()) {
                 repetitionLevel = columnIO.getParent().getRepetitionLevel();
             }
@@ -269,33 +271,5 @@ public class ParquetReaderUtil {
             groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
         }
         return groupColumnIO;
-    }
-
-    public static ColumnIO getArrayElementColumn(ColumnIO columnIO) {
-        while (columnIO instanceof GroupColumnIO && !columnIO.getType().isRepetition(REPEATED)) {
-            columnIO = ((GroupColumnIO) columnIO).getChild(0);
-        }
-
-        /* Compatible with array has a standard 3-level structure:
-         *  optional group my_list (LIST) {
-         *     repeated group element {
-         *        required binary str (UTF8);
-         *     };
-         *  }
-         */
-        if (columnIO instanceof GroupColumnIO
-                && columnIO.getType().getLogicalTypeAnnotation() == null
-                && ((GroupColumnIO) columnIO).getChildrenCount() == 1
-                && !columnIO.getName().equals("array")
-                && !columnIO.getName().equals(columnIO.getParent().getName() + "_tuple")) {
-            return ((GroupColumnIO) columnIO).getChild(0);
-        }
-
-        /* Compatible with array for 2-level arrays where a repeated field is not a group:
-         *   optional group my_list (LIST) {
-         *      repeated int32 element;
-         *   }
-         */
-        return columnIO;
     }
 }

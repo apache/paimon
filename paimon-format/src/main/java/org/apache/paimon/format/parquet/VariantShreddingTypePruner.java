@@ -37,8 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isCanonicalList;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.isCanonicalList;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.resolveElementType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -194,7 +194,7 @@ public class VariantShreddingTypePruner {
             newFields.add(group.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
         }
 
-        Type elementType = parquetListElementType(listGroup);
+        Type elementType = resolveElementType(listGroup);
         Type clippedElement = clipShreddingRow(elementType.asGroupType(), node.arrayElement);
         GroupType repeated = listGroup.getType(0).asGroupType();
         GroupType clippedRepeated =
