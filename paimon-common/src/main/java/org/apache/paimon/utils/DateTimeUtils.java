@@ -349,15 +349,22 @@ public class DateTimeUtils {
                 + milli;
     }
 
+    /**
+     * Whether the string is a non-negative decimal integer that fits in an {@code int}. Callers
+     * hand the string straight to {@link Integer#parseInt}, so the range matters as much as the
+     * characters.
+     */
     private static boolean isInteger(String s) {
-        boolean isInt = s.length() > 0;
+        if (s.isEmpty() || s.length() > 10) {
+            return false;
+        }
         for (int i = 0; i < s.length(); i++) {
             if (s.charAt(i) < '0' || s.charAt(i) > '9') {
-                isInt = false;
-                break;
+                return false;
             }
         }
-        return isInt;
+        // ten digits still reach past Integer.MAX_VALUE
+        return s.length() < 10 || Long.parseLong(s) <= Integer.MAX_VALUE;
     }
 
     private static boolean isIllegalDate(int y, int m, int d) {
