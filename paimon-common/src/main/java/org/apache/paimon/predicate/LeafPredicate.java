@@ -35,6 +35,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -262,9 +267,28 @@ public class LeafPredicate implements Predicate {
         }
         List<Object> serialized = new ArrayList<>(literals.size());
         for (Object lit : literals) {
-            serialized.add(PredicateBuilder.convertToJavaObject(type, lit));
+            serialized.add(toJsonFriendly(PredicateBuilder.convertToJavaObject(type, lit)));
         }
         return serialized;
+    }
+
+    /**
+     * Temporal and decimal literals are carried as strings: reading the JSON back into the untyped
+     * literal list materializes Jackson's JavaTimeModule array/number forms as {@code List}/{@code
+     * Double}, which {@link PredicateBuilder#convertJavaObject} rejects, and the double
+     * materialization of a decimal is lossy beyond ~15 significant digits.
+     */
+    private static Object toJsonFriendly(Object literal) {
+        if (literal instanceof LocalDate
+                || literal instanceof LocalTime
+                || literal instanceof LocalDateTime
+                || literal instanceof Instant) {
+            return literal.toString();
+        }
+        if (literal instanceof BigDecimal) {
+            return ((BigDecimal) literal).toPlainString();
+        }
+        return literal;
     }
 
     protected static List<Object> deserializeLiterals(DataType type, List<Object> literals) {
@@ -277,8 +301,35 @@ public class LeafPredicate implements Predicate {
                 converted.add(literal);
                 continue;
             }
-            converted.add(PredicateBuilder.convertJavaObject(type, literal));
+            converted.add(
+                    PredicateBuilder.convertJavaObject(type, parseJsonLiteral(type, literal)));
         }
         return converted;
+    }
+
+    /**
+     * Converts a literal materialized from JSON back into the object {@link
+     * PredicateBuilder#convertJavaObject} accepts, undoing {@link #toJsonFriendly}. Anything else
+     * is returned unchanged so that convertJavaObject reports it.
+     */
+    private static Object parseJsonLiteral(DataType type, Object literal) {
+        if (!(literal instanceof String)) {
+            return literal;
+        }
+        String text = (String) literal;
+        switch (type.getTypeRoot()) {
+            case DATE:
+                return LocalDate.parse(text);
+            case TIME_WITHOUT_TIME_ZONE:
+                return LocalTime.parse(text);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return LocalDateTime.parse(text);
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Instant.parse(text);
+            case DECIMAL:
+                return new BigDecimal(text);
+            default:
+                return literal;
+        }
     }
 }
