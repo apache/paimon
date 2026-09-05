@@ -95,6 +95,38 @@ class CachingFileIOTest {
     }
 
     @Test
+    void testMemoryModeServesFreshContentAfterInPlaceOverwrite() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path consumer = new Path("consumer-1");
+
+        // Same path overwritten in place with new content and a new mtime; the
+        // memory cache must not keep serving the first version's blocks.
+        delegate.addFile("consumer-1", "v1cc".getBytes(), 1000L);
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v1cc");
+        }
+        // one remote open, after which the first version's blocks are cached
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(1);
+
+        delegate.addFile("consumer-1", "v2cc".getBytes(), 2000L);
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v2cc");
+        }
+        // the new version has a different key, forcing a fresh remote read
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(2);
+    }
+
+    @Test
     void testCreateBlobPresignedUrlDelegates() throws IOException {
         FileIO delegate = mock(FileIO.class);
         CachingFileIO cachingIO =
@@ -812,7 +844,8 @@ class CachingFileIOTest {
         CountDownLatch openGate = new CountDownLatch(1);
         delegate.blockOpensUntil(openGate);
 
-        // the file size is resolved lazily here, as CachingFileIO does for the memory cache
+        // the file size is resolved lazily here, exercising the lazy path that only
+        // the testing constructor still uses
         CachingSeekableInputStream stream =
                 new CachingSeekableInputStream(
                         delegate,
@@ -994,6 +1027,7 @@ class CachingFileIOTest {
 
         private final Map<String, byte[]> files = new HashMap<>();
         private final Map<String, Long> reportedLengths = new HashMap<>();
+        private final Map<String, Long> mtimes = new HashMap<>();
         // concurrent so the thread-safety tests below can count from several reader threads
         private final Map<String, Integer> fileStatusCalls = new ConcurrentHashMap<>();
         private final Map<String, Integer> newInputStreamCalls = new ConcurrentHashMap<>();
@@ -1036,6 +1070,11 @@ class CachingFileIOTest {
         static int globalInputStreamCallCount(String name) {
             AtomicInteger count = GLOBAL_INPUT_STREAM_CALLS.get(name);
             return count == null ? 0 : count.get();
+        }
+
+        void addFile(String name, byte[] data, long mtime) {
+            files.put(name, data);
+            mtimes.put(name, mtime);
         }
 
         void addFile(String name, byte[] data) {
@@ -1123,7 +1162,7 @@ class CachingFileIOTest {
 
                 @Override
                 public long getModificationTime() {
-                    return 0;
+                    return mtimes.getOrDefault(name, 0L);
                 }
             };
         }

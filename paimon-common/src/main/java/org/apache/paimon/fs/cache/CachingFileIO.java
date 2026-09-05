@@ -137,12 +137,16 @@ public class CachingFileIO implements FileIO {
         if (c == null) {
             return delegate.newInputStream(path);
         }
+        FileStatus status = delegate.getFileStatus(path);
         if (c instanceof LocalDiskCacheManager) {
-            FileStatus status = delegate.getFileStatus(path);
             return new CachingSeekableInputStream(
-                    delegate, path, c, diskCacheKey(path, status), status.getLen());
+                    delegate, path, c, versionedCacheKey(path, status), status.getLen());
         }
-        return new CachingSeekableInputStream(delegate, path, c, cacheNamespace + ":" + path, -1);
+        // Version the key by len+mtime as the disk branch does, otherwise an in-place
+        // overwrite of a whitelisted path keeps serving the cached content. The namespace
+        // prefix stays, since SharedCacheManager invalidation matches on it.
+        String cacheKey = cacheNamespace + ":" + versionedCacheKey(path, status);
+        return new CachingSeekableInputStream(delegate, path, c, cacheKey, status.getLen());
     }
 
     @Override
@@ -281,7 +285,7 @@ public class CachingFileIO implements FileIO {
                 });
     }
 
-    private static String diskCacheKey(Path path, FileStatus status) {
+    private static String versionedCacheKey(Path path, FileStatus status) {
         return path + "\0" + status.getLen() + "\0" + status.getModificationTime();
     }
 
