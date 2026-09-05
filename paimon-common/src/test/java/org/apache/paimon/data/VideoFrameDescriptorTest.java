@@ -92,8 +92,8 @@ public class VideoFrameDescriptorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("non-negative");
 
-        // A uriLength near Integer.MAX_VALUE: uriLength + 3 * Long.BYTES wrapped negative,
-        // so the length check passed and deserialize went on to allocate ~2GB.
+        // The old check let this through because uriLength + 3 * Long.BYTES wrapped
+        // negative, and deserialize went on to allocate ~2GB.
         byte[] hostileUriLength = descriptor.serialize();
         ByteBuffer.wrap(hostileUriLength)
                 .order(ByteOrder.LITTLE_ENDIAN)
