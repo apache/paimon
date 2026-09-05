@@ -24,6 +24,7 @@ import math
 import operator
 from array import array
 
+import numpy as np
 import pyarrow as pa
 
 from pypaimon.catalog.catalog_exception import TagNotExistException
@@ -777,56 +778,221 @@ def _semantic_index_mapping(
     ]
     if control_contract["subtask_names"] is not None:
         projection.append("subtask_index")
-    index_dataset = _lazy_torch_dataset_for_splits(
-        read_table, projection, splits)
-    if len(index_dataset) != size:
-        raise ValueError(
-            "Paimon index contains %d rows, expected %d."
-            % (len(index_dataset), size))
-
-    positions = None
-    batch_size = 65536
-    for begin in range(0, size, batch_size):
-        end = min(begin + batch_size, size)
-        rows = index_dataset.__getitems__(range(begin, end))
-        if len(rows) != end - begin:
-            raise ValueError(
-                "Paimon index read returned %d rows for range [%d, %d)."
-                % (len(rows), begin, end))
-        for offset, row in enumerate(rows):
-            physical = begin + offset
-            try:
-                index = operator.index(row["index"])
-            except (KeyError, TypeError) as error:
-                raise ValueError(
-                    "Paimon LeRobot index must contain integers.") from error
-            if index < 0 or index >= size:
-                raise ValueError(
-                    "Paimon LeRobot index %d is outside [0, %d)."
-                    % (index, size))
-            _validate_control_row(
-                row, index, control_contract, tolerance_s)
-            if positions is None and index == physical:
-                continue
-            if positions is None:
-                positions = array("q", [-1]) * size
-                for previous in range(physical):
-                    positions[previous] = previous
-            if positions[index] >= 0:
-                raise ValueError(
-                    "Paimon LeRobot index contains duplicate value %d."
-                    % index)
-            positions[index] = physical
-
-    if positions is not None and any(position < 0 for position in positions):
-        raise ValueError("Paimon LeRobot index is not contiguous.")
+    builder = read_table.new_read_builder().with_projection(projection)
+    batches = builder.new_read().to_arrow_batch_reader(splits)
+    positions = _semantic_positions_from_arrow(
+        batches, size, control_contract, tolerance_s)
     return _LeRobotIndexMapping(
         table_identifier,
         snapshot_id,
         control_contract["signature"],
         tolerance_s,
-        range(size) if positions is None else positions,
+        positions,
     )
+
+
+def _semantic_positions_from_arrow(
+        batches, size, control_contract, tolerance_s):
+    """Validate controls and map semantic indices to physical ordinals."""
+    positions = None
+    position_values = None
+    episode_ranges = control_contract["episode_ranges"]
+    episode_starts = None
+    episode_ends = None
+    if episode_ranges is not None:
+        episode_starts = np.fromiter(
+            (begin for begin, _ in episode_ranges),
+            dtype=np.int64,
+            count=len(episode_ranges),
+        )
+        episode_ends = np.fromiter(
+            (end for _, end in episode_ranges),
+            dtype=np.int64,
+            count=len(episode_ranges),
+        )
+
+    task_names = control_contract["task_names"]
+    valid_tasks = np.asarray(
+        sorted(task_names) if task_names is not None else [],
+        dtype=np.int64,
+    )
+    task_indices_by_name = {}
+    for index, name in (task_names or {}).items():
+        task_indices_by_name.setdefault(name, []).append(index)
+    episode_tasks = control_contract["episode_tasks"]
+    restricted_episodes = None
+    allowed_task_pairs = None
+    pair_stride = int(valid_tasks[-1]) + 1 if len(valid_tasks) else 1
+    if episode_tasks is not None:
+        restricted_episodes = np.zeros(
+            len(episode_tasks), dtype=np.bool_)
+        pairs = []
+        for episode, allowed in enumerate(episode_tasks):
+            if allowed is None:
+                continue
+            restricted_episodes[episode] = True
+            for task in allowed:
+                task_indices = task_indices_by_name.get(task)
+                if task_indices is None:
+                    raise ValueError(
+                        "LeRobot episode %d refers to an unknown task: %r."
+                        % (episode, task))
+                pairs.extend(
+                    episode * pair_stride + task_index
+                    for task_index in task_indices)
+        allowed_task_pairs = np.asarray(
+            sorted(set(pairs)), dtype=np.int64)
+
+    subtask_names = control_contract["subtask_names"]
+    valid_subtasks = np.asarray(
+        sorted(subtask_names) if subtask_names is not None else [],
+        dtype=np.int64,
+    )
+
+    physical_begin = 0
+    for batch in batches:
+        count = batch.num_rows
+        if count == 0:
+            continue
+        physical_end = physical_begin + count
+        if physical_end > size:
+            raise ValueError(
+                "Paimon index contains more than %d rows." % size)
+
+        semantic = _required_integer_arrow_column(batch, "index")
+        bad = _first_true((semantic < 0) | (semantic >= size))
+        if bad is not None:
+            raise ValueError(
+                "Paimon LeRobot index %d is outside [0, %d)."
+                % (semantic[bad], size))
+        physical = np.arange(
+            physical_begin, physical_end, dtype=np.int64)
+        if positions is not None or not np.array_equal(semantic, physical):
+            if np.unique(semantic).size != count:
+                raise ValueError(
+                    "Paimon LeRobot index contains duplicate values.")
+            if positions is None:
+                positions = array("q", [-1]) * size
+                position_values = np.frombuffer(
+                    positions, dtype=np.int64)
+                position_values[:physical_begin] = np.arange(
+                    physical_begin, dtype=np.int64)
+            bad = _first_true(position_values[semantic] >= 0)
+            if bad is not None:
+                raise ValueError(
+                    "Paimon LeRobot index contains duplicate value %d."
+                    % semantic[bad])
+            position_values[semantic] = physical
+
+        if episode_ranges is not None:
+            expected_episode = np.searchsorted(
+                episode_ends, semantic, side="right")
+            expected_frame = semantic - episode_starts[expected_episode]
+            _require_equal_control(
+                batch, "episode_index", semantic, expected_episode)
+            _require_equal_control(
+                batch, "frame_index", semantic, expected_frame)
+            _validate_arrow_timestamps(
+                batch,
+                semantic,
+                expected_frame,
+                control_contract,
+                tolerance_s,
+            )
+
+            actual_task = _required_integer_arrow_column(
+                batch, "task_index")
+            bad = _first_true(~np.isin(actual_task, valid_tasks))
+            if bad is not None:
+                raise ValueError(
+                    "Paimon task_index at LeRobot index %d is absent from "
+                    "metadata: %r."
+                    % (semantic[bad], actual_task[bad]))
+            if restricted_episodes is not None:
+                task_pairs = expected_episode * pair_stride + actual_task
+                allowed = np.isin(task_pairs, allowed_task_pairs)
+                bad = _first_true(
+                    restricted_episodes[expected_episode] & ~allowed)
+                if bad is not None:
+                    raise ValueError(
+                        "Paimon task at LeRobot index %d is not assigned to "
+                        "episode %d."
+                        % (semantic[bad], expected_episode[bad]))
+
+            if subtask_names is not None:
+                actual_subtask = _required_integer_arrow_column(
+                    batch, "subtask_index")
+                bad = _first_true(~np.isin(actual_subtask, valid_subtasks))
+                if bad is not None:
+                    raise ValueError(
+                        "Paimon subtask_index at LeRobot index %d is absent "
+                        "from metadata: %r."
+                        % (semantic[bad], actual_subtask[bad]))
+
+        physical_begin = physical_end
+
+    if physical_begin != size:
+        raise ValueError(
+            "Paimon index contains %d rows, expected %d."
+            % (physical_begin, size))
+    if positions is not None:
+        missing = _first_true(position_values < 0)
+        if missing is not None:
+            raise ValueError(
+                "Paimon LeRobot index is not contiguous; missing value %d."
+                % missing)
+        return positions
+    return range(size)
+
+
+def _required_integer_arrow_column(batch, name):
+    field_index = batch.schema.get_field_index(name)
+    if field_index < 0:
+        raise ValueError("Paimon LeRobot index is missing %s." % name)
+    values = batch.column(field_index)
+    if values.null_count or not pa.types.is_integer(values.type):
+        raise ValueError("Paimon LeRobot %s must contain integers." % name)
+    return values.to_numpy(zero_copy_only=False).astype(
+        np.int64, copy=False)
+
+
+def _first_true(mask):
+    matches = np.flatnonzero(mask)
+    return None if not matches.size else int(matches[0])
+
+
+def _require_equal_control(batch, name, semantic, expected):
+    actual = _required_integer_arrow_column(batch, name)
+    bad = _first_true(actual != expected)
+    if bad is not None:
+        raise ValueError(
+            "Paimon %s at LeRobot index %d is %r, metadata expects %r."
+            % (name, semantic[bad], actual[bad], expected[bad]))
+
+
+def _validate_arrow_timestamps(
+        batch, semantic, expected_frame, contract, tolerance_s):
+    field_index = batch.schema.get_field_index("timestamp")
+    if field_index < 0:
+        raise ValueError("Paimon LeRobot index is missing timestamp.")
+    values = batch.column(field_index)
+    is_numeric = pa.types.is_integer(values.type) or \
+        pa.types.is_floating(values.type)
+    if values.null_count or not is_numeric:
+        raise ValueError("Paimon LeRobot timestamp must be numeric.")
+    actual = values.to_numpy(zero_copy_only=False)
+    expected = expected_frame.astype(np.float64) / contract["fps"]
+    expected = expected.astype(actual.dtype, copy=False)
+    actual64 = actual.astype(np.float64, copy=False)
+    expected64 = expected.astype(np.float64, copy=False)
+    invalid = ~np.isfinite(actual64)
+    outside_tolerance = np.abs(actual64 - expected64) > tolerance_s
+    bad = _first_true(invalid | outside_tolerance)
+    if bad is not None:
+        raise ValueError(
+            "Paimon timestamp at LeRobot index %d is %r, metadata expects "
+            "%r."
+            % (semantic[bad], actual[bad], expected[bad]))
 
 
 def _reuse_index_mapping(
@@ -851,70 +1017,6 @@ def _reuse_index_mapping(
         raise ValueError(
             "index_mapping was validated with a looser tolerance_s.")
     return mapping
-
-
-def _validate_control_row(row, index, contract, tolerance_s):
-    ranges = contract["episode_ranges"]
-    if ranges is None:
-        return
-    episode = bisect.bisect_right(contract["episode_ends"], index)
-    begin, _ = ranges[episode]
-    frame = index - begin
-    _validate_int_control(row, "episode_index", index, episode)
-    _validate_int_control(row, "frame_index", index, frame)
-
-    expected_timestamp = pa.scalar(
-        frame / contract["fps"], type=contract["timestamp_type"]).as_py()
-    try:
-        timestamp = float(row["timestamp"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(
-            "Paimon timestamp at LeRobot index %d must be numeric." % index
-        ) from error
-    if not math.isfinite(timestamp) \
-            or abs(timestamp - expected_timestamp) > tolerance_s:
-        raise ValueError(
-            "Paimon timestamp at LeRobot index %d is %r, metadata expects %r."
-            % (index, timestamp, expected_timestamp))
-
-    task_names = contract["task_names"]
-    task_index = _control_int(row, "task_index", index)
-    task = None if task_names is None else task_names.get(task_index)
-    if task is None:
-        raise ValueError(
-            "Paimon task_index at LeRobot index %d is absent from metadata: "
-            "%r." % (index, task_index))
-    episode_tasks = contract["episode_tasks"]
-    allowed = episode_tasks[episode] if episode_tasks is not None else None
-    if allowed is not None and task not in allowed:
-        raise ValueError(
-            "Paimon task at LeRobot index %d is not assigned to episode %d: "
-            "%r." % (index, episode, task))
-
-    subtask_names = contract["subtask_names"]
-    if subtask_names is not None:
-        subtask_index = _control_int(row, "subtask_index", index)
-        if subtask_index not in subtask_names:
-            raise ValueError(
-                "Paimon subtask_index at LeRobot index %d is absent from "
-                "metadata: %r." % (index, subtask_index))
-
-
-def _validate_int_control(row, field, index, expected):
-    actual = _control_int(row, field, index)
-    if actual != expected:
-        raise ValueError(
-            "Paimon %s at LeRobot index %d is %r, metadata expects %r."
-            % (field, index, actual, expected))
-
-
-def _control_int(row, field, index):
-    try:
-        return operator.index(row[field])
-    except (KeyError, TypeError) as error:
-        raise ValueError(
-            "Paimon %s at LeRobot index %d must be an integer."
-            % (field, index)) from error
 
 
 def _read_rows(dataset, indices, index_positions):

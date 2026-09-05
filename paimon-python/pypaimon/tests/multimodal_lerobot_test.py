@@ -42,6 +42,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _image_tensor,
     _selected_episodes,
     _select_manifest,
+    _semantic_positions_from_arrow,
 )
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
@@ -102,6 +103,68 @@ def _catalog_arrow(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    @staticmethod
+    def _control_contract(size):
+        return {
+            "episode_ranges": [(0, size)],
+            "episode_ends": [size],
+            "fps": 10,
+            "task_names": {0: "pick"},
+            "subtask_names": None,
+            "episode_tasks": (("pick",),),
+            "timestamp_type": pa.float32(),
+            "signature": ("test",),
+        }
+
+    @staticmethod
+    def _control_table(order):
+        return pa.table({
+            "index": pa.array(order, type=pa.int64()),
+            "episode_index": pa.array(
+                [0] * len(order), type=pa.int64()),
+            "frame_index": pa.array(order, type=pa.int64()),
+            "timestamp": pa.array(
+                [index / 10 for index in order], type=pa.float32()),
+            "task_index": pa.array(
+                [0] * len(order), type=pa.int64()),
+        })
+
+    def test_arrow_semantic_positions_support_multiple_batches(self):
+        table = self._control_table([0, 1, 2, 3, 4])
+
+        positions = _semantic_positions_from_arrow(
+            table.to_batches(max_chunksize=2),
+            5,
+            self._control_contract(5),
+            1e-4,
+        )
+
+        self.assertIsInstance(positions, range)
+        self.assertEqual([0, 1, 2, 3, 4], list(positions))
+
+    def test_arrow_rows_honor_nonidentity_semantic_mapping(self):
+        table = self._control_table([2, 0, 3, 1])
+        positions = _semantic_positions_from_arrow(
+            table.to_batches(max_chunksize=2),
+            4,
+            self._control_contract(4),
+            1e-4,
+        )
+
+        self.assertIsInstance(positions, array)
+        self.assertEqual([1, 3, 0, 2], list(positions))
+
+    def test_arrow_semantic_positions_detect_cross_batch_duplicates(self):
+        table = self._control_table([0, 1, 1])
+
+        with self.assertRaisesRegex(ValueError, "duplicate value 1"):
+            _semantic_positions_from_arrow(
+                table.to_batches(max_chunksize=2),
+                3,
+                self._control_contract(3),
+                1e-4,
+            )
 
     def test_dataset_selects_latest_or_requested_published_version(self):
         manifests = [
