@@ -93,11 +93,11 @@ public class VectorizedDeltaByteArrayReader extends VectorizedReaderBase
 
             c.putByteArray(rowId + i, bytes, offset, length);
             // Keep the value we just assembled rather than a view over the output vector's
-            // buffer. The record reader resets that vector between batches, and reset() zeroes
-            // the buffer, so a view into it would hand NUL bytes to the next value's prefix
-            // whenever a page spans more than one batch. skipBinary avoids the same hazard by
-            // alternating two vectors; here the array is already a fresh copy, so wrapping it
-            // costs nothing.
+            // buffer. The record reader reuses that vector across batches, rewriting it
+            // from offset 0, so a view into it would hand the next batch's bytes to the
+            // next value's prefix whenever a page spans more than one batch. skipBinary
+            // avoids the same hazard by alternating two vectors; here the array is
+            // already a fresh copy, so wrapping it costs nothing.
             previous = ByteBuffer.wrap(bytes);
             currentRow++;
         }
