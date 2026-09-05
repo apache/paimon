@@ -26,7 +26,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.schema.ColumnOrder;
-import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -209,168 +208,195 @@ public class ParquetSchemaConverterTest {
         assertThat(expected).isEqualTo(convertToPaimonRowType(messageType));
     }
 
-    // Rule 5: canonical three-level list (list -> element) with a primitive element.
+    /**
+     * Backward-compatibility Rules 1, 2 and 4: two-level lists (a repeated primitive, a repeated
+     * struct, and a legacy {@code array} wrapper) infer a non-nullable element, because a {@code
+     * REPEATED} node is never null. This matches parquet-cpp's {@code SchemaManifest} contract and
+     * keeps the inferred schema symmetric with what Paimon's own writer produces.
+     *
+     * <p>Rule 5 (three-level wrapper) is the contrast case: the wrapper child's own nullability is
+     * preserved, so an {@code OPTIONAL} element stays nullable.
+     */
     @Test
-    public void testParquetListElementTypeThreeLevelPrimitive() {
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(
-                                Types.buildGroup(Type.Repetition.REPEATED)
-                                        .optional(INT32)
-                                        .named("element")
-                                        .named("list"))
-                        .named("arr");
+    public void testInferTwoLevelListElementNotNull() {
+        // Rule 1: optional group my_list (LIST) { repeated int32 element; }
+        MessageType rule1 =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.primitive(INT32, Type.Repetition.REPEATED)
+                                                .named("element")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(DataTypes.INT().notNull())))))
+                .isEqualTo(convertToPaimonRowType(rule1));
 
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(true);
-        assertThat(element.getName()).isEqualTo("element");
+        // Rule 2: optional group my_list (LIST) { repeated group element { optional int32 x;
+        // optional int32 y; } }
+        MessageType rule2 =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.OPTIONAL)
+                                                                .named("x")
+                                                                .withId(2))
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.OPTIONAL)
+                                                                .named("y")
+                                                                .withId(3))
+                                                .named("element")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        RowType rule2Element =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(2, "x", DataTypes.INT()),
+                                new DataField(3, "y", DataTypes.INT())));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(rule2Element.notNull())))))
+                .isEqualTo(convertToPaimonRowType(rule2));
+
+        // Rule 4: optional group my_list (LIST) { repeated group array { optional int32 foo; } }
+        MessageType rule4 =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.OPTIONAL)
+                                                                .named("foo")
+                                                                .withId(2))
+                                                .named("array")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        RowType rule4Element = new RowType(Arrays.asList(new DataField(2, "foo", DataTypes.INT())));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(rule4Element.notNull())))))
+                .isEqualTo(convertToPaimonRowType(rule4));
+
+        // Rule 5 (contrast): optional group my_list (LIST) { repeated group bag { optional int32
+        // array_element; } } keeps the OPTIONAL element nullable.
+        MessageType rule5 =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.OPTIONAL)
+                                                                .named("array_element")
+                                                                .withId(2))
+                                                .named("bag")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0, "my_list", new ArrayType(DataTypes.INT())))))
+                .isEqualTo(convertToPaimonRowType(rule5));
     }
 
-    // Rule 5: canonical three-level list (list -> element) with a group element.
+    /**
+     * Backward-compatibility Rule 3: an annotated list whose element is a nested legacy list infers
+     * {@code ARRAY<ARRAY<INT NOT NULL> NOT NULL>}.
+     */
     @Test
-    public void testParquetListElementTypeThreeLevelGroupElement() {
-        GroupType elementStruct =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .optional(INT32)
-                        .named("x")
-                        .optional(INT32)
-                        .named("y")
-                        .named("element");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(
-                                Types.buildGroup(Type.Repetition.REPEATED)
-                                        .addField(elementStruct)
-                                        .named("list"))
-                        .named("arr");
+    public void testInferNestedLegacyList() {
+        // Rule 3: optional group my_list (LIST) { repeated group element { repeated int32 array; }
+        // }
+        MessageType annotated =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.REPEATED)
+                                                                .named("array")
+                                                                .withId(2))
+                                                .named("element")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(
+                                                        new ArrayType(DataTypes.INT().notNull())
+                                                                .notNull())))))
+                .isEqualTo(convertToPaimonRowType(annotated));
 
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(false);
-        assertThat(element.getName()).isEqualTo("element");
-        assertThat(element.asGroupType().getFieldCount()).isEqualTo(2);
-    }
-
-    // Rule 1: a repeated primitive field is itself the element type.
-    @Test
-    public void testParquetListElementTypeTwoLevelPrimitive() {
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .repeated(INT32)
-                        .named("element")
-                        .named("arr");
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(true);
-        assertThat(element.getName()).isEqualTo("element");
-    }
-
-    // Rule 2: a repeated group with multiple fields is itself the element type.
-    @Test
-    public void testParquetListElementTypeTwoLevelGroupElement() {
-        GroupType elementStruct =
-                Types.buildGroup(Type.Repetition.REPEATED)
-                        .optional(INT32)
-                        .named("x")
-                        .optional(INT32)
-                        .named("y")
-                        .named("element");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(elementStruct)
-                        .named("arr");
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(false);
-        assertThat(element.getName()).isEqualTo("element");
-        assertThat(element.asGroupType().getFieldCount()).isEqualTo(2);
-    }
-
-    // Rule 3: a repeated group with a single repeated field is the element type.
-    @Test
-    public void testParquetListElementTypeLegacyNestedRepeatedWrapper() {
-        GroupType wrapper =
-                Types.buildGroup(Type.Repetition.REPEATED)
-                        .repeated(INT32)
-                        .named("array")
-                        .named("array");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(wrapper)
-                        .named("arr");
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(false);
-        assertThat(element.getName()).isEqualTo("array");
-        assertThat(element.asGroupType().getFieldCount()).isEqualTo(1);
-        assertThat(element.asGroupType().getType(0).getName()).isEqualTo("array");
-    }
-
-    // Rule 4: a repeated group named "array" with one field is the element type.
-    @Test
-    public void testParquetListElementTypeLegacyArrayWrapper() {
-        GroupType arrayGroup =
-                Types.buildGroup(Type.Repetition.REPEATED)
-                        .optional(INT32)
-                        .named("foo")
-                        .named("array");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(arrayGroup)
-                        .named("arr");
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(false);
-        assertThat(element.getName()).isEqualTo("array");
-    }
-
-    // Rule 4: a repeated group named "<list>_tuple" with one field is the element type.
-    @Test
-    public void testParquetListElementTypeLegacyListTupleWrapper() {
-        GroupType tupleGroup =
-                Types.buildGroup(Type.Repetition.REPEATED)
-                        .required(BINARY)
-                        .as(LogicalTypeAnnotation.stringType())
-                        .named("str")
-                        .named("my_list_tuple");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(tupleGroup)
-                        .named("my_list");
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(false);
-        assertThat(element.getName()).isEqualTo("my_list_tuple");
-        assertThat(element.asGroupType().getFieldCount()).isEqualTo(1);
-        assertThat(element.asGroupType().getType(0).getName()).isEqualTo("str");
-    }
-
-    // Rule 5: a repeated group with a single non-repeated field that is neither "array" nor
-    // "<list>_tuple" unwraps to the single child (e.g. Hive's bag/array_element encoding).
-    @Test
-    public void testParquetListElementTypeLegacyBagWrapper() {
-        GroupType bagGroup =
-                Types.buildGroup(Type.Repetition.REPEATED)
-                        .optional(INT32)
-                        .named("array_element")
-                        .named("bag");
-        GroupType list =
-                Types.buildGroup(Type.Repetition.OPTIONAL)
-                        .as(LogicalTypeAnnotation.listType())
-                        .addField(bagGroup)
-                        .named("arr");
-
-        Assertions.assertThat(ParquetSchemaConverter.isThreeLevelList(list)).isTrue();
-        Assertions.assertThat(ParquetSchemaConverter.isCanonicalList(list)).isFalse();
-
-        Type element = ParquetSchemaConverter.parquetListElementType(list);
-        assertThat(element.isPrimitive()).isEqualTo(true);
-        assertThat(element.getName()).isEqualTo("array_element");
+        // Without the annotation: repeated group my_list { repeated group array { optional int32
+        // x; } } infers ARRAY<ROW<x INT> NOT NULL>.
+        MessageType unannotated =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.REPEATED)
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .addField(
+                                                        Types.primitive(
+                                                                        INT32,
+                                                                        Type.Repetition.OPTIONAL)
+                                                                .named("x")
+                                                                .withId(2))
+                                                .named("array")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        RowType unannotatedElement =
+                new RowType(Arrays.asList(new DataField(2, "x", DataTypes.INT())));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(unannotatedElement.notNull())))))
+                .isEqualTo(convertToPaimonRowType(unannotated));
     }
 }
