@@ -34,10 +34,12 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnresolvedOrdinals}
+import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, DescribeRelation, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.physical.Distribution
 // NOTE: `MergeRows` / `MergeRows.Keep` were introduced in Spark 3.4. We access them only via
 // reflection inside the `mergeRowsKeep*` method bodies so that loading `Spark3Shim` does not fail
@@ -52,12 +54,13 @@ import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
-import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
+import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, CreateTableAsSelectExec, DescribeTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
 
+import java.net.URI
 import java.util.{Map => JMap}
 
 class Spark3Shim extends SparkShim {
@@ -94,6 +97,42 @@ class Spark3Shim extends SparkShim {
       partitions: Array[Transform],
       properties: JMap[String, String]): Table = {
     tableCatalog.createTable(ident, schema, partitions, properties)
+  }
+
+  override def withStorageLocation(
+      storage: CatalogStorageFormat,
+      locationUri: Option[URI]): CatalogStorageFormat =
+    storage.copy(locationUri = locationUri)
+
+  override def overwriteByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      deleteExpr: Expression,
+      writeOptions: Map[String, String]): OverwriteByExpression =
+    OverwriteByExpression.byName(table, query, deleteExpr, writeOptions)
+
+  override def overwritePartitionsDynamicByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      writeOptions: Map[String, String]): OverwritePartitionsDynamic =
+    OverwritePartitionsDynamic.byName(table, query, writeOptions)
+
+  override def createCreateTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      ifNotExists: Boolean): SparkPlan = {
+    CreateTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      ifNotExists)
   }
 
   override def createReplaceTableAsSelectExec(
@@ -416,6 +455,31 @@ class Spark3Shim extends SparkShim {
       parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
     throw new UnsupportedOperationException(
       "SQL user-defined functions (CREATE FUNCTION ... RETURN) require Spark 4.0 or later.")
+
+  // Spark 4.0/4.1 have no `CreateTableLike` logical plan; `CREATE TABLE LIKE` still arrives as the
+  // V1 `CreateTableLikeCommand`, which `RewriteCreateTableLikeCommand` matches directly.
+  override def createTableLikeParts(plan: LogicalPlan)
+      : Option[(Seq[String], Seq[String], Option[String], Option[String], Map[String, String], Boolean, Boolean)] =
+    None
+
+  // Spark 3.x/4.0/4.1 keep `DESCRIBE ... PARTITION` inside `DescribeRelation`; see
+  // `describeRelationPartitionSpec`.
+  override def describeTablePartition(
+      plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])] = None
+
+  override def describeRelationPartitionSpec(plan: DescribeRelation): Map[String, String] =
+    plan.partitionSpec
+
+  override def createDescribeTableExec(
+      output: Seq[Attribute],
+      catalogName: String,
+      identifier: Identifier,
+      table: Table,
+      isExtended: Boolean): SparkPlan =
+    DescribeTableExec(output, table, isExtended)
+
+  // Spark 3.x has no schema evolution for MERGE INTO.
+  override def mergeNeedsSchemaEvolution(merge: MergeIntoTable): Boolean = false
 }
 
 object Spark3Shim {

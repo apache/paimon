@@ -31,7 +31,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
 
   private def scanReadSchemaOf(df: org.apache.spark.sql.DataFrame): StructType = {
     df.queryExecution.optimizedPlan
-      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.readSchema() }
+      .collectFirst { case r: DataSourceV2ScanRelation => r.scan.readSchema() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the optimized plan"))
   }
 
@@ -1121,7 +1121,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
 
     val df = sql("SELECT try_variant_get(v, '$.age', 'int') FROM T")
     val desc = df.queryExecution.optimizedPlan
-      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.description() }
+      .collectFirst { case r: DataSourceV2ScanRelation => r.scan.description() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the plan"))
 
     if (variantPushDownEnabled) {

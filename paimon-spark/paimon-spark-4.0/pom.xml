@@ -124,9 +124,13 @@ under the License.
 
         <!-- test -->
 
+        <!-- The 4.0-compiled build of `paimon-spark-ut`'s test sources. The baseline build cannot
+             be used here: Spark 4.2 turned `QueryTest` into a trait (SPARK-55910), so a
+             4.2-compiled `PaimonSparkTestBase` carries it as an interface and fails to load on a
+             4.0/4.1 runtime. See `paimon-spark-ut-4.0/pom.xml`. -->
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
+            <artifactId>paimon-spark-ut-4.0_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
