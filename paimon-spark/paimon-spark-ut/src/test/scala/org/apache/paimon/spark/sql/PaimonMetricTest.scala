@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
+import org.apache.paimon.spark.PaimonMetrics.{RESULTED_RECORD_COUNT, RESULTED_TABLE_FILES, RESULTED_TABLE_FILES_SIZE, SCANNED_SNAPSHOT_ID, SKIPPED_MANIFESTS, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
@@ -53,7 +53,8 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
           s: String,
           scannedSnapshotId: Long,
           skippedTableFiles: Long,
-          resultedTableFiles: Long): Unit = {
+          resultedTableFiles: Long,
+          resultedRecordCount: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
         scan.inputPartitions
@@ -61,17 +62,24 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
         Assertions.assertEquals(scannedSnapshotId, metric(metrics, SCANNED_SNAPSHOT_ID))
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
         Assertions.assertEquals(resultedTableFiles, metric(metrics, RESULTED_TABLE_FILES))
+        Assertions.assertEquals(resultedRecordCount, metric(metrics, RESULTED_RECORD_COUNT))
+        Assertions.assertTrue(metric(metrics, RESULTED_TABLE_FILES_SIZE) > 0)
       }
 
-      checkMetrics(s"SELECT * FROM T", 3, 0, 5)
-      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 3, 2, 3)
+      checkMetrics(s"SELECT * FROM T", 3, 0, 5, 5)
+      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 3, 2, 3, 3)
 
       sql(s"DELETE FROM T WHERE pt = 'p1'")
-      checkMetrics(s"SELECT * FROM T", 4, 0, 4)
+      checkMetrics(s"SELECT * FROM T", 4, 0, 4, 4)
 
       sql("CALL sys.compact(table => 'T', partitions => 'pt=\"p2\"')")
-      checkMetrics(s"SELECT * FROM T", 5, 0, 2)
-      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 5, 1, 1)
+      checkMetrics(s"SELECT * FROM T", 5, 0, 2, 4)
+      checkMetrics(s"SELECT * FROM T WHERE pt = 'p2'", 5, 1, 1, 3)
+
+      // a scan without any filter cannot prune any manifest
+      val fullScan = getPaimonScan(s"SELECT * FROM T")
+      fullScan.inputPartitions
+      Assertions.assertEquals(0, metric(fullScan.reportDriverMetrics(), SKIPPED_MANIFESTS))
     }
   }
 

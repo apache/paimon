@@ -26,20 +26,30 @@ public class ScanStats {
     private final long duration;
     private final long scannedSnapshotId;
     private final long scannedManifests;
+    private final long skippedManifests;
     private final long skippedTableFiles;
     private final long resultedTableFiles;
+    // the unit is bytes
+    private final long resultedTableFilesSize;
+    private final long resultedRecordCount;
 
     public ScanStats(
             long duration,
             long scannedSnapshotId,
             long scannedManifests,
+            long skippedManifests,
             long skippedTableFiles,
-            long resultedTableFiles) {
+            long resultedTableFiles,
+            long resultedTableFilesSize,
+            long resultedRecordCount) {
         this.duration = duration;
         this.scannedSnapshotId = scannedSnapshotId;
         this.scannedManifests = scannedManifests;
+        this.skippedManifests = skippedManifests;
         this.skippedTableFiles = skippedTableFiles;
         this.resultedTableFiles = resultedTableFiles;
+        this.resultedTableFilesSize = resultedTableFilesSize;
+        this.resultedRecordCount = resultedRecordCount;
     }
 
     @VisibleForTesting
@@ -53,6 +63,11 @@ public class ScanStats {
     }
 
     @VisibleForTesting
+    protected long getSkippedManifests() {
+        return skippedManifests;
+    }
+
+    @VisibleForTesting
     protected long getSkippedTableFiles() {
         return skippedTableFiles;
     }
@@ -60,6 +75,16 @@ public class ScanStats {
     @VisibleForTesting
     protected long getResultedTableFiles() {
         return resultedTableFiles;
+    }
+
+    @VisibleForTesting
+    protected long getResultedTableFilesSize() {
+        return resultedTableFilesSize;
+    }
+
+    @VisibleForTesting
+    protected long getResultedRecordCount() {
+        return resultedRecordCount;
     }
 
     @VisibleForTesting

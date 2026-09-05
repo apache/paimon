@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileEntry.Identifier;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -319,13 +320,26 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     manifestsResult.allManifests.stream()
                             .mapToLong(f -> f.numAddedFiles() - f.numDeletedFiles())
                             .sum();
+            // for DELTA and CHANGELOG scan modes the result contains both ADD and DELETE entries,
+            // only ADD entries will actually be read, so size and record count only count them
+            long resultedTableFilesSize = 0L;
+            long resultedRecordCount = 0L;
+            for (ManifestEntry entry : result) {
+                if (entry.kind() == FileKind.ADD) {
+                    resultedTableFilesSize += entry.file().fileSize();
+                    resultedRecordCount += entry.file().rowCount();
+                }
+            }
             scanMetrics.reportScan(
                     new ScanStats(
                             scanDuration,
                             snapshot == null ? 0 : snapshot.id(),
                             manifests.size(),
+                            manifestsResult.allManifests.size() - manifests.size(),
                             allDataFiles - result.size(),
-                            result.size()));
+                            result.size(),
+                            resultedTableFilesSize,
+                            resultedRecordCount));
         }
 
         return new Plan() {
