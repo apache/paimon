@@ -132,7 +132,7 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
             fileIndexResult =
                     fileIndexResult == null
                             ? visitNotEqual(fieldRef, key)
-                            : fileIndexResult.or(visitNotEqual(fieldRef, key));
+                            : fileIndexResult.and(visitNotEqual(fieldRef, key));
         }
         return fileIndexResult;
     }
