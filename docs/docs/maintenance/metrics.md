@@ -71,6 +71,11 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Number of scanned manifest files in the last scan.</td>
         </tr>
         <tr>
+            <td>lastScanSkippedManifests</td>
+            <td>Gauge</td>
+            <td>Number of manifest files skipped by manifest level filtering in the last scan.</td>
+        </tr>
+        <tr>
             <td>lastScanSkippedTableFiles</td>
             <td>Gauge</td>
             <td>Total skipped table files in the last scan.</td>
@@ -79,6 +84,16 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>lastScanResultedTableFiles</td>
             <td>Gauge</td>
             <td>Resulted table files in the last scan.</td>
+        </tr>
+        <tr>
+            <td>lastScanResultedTableFilesSize</td>
+            <td>Gauge</td>
+            <td>Total size in bytes of the resulted table files to be read in the last scan.</td>
+        </tr>
+        <tr>
+            <td>lastScanResultedRecordCount</td>
+            <td>Gauge</td>
+            <td>Total number of records in the resulted table files to be read in the last scan.</td>
         </tr>
     </tbody>
 </table>
