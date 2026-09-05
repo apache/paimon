@@ -18,8 +18,10 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sst.BlockCache;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -29,6 +31,7 @@ import java.io.File;
 import java.io.RandomAccessFile;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -65,6 +68,38 @@ public class CacheManagerTest {
                 assertThat(segment.getHeapMemory()).isEqualTo(value);
             }
         }
+    }
+
+    @Test
+    void testRejectedPageNotRetainedByBlockCache() throws Exception {
+        int pageSize = 1024;
+        int hotPages = 64;
+        int totalPages = 10_000;
+        byte[] data = new byte[pageSize * totalPages];
+        org.apache.paimon.fs.Path file = new org.apache.paimon.fs.Path("file");
+        AtomicInteger invalidatedPages = new AtomicInteger();
+        CacheManager cacheManager =
+                new CacheManager(MemorySize.ofKibiBytes(64), 0) {
+                    @Override
+                    public void invalidPage(CacheKey key) {
+                        invalidatedPages.incrementAndGet();
+                        super.invalidPage(key);
+                    }
+                };
+        BlockCache blockCache =
+                new BlockCache(file, new ByteArraySeekableStream(data), cacheManager);
+
+        for (int round = 0; round < 100; round++) {
+            for (int page = 0; page < hotPages; page++) {
+                blockCache.getBlock(page * pageSize, pageSize, bytes -> bytes, false);
+            }
+        }
+        for (int page = hotPages; page < totalPages; page++) {
+            blockCache.getBlock(page * pageSize, pageSize, bytes -> bytes, false);
+        }
+
+        blockCache.close();
+        assertThat(invalidatedPages).hasValue(hotPages);
     }
 
     @Test
