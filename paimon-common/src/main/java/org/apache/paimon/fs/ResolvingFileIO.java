@@ -117,6 +117,15 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        // Forward to the resolved FileIO so implementations with native multipart
+        // commits (object storage) keep them; the interface default would wrap this
+        // resolver in a rename-based committer instead.
+        return wrap(() -> fileIO(path).newTwoPhaseOutputStream(path, overwrite));
+    }
+
+    @Override
     public String createBlobPresignedUrl(
             Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
         return wrap(
