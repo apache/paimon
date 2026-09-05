@@ -51,6 +51,7 @@ import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
 
 import java.io.Serializable;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -144,6 +145,12 @@ public class ZIndexer implements Serializable {
 
     /** Type Visitor to generate function map from row column to z-index. */
     public static class TypeVisitor implements DataTypeVisitor<ZProcessFunction>, Serializable {
+
+        // Clamp bounds for the unscaled value of a non-compact decimal: clamping keeps the
+        // ordering non-decreasing where narrowing to a long would wrap. The lower bound stops
+        // one above Long.MIN_VALUE, whose z-value is the all-zero null sentinel.
+        private static final BigInteger MIN_UNSCALED = BigInteger.valueOf(Long.MIN_VALUE + 1);
+        private static final BigInteger MAX_UNSCALED = BigInteger.valueOf(Long.MAX_VALUE);
 
         private final int fieldIndex;
         private final int varTypeSize;
@@ -241,13 +248,23 @@ public class ZIndexer implements Serializable {
                     InternalRow.createFieldGetter(decimalType, fieldIndex);
             return (row, reuse) -> {
                 Object o = fieldGetter.getFieldOrNull(row);
-                return o == null
-                        ? NULL_BYTES
-                        : ZOrderByteUtils.byteTruncateOrFill(
-                                        ((Decimal) o).toUnscaledBytes(),
-                                        PRIMITIVE_BUFFER_SIZE,
-                                        reuse)
-                                .array();
+                if (o == null) {
+                    return NULL_BYTES;
+                }
+                Decimal decimal = (Decimal) o;
+                // toUnscaledBytes is a variable-length two's-complement array, which is not
+                // order-preserving under the unsigned comparison a z-value gets. Map the
+                // unscaled value through the same sign-flipped long transform as BIGINT,
+                // clamped into the long range for the decimals that do not fit it.
+                long unscaled =
+                        decimal.isCompact()
+                                ? decimal.toUnscaledLong()
+                                : decimal.toBigDecimal()
+                                        .unscaledValue()
+                                        .max(MIN_UNSCALED)
+                                        .min(MAX_UNSCALED)
+                                        .longValue();
+                return ZOrderByteUtils.longToOrderedBytes(unscaled, reuse).array();
             };
         }
 
