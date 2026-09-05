@@ -121,7 +121,9 @@ public class ChainTableSnapshotExpireTest {
                 new Schema(
                         RowType.of(
                                         new org.apache.paimon.types.DataType[] {
-                                            DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()
+                                            DataTypes.STRING(),
+                                            DataTypes.STRING(),
+                                            DataTypes.STRING()
                                         },
                                         new String[] {"dt", "pk", "v"})
                                 .getFields(),
@@ -140,7 +142,8 @@ public class ChainTableSnapshotExpireTest {
                         SchemaChange.setOption(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true"),
                         SchemaChange.setOption(
                                 CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot"),
-                        SchemaChange.setOption(CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta"),
+                        SchemaChange.setOption(
+                                CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "delta"),
                         SchemaChange.setOption(
                                 CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$dt"),
                         SchemaChange.setOption(
