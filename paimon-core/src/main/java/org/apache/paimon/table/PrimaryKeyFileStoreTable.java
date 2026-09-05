@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.MergeTreeSplitGenerator;
 import org.apache.paimon.table.source.PrimaryKeyBatchScan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
@@ -213,8 +214,21 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     protected Runnable newExpireRunnable() {
         if (coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             return null;
-        } else {
-            return super.newExpireRunnable();
         }
+
+        Runnable expire = super.newExpireRunnable();
+        CoreOptions options = coreOptions();
+        if (expire == null || !ChainTableUtils.isScanFallbackDeltaBranch(options)) {
+            return expire;
+        }
+
+        ExpireSnapshots snapshotBranchExpire =
+                switchToBranch(options.scanFallbackSnapshotBranch())
+                        .newExpireSnapshots()
+                        .config(options.expireConfig());
+        return () -> {
+            expire.run();
+            snapshotBranchExpire.expire();
+        };
     }
 }
