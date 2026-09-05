@@ -354,6 +354,68 @@ class LeRobotValidationTest(unittest.TestCase):
             torch.testing.assert_close(
                 normalized[key], single[key].float().div(255))
 
+    def test_dataset_retries_image_fetch_and_decode_together(self):
+        try:
+            from PIL import Image
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        output = io.BytesIO()
+        Image.fromarray(
+            np.full((4, 5, 3), 64, dtype=np.uint8), mode="RGB"
+        ).save(output, format="JPEG")
+        descriptor = b"serialized blob descriptor"
+        rows = [{
+            "index": 0,
+            "task_index": 0,
+            "observation.image": descriptor,
+        }]
+
+        class Rows:
+
+            def __getitems__(self, positions):
+                return [dict(rows[position]) for position in positions]
+
+        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset._total_frames = 1
+        dataset.episodes = None
+        dataset._selected_ranges = None
+        dataset._delta_indices = {}
+        dataset._dataset = Rows()
+        dataset._index_positions = range(1)
+        dataset._delta_dataset = None
+        dataset._file_io = Mock()
+        dataset._image_keys = ["observation.image"]
+        dataset.blob_parallelism = 1
+        dataset._task_names = {0: "task"}
+        dataset._subtask_names = None
+        dataset._features = {
+            "index": {"dtype": "int64", "shape": [1]},
+            "task_index": {"dtype": "int64", "shape": [1]},
+            "observation.image": {
+                "dtype": "image", "shape": [4, 5, 3]},
+        }
+        dataset.return_uint8 = True
+        dataset.image_transforms = None
+        sources = []
+
+        def resolve(_file_io, row_groups, image_keys, _parallelism):
+            sources.append(row_groups[0][0][image_keys[0]])
+            row_groups[0][0][image_keys[0]] = \
+                b"not a JPEG" if len(sources) == 1 else output.getvalue()
+
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset._resolve_image_blobs",
+                side_effect=resolve) as fetch:
+            sample = dataset[0]
+
+        self.assertEqual(2, fetch.call_count)
+        self.assertEqual([descriptor, descriptor], sources)
+        self.assertEqual(torch.uint8, sample["observation.image"].dtype)
+        self.assertEqual([3, 4, 5], list(
+            sample["observation.image"].shape))
+
     def test_dataset_return_uint8_requires_bool(self):
         published = (
             Mock(),

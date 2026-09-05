@@ -57,6 +57,8 @@ _TORCH_DTYPE_NAMES = {
     "float64": "float64",
 }
 
+_IMAGE_READ_ATTEMPTS = 3
+
 
 class _LeRobotIndexMapping:
     """Reusable semantic-index mapping bound to one table snapshot."""
@@ -298,24 +300,35 @@ class PaimonLeRobotDataset:
             self._delta_dataset, delta_indices, self._index_positions) \
             if delta_indices else {}
 
-        _resolve_image_blobs(
-            self._file_io,
-            [base_rows, delta_rows],
-            self._image_keys,
-            self.blob_parallelism,
-        )
         _materialize_labels(
             base_rows, self._task_names, self._subtask_names)
-        converted = {
-            position: _torch_row(
-                row, self._features, self.return_uint8)
-            for position, row in base_rows.items()
-        }
-        converted.update({
-            position: _torch_row(
-                row, self._features, self.return_uint8)
-            for position, row in delta_rows.items()
-        })
+        row_groups = [base_rows, delta_rows]
+        image_sources = _image_blob_sources(
+            row_groups, self._image_keys)
+        for attempt in range(_IMAGE_READ_ATTEMPTS):
+            if attempt:
+                _restore_image_blob_sources(image_sources)
+            try:
+                _resolve_image_blobs(
+                    self._file_io,
+                    row_groups,
+                    self._image_keys,
+                    self.blob_parallelism,
+                )
+                converted = {
+                    position: _torch_row(
+                        row, self._features, self.return_uint8)
+                    for position, row in base_rows.items()
+                }
+                converted.update({
+                    position: _torch_row(
+                        row, self._features, self.return_uint8)
+                    for position, row in delta_rows.items()
+                })
+                break
+            except OSError:
+                if attempt + 1 == _IMAGE_READ_ATTEMPTS:
+                    raise
 
         import torch
         duplicates = _duplicate_indices(plans)
@@ -1067,6 +1080,21 @@ def _resolve_image_blobs(
     for key in used:
         for row, body in zip(targets[key], bodies[key]):
             row[key] = body
+
+
+def _image_blob_sources(row_groups, image_keys):
+    return [
+        (row, key, row[key])
+        for rows in row_groups
+        for row in rows.values()
+        for key in image_keys
+        if key in row
+    ]
+
+
+def _restore_image_blob_sources(sources):
+    for row, key, descriptor in sources:
+        row[key] = descriptor
 
 
 def _materialize_labels(rows, task_names, subtask_names):
