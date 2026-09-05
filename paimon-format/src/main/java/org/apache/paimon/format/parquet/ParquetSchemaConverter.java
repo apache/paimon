@@ -462,10 +462,18 @@ public class ParquetSchemaConverter {
                     parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
         } else {
             GroupType groupType = parquetType.asGroupType();
-            if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
+            if (ParquetListLayoutResolver.isList(groupType)) {
+                Type parquetElementType = ParquetListLayoutResolver.resolveElementType(groupType);
+                DataType elementDataType = convertToPaimonField(parquetElementType).type();
+                if (!ParquetListLayoutResolver.isThreeLevelList(groupType)) {
+                    // Rules 1-4: the repeated node itself is the element. A REPEATED node is
+                    // never null, so the element type is not nullable.
+                    elementDataType = elementDataType.notNull();
+                }
+                paimonDataType = new ArrayType(elementDataType);
+            } else if (ParquetListLayoutResolver.isLegacyNestedList(groupType)) {
                 paimonDataType =
-                        new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType)).type());
+                        new ArrayType(convertToPaimonField(groupType.getType(0)).type().notNull());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -488,22 +496,6 @@ public class ParquetSchemaConverter {
         }
 
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
-    }
-
-    public static Type parquetListElementType(GroupType listType) {
-        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
-        if (level == 3) {
-            // Level 3 representation of list type.
-            // List type should only have one middle group type, which is repeated, and one element
-            // type, which is optional.
-            return listType.getType(0).asGroupType().getType(0);
-        } else if (level == 2) {
-            // Level 2 representation of list type
-            return listType.getType(0);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Parquet list type only have two level representation and three level representation.");
-        }
     }
 
     public static Pair<Type, Type> parquetMapKeyValueType(GroupType mapType) {
