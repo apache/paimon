@@ -315,6 +315,19 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public void restore(@Nullable Long nextSnapshotId) {
+        if (nextSnapshotId != null) {
+            Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
+                LOG.warn(
+                        "The restored snapshot with id {} has expired. "
+                                + "The earliest snapshot is {}. "
+                                + "Falling back to starting scanner.",
+                        nextSnapshotId,
+                        earliestSnapshotId);
+                this.nextSnapshotId = null;
+                return;
+            }
+        }
         this.nextSnapshotId = nextSnapshotId;
     }
 
