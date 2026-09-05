@@ -109,8 +109,16 @@ public class VideoFrameDescriptor extends BlobDescriptor {
             throw invalidPayload("missing magic header");
         }
         int uriLength = buffer.getInt();
-        if (uriLength < 0 || buffer.remaining() < uriLength + 3 * Long.BYTES) {
-            throw invalidPayload("invalid URI length: " + uriLength);
+        // checked by comparison and subtraction: uriLength + 3 * Long.BYTES wraps negative
+        // for a uriLength near Integer.MAX_VALUE
+        if (uriLength < 0) {
+            throw invalidPayload("negative URI length: " + uriLength);
+        }
+        if (uriLength > buffer.remaining()) {
+            throw invalidPayload("URI length exceeds data size");
+        }
+        if (buffer.remaining() - uriLength < 3 * Long.BYTES) {
+            throw invalidPayload("missing offset/length/frame index");
         }
 
         byte[] uriBytes = new byte[uriLength];
