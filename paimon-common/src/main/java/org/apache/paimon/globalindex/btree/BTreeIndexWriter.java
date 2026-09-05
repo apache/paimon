@@ -100,7 +100,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeabl
             this.comparator = keySerializer.createComparator();
             // todo: we may enable bf to accelerate equal and in predicate in the future
             this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             IOUtils.closeQuietly(out);
             throw e;
         }

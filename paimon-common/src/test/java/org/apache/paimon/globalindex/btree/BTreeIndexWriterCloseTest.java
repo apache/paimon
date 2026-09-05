@@ -22,12 +22,14 @@ import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,6 +109,47 @@ public class BTreeIndexWriterCloseTest {
         writer.close();
 
         assertThat(closed).hasValue(1);
+    }
+
+    /**
+     * SstFileWriter allocates its block buffers after the stream is open, so a direct or heap
+     * allocation failure there arrives as an Error rather than an exception. The stream still has
+     * to be released: a task runtime can catch that and keep the JVM alive.
+     */
+    @Test
+    public void testConstructorReleasesTheFileWhenSetupThrowsAnError() {
+        AtomicInteger closed = new AtomicInteger();
+        assertThatThrownBy(
+                        () ->
+                                new BTreeIndexWriter(
+                                        failingWriter(closed),
+                                        errorThrowingSerializer(),
+                                        1024,
+                                        (BlockCompressionFactory) null))
+                .isInstanceOf(OutOfMemoryError.class);
+
+        assertThat(closed).hasValue(1);
+    }
+
+    private static KeySerializer errorThrowingSerializer() {
+        KeySerializer delegate = KeySerializer.create(new IntType());
+        return new KeySerializer() {
+
+            @Override
+            public byte[] serialize(Object key) {
+                return delegate.serialize(key);
+            }
+
+            @Override
+            public Object deserialize(MemorySlice data) {
+                return delegate.deserialize(data);
+            }
+
+            @Override
+            public Comparator<Object> createComparator() {
+                throw new OutOfMemoryError("Direct buffer memory");
+            }
+        };
     }
 
     private static GlobalIndexFileWriter failingWriter(AtomicInteger closed) {
