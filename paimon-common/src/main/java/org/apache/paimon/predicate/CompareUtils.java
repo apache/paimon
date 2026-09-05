@@ -27,6 +27,11 @@ public class CompareUtils {
     private CompareUtils() {}
 
     public static int compareLiteral(DataType type, Object v1, Object v2) {
+        // SQL null literals are unordered, so a caller that merges range predicates has to
+        // handle a null bound rather than ask for its order.
+        if (v1 == null || v2 == null) {
+            throw new IllegalArgumentException("Null literal cannot be compared for type: " + type);
+        }
         if (v1 instanceof Comparable) {
             return ((Comparable<Object>) v1).compareTo(v2);
         } else if (v1 instanceof byte[]) {
