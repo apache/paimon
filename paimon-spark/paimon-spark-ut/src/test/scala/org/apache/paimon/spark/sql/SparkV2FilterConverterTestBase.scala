@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{FieldTransform, LeafPredicate, NestedFieldTransform, PredicateBuilder}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -537,6 +537,63 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     val filesScanned = scanFilesWithPredicate(paimonPredicate)
     // All 4 files should be scanned because AlwaysTrue in OR matches everything
     assert(filesScanned == 4, s"Expected 4 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: nested field") {
+    withTable("nested_tbl") {
+      sql("""
+            |CREATE TABLE nested_tbl (
+            | id INT,
+            | info STRUCT<uid: INT, addr: STRUCT<city: STRING, zip: STRING>>
+            |) USING paimon
+            |""".stripMargin)
+      sql("INSERT INTO nested_tbl VALUES (1, struct(10, struct('Beijing', '100080')))")
+      sql("INSERT INTO nested_tbl VALUES (2, struct(20, struct('Shanghai', '200000')))")
+
+      val nestedConverter = SparkV2FilterConverter(loadTable("nested_tbl").rowType())
+
+      Seq("info.uid = 10" -> "info.uid", "info.addr.city = 'Beijing'" -> "info.addr.city")
+        .foreach {
+          case (filter, expectedName) =>
+            val predicate =
+              nestedConverter
+                .convert(v2Filter(filter, "nested_tbl"))
+                .get
+                .asInstanceOf[LeafPredicate]
+            val transform = predicate.transform().asInstanceOf[NestedFieldTransform]
+            assert(transform.fieldName() == expectedName)
+            // no FieldRef is handed out, so nothing mistakes this for a top-level column
+            assert(!predicate.fieldRefOptional().isPresent)
+            // the enclosing column is what field-name based rewrites see
+            assert(predicate.fieldNames().asScala == Seq("info"))
+
+            checkAnswer(sql(s"SELECT id FROM nested_tbl WHERE $filter"), Seq(Row(1)))
+            assert(
+              getPaimonScan(s"SELECT * FROM nested_tbl WHERE $filter").pushedDataFilters
+                .exists(_.toString.contains(expectedName)))
+        }
+
+      // a nested field still reads correctly alongside a projection of a sibling field
+      checkAnswer(
+        sql("SELECT info.addr.zip FROM nested_tbl WHERE info.addr.city = 'Shanghai'"),
+        Seq(Row("200000")))
+    }
+  }
+
+  test("V2Filter: a top-level column whose name contains a dot") {
+    withTable("dotted_tbl") {
+      sql("CREATE TABLE dotted_tbl (id INT, `a.b` STRING) USING paimon")
+
+      val dottedConverter = SparkV2FilterConverter(loadTable("dotted_tbl").rowType())
+      val predicate = dottedConverter
+        .convert(v2Filter("`a.b` = 'x'", "dotted_tbl"))
+        .get
+        .asInstanceOf[LeafPredicate]
+
+      // resolves as the flat column it is, not as a path into a struct named "a"
+      assert(predicate.transform().isInstanceOf[FieldTransform])
+      assert(predicate.fieldNames().asScala == Seq("a.b"))
+    }
   }
 
   private def v2Filter(str: String, tableName: String = "test_tbl"): SparkPredicate = {
