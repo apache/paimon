@@ -400,6 +400,15 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         FileSystem fs = getFileSystem(hadoopDst);
 
+        // HadoopSecuredFileSystem cannot override FileSystem's protected 3-arg rename, so
+        // reflection has to find it on the file system underneath the wrapper.
+        final FileSystem renameTarget;
+        if (fs instanceof HadoopSecuredFileSystem) {
+            renameTarget = ((HadoopSecuredFileSystem) fs).unwrap();
+        } else {
+            renameTarget = fs;
+        }
+
         if (renameMethodRef == null) {
             synchronized (this) {
                 if (renameMethodRef == null) {
@@ -409,7 +418,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
                     // DistributedFileSystem and ViewFileSystem override the rename method to public
                     // and implement correct renaming
                     try {
-                        method = ReflectionUtils.getMethod(fs.getClass(), "rename", 3);
+                        method = ReflectionUtils.getMethod(renameTarget.getClass(), "rename", 3);
                     } catch (NoSuchMethodException e) {
                         method = null;
                     }
@@ -435,8 +444,20 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
                 writer.flush();
             }
 
-            renameMethod.invoke(
-                    fs, hadoopTemp, hadoopDst, new Options.Rename[] {Options.Rename.OVERWRITE});
+            Options.Rename[] renameOptions = new Options.Rename[] {Options.Rename.OVERWRITE};
+            if (fs instanceof HadoopSecuredFileSystem) {
+                // the call has to stay inside the wrapper's doAs, or the rename runs as
+                // whoever the current thread is rather than the login user
+                ((HadoopSecuredFileSystem) fs)
+                        .callAsLoginUser(
+                                () -> {
+                                    renameMethod.invoke(
+                                            renameTarget, hadoopTemp, hadoopDst, renameOptions);
+                                    return null;
+                                });
+            } else {
+                renameMethod.invoke(renameTarget, hadoopTemp, hadoopDst, renameOptions);
+            }
             renameDone = true;
             // TODO: this is a workaround of HADOOP-16255 - remove this when HADOOP-16255 is
             // resolved
