@@ -37,7 +37,7 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal.table import MultimodalTable
 
 from pypaimon.read.datasource.torch_dataset import (
-    _SplitRangeIndex,
+    SplitRangeIndex,
     TorchIterDataset,
     TorchShuffledIterDataset,
     _resolve_distributed_context,
@@ -666,7 +666,7 @@ class TorchReadTest(unittest.TestCase):
                     self.assertEqual(dataset[0], restored[0])
 
     def test_split_range_index(self):
-        index = _SplitRangeIndex([
+        index = SplitRangeIndex([
             [Range(split * 10, split * 10 + 9)]
             for split in range(10000)
         ])

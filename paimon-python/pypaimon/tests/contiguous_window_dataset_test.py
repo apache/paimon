@@ -31,6 +31,7 @@ from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.multimodal import window_dataset
 from pypaimon.multimodal.query import ScanQuery
 from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.table_scan import TableScan
 
 
@@ -509,6 +510,77 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "masks _ROW_ID"):
             self._dataset(table)
+
+    def test_rejects_reads_after_the_pinned_tag_moves_to_another_snapshot(self):
+        table = self._table()
+        raw_table = table.raw_table
+        raw_table.create_tag("v1")
+        dataset = table.scan(tag_name="v1").to_contiguous_window_dataset(
+            window_size=3, columns=["value"],
+            group_key="episode", order_key="step")
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        table.add([self._row("episode-b", 4)])
+        raw_table.replace_tag("v1")
+
+        for pinned in (dataset, restored):
+            with self.assertRaisesRegex(RuntimeError, "pinned snapshot moved"):
+                pinned[0]
+
+    def test_rejects_query_authorization_that_masks_the_group_key(self):
+        table = self._table()
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"episode": json.dumps({
+                "name": "SUBSTRING",
+                "inputs": [
+                    {"name": "episode", "type": "STRING NOT NULL"}, 1, 1,
+                ],
+            })},
+        )
+        table.raw_table.catalog_environment.table_query_auth = (
+            lambda options, table_identifier: lambda select: auth)
+
+        with self.assertRaisesRegex(ValueError, r"masks \['episode'\]"):
+            self._dataset(table)
+
+    def test_reads_only_the_files_and_row_ranges_a_window_touches(self):
+        table = self.conn.create_table(
+            "many_files", schema=self._schema(), options=_TABLE_OPTIONS)
+        for batch in range(4):
+            table.add([
+                self._row("episode-a", batch * 8 + offset)
+                for offset in range(8)
+            ])
+        dataset = table.scan().to_contiguous_window_dataset(
+            window_size=3, columns=["value"],
+            group_key="episode", order_key="step")
+
+        opened = []
+        decoded = []
+        original_init = FormatPyArrowReader.__init__
+        original_read = FormatPyArrowReader.read_arrow_batch
+
+        def recording_init(reader, *args, **kwargs):
+            original_init(reader, *args, **kwargs)
+            opened.append((args[2], kwargs.get("row_ranges")))
+
+        def recording_read(reader):
+            batch = original_read(reader)
+            decoded.append(0 if batch is None else batch.num_rows)
+            return batch
+
+        with patch.object(FormatPyArrowReader, "__init__", recording_init), \
+                patch.object(
+                    FormatPyArrowReader, "read_arrow_batch", recording_read):
+            sample = dataset[len(dataset) - 1]
+
+        self.assertEqual([29, 30, 31], sample["value"])
+        self.assertEqual(1, len({file_path for file_path, _ in opened}))
+        # The reader receives positions inside the file, so global rows 29-31
+        # of the fourth eight-row file arrive as 5-7.
+        self.assertEqual([[(5, 7)]], [ranges for _, ranges in opened])
+        self.assertEqual(3, sum(decoded))
 
     def test_rejects_nan_group_keys_that_never_compare_equal(self):
         table = self.conn.create_table(

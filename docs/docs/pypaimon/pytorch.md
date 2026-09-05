@@ -199,7 +199,9 @@ Rows are sorted by `order_key` inside each `group_key` value. Order values must
 be integers which increase by exactly one; duplicates and missing steps are
 rejected, and windows never cross groups. The resolved Paimon
 snapshot is pinned for the lifetime of the dataset, so later commits cannot
-change its index or sample contents.
+change its index or sample contents. A dataset pinned through `tag_name` fails
+its reads if the tag is moved to another snapshot, rather than mixing rows from
+the two snapshots.
 
 Columns configured by `video-frame-field` are rejected: a window read would drop
 the `frame_index` and other metadata carried by their `VideoFrameDescriptor`

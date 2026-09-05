@@ -29,6 +29,11 @@ from torch.utils.data import Dataset
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.multimodal.query import ScanQuery, _PreFilterQuery
+from pypaimon.read.datasource.torch_dataset import (
+    SplitRangeIndex,
+    row_ranges_for_split,
+    select_indexed_splits,
+)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS
@@ -377,7 +382,8 @@ class ContiguousWindowDataset(Dataset):
         key = tuple(columns)
         plan = self._plans.get(key)
         if plan is None:
-            plan = _PinnedRowIdPlan(self._table, columns, self.blob_parallelism)
+            plan = _PinnedRowIdPlan(
+                self._table, columns, self.blob_parallelism, self.snapshot_id)
             self._plans[key] = plan
         return plan
 
@@ -386,12 +392,13 @@ class _PinnedRowIdPlan:
     """One authorized scan plan of the pinned snapshot, read by row ID.
 
     Planning happens once per projection. Every read then narrows the cached
-    splits to the files covering the requested row IDs, so repeated item and
-    batch reads never revisit the snapshot's manifests.
+    splits to the row ranges covering the requested row IDs, so repeated item
+    and batch reads never revisit the snapshot's manifests.
     """
 
-    def __init__(self, table, columns, blob_parallelism):
+    def __init__(self, table, columns, blob_parallelism, snapshot_id):
         self._blob_parallelism = blob_parallelism
+        self._snapshot_id = snapshot_id
         self._blob_columns = [
             field.name for field in table.fields
             if field.name in columns
@@ -411,26 +418,35 @@ class _PinnedRowIdPlan:
             table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"})
             if self._blob_columns else table
         )
-        self._splits = self._new_read_builder().new_scan().plan().splits()
+        plan = self._new_read_builder().new_scan().plan()
+        # A tag can be replaced between indexing and this deferred plan, so the
+        # plan is only usable while it still resolves the indexed snapshot.
+        if snapshot_id is not None and plan.snapshot_id != snapshot_id:
+            raise RuntimeError(
+                "The window index was built from snapshot %s, but reading its "
+                "rows now resolves snapshot %s; the pinned snapshot moved."
+                % (snapshot_id, plan.snapshot_id))
+        self._splits = plan.splits()
         _reject_masked_row_ids(self._splits)
+        self._split_ranges = [
+            row_ranges_for_split(split) for split in self._splits
+        ]
+        self._split_range_index = SplitRangeIndex(self._split_ranges)
 
     def read(self, row_ids):
         """Return raw row dictionaries, including ``_ROW_ID``, for ``row_ids``."""
         requested = list(dict.fromkeys(row_ids))
         ranges = Range.to_ranges(requested)
-        splits = [
-            pruned for pruned in (
-                _prune_split_files(split, ranges) for split in self._splits)
-            if pruned is not None
-        ]
+        splits = select_indexed_splits(
+            self._splits, self._split_ranges, self._split_range_index, ranges)
         if not splits:
             return []
         read_builder = self._new_read_builder()
         predicate = read_builder.new_predicate_builder().is_in(
             SpecialFields.ROW_ID.name, requested)
         arrow = read_builder.with_filter(predicate).new_read().to_arrow(splits)
-        # Row-ID pruning happens per file and per split; drop the remaining
-        # rows before BLOB bodies are fetched for them.
+        # Row ranges are merged per split, so a read can still return rows
+        # between requested IDs; drop them before BLOB bodies are fetched.
         row_id_column = arrow.column(SpecialFields.ROW_ID.name)
         arrow = arrow.filter(pc.is_in(
             row_id_column,
@@ -462,42 +478,34 @@ class _PinnedRowIdPlan:
         return self._table.new_read_builder().with_projection(self._projection)
 
 
-def _prune_split_files(split, ranges):
-    """Drop files of ``split`` outside ``ranges``; ``None`` when nothing is left."""
-    auth_result = None
-    data_split = split
-    if isinstance(data_split, QueryAuthSplit):
-        auth_result = data_split.auth_result
-        data_split = data_split.split
-    filter_file = getattr(data_split, "filter_file", None)
-    if filter_file is None:
-        return split
-    pruned = filter_file(lambda meta: _file_overlaps(meta, ranges))
-    if pruned is None:
-        return None
-    if auth_result is None:
-        return pruned
-    return QueryAuthSplit(pruned, auth_result)
-
-
-def _file_overlaps(meta, ranges):
-    file_range = meta.row_id_range()
-    if file_range is None:
-        return True
-    return bool(Range.and_(ranges, [file_range]))
+def _masked_columns(split):
+    if not isinstance(split, QueryAuthSplit):
+        return ()
+    masking = getattr(split.auth_result, "column_masking", None)
+    return tuple(masking) if masking else ()
 
 
 def _reject_masked_row_ids(splits):
     for split in splits:
-        if not isinstance(split, QueryAuthSplit):
-            continue
-        masking = getattr(split.auth_result, "column_masking", None)
-        if masking and SpecialFields.ROW_ID.name in masking:
+        if SpecialFields.ROW_ID.name in _masked_columns(split):
             raise ValueError(
                 "ContiguousWindowDataset requires readable Paimon row IDs, but "
                 "query authorization masks %s for this table; read the rows "
                 "with scan().to_arrow() instead."
                 % SpecialFields.ROW_ID.name)
+
+
+def _reject_masked_index_keys(splits, group_key, order_key):
+    for split in splits:
+        masked = _masked_columns(split)
+        keys = [name for name in (group_key, order_key) if name in masked]
+        if keys:
+            raise ValueError(
+                "ContiguousWindowDataset groups and orders rows by %s, but "
+                "query authorization masks %s for this table; a mask can merge "
+                "distinct groups or break contiguity, so its windows would no "
+                "longer follow the stored rows."
+                % ([group_key, order_key], keys))
 
 
 def _contiguous_array(column):
@@ -538,6 +546,7 @@ def _read_window_index(query, group_key, order_key):
     plan = read_builder.new_scan().plan()
     splits = plan.splits()
     _reject_masked_row_ids(splits)
+    _reject_masked_index_keys(splits, group_key, order_key)
     index = read_builder.new_read().to_arrow(splits)
     if index.num_rows and plan.snapshot_id is None:
         raise RuntimeError("Cannot pin the snapshot used to build the window index.")
