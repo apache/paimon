@@ -691,6 +691,12 @@ public class InferVariantShreddingSchema {
                                     ((ArrayType) selected).getElementType(), maxFields);
             return new ArrayType(element);
         }
+        if (selected instanceof VariantType) {
+            // The caller has already spent this node's entry unit, and a VARIANT has no typed child
+            // to spend another on - the evidence-driven walk also returns VARIANT after the entry
+            // debit alone.
+            return selected;
+        }
         maxFields.remaining--;
         return selected;
     }

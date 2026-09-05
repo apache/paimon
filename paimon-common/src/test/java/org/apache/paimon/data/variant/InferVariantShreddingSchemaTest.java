@@ -431,6 +431,34 @@ public class InferVariantShreddingSchemaTest {
         assertThat(afterAbsence.getField("b").type().toString()).contains("`q`");
     }
 
+    /**
+     * A retained VARIANT leaf costs the entry unit the caller already spent and nothing more - it
+     * has no typed child to spend a second on. Charging it twice takes width away from the columns
+     * that follow.
+     */
+    @Test
+    void testRetainedVariantLeafIsNotChargedTwice() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 3, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(GenericRow.of(null, GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(null, GenericVariant.fromJson("6"))));
+
+        assertThat(afterAbsence.getField("b").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.BIGINT()));
+    }
+
     @Test
     void testInferSchemaWithDeepNesting() {
         // Schema: row<v: variant>
