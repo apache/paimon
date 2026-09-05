@@ -31,6 +31,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -313,6 +314,149 @@ public class InferVariantShreddingSchemaTest {
                                 RowType.of(
                                         new DataType[] {DataTypes.BIGINT()},
                                         new String[] {"historical"})));
+    }
+
+    /**
+     * A node can drift from scalar to object, which degrades its combined evidence to VARIANT while
+     * the selected schema for it is a ROW, and then be absent from the next file. With no evidence
+     * to fall back on, the selected schema is the only thing left - but it is not evidence: its
+     * fields carry no counts, so it cannot be run through admission and retention a second time.
+     */
+    @Test
+    void testAdaptiveInferenceKeepsSelectedRowWhenEvidenceDegradedAndNodeIsAbsent() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 300, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("{\"k\":1,\"p\":5}"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("{\"k\":1,\"p\":{\"x\":1}}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"k\":1}"))));
+
+        assertThat(afterAbsence.getField("v").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BIGINT(),
+                                            RowType.of(
+                                                    new DataType[] {DataTypes.BIGINT()},
+                                                    new String[] {"x"})
+                                        },
+                                        new String[] {"k", "p"})));
+    }
+
+    /**
+     * maxSchemaWidth is one budget shared by every variant column. A schema carried forward for a
+     * node with no evidence still occupies it, so a later column must not get to spend what the
+     * carried-forward schema is holding.
+     */
+    @Test
+    void testRetainedSchemaStillConsumesTheSharedWidthBudget() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 8, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":5}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("{\"p\":{\"x\":1}}"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(
+                                        GenericVariant.fromJson("{}"),
+                                        GenericVariant.fromJson("{\"q\":1,\"r\":1}"))));
+
+        // "a" keeps ROW<x BIGINT> under "p", and the budget it holds leaves "r" untyped in "b".
+        assertThat(afterAbsence.getField("b").type().toString())
+                .contains("`q` ROW<`value` BYTES, `typed_value` BIGINT>")
+                .doesNotContain("`r` ROW<`value` BYTES, `typed_value`");
+    }
+
+    /**
+     * At the last budget unit the evidence-driven walk still keeps the field and downgrades its
+     * child to VARIANT. Retaining a schema has to do the same rather than drop the field, or the
+     * whole retained node collapses.
+     */
+    @Test
+    void testRetainedSchemaKeepsItsFieldsAtTheLastBudgetUnit() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 7, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(GenericVariant.fromJson("1"), GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+        session.inferSchema(
+                Collections.singletonList(
+                        GenericRow.of(
+                                GenericVariant.fromJson("1"),
+                                GenericVariant.fromJson("{\"q\":1}"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(GenericVariant.fromJson("{\"x\":1,\"y\":1}"), null)));
+
+        assertThat(afterAbsence.getField("b").type().toString()).contains("`q`");
+    }
+
+    /**
+     * A retained VARIANT leaf costs the entry unit the caller already spent and nothing more - it
+     * has no typed child to spend a second on. Charging it twice takes width away from the columns
+     * that follow.
+     */
+    @Test
+    void testRetainedVariantLeafIsNotChargedTwice() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"a", "b"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 3, 50, 0.1), 256, 0.1, 0.05);
+
+        session.inferSchema(
+                Collections.singletonList(GenericRow.of(null, GenericVariant.fromJson("5"))));
+        session.commitPendingInference();
+
+        RowType afterAbsence =
+                session.inferSchema(
+                        Collections.singletonList(
+                                GenericRow.of(null, GenericVariant.fromJson("6"))));
+
+        assertThat(afterAbsence.getField("b").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.BIGINT()));
     }
 
     @Test
