@@ -73,6 +73,8 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_PROPERTIES = "properties";
     protected static final String FIELD_NEXT_ROW_ID = "nextRowId";
     protected static final String FIELD_OPERATION = "operation";
+    protected static final String FIELD_NUM_FILES = "numFiles";
+    protected static final String FIELD_TOTAL_FILE_SIZE_IN_BYTES = "totalFileSizeInBytes";
 
     // version of snapshot
     @JsonProperty(FIELD_VERSION)
@@ -203,6 +205,19 @@ public class Snapshot implements Serializable {
     @Nullable
     protected final Operation operation;
 
+    // number of live data files in this snapshot, null when it could not be derived incrementally
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_NUM_FILES)
+    @Nullable
+    protected final Long numFiles;
+
+    // total size of live data files in this snapshot, null when it could not be derived
+    // incrementally
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_TOTAL_FILE_SIZE_IN_BYTES)
+    @Nullable
+    protected final Long totalFileSizeInBytes;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -227,6 +242,58 @@ public class Snapshot implements Serializable {
             @Nullable Long nextRowId,
             @Nullable Operation operation) {
         this(
+                id,
+                schemaId,
+                baseManifestList,
+                baseManifestListSize,
+                deltaManifestList,
+                deltaManifestListSize,
+                changelogManifestList,
+                changelogManifestListSize,
+                indexManifest,
+                commitUser,
+                writerVersion,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark,
+                statistics,
+                properties,
+                nextRowId,
+                operation,
+                null,
+                null);
+    }
+
+    public Snapshot(
+            long id,
+            long schemaId,
+            String baseManifestList,
+            @Nullable Long baseManifestListSize,
+            String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
+            @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
+            @Nullable String indexManifest,
+            String commitUser,
+            @Nullable String writerVersion,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            long totalRecordCount,
+            long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark,
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId,
+            @Nullable Operation operation,
+            @Nullable Long numFiles,
+            @Nullable Long totalFileSizeInBytes) {
+        this(
                 CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 id,
@@ -250,7 +317,67 @@ public class Snapshot implements Serializable {
                 statistics,
                 properties,
                 nextRowId,
-                operation);
+                operation,
+                numFiles,
+                totalFileSizeInBytes);
+    }
+
+    /**
+     * Kept so that callers written before {@link #numFiles()} and {@link #totalFileSizeInBytes()}
+     * existed keep compiling; both are left unknown.
+     */
+    public Snapshot(
+            int version,
+            @Nullable String uuid,
+            long id,
+            long schemaId,
+            String baseManifestList,
+            @Nullable Long baseManifestListSize,
+            String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
+            @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
+            @Nullable String indexManifest,
+            String commitUser,
+            @Nullable String writerVersion,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            long totalRecordCount,
+            long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark,
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId,
+            @Nullable Operation operation) {
+        this(
+                version,
+                uuid,
+                id,
+                schemaId,
+                baseManifestList,
+                baseManifestListSize,
+                deltaManifestList,
+                deltaManifestListSize,
+                changelogManifestList,
+                changelogManifestListSize,
+                indexManifest,
+                commitUser,
+                writerVersion,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark,
+                statistics,
+                properties,
+                nextRowId,
+                operation,
+                null,
+                null);
     }
 
     @JsonCreator
@@ -279,7 +406,9 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
             @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
-            @JsonProperty(FIELD_OPERATION) @Nullable Operation operation) {
+            @JsonProperty(FIELD_OPERATION) @Nullable Operation operation,
+            @JsonProperty(FIELD_NUM_FILES) @Nullable Long numFiles,
+            @JsonProperty(FIELD_TOTAL_FILE_SIZE_IN_BYTES) @Nullable Long totalFileSizeInBytes) {
         this.version = version;
         this.uuid = uuid;
         this.id = id;
@@ -304,6 +433,8 @@ public class Snapshot implements Serializable {
         this.properties = properties;
         this.nextRowId = nextRowId;
         this.operation = operation;
+        this.numFiles = numFiles;
+        this.totalFileSizeInBytes = totalFileSizeInBytes;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -439,6 +570,29 @@ public class Snapshot implements Serializable {
         return operation;
     }
 
+    /**
+     * Number of live data files in this snapshot, maintained incrementally at commit time.
+     *
+     * <p>Returns null when the value is unknown: snapshots written before this field existed, and
+     * commits whose previous snapshot had no value to derive from. Callers must fall back to
+     * scanning manifests instead of treating null as zero.
+     */
+    @JsonGetter(FIELD_NUM_FILES)
+    @Nullable
+    public Long numFiles() {
+        return numFiles;
+    }
+
+    /**
+     * Total size in bytes of the live data files in this snapshot, maintained incrementally at
+     * commit time. Null has the same meaning as in {@link #numFiles()}.
+     */
+    @JsonGetter(FIELD_TOTAL_FILE_SIZE_IN_BYTES)
+    @Nullable
+    public Long totalFileSizeInBytes() {
+        return totalFileSizeInBytes;
+    }
+
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -469,7 +623,9 @@ public class Snapshot implements Serializable {
                 statistics,
                 properties,
                 nextRowId,
-                operation);
+                operation,
+                numFiles,
+                totalFileSizeInBytes);
     }
 
     @Override
@@ -504,7 +660,9 @@ public class Snapshot implements Serializable {
                 && Objects.equals(statistics, that.statistics)
                 && Objects.equals(properties, that.properties)
                 && Objects.equals(nextRowId, that.nextRowId)
-                && operation == that.operation;
+                && operation == that.operation
+                && Objects.equals(numFiles, that.numFiles)
+                && Objects.equals(totalFileSizeInBytes, that.totalFileSizeInBytes);
     }
 
     /** Type of changes in this snapshot. */

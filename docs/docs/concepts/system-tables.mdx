@@ -70,6 +70,18 @@ logical rows to a table with one [dedicated BLOB column](../multimodal-table/blo
 adds `N` records to the regular data files and `N` records to the BLOB files, so
 `delta_record_count` increases by `2 * N`. Use `COUNT(*)` when you need the logical row count.
 
+`num_files` and `total_file_size_in_bytes` describe the live data files of the snapshot. They are
+folded incrementally at commit time from the files the commit adds and removes, so reading them
+costs nothing extra, and they cover data files only: changelog files, index files and deletion
+vectors are not counted.
+
+Both columns are nullable, and `NULL` means unknown rather than zero. It appears for snapshots
+written before these columns existed, and for commits that could not derive the values from the
+previous snapshot, such as metadata repair operations that replace the manifest layout wholesale.
+Once a snapshot reports unknown, the snapshots committed after it report unknown as well, until the
+values are recomputed. Fall back to scanning the manifests when you read `NULL`; never read it as
+zero.
+
 ### Schemas Table
 
 You can query the historical schemas of the table through schemas table.

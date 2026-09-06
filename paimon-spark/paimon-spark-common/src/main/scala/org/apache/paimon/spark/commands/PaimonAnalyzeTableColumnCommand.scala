@@ -59,12 +59,18 @@ case class PaimonAnalyzeTableColumnCommand(
     }
 
     // compute stats
-    val totalSize = table
-      .newScan()
-      .listPartitionEntries()
-      .asScala
-      .map(_.fileSizeInBytes())
-      .sum
+    // Prefer the total file size maintained incrementally on the snapshot. It is unknown for
+    // snapshots written before the field existed, or when a commit could not derive it, in which
+    // case fall back to folding the partition entries out of the manifests.
+    val totalSize = Option(currentSnapshot.totalFileSizeInBytes())
+      .map(_.longValue())
+      .getOrElse(
+        table
+          .newScan()
+          .listPartitionEntries()
+          .asScala
+          .map(_.fileSizeInBytes())
+          .sum)
     val (mergedRecordCount, colStats) =
       PaimonStatsUtils.computeColumnStats(sparkSession, relation, attributes)
 

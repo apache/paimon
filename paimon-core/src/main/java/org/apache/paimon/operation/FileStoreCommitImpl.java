@@ -1107,9 +1107,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
+            // A brand new table starts from an empty file set. An existing snapshot that carries no
+            // file statistics (written before the fields existed, or by a commit that could not
+            // derive them) breaks the chain, and the new snapshot stays unknown as well.
+            Long previousNumFiles = 0L;
+            Long previousTotalFileSizeInBytes = 0L;
             Long currentWatermark = watermark;
             if (latestSnapshot != null) {
                 previousTotalRecordCount = latestSnapshot.totalRecordCount();
+                previousNumFiles = latestSnapshot.numFiles();
+                previousTotalFileSizeInBytes = latestSnapshot.totalFileSizeInBytes();
                 // read all previous manifest files
                 mergeBeforeManifests = manifestList.readDataManifests(latestSnapshot);
                 Long latestWatermark = latestSnapshot.watermark();
@@ -1127,6 +1134,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
+                // the previous file set is dropped entirely, so the counters restart from zero
+                previousNumFiles = 0L;
+                previousTotalFileSizeInBytes = 0L;
             } else {
                 ManifestMergeReuse manifestMergeReuse =
                         tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
@@ -1174,6 +1184,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             // write new delta files into manifest files
             deltaPartitionEntries = new ArrayList<>(PartitionEntry.merge(deltaFiles));
+
+            // reuse the per-partition fold above: its counts are already signed by file kind, so
+            // summing them gives the table level delta without walking deltaFiles again
+            long deltaNumFiles = 0L;
+            long deltaFileSizeInBytes = 0L;
+            for (PartitionEntry entry : deltaPartitionEntries) {
+                deltaNumFiles += entry.fileCount();
+                deltaFileSizeInBytes += entry.fileSizeInBytes();
+            }
+            Long numFiles = previousNumFiles == null ? null : previousNumFiles + deltaNumFiles;
+            Long totalFileSizeInBytes =
+                    previousTotalFileSizeInBytes == null
+                            ? null
+                            : previousTotalFileSizeInBytes + deltaFileSizeInBytes;
+
             deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
 
             // write changelog into manifest files
@@ -1241,7 +1266,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             // if empty properties, just set to null
                             properties.isEmpty() ? null : properties,
                             nextRowIdStart,
-                            operation);
+                            operation,
+                            numFiles,
+                            totalFileSizeInBytes);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             commitCleaner.cleanUpReuseTmpManifests(
@@ -1409,6 +1436,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         // if empty properties, just set to null
                         latest.properties(),
                         nextRowId,
+                        null,
+                        // the manifest layout is rewritten wholesale here, so the incremental file
+                        // statistics cannot be carried over; leave them unknown
+                        null,
                         null);
 
         return commitSnapshotImpl(latest, newSnapshot, emptyList());
@@ -1495,7 +1526,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.statistics(),
                         targetSnapshot.properties(),
                         nextRowId,
-                        null);
+                        null,
+                        // the live file set is restored to the target snapshot's
+                        targetSnapshot.numFiles(),
+                        targetSnapshot.totalFileSizeInBytes());
 
         // The rollback is an overwrite from the previous latest to the target, so the base files,
         // delta files and index changes describe the transition the callbacks need. These are
@@ -1644,7 +1678,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.statistics(),
                         latestSnapshot.properties(),
                         latestSnapshot.nextRowId(),
-                        null);
+                        null,
+                        // manifest compaction only rewrites metadata, the data files are untouched
+                        latestSnapshot.numFiles(),
+                        latestSnapshot.totalFileSizeInBytes());
 
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
     }
