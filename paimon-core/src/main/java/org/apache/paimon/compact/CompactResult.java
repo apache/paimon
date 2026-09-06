@@ -19,6 +19,7 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 
 import javax.annotation.Nullable;
 
@@ -32,6 +33,13 @@ public class CompactResult {
     private final List<DataFileMeta> before;
     private final List<DataFileMeta> after;
     private final List<DataFileMeta> changelog;
+
+    /**
+     * Handles to delete the files this result is made of. They are only meaningful while the result
+     * has not been handed over to the writer: whoever throws the result away is responsible for
+     * aborting the files it describes.
+     */
+    private final List<FileWriterAbortExecutor> abortExecutors;
 
     @Nullable private CompactDeletionFile deletionFile;
 
@@ -52,6 +60,7 @@ public class CompactResult {
         this.before = new ArrayList<>(before);
         this.after = new ArrayList<>(after);
         this.changelog = new ArrayList<>(changelog);
+        this.abortExecutors = new ArrayList<>();
     }
 
     public List<DataFileMeta> before() {
@@ -64,6 +73,14 @@ public class CompactResult {
 
     public List<DataFileMeta> changelog() {
         return changelog;
+    }
+
+    public void addAbortExecutors(List<FileWriterAbortExecutor> executors) {
+        abortExecutors.addAll(executors);
+    }
+
+    public List<FileWriterAbortExecutor> abortExecutors() {
+        return abortExecutors;
     }
 
     public void setDeletionFile(@Nullable CompactDeletionFile deletionFile) {
@@ -79,6 +96,7 @@ public class CompactResult {
         before.addAll(that.before);
         after.addAll(that.after);
         changelog.addAll(that.changelog);
+        abortExecutors.addAll(that.abortExecutors);
 
         if (deletionFile != null || that.deletionFile != null) {
             throw new UnsupportedOperationException(

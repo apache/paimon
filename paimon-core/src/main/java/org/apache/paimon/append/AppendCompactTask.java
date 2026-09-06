@@ -84,10 +84,11 @@ public class AppendCompactTask {
                             partition);
             compactAfter.addAll(
                     write.compactRewrite(
-                            partition,
-                            UNAWARE_BUCKET,
-                            dvIndexFileMaintainer::getDeletionVector,
-                            compactBefore));
+                                    partition,
+                                    UNAWARE_BUCKET,
+                                    dvIndexFileMaintainer::getDeletionVector,
+                                    compactBefore)
+                            .after());
 
             compactBefore.forEach(
                     f -> dvIndexFileMaintainer.notifyRemovedDeletionVector(f.fileName()));
@@ -101,7 +102,7 @@ public class AppendCompactTask {
             }
         } else {
             compactAfter.addAll(
-                    write.compactRewrite(partition, UNAWARE_BUCKET, null, compactBefore));
+                    write.compactRewrite(partition, UNAWARE_BUCKET, null, compactBefore).after());
         }
 
         CompactIncrement compactIncrement =

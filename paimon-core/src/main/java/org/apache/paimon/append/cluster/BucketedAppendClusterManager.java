@@ -151,7 +151,7 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
-        taskFuture = executor.submit(task);
+        submitTask(executor, task);
     }
 
     @Override

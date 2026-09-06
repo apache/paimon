@@ -152,7 +152,7 @@ public class FullCompactTaskTest {
                     compactAfter.add(newFile(minSeq, file.maxSequenceNumber()));
                 }
             }
-            return compactAfter;
+            return new CompactResult(compactBefore, compactAfter);
         };
     }
 }

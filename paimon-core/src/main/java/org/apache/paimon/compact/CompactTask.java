@@ -19,6 +19,7 @@
 package org.apache.paimon.compact;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
 
@@ -27,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -37,6 +39,13 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
     private final String bucketInfo;
+
+    /**
+     * Files this task has already written, with the handles needed to delete them again. Written by
+     * the compaction thread as parts of the task finish, read by whoever cancels the task, hence
+     * the lock.
+     */
+    private final List<FileWriterAbortExecutor> newFiles = new ArrayList<>();
 
     public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter, String bucketInfo) {
         this.metricsReporter = metricsReporter;
@@ -88,6 +97,15 @@ public abstract class CompactTask implements Callable<CompactResult> {
             if (LOG.isDebugEnabled()) {
                 LOG.debug(logMetric(startMillis, result.before(), result.after()));
             }
+
+            // Keep this check last. If we were cancelled the future drops the result on the
+            // floor, so this task is the only one that still knows about the files it wrote.
+            if (Thread.currentThread().isInterrupted()) {
+                trackNewFiles(result);
+                cleanDeletionFile(result);
+                throw new InterruptedException(
+                        "Compact task was cancelled after it had written its files.");
+            }
             return result;
         } catch (Exception e) {
             LOG.warn(
@@ -95,10 +113,68 @@ public abstract class CompactTask implements Callable<CompactResult> {
                     bucketInfo,
                     getClass().getSimpleName(),
                     e);
+            // Parts of this task that already finished have closed their writers, so nothing but
+            // this task can delete their output any more. The result is never returned now, so
+            // those files would be left behind.
+            abortNewFiles();
             throw e;
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
             MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);
+        }
+    }
+
+    /**
+     * Takes over the files a finished part of this task has written, so that {@link
+     * #abortNewFiles()} can still delete them once the sub-result has been merged away.
+     *
+     * <p>Ownership is transferred: the handles are removed from {@code partialResult}, so a file is
+     * never tracked twice.
+     */
+    public void trackNewFiles(CompactResult partialResult) {
+        List<FileWriterAbortExecutor> executors = partialResult.abortExecutors();
+        if (executors.isEmpty()) {
+            return;
+        }
+        synchronized (newFiles) {
+            newFiles.addAll(executors);
+        }
+        executors.clear();
+    }
+
+    /**
+     * Deletes every file written by this task so far. Only call this once it is certain that the
+     * result of this task will not be committed, otherwise it deletes live data.
+     */
+    public void abortNewFiles() {
+        List<FileWriterAbortExecutor> toAbort;
+        synchronized (newFiles) {
+            if (newFiles.isEmpty()) {
+                return;
+            }
+            toAbort = new ArrayList<>(newFiles);
+            newFiles.clear();
+        }
+
+        LOG.info(
+                "Deleting {} file(s) written by a compact task whose result is discarded: {}, taskType={}",
+                toAbort.size(),
+                bucketInfo,
+                getClass().getSimpleName());
+        for (FileWriterAbortExecutor abortExecutor : toAbort) {
+            abortExecutor.abort();
+        }
+    }
+
+    private void cleanDeletionFile(CompactResult result) {
+        CompactDeletionFile deletionFile = result.deletionFile();
+        if (deletionFile == null) {
+            return;
+        }
+        try {
+            deletionFile.clean();
+        } catch (Throwable t) {
+            LOG.warn("Failed to clean the deletion file of a discarded compact task.", t);
         }
     }
 

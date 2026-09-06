@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
@@ -192,7 +193,7 @@ public class AppendOnlyWriterTest {
                                 true,
                                 true,
                                 Collections.emptyList(),
-                                compactBefore -> Collections.emptyList(),
+                                compactBefore -> new CompactResult(),
                                 options)
                         .getKey();
 
@@ -1228,8 +1229,10 @@ public class AppendOnlyWriterTest {
                 compactBefore -> {
                     latch.await();
                     return compactBefore.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(generateCompactAfter(compactBefore));
+                            ? new CompactResult()
+                            : new CompactResult(
+                                    compactBefore,
+                                    Collections.singletonList(generateCompactAfter(compactBefore)));
                 },
                 options);
     }
@@ -1248,7 +1251,7 @@ public class AppendOnlyWriterTest {
                         false,
                         true,
                         Collections.emptyList(),
-                        compactBefore -> Collections.emptyList(),
+                        compactBefore -> new CompactResult(),
                         options)
                 .getKey();
     }

@@ -444,6 +444,15 @@ public class DedicatedFormatRollingFileWriter
         }
     }
 
+    /** Transfers ownership of abort executors for closed files to the caller. */
+    @Override
+    public List<FileWriterAbortExecutor> drainAbortExecutors() {
+        Preconditions.checkState(closed, "Cannot drain abort executors unless close all writers.");
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>(closedWriters);
+        closedWriters.clear();
+        return abortExecutors;
+    }
+
     /**
      * Checks if the current file should be rolled. The row cap applies even when there is no main
      * writer (all fields dedicated), so blob/vector writers roll together.

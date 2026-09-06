@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
@@ -58,7 +59,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -269,14 +269,21 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             ExecutorService compactExecutor,
             @Nullable BucketedDvMaintainer dvMaintainer);
 
-    public List<DataFileMeta> compactRewrite(
+    /**
+     * Rewrites the given files into new ones.
+     *
+     * <p>The result also carries the handles needed to delete the files it has written: a caller
+     * whose result may end up being thrown away - an asynchronous compaction task that can be
+     * cancelled - needs those to clean up after itself.
+     */
+    public CompactResult compactRewrite(
             BinaryRow partition,
             int bucket,
             @Nullable Function<String, DeletionVector> dvFactory,
             List<DataFileMeta> toCompact)
             throws Exception {
         if (toCompact.isEmpty()) {
-            return Collections.emptyList();
+            return new CompactResult();
         }
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
@@ -305,7 +312,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (collectedExceptions != null) {
             throw collectedExceptions;
         }
-        return rewriter.result();
+        CompactResult result = new CompactResult(toCompact, rewriter.result());
+        result.addAbortExecutors(rewriter.drainAbortExecutors());
+        return result;
     }
 
     public List<DataFileMeta> clusterRewrite(

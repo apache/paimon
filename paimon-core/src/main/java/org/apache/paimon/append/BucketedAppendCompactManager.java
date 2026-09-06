@@ -46,8 +46,6 @@ import java.util.PriorityQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
-import static java.util.Collections.emptyList;
-
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class BucketedAppendCompactManager extends CompactFutureManager {
 
@@ -115,15 +113,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             LOG.debug("Submit full compaction with these files {}", toCompact);
         }
 
-        taskFuture =
-                executor.submit(
-                        new FullCompactTask(
-                                dvMaintainer,
-                                toCompact,
-                                compactionFileSize,
-                                forceRewriteAllFiles,
-                                rewriter,
-                                metricsReporter));
+        submitTask(
+                executor,
+                new FullCompactTask(
+                        dvMaintainer,
+                        toCompact,
+                        compactionFileSize,
+                        forceRewriteAllFiles,
+                        rewriter,
+                        metricsReporter));
         recordCompactionsQueuedRequest();
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
@@ -147,10 +145,9 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 LOG.debug("Submit normal compaction with these files {}", compacting);
             }
 
-            taskFuture =
-                    executor.submit(
-                            new AutoCompactTask(
-                                    dvMaintainer, compacting, rewriter, metricsReporter));
+            submitTask(
+                    executor,
+                    new AutoCompactTask(dvMaintainer, compacting, rewriter, metricsReporter));
             recordCompactionsQueuedRequest();
         }
     }
@@ -281,7 +278,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             // do compaction
             if (dvMaintainer != null) {
                 // if deletion vector enables, always trigger compaction.
-                return compact(dvMaintainer, toCompact, rewriter);
+                return compact(this, dvMaintainer, toCompact, rewriter);
             } else {
                 // compute small files
                 int big = 0;
@@ -295,9 +292,9 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 }
                 if (forceRewriteAllFiles
                         || (small > big && toCompact.size() >= FULL_COMPACT_MIN_FILE)) {
-                    return compact(null, toCompact, rewriter);
+                    return compact(this, null, toCompact, rewriter);
                 } else {
-                    return result(emptyList(), emptyList());
+                    return new CompactResult();
                 }
             }
         }
@@ -334,17 +331,20 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
         @Override
         protected CompactResult doCompact() throws Exception {
-            return compact(dvMaintainer, toCompact, rewriter);
+            return compact(this, dvMaintainer, toCompact, rewriter);
         }
     }
 
     private static CompactResult compact(
+            CompactTask task,
             @Nullable BucketedDvMaintainer dvMaintainer,
             List<DataFileMeta> toCompact,
             CompactRewriter rewriter)
             throws Exception {
-        List<DataFileMeta> rewrite = rewriter.rewrite(toCompact);
-        CompactResult result = result(toCompact, rewrite);
+        CompactResult result = rewriter.rewrite(toCompact);
+        // The files exist from here on, so hand them to the task before doing anything that can
+        // still fail: from now on the task is what keeps them reachable.
+        task.trackNewFiles(result);
         if (dvMaintainer != null) {
             toCompact.forEach(f -> dvMaintainer.removeDeletionVectorOf(f.fileName()));
             result.setDeletionFile(CompactDeletionFile.generateFiles(dvMaintainer));
@@ -352,12 +352,16 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         return result;
     }
 
-    private static CompactResult result(List<DataFileMeta> before, List<DataFileMeta> after) {
-        return new CompactResult(before, after);
-    }
-
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
-        List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+
+        /**
+         * Rewrites the given files.
+         *
+         * <p>The returned result carries the handles to delete the files it has written, so that
+         * they can still be cleaned up if the compaction is cancelled before its result is
+         * committed.
+         */
+        CompactResult rewrite(List<DataFileMeta> compactBefore) throws Exception;
     }
 }

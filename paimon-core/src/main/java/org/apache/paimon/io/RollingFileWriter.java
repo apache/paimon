@@ -44,6 +44,17 @@ public interface RollingFileWriter<T, R> extends FileWriter<T, List<R>> {
 
     void writeBundle(BundleRecords records) throws IOException;
 
+    /**
+     * Transfers ownership of the abort executors for the files this writer has already closed and
+     * rolled over.
+     *
+     * <p>Once a file is rolled over its writer is dropped, so nothing but this handle can delete it
+     * any more. A caller which is going to throw away {@link #result()} - a compaction task whose
+     * result will never be committed, for instance - must drain these and abort them, otherwise the
+     * files are left behind with nothing referencing them.
+     */
+    List<FileWriterAbortExecutor> drainAbortExecutors();
+
     @VisibleForTesting
     static FileWriterContext createFileWriterContext(
             FileFormat fileFormat,

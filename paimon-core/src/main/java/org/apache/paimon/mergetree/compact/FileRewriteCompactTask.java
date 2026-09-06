@@ -69,6 +69,8 @@ public class FileRewriteCompactTask extends CompactTask {
 
     private void rewriteFile(DataFileMeta file, CompactResult toUpdate) throws Exception {
         List<List<SortedRun>> candidate = singletonList(singletonList(SortedRun.fromSingle(file)));
-        toUpdate.merge(rewriter.rewrite(outputLevel, dropDelete, candidate));
+        CompactResult rewriteResult = rewriter.rewrite(outputLevel, dropDelete, candidate);
+        trackNewFiles(rewriteResult);
+        toUpdate.merge(rewriteResult);
     }
 }

@@ -133,6 +133,7 @@ public class MergeTreeCompactTask extends CompactTask {
 
         if (file.level() != outputLevel) {
             CompactResult upgradeResult = rewriter.upgrade(outputLevel, file);
+            trackNewFiles(upgradeResult);
             toUpdate.merge(upgradeResult);
             upgradeFilesNum++;
         }
@@ -160,6 +161,9 @@ public class MergeTreeCompactTask extends CompactTask {
     private void rewriteImpl(List<List<SortedRun>> candidate, CompactResult toUpdate)
             throws Exception {
         CompactResult rewriteResult = rewriter.rewrite(outputLevel, dropDelete, candidate);
+        // Take the files over before merging: this section is finished, its writer is closed, and
+        // if a later section fails or the task is cancelled nothing else can delete them.
+        trackNewFiles(rewriteResult);
         toUpdate.merge(rewriteResult);
         candidate.clear();
     }

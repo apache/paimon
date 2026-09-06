@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
@@ -157,13 +158,13 @@ public class AppendCompactTaskTest {
         }
 
         @Override
-        public List<DataFileMeta> compactRewrite(
+        public CompactResult compactRewrite(
                 BinaryRow partition,
                 int bucket,
                 @Nullable Function<String, DeletionVector> dvFactory,
                 List<DataFileMeta> toCompact)
                 throws Exception {
-            return Collections.emptyList();
+            return new CompactResult();
         }
 
         @Override

@@ -112,7 +112,9 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             metricsReporter.reportSortBufferMetrics(
                     mergeSorter.sortBufferUsedBytes(), mergeSorter.sortBufferTotalBytes());
         }
-        return new CompactResult(before, after);
+        CompactResult result = new CompactResult(before, after);
+        result.addAbortExecutors(writer.drainAbortExecutors());
+        return result;
     }
 
     protected <T> RecordReader<T> readerForMergeTree(

@@ -206,7 +206,14 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                 changelogFileWriter != null
                         ? changelogFileWriter.result()
                         : Collections.emptyList();
-        return new CompactResult(before, after, changelogFiles);
+        CompactResult result = new CompactResult(before, after, changelogFiles);
+        if (compactFileWriter != null) {
+            result.addAbortExecutors(compactFileWriter.drainAbortExecutors());
+        }
+        if (changelogFileWriter != null) {
+            result.addAbortExecutors(changelogFileWriter.drainAbortExecutors());
+        }
+        return result;
     }
 
     @Override
