@@ -24,6 +24,13 @@ _native_plan_count = 0
 _force_native_for_test = False
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--robomind-agilex-input",
+        help="Downloaded RoboMIND AgileX directory for the optional sample test.",
+    )
+
+
 def _native_plan_enabled():
     return os.environ.get(_NATIVE_PLAN_ENV) == "1"
 

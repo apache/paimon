@@ -32,6 +32,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -75,7 +76,7 @@ class PkSortedDataFileReaderTest {
                         Collections.singletonList("id"),
                         Collections.emptyMap(),
                         "");
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         assertThat(schemaManager.commit(schema)).isTrue();
         FileStorePathFactory pathFactory = createNonPartFactory(tablePath);
         FlushingFileFormat format = new FlushingFileFormat("avro");

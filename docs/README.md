@@ -22,7 +22,7 @@ The site will be available at http://localhost:3000/docs/master/.
 ## Build
 
 ```bash
-# Validate the REST Catalog OpenAPI contract
+# Validate the REST OpenAPI contracts
 yarn test:rest-openapi
 
 # Production build

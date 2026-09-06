@@ -331,10 +331,16 @@ public abstract class DelegateCatalog implements Catalog {
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics)
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
         wrapped.createPartitions(
-                identifier, partitions, ignoreIfExists, statistics, replaceStatistics);
+                identifier,
+                partitions,
+                ignoreIfExists,
+                statistics,
+                replaceStatistics,
+                partitionOptions);
     }
 
     @Override

@@ -48,6 +48,11 @@ public class CaffeineCache implements Cache {
     }
 
     @Override
+    public boolean contains(CacheKey key) {
+        return this.cache.policy().getIfPresentQuietly(key) != null;
+    }
+
+    @Override
     public void invalidate(CacheKey key) {
         this.cache.invalidate(key);
     }

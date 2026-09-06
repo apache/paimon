@@ -1221,8 +1221,10 @@ public class ParquetVectorUpdaterFactory {
         @Override
         public void readValue(
                 int offset, WritableColumnVector values, VectorizedValuesReader valuesReader) {
-            valuesReader.readBinary(1, bytesVector, offset);
-            BigInteger value = new BigInteger(bytesVector.getBytes(offset).getBytes());
+            // The scratch vector has capacity 1: always read at index 0, never at the
+            // target row offset.
+            valuesReader.readBinary(1, bytesVector, 0);
+            BigInteger value = new BigInteger(bytesVector.getBytes(0).getBytes());
             BigDecimal decimal = new BigDecimal(value, parquetScale);
             putDecimal(values, offset, decimal);
         }

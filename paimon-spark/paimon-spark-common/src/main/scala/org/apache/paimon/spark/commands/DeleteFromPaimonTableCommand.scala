@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.Snapshot
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -54,7 +54,8 @@ case class DeleteFromPaimonTableCommand(
   private def usePKUpsertDelete(): Boolean = {
     try {
       validatePKUpsertDeletable(table)
-      true
+      coreOptions.mergeEngine() != CoreOptions.MergeEngine.PARTIAL_UPDATE ||
+      coreOptions.toConfiguration.get(CoreOptions.PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE)
     } catch {
       case _: UnsupportedOperationException => false
     }

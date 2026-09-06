@@ -408,6 +408,21 @@ Lookup metrics are available for local partial lookup. They are reported at look
             <td>The average total file size of all active (currently being written) buckets.</td>
         </tr>
         <tr>
+            <td>maxTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The maximum total file count of an active (currently being written) bucket.</td>
+        </tr>
+        <tr>
+            <td>avgTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The average total file count of all active (currently being written) buckets.</td>
+        </tr>
+        <tr>
+            <td>minAvgFileSize</td>
+            <td>Gauge</td>
+            <td>The minimum average file size across all active buckets, computed as total file size divided by total file count per bucket. Directly indicates if any bucket has a small file problem. Only reported for primary-key tables.</td>
+        </tr>
+        <tr>
             <td>maxSortBufferUsedBytes</td>
             <td>Gauge</td>
             <td>The maximum sort buffer memory currently used across all active compaction buckets, in bytes. High values relative to <code>maxSortBufferTotalBytes</code> indicate memory pressure during compaction; consider lowering <code>sort-spill-threshold</code> or reducing <code>sort-spill-buffer-size</code>.</td>

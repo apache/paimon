@@ -25,8 +25,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -75,7 +75,7 @@ public class AppendOnlyTableCompactionTest {
     public void createNegativeAppendOnlyTable() throws Exception {
         FileIO fileIO = new LocalFileIO();
         path = new org.apache.paimon.fs.Path(tempDir.toString());
-        tableSchema = new SchemaManager(fileIO, path).createTable(schema());
+        tableSchema = new FileSystemSchemaManager(fileIO, path).createTable(schema());
         snapshotManager = newSnapshotManager(fileIO, path);
         recreate();
     }

@@ -631,7 +631,8 @@ private[sql] class StatefulFaultCatalog(initial: Set[Map[String, String]] = Set.
       partitions: JList[JMap[String, String]],
       ignoreIfExists: Boolean,
       statistics: JList[PartitionStatistics],
-      replaceStatistics: Boolean): Unit = {
+      replaceStatistics: Boolean,
+      partitionOptions: JList[JMap[String, String]]): Unit = {
     createCalls += 1
     state ++= partitions.asScala.map(_.asScala.toMap)
     if (failCreateAfterApply) {
@@ -720,8 +721,14 @@ private[sql] class FaultInjectingFormatTablePartitionManager(delegate: FormatTab
       partitions: JList[JMap[String, String]],
       ignoreIfExists: Boolean,
       statistics: JList[PartitionStatistics],
-      replaceStatistics: Boolean): Unit = {
-    delegate.createPartitions(partitions, ignoreIfExists, statistics, replaceStatistics)
+      replaceStatistics: Boolean,
+      partitionOptions: JList[JMap[String, String]]): Unit = {
+    delegate.createPartitions(
+      partitions,
+      ignoreIfExists,
+      statistics,
+      replaceStatistics,
+      partitionOptions)
     MsckFaultInjection.createCalls += 1
   }
 

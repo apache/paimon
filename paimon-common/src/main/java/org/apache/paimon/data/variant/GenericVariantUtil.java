@@ -18,14 +18,11 @@
 
 package org.apache.paimon.data.variant;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.memory.MemorySegment;
-
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /* This file is based on source code from the Spark Project (http://spark.apache.org/), licensed by the Apache
@@ -189,7 +186,7 @@ public class GenericVariantUtil {
     }
 
     // An exception indicating that an external caller tried to call the Variant constructor with
-    // value or metadata exceeding the 16MiB size limit. We will never construct a Variant this
+    // value or metadata exceeding the 128MiB size limit. We will never construct a Variant this
     // large,
     // so it should only be possible to encounter this exception when reading a Variant produced by
     // another tool.
@@ -205,32 +202,54 @@ public class GenericVariantUtil {
         }
     }
 
+    static ByteBuffer slice(ByteBuffer buffer, int offset, int length) {
+        if (offset < 0 || length < 0 || offset > buffer.remaining() - length) {
+            throw malformedVariant();
+        }
+        ByteBuffer slice = buffer.duplicate();
+        slice.position(buffer.position() + offset);
+        slice.limit(buffer.position() + offset + length);
+        return slice.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    static byte getByte(ByteBuffer buffer, int pos) {
+        checkIndex(pos, buffer.remaining());
+        return buffer.get(buffer.position() + pos);
+    }
+
+    static byte[] copyBytes(ByteBuffer buffer, int offset, int length) {
+        ByteBuffer slice = slice(buffer, offset, length);
+        byte[] bytes = new byte[length];
+        slice.get(bytes);
+        return bytes;
+    }
+
     // Read a little-endian signed long value from `bytes[pos, pos + numBytes)`.
-    static long readLong(byte[] bytes, int pos, int numBytes) {
-        checkIndex(pos, bytes.length);
-        checkIndex(pos + numBytes - 1, bytes.length);
+    static long readLong(ByteBuffer bytes, int pos, int numBytes) {
+        checkIndex(pos, bytes.remaining());
+        checkIndex(pos + numBytes - 1, bytes.remaining());
         long result = 0;
         // All bytes except the most significant byte should be unsign-extended and shifted (so we
         // need `& 0xFF`). The most significant byte should be sign-extended and is handled after
         // the loop.
         for (int i = 0; i < numBytes - 1; ++i) {
-            long unsignedByteValue = bytes[pos + i] & 0xFF;
+            long unsignedByteValue = getByte(bytes, pos + i) & 0xFF;
             result |= unsignedByteValue << (8 * i);
         }
-        long signedByteValue = bytes[pos + numBytes - 1];
+        long signedByteValue = getByte(bytes, pos + numBytes - 1);
         result |= signedByteValue << (8 * (numBytes - 1));
         return result;
     }
 
     // Read a little-endian unsigned int value from `bytes[pos, pos + numBytes)`. The value must fit
     // into a non-negative int (`[0, Integer.MAX_VALUE]`).
-    static int readUnsigned(byte[] bytes, int pos, int numBytes) {
-        checkIndex(pos, bytes.length);
-        checkIndex(pos + numBytes - 1, bytes.length);
+    static int readUnsigned(ByteBuffer bytes, int pos, int numBytes) {
+        checkIndex(pos, bytes.remaining());
+        checkIndex(pos + numBytes - 1, bytes.remaining());
         int result = 0;
         // Similar to the `readLong` loop, but all bytes should be unsign-extended.
         for (int i = 0; i < numBytes; ++i) {
-            int unsignedByteValue = bytes[pos + i] & 0xFF;
+            int unsignedByteValue = getByte(bytes, pos + i) & 0xFF;
             result |= unsignedByteValue << (8 * i);
         }
         if (result < 0) {
@@ -260,19 +279,18 @@ public class GenericVariantUtil {
         UUID
     }
 
-    public static int getTypeInfo(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        return (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static int getTypeInfo(ByteBuffer value, int pos) {
+        return (getByte(value, pos) >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
     }
 
     // Get the value type of variant value `value[pos...]`. It is only legal to call `get*` if
     // `getType` returns this type (for example, it is only legal to call `getLong` if `getType`
     // returns `Type.Long`).
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static Type getType(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static Type getType(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         switch (basicType) {
             case SHORT_STR:
                 return Type.STRING;
@@ -321,10 +339,10 @@ public class GenericVariantUtil {
     // Compute the size in bytes of the variant value `value[pos...]`. `value.length - pos` is an
     // upper bound of the size, but the actual size can be smaller.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static int valueSize(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static int valueSize(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         switch (basicType) {
             case SHORT_STR:
                 return 1 + typeInfo;
@@ -392,10 +410,10 @@ public class GenericVariantUtil {
 
     // Get a boolean value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static boolean getBoolean(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static boolean getBoolean(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE || (typeInfo != TRUE && typeInfo != FALSE)) {
             throw unexpectedType(Type.BOOLEAN);
         }
@@ -408,10 +426,10 @@ public class GenericVariantUtil {
     // represents the number of days from the Unix epoch.
     // If the type is `TIMESTAMP/TIMESTAMP_NTZ`, the return value represents the number of
     // microseconds from the Unix epoch.
-    public static long getLong(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static long getLong(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         String exceptionMessage = "Expect type to be LONG/DATE/TIMESTAMP/TIMESTAMP_NTZ";
         if (basicType != PRIMITIVE) {
             throw new IllegalStateException(exceptionMessage);
@@ -435,10 +453,10 @@ public class GenericVariantUtil {
 
     // Get a double value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static double getDouble(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static double getDouble(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE || typeInfo != DOUBLE) {
             throw unexpectedType(Type.DOUBLE);
         }
@@ -454,16 +472,16 @@ public class GenericVariantUtil {
 
     // Get a decimal value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static BigDecimal getDecimalWithOriginalScale(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static BigDecimal getDecimalWithOriginalScale(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE) {
             throw unexpectedType(Type.DECIMAL);
         }
         // Interpret the scale byte as unsigned. If it is a negative byte, the unsigned value must
         // be greater than `MAX_DECIMAL16_PRECISION` and will trigger an error in `checkDecimal`.
-        int scale = value[pos + 1] & 0xFF;
+        int scale = getByte(value, pos + 1) & 0xFF;
         BigDecimal result;
         switch (typeInfo) {
             case DECIMAL4:
@@ -475,12 +493,12 @@ public class GenericVariantUtil {
                 checkDecimal(result, MAX_DECIMAL8_PRECISION);
                 break;
             case DECIMAL16:
-                checkIndex(pos + 17, value.length);
+                checkIndex(pos + 17, value.remaining());
                 byte[] bytes = new byte[16];
                 // Copy the bytes reversely because the `BigInteger` constructor expects a
                 // big-endian representation.
                 for (int i = 0; i < 16; ++i) {
-                    bytes[i] = value[pos + 17 - i];
+                    bytes[i] = getByte(value, pos + 17 - i);
                 }
                 result = new BigDecimal(new BigInteger(bytes), scale);
                 checkDecimal(result, MAX_DECIMAL16_PRECISION);
@@ -491,16 +509,16 @@ public class GenericVariantUtil {
         return result;
     }
 
-    public static BigDecimal getDecimal(byte[] value, int pos) {
+    public static BigDecimal getDecimal(ByteBuffer value, int pos) {
         return getDecimalWithOriginalScale(value, pos).stripTrailingZeros();
     }
 
     // Get a float value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static float getFloat(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static float getFloat(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE || typeInfo != FLOAT) {
             throw unexpectedType(Type.FLOAT);
         }
@@ -509,25 +527,27 @@ public class GenericVariantUtil {
 
     // Get a binary value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static byte[] getBinary(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static byte[] getBinary(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE || typeInfo != BINARY) {
             throw unexpectedType(Type.BINARY);
         }
         int start = pos + 1 + U32_SIZE;
         int length = readUnsigned(value, pos + 1, U32_SIZE);
-        checkIndex(start + length - 1, value.length);
-        return Arrays.copyOfRange(value, start, start + length);
+        if (length > 0) {
+            checkIndex(start + length - 1, value.remaining());
+        }
+        return copyBytes(value, start, length);
     }
 
     // Get a string value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static String getString(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static String getString(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType == SHORT_STR || (basicType == PRIMITIVE && typeInfo == LONG_STR)) {
             int start;
             int length;
@@ -538,25 +558,34 @@ public class GenericVariantUtil {
                 start = pos + 1 + U32_SIZE;
                 length = readUnsigned(value, pos + 1, U32_SIZE);
             }
-            checkIndex(start + length - 1, value.length);
-            return new String(value, start, length);
+            if (length > 0) {
+                checkIndex(start + length - 1, value.remaining());
+            }
+            if (value.hasArray()) {
+                return new String(
+                        value.array(),
+                        value.arrayOffset() + value.position() + start,
+                        length,
+                        StandardCharsets.UTF_8);
+            }
+            return StandardCharsets.UTF_8.decode(slice(value, start, length)).toString();
         }
         throw unexpectedType(Type.STRING);
     }
 
     // Get a UUID value from variant value `value[pos...]`.
     // Throw `MALFORMED_VARIANT` if the variant is malformed.
-    public static UUID getUuid(byte[] value, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static UUID getUuid(ByteBuffer value, int pos) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != PRIMITIVE || typeInfo != UUID) {
             throw unexpectedType(Type.UUID);
         }
         int start = pos + 1;
-        checkIndex(start + 15, value.length);
+        checkIndex(start + 15, value.remaining());
         // UUID values are big-endian, so we can't use VariantUtil.readLong().
-        ByteBuffer bb = ByteBuffer.wrap(value, start, 16).order(ByteOrder.BIG_ENDIAN);
+        ByteBuffer bb = slice(value, start, 16).order(ByteOrder.BIG_ENDIAN);
         return new UUID(bb.getLong(), bb.getLong());
     }
 
@@ -575,10 +604,10 @@ public class GenericVariantUtil {
 
     // A helper function to access a variant object. It provides `handler` with its required
     // parameters and returns what it returns.
-    public static <T> T handleObject(byte[] value, int pos, ObjectHandler<T> handler) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static <T> T handleObject(ByteBuffer value, int pos, ObjectHandler<T> handler) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != OBJECT) {
             throw unexpectedType(Type.OBJECT);
         }
@@ -610,10 +639,10 @@ public class GenericVariantUtil {
     }
 
     // A helper function to access a variant array.
-    public static <T> T handleArray(byte[] value, int pos, ArrayHandler<T> handler) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
-        int typeInfo = (value[pos] >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
+    public static <T> T handleArray(ByteBuffer value, int pos, ArrayHandler<T> handler) {
+        byte header = getByte(value, pos);
+        int basicType = header & BASIC_TYPE_MASK;
+        int typeInfo = (header >> BASIC_TYPE_BITS) & TYPE_INFO_MASK;
         if (basicType != ARRAY) {
             throw unexpectedType(Type.ARRAY);
         }
@@ -634,11 +663,11 @@ public class GenericVariantUtil {
     // Get a key at `id` in the variant metadata.
     // Throw `MALFORMED_VARIANT` if the variant is malformed. An out-of-bound `id` is also
     // considered a malformed variant because it is read from the corresponding variant value.
-    public static String getMetadataKey(byte[] metadata, int id) {
-        checkIndex(0, metadata.length);
+    public static String getMetadataKey(ByteBuffer metadata, int id) {
+        checkIndex(0, metadata.remaining());
         // Extracts the highest 2 bits in the metadata header to determine the integer size of the
         // offset list.
-        int offsetSize = ((metadata[0] >> 6) & 0x3) + 1;
+        int offsetSize = ((getByte(metadata, 0) >> 6) & 0x3) + 1;
         int dictSize = readUnsigned(metadata, 1, offsetSize);
         if (id >= dictSize) {
             throw malformedVariant();
@@ -651,14 +680,25 @@ public class GenericVariantUtil {
         if (offset > nextOffset) {
             throw malformedVariant();
         }
-        checkIndex(stringStart + nextOffset - 1, metadata.length);
-        return new String(metadata, stringStart + offset, nextOffset - offset);
+        if (nextOffset > 0) {
+            checkIndex(stringStart + nextOffset - 1, metadata.remaining());
+        }
+        int length = nextOffset - offset;
+        if (metadata.hasArray()) {
+            return new String(
+                    metadata.array(),
+                    metadata.arrayOffset() + metadata.position() + stringStart + offset,
+                    length,
+                    StandardCharsets.UTF_8);
+        }
+        return StandardCharsets.UTF_8
+                .decode(slice(metadata, stringStart + offset, length))
+                .toString();
     }
 
-    static void pointToMetadataKey(
-            byte[] metadata, MemorySegment[] metadataSegments, int id, BinaryString result) {
-        checkIndex(0, metadata.length);
-        int offsetSize = ((metadata[0] >> 6) & 0x3) + 1;
+    static int compareMetadataKey(ByteBuffer metadata, int id, byte[] utf8Key) {
+        checkIndex(0, metadata.remaining());
+        int offsetSize = ((getByte(metadata, 0) >> 6) & 0x3) + 1;
         int dictSize = readUnsigned(metadata, 1, offsetSize);
         if (id >= dictSize) {
             throw malformedVariant();
@@ -669,7 +709,79 @@ public class GenericVariantUtil {
         if (offset > nextOffset) {
             throw malformedVariant();
         }
-        checkIndex(stringStart + nextOffset - 1, metadata.length);
-        result.pointTo(metadataSegments, stringStart + offset, nextOffset - offset);
+        if (nextOffset > 0) {
+            checkIndex(stringStart + nextOffset - 1, metadata.remaining());
+        }
+        int length = nextOffset - offset;
+        int commonLength = Math.min(length, utf8Key.length);
+        for (int i = 0; i < commonLength; i++) {
+            int left = getByte(metadata, stringStart + offset + i) & 0xFF;
+            int right = utf8Key[i] & 0xFF;
+            if (left != right) {
+                return left - right;
+            }
+        }
+        return length - utf8Key.length;
+    }
+
+    // Compatibility overloads for callers using the original byte-array API.
+    public static int getTypeInfo(byte[] value, int pos) {
+        return getTypeInfo(ByteBuffer.wrap(value), pos);
+    }
+
+    public static Type getType(byte[] value, int pos) {
+        return getType(ByteBuffer.wrap(value), pos);
+    }
+
+    public static int valueSize(byte[] value, int pos) {
+        return valueSize(ByteBuffer.wrap(value), pos);
+    }
+
+    public static boolean getBoolean(byte[] value, int pos) {
+        return getBoolean(ByteBuffer.wrap(value), pos);
+    }
+
+    public static long getLong(byte[] value, int pos) {
+        return getLong(ByteBuffer.wrap(value), pos);
+    }
+
+    public static double getDouble(byte[] value, int pos) {
+        return getDouble(ByteBuffer.wrap(value), pos);
+    }
+
+    public static BigDecimal getDecimalWithOriginalScale(byte[] value, int pos) {
+        return getDecimalWithOriginalScale(ByteBuffer.wrap(value), pos);
+    }
+
+    public static BigDecimal getDecimal(byte[] value, int pos) {
+        return getDecimal(ByteBuffer.wrap(value), pos);
+    }
+
+    public static float getFloat(byte[] value, int pos) {
+        return getFloat(ByteBuffer.wrap(value), pos);
+    }
+
+    public static byte[] getBinary(byte[] value, int pos) {
+        return getBinary(ByteBuffer.wrap(value), pos);
+    }
+
+    public static String getString(byte[] value, int pos) {
+        return getString(ByteBuffer.wrap(value), pos);
+    }
+
+    public static UUID getUuid(byte[] value, int pos) {
+        return getUuid(ByteBuffer.wrap(value), pos);
+    }
+
+    public static <T> T handleObject(byte[] value, int pos, ObjectHandler<T> handler) {
+        return handleObject(ByteBuffer.wrap(value), pos, handler);
+    }
+
+    public static <T> T handleArray(byte[] value, int pos, ArrayHandler<T> handler) {
+        return handleArray(ByteBuffer.wrap(value), pos, handler);
+    }
+
+    public static String getMetadataKey(byte[] metadata, int id) {
+        return getMetadataKey(ByteBuffer.wrap(metadata), id);
     }
 }

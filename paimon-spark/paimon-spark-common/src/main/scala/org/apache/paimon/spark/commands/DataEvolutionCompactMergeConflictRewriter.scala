@@ -24,13 +24,15 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.{DataSplit, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.{RowType => PaimonRowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
-import org.apache.paimon.utils.{Range, RowRangeIndex}
+import org.apache.paimon.utils.{DataEvolutionUtils, Range, RowRangeIndex}
 
 import org.apache.spark.sql.{functions, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -52,6 +54,10 @@ class DataEvolutionCompactMergeConflictRewriter(
   extends ScanPlanHelper {
 
   import DataEvolutionCompactMergeConflictRewriter._
+
+  private val partialColumns = new DataEvolutionPartialColumns(table)
+  private val nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled()
+  private val fileSchemaCache = mutable.HashMap.empty[Long, TableSchema]
 
   def rewrite(
       sparkSession: SparkSession,
@@ -121,12 +127,11 @@ class DataEvolutionCompactMergeConflictRewriter(
       target =>
         val files = additionsByTarget.get(target).map(_.toSeq).getOrElse(Seq.empty)
         if (files.nonEmpty) {
-          val updatedFields = table
-            .rowType()
-            .getFieldNames
-            .asScala
-            .filter(name => files.exists(_.file.writeCols().contains(name)))
-            .toSeq
+          // write columns may be dotted sub-field paths (e.g. "nest.a"), so they cannot be matched
+          // against top-level field names; collect their union instead, ordered by the schema.
+          val updatedFields =
+            updatedWritePaths(
+              files.flatMap(file => partialFileWriteCols(file.file).get).distinct.toSet)
           if (updatedFields.isEmpty) {
             return JOptional.empty()
           }
@@ -155,6 +160,41 @@ class DataEvolutionCompactMergeConflictRewriter(
       }
 
     JOptional.of((messageImpls ++ rewrittenMessages).map(_.asInstanceOf[CommitMessage]).asJava)
+  }
+
+  /**
+   * The write paths covered by the staged MERGE files, laid out in schema order: a top-level column
+   * written whole by any file is taken whole, otherwise its written sub-fields are listed in the
+   * struct's declaration order. Ordering here has to be deterministic because [[TargetRewrite]]s
+   * are grouped by it and it becomes the physical layout of the rebased file.
+   */
+  private def updatedWritePaths(writePaths: Set[String]): Seq[String] = {
+    if (!nestedFieldEnabled) {
+      return table
+        .rowType()
+        .getFieldNames
+        .asScala
+        .filter(writePaths.contains)
+        .toSeq
+    }
+    table.rowType().getFields.asScala.toSeq.flatMap {
+      field =>
+        val forField = writePaths.filter(path => partialColumns.topLevelOf(path) == field.name)
+        if (forField.isEmpty) {
+          Seq.empty[String]
+        } else if (forField.contains(field.name)) {
+          // some file wrote the whole column, which subsumes any sub-field write of it
+          Seq(field.name)
+        } else {
+          field.`type`() match {
+            case struct: PaimonRowType =>
+              struct.getFields.asScala.toSeq
+                .map(sub => field.name + "." + sub.name)
+                .filter(forField.contains)
+            case _ => Seq(field.name)
+          }
+        }
+    }
   }
 
   private def targetReader(snapshot: Snapshot, targetScan: TargetScan): SnapshotReader = {
@@ -236,7 +276,12 @@ class DataEvolutionCompactMergeConflictRewriter(
     }
 
     val rowIdAttribute = attribute(ROW_ID_NAME)
-    val readOutput = updatedFields.map(attribute) :+ rowIdAttribute
+    // updatedFields are write paths and may address a single leaf of a struct (e.g. "nest.a"); the
+    // scan is in terms of top-level columns and the projection prunes each partially written
+    // struct, so the rebased file carries exactly the leaves the staged MERGE files carried.
+    val topColumns = partialColumns.topLevelColumns(updatedFields)
+    val projections = partialColumns.projections(updatedFields)
+    val readOutput = topColumns.map(attribute) :+ rowIdAttribute
     val relation = createNewScanPlan(relevantSplits, targetRelation)
     val readPlan =
       SparkShimLoader.shim.copyDataSourceV2Relation(relation, relation.table, readOutput)
@@ -244,7 +289,7 @@ class DataEvolutionCompactMergeConflictRewriter(
     val rangeIndex = new CompactRowIdRangeIndex(targetRanges)
     val firstRowId = udf((rowId: Long) => rangeIndex.firstRowId(rowId))
     val rewrittenRows = createDataset(sparkSession, readPlan)
-      .select((updatedFields.map(quotedColumn) :+ quotedColumn(ROW_ID_NAME)): _*)
+      .select((projections :+ quotedColumn(ROW_ID_NAME)): _*)
       .withColumn(FIRST_ROW_ID_NAME, firstRowId(quotedColumn(ROW_ID_NAME)))
       .filter(quotedColumn(FIRST_ROW_ID_NAME).isNotNull)
       .repartition(col(FIRST_ROW_ID_NAME))
@@ -307,6 +352,22 @@ class DataEvolutionCompactMergeConflictRewriter(
         throw new UnsupportedOperationException(
           s"Unsupported compact MERGE conflict commit message: $other")
     }
+  }
+
+  private def isRegularPartialFile(file: DataFileMeta): Boolean = {
+    isNormalRowIdFile(file) &&
+    file.fileSource().orElse(null) == FileSource.APPEND &&
+    partialFileWriteCols(file).exists(
+      columns => columns.nonEmpty && columns.forall(column => !SpecialFields.isSystemField(column)))
+  }
+
+  private def partialFileWriteCols(file: DataFileMeta): Option[Seq[String]] = {
+    val fileSchema = fileSchemaCache.getOrElseUpdate(
+      file.schemaId(),
+      if (file.schemaId() == table.schema().id()) table.schema()
+      else table.schemaManager().schema(file.schemaId()))
+    val columns = DataEvolutionUtils.partialFileWriteCols(fileSchema, file)
+    if (columns.isPresent) Some(columns.get().asScala.toSeq) else None
   }
 
 }
@@ -415,14 +476,6 @@ private object DataEvolutionCompactMergeConflictRewriter {
 
   private def isNormalRowIdFile(file: DataFileMeta): Boolean = {
     file.firstRowId() != null && !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())
-  }
-
-  private def isRegularPartialFile(file: DataFileMeta): Boolean = {
-    isNormalRowIdFile(file) &&
-    file.fileSource().orElse(null) == FileSource.APPEND &&
-    file.writeCols() != null &&
-    !file.writeCols().isEmpty &&
-    file.writeCols().asScala.forall(column => !SpecialFields.isSystemField(column))
   }
 
   private def quotedColumn(name: String) = {

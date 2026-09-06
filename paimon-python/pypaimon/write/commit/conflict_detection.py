@@ -94,7 +94,18 @@ class RowIdColumnConflictChecker:
 
     def _contains_any_write_field(self, field_ids, file):
         if file.write_cols is None:
-            return True
+            schema = self._schema_manager.get_schema(file.schema_id)
+            if schema is None:
+                raise RuntimeError(f"Schema {file.schema_id} not found")
+            data_file_fields = (
+                schema.data_file_fields(None)
+                if hasattr(schema, 'data_file_fields')
+                else schema.fields
+            )
+            return any(
+                field.id in field_ids
+                for field in data_file_fields
+            )
         for col_name in file.write_cols:
             fid = self._field_id(file, col_name)
             if fid is not None and fid in field_ids:
@@ -126,7 +137,12 @@ class RowIdColumnConflictChecker:
         if file.write_cols is None:
             schema = schema_manager.get_schema(file.schema_id)
             if schema is not None:
-                for field in schema.fields:
+                data_file_fields = (
+                    schema.data_file_fields(None)
+                    if hasattr(schema, 'data_file_fields')
+                    else schema.fields
+                )
+                for field in data_file_fields:
                     if not SpecialFields.is_system_field(field.name):
                         field_ids.add(field.id)
         else:

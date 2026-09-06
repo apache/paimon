@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * Utils for marking and identifying variant-originated RowType. Uses description field in DataField
  * to encode variant metadata.
@@ -42,6 +44,11 @@ public class VariantMetadataUtils {
 
     /** Build variant metadata description string. */
     public static String buildVariantMetadata(String path, boolean failOnError, String timeZoneId) {
+        checkArgument(
+                !path.contains(DELIMITER),
+                "Variant extraction path must not contain '%s': %s",
+                DELIMITER,
+                path);
         return METADATA_KEY + path + DELIMITER + failOnError + DELIMITER + timeZoneId;
     }
 

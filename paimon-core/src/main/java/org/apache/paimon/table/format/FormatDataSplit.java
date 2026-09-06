@@ -39,10 +39,17 @@ public class FormatDataSplit implements Split {
 
     private final List<FileMeta> files;
     @Nullable private final BinaryRow partition;
+    private final boolean useCatalogContextFileIO;
 
     public FormatDataSplit(List<FileMeta> files, @Nullable BinaryRow partition) {
+        this(files, partition, false);
+    }
+
+    public FormatDataSplit(
+            List<FileMeta> files, @Nullable BinaryRow partition, boolean useCatalogContextFileIO) {
         this.files = files;
         this.partition = partition;
+        this.useCatalogContextFileIO = useCatalogContextFileIO;
     }
 
     public List<FileMeta> files() {
@@ -52,6 +59,14 @@ public class FormatDataSplit implements Split {
     @Nullable
     public BinaryRow partition() {
         return partition;
+    }
+
+    /**
+     * Whether readers must resolve this split through the client {@code CatalogContext} instead of
+     * the FileIO bound to the table root.
+     */
+    public boolean useCatalogContextFileIO() {
+        return useCatalogContextFileIO;
     }
 
     /** Total bytes to read for this split, i.e. the sum of {@link FileMeta#readSize()}. */
@@ -83,12 +98,14 @@ public class FormatDataSplit implements Split {
             return false;
         }
         FormatDataSplit that = (FormatDataSplit) o;
-        return Objects.equals(files, that.files) && Objects.equals(partition, that.partition);
+        return useCatalogContextFileIO == that.useCatalogContextFileIO
+                && Objects.equals(files, that.files)
+                && Objects.equals(partition, that.partition);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(files, partition);
+        return Objects.hash(files, partition, useCatalogContextFileIO);
     }
 
     /**

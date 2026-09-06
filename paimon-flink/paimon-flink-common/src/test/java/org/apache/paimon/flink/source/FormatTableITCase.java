@@ -134,6 +134,52 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
+    public void testInsertOverwriteWithoutRowsReplacesItsTarget() {
+        String tableName = "format_table_empty_overwrite";
+        sql(
+                "CREATE TABLE %s (a INT, b INT) WITH ('file.format'='parquet', 'type'='format-table')",
+                tableName);
+        setDataToken(tableName);
+
+        sql("INSERT INTO %s VALUES (1, 11), (2, 22)", tableName);
+        assertThat(sql("SELECT * FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(1, 11), Row.of(2, 22));
+
+        sql("INSERT OVERWRITE %s SELECT a, b FROM %s WHERE a < 0", tableName, tableName);
+        assertThat(sql("SELECT * FROM %s", tableName)).isEmpty();
+
+        sql("Drop TABLE %s", tableName);
+    }
+
+    @Test
+    public void testInsertOverwriteWithoutRowsEmptiesOnlyTheNamedPartition() {
+        String tableName = "format_table_empty_overwrite_partitioned";
+        sql(
+                "CREATE TABLE %s (a INT, b INT, c INT) PARTITIONED BY (c) WITH ('file.format'='parquet', 'type'='format-table')",
+                tableName);
+        setDataToken(tableName);
+
+        sql("INSERT INTO %s PARTITION (c = 1) VALUES (1, 11)", tableName);
+        sql("INSERT INTO %s PARTITION (c = 2) VALUES (2, 22)", tableName);
+        assertThat(sql("SELECT a, b, c FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 1), Row.of(2, 22, 2));
+
+        sql(
+                "INSERT OVERWRITE %s PARTITION (c = 1) SELECT a, b FROM %s WHERE a < 0",
+                tableName, tableName);
+        assertThat(sql("SELECT a, b, c FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(2, 22, 2));
+
+        // Without a PARTITION clause the statement replaces the partitions it wrote, and it wrote
+        // none, so both engines leave the table alone.
+        sql("INSERT OVERWRITE %s SELECT a, b, c FROM %s WHERE a < 0", tableName, tableName);
+        assertThat(sql("SELECT a, b, c FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(2, 22, 2));
+
+        sql("Drop TABLE %s", tableName);
+    }
+
+    @Test
     public void testTruncateTable() {
         String tableName = "format_table_truncate";
         sql(

@@ -32,6 +32,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -206,7 +207,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         }
 
         table = table.copyWithLatestSchema();
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         TableSchema schema = schemaManager.latest().get();
 
         ReadBuilder readBuilder = table.newReadBuilder();
@@ -237,7 +238,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }

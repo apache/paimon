@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
@@ -69,7 +70,7 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
                 Path tablePath = CoreOptions.path(table.getOptions());
                 String branch = CoreOptions.branch(table.getOptions());
                 SchemaManager schemaManager =
-                        new SchemaManager(
+                        new FileSystemSchemaManager(
                                 FileIO.get(tablePath, createCatalogContext(context)),
                                 tablePath,
                                 branch);

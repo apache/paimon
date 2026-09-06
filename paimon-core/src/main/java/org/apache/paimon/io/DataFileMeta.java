@@ -361,6 +361,11 @@ public interface DataFileMeta {
         return new Range(firstRowId, firstRowId + rowCount() - 1);
     }
 
+    /**
+     * Columns physically stored in this file. A null value means all table fields, except that a
+     * normal data-evolution file whose schema enables compact write-column metadata and has
+     * dedicated BLOB or vector fields contains all non-dedicated fields.
+     */
     @Nullable
     List<String> writeCols();
 
@@ -368,8 +373,8 @@ public interface DataFileMeta {
      * Maximum sequence number per physical table field after data-evolution compaction.
      *
      * <p>Values follow the table-field order selected by {@link #writeCols()} when it is non-null
-     * (system fields are ignored), or the file schema field order otherwise. A null value means
-     * that only the file-level sequence range is available.
+     * (system fields are ignored), or the physical field order implied by a null write-columns
+     * value otherwise. A null value means that only the file-level sequence range is available.
      */
     @Nullable
     long[] columnMaxSequenceNumbers();

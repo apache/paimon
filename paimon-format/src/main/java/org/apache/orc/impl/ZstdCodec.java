@@ -165,7 +165,7 @@ public class ZstdCodec implements CompressionCodec, DirectDecompressionCodec {
 
     @Override
     public Options getDefaultOptions() {
-        return DEFAULT_OPTIONS;
+        return DEFAULT_OPTIONS.copy();
     }
 
     /**

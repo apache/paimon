@@ -23,6 +23,10 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,7 +38,7 @@ import java.util.concurrent.CompletableFuture;
  * A {@link GlobalIndexReader} that wraps another reader and applies an offset to all row IDs in the
  * results.
  */
-public class OffsetGlobalIndexReader implements GlobalIndexReader {
+public class OffsetGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
 
     private final GlobalIndexReader wrapped;
     private final long offset;
@@ -72,6 +76,40 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
             FieldRef fieldRef, Object literal) {
         return wrapped.visitContains(fieldRef, literal).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        GlobalIndexResult localCandidates = localCandidates(candidates);
+        if (localCandidates != null && localCandidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        CompletableFuture<Optional<GlobalIndexResult>> result =
+                wrapped instanceof ContainsRefiningGlobalIndexReader
+                        ? ((ContainsRefiningGlobalIndexReader) wrapped)
+                                .visitContainsCandidates(fieldRef, literals, localCandidates)
+                        : visitContainsConjunctionFallback(fieldRef, literals, localCandidates);
+        return result.thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        GlobalIndexResult localCandidates = localCandidates(candidates);
+        if (localCandidates != null && localCandidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+
+        CompletableFuture<Optional<GlobalIndexResult>> result;
+        if (wrapped instanceof ContainsRefiningGlobalIndexReader) {
+            result =
+                    ((ContainsRefiningGlobalIndexReader) wrapped)
+                            .visitContainsConjunction(fieldRef, literals, localCandidates);
+        } else {
+            result = visitContainsConjunctionFallback(fieldRef, literals, localCandidates);
+        }
+        return result.thenApply(this::applyOffset);
     }
 
     @Override
@@ -194,6 +232,51 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {
         return result.map(r -> r.offset(offset));
+    }
+
+    @Nullable
+    private GlobalIndexResult localCandidates(@Nullable GlobalIndexResult candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        RoaringNavigableMap64 local = new RoaringNavigableMap64();
+        for (Range range : candidates.results().toRangeList()) {
+            long from = Math.max(range.from, offset);
+            long rangeTo = Math.min(range.to, to);
+            if (from <= rangeTo) {
+                local.addRange(new Range(from - offset, rangeTo - offset));
+            }
+        }
+        return GlobalIndexResult.create(local);
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunctionFallback(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            futures.add(wrapped.visitContains(fieldRef, literal));
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            Optional<GlobalIndexResult> result = Optional.empty();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                                Optional<GlobalIndexResult> current = future.join();
+                                if (!current.isPresent()) {
+                                    continue;
+                                }
+                                result =
+                                        Optional.of(
+                                                result.isPresent()
+                                                        ? result.get().and(current.get())
+                                                        : current.get());
+                            }
+                            if (result.isPresent() && candidates != null) {
+                                result = Optional.of(result.get().and(candidates));
+                            }
+                            return result;
+                        });
     }
 
     @Override

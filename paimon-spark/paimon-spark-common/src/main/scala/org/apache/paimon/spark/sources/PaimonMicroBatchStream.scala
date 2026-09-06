@@ -127,7 +127,9 @@ class PaimonMicroBatchStream(
   private def normalizeStartOffset(start: Offset): PaimonSourceOffset = {
     val startOffset = PaimonSourceOffset(start)
     val snapshotCompleted = startOffset.snapshotCompleted
-    val resumeSnapshotId = if (snapshotCompleted) {
+    val resumeSnapshotId = if (startOffset.emptySnapshotCompleted) {
+      startOffset.snapshotId
+    } else if (snapshotCompleted) {
       startOffset.snapshotId + 1
     } else {
       startOffset.snapshotId
@@ -199,7 +201,11 @@ class PaimonMicroBatchStream(
       startOffset.json(),
       endOffset.json(),
       admittedSplits.length,
-      () => DataEvolutionUtils.collectWrittenColumnIds(admittedSplitSnapshot, schemaLoader)
+      () =>
+        DataEvolutionUtils.collectWrittenColumnIds(
+          admittedSplitSnapshot,
+          schemaId => schemaLoader.apply(schemaId)
+        )
     )
   }
 
@@ -220,6 +226,8 @@ class PaimonMicroBatchStream(
     consumerId.foreach {
       id =>
         offset.totalSplits match {
+          case Some(0L) if offset.emptySnapshotCompleted =>
+            notifyConsumerCheckpointComplete(offset.snapshotId)
           case Some(totalSplits) if offset.index >= totalSplits =>
             throw new IllegalStateException(
               s"Invalid Paimon source offset $offset: split index must be smaller than " +

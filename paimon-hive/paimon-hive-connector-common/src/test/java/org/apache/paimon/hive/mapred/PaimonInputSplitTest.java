@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileTestDataGenerator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -100,7 +101,7 @@ public class PaimonInputSplitTest {
     @Test
     public void testWriteAndReadWithTable() throws Exception {
         Path path = new Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         schemaManager.createTable(
                 new Schema(
                         RowType.of(VarCharType.STRING_TYPE).getFields(),

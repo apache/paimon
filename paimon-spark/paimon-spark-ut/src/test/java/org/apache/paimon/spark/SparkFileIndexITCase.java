@@ -35,6 +35,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
@@ -196,7 +197,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
     protected void foreachIndexReader(String tableName, Consumer<FileIndexReader> consumer)
             throws Catalog.TableNotExistException {
         Path tableRoot = fileSystemCatalog.getTableLocation(Identifier.create("db", tableName));
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         tableRoot,

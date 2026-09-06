@@ -186,7 +186,21 @@ public class ParquetFilters {
 
         @Override
         public FilterPredicate visitStartsWith(FieldRef fieldRef, Object literal) {
-            throw new UnsupportedOperationException();
+            Operators.Column<?> column = toParquetColumn(fieldRef);
+            if (!(column instanceof Operators.BinaryColumn)) {
+                throw new UnsupportedOperationException();
+            }
+
+            Binary prefix = (Binary) toParquetObject(literal, fieldRef);
+            if (prefix.length() == 0) {
+                throw new UnsupportedOperationException();
+            }
+
+            FilterPredicate lower = FilterApi.gtEq((Operators.BinaryColumn) column, prefix);
+            Binary upper = nextBinary(prefix);
+            return upper == null
+                    ? lower
+                    : FilterApi.and(lower, FilterApi.lt((Operators.BinaryColumn) column, upper));
         }
 
         @Override
@@ -416,6 +430,20 @@ public class ParquetFilters {
                 return Binary.fromReusedByteArray((byte[]) value);
             }
             throw new UnsupportedOperationException();
+        }
+
+        /** Returns the smallest binary value strictly greater than all values with this prefix. */
+        @Nullable
+        private Binary nextBinary(Binary prefix) {
+            byte[] bytes = prefix.getBytes();
+            for (int i = bytes.length - 1; i >= 0; i--) {
+                int value = bytes[i] & 0xff;
+                if (value != 0xff) {
+                    bytes[i] = (byte) (value + 1);
+                    return Binary.fromConstantByteArray(bytes, 0, i + 1);
+                }
+            }
+            return null;
         }
 
         private Decimal normalizeDecimal(Decimal decimal, DecimalType fieldType) {

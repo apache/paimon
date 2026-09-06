@@ -20,8 +20,8 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -268,7 +268,7 @@ public class HiveTableSchemaTest {
     }
 
     private void createSchema() throws Exception {
-        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+        new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
                                 ROW_TYPE.getFields(),
@@ -373,7 +373,7 @@ public class HiveTableSchemaTest {
     }
 
     private void createSchemaWithPartition() throws Exception {
-        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+        new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
                                 ROW_TYPE.getFields(),

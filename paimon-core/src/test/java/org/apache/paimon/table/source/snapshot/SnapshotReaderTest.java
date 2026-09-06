@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -215,7 +216,7 @@ public class SnapshotReaderTest {
         // change file schema
 
         write.close();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -299,7 +300,7 @@ public class SnapshotReaderTest {
         // change file schema
 
         write.close();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -358,7 +359,7 @@ public class SnapshotReaderTest {
                         + CoreOptions.COLUMNS,
                 rowType.getFieldNames().get(0));
 
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
                 schemaManager.createTable(
                         new Schema(

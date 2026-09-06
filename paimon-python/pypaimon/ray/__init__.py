@@ -31,6 +31,8 @@ from pypaimon.ray.data_evolution_merge_transform import (
 from pypaimon.ray.update_by_row_id import update_by_row_id
 from pypaimon.ray.read_by_row_id import read_by_row_id
 from pypaimon.ray.process_row_id_ranges import process_row_id_ranges
+from pypaimon.ray.hdf5 import load_from_hdf5
+from pypaimon.ray.rosbag import load_from_rosbag
 
 __all__ = [
     "read_paimon",
@@ -42,6 +44,8 @@ __all__ = [
     "update_by_row_id",
     "read_by_row_id",
     "process_row_id_ranges",
+    "load_from_hdf5",
+    "load_from_rosbag",
     "WhenMatched",
     "WhenNotMatched",
     "source_col",

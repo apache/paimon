@@ -186,6 +186,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
         if (writeOptions.primaryKeyVectorIndexEnabled()
                 || writeOptions.primaryKeyFullTextIndexEnabled()
+                || writeOptions.primaryKeyFMIndexEnabled()
                 || !writeOptions.primaryKeyBTreeIndexColumns().isEmpty()
                 || !writeOptions.primaryKeyBitmapIndexColumns().isEmpty()
                 || !writeOptions.primaryKeyMultiValueIndexColumns().isEmpty()) {

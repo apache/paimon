@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -151,7 +152,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     private SchemaManager schemaManager(Identifier identifier) {
         Path path = getTableLocation(identifier);
-        return new SchemaManager(fileIO, path, identifier.getBranchNameOrDefault());
+        return new FileSystemSchemaManager(fileIO, path, identifier.getBranchNameOrDefault());
     }
 
     @Override

@@ -49,7 +49,11 @@ case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boole
       index: Long = this.index,
       scanSnapshot: Boolean = this.scanSnapshot): PaimonSourceOffset = {
     val copied = PaimonSourceOffset(snapshotId, index, scanSnapshot)
-    if (snapshotId == this.snapshotId && scanSnapshot == this.scanSnapshot) {
+    if (
+      snapshotId == this.snapshotId &&
+      scanSnapshot == this.scanSnapshot &&
+      totalSplitsValue.forall(_ > 0 || index == PaimonSourceOffset.INIT_OFFSET_INDEX)
+    ) {
       copied.totalSplitsValue = totalSplitsValue
     }
     copied
@@ -58,6 +62,9 @@ case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boole
   private[spark] def snapshotCompleted: Boolean = {
     totalSplits.exists(index == _ - 1)
   }
+
+  /** Whether this offset is the cursor immediately after an empty full snapshot. */
+  private[spark] def emptySnapshotCompleted: Boolean = totalSplits.contains(0L)
 
   override def json(): String = {
     val node = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.createObjectNode()
@@ -103,7 +110,11 @@ object PaimonSourceOffset {
       index: Long,
       scanSnapshot: Boolean,
       totalSplits: Long): PaimonSourceOffset = {
-    require(totalSplits > 0, s"Total splits must be positive, but was $totalSplits.")
+    require(
+      totalSplits > 0 ||
+        (totalSplits == 0 && index == INIT_OFFSET_INDEX && !scanSnapshot),
+      s"Total splits must be positive except for an empty full snapshot cursor, but was $totalSplits."
+    )
     val offset = PaimonSourceOffset(snapshotId, index, scanSnapshot)
     offset.totalSplitsValue = Some(totalSplits)
     offset

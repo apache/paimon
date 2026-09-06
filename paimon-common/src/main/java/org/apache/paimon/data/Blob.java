@@ -97,7 +97,7 @@ public interface Blob {
             return fromView(BlobViewStruct.deserialize(bytes));
         }
 
-        if (BlobDescriptor.isBlobDescriptor(bytes) || !allowBlobData) {
+        if (BlobDescriptor.isSerializedDescriptor(bytes) || !allowBlobData) {
             BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
             UriReader reader =
                     uriReaderFactory != null
@@ -127,7 +127,7 @@ public interface Blob {
             return fromView(BlobViewStruct.deserialize(bytes));
         }
 
-        if (BlobDescriptor.isBlobDescriptor(bytes) || !allowBlobData) {
+        if (BlobDescriptor.isSerializedDescriptor(bytes) || !allowBlobData) {
             BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
             UriReader reader = uriReader == null ? UriReader.fromFile(fileIO) : uriReader;
             return fromDescriptor(reader, descriptor);

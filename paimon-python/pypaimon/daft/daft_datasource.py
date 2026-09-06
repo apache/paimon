@@ -488,12 +488,14 @@ def _blob_native_covering_files(
     task_columns: list[str],
     blob_column_names: set[str],
     partition_keys: list[str],
+    schema_loader=None,
 ) -> list[DataFileMeta] | None:
     """Return the parquet files that can serve a blob-table split via Daft's
     native reader, or ``None`` if the split must use the pypaimon fallback.
 
     A blob table stores each column bunch in its own file: scalar columns in
-    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` files, vector columns in
+    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` or
+    ``.video`` files, vector columns in
     ``.vector`` files, aligned by row id. Reading the base parquet files
     natively is only correct when every projected data column lives in parquet
     files that each fully cover the projection over disjoint row-id ranges --
@@ -510,9 +512,15 @@ def _blob_native_covering_files(
     covering: list[DataFileMeta] = []
     for f in files:
         name = f.file_name
-        write_cols = set(f.write_cols or [])
+        if f.write_cols is None and schema_loader is not None:
+            file_schema = schema_loader(f.schema_id)
+            write_cols = {
+                field.name for field in file_schema.data_file_fields(None)
+            }
+        else:
+            write_cols = set(f.write_cols or [])
         carried = write_cols & projected
-        if name.endswith(".blob") or ".vector." in name:
+        if name.endswith((".blob", ".video")) or ".vector." in name:
             if carried:
                 return None  # a projected column lives in a blob/vector bunch
             continue
@@ -1010,7 +1018,15 @@ class PaimonDataSource(DataSource):
             | self._map_blob_column_names
         )
         return _blob_native_covering_files(
-            files, task_columns, blob_column_names, self._table.partition_keys
+            files,
+            task_columns,
+            blob_column_names,
+            self._table.partition_keys,
+            lambda schema_id: (
+                self._table.table_schema
+                if schema_id == self._table.table_schema.id
+                else self._table.schema_manager.get_schema(schema_id)
+            ),
         )
 
     @staticmethod

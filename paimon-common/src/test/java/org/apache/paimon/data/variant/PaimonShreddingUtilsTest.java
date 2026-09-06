@@ -25,6 +25,12 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnVectorUtils;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -38,6 +44,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
 import java.util.Arrays;
@@ -56,6 +63,66 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for PaimonShreddingUtils. */
 public class PaimonShreddingUtilsTest {
+
+    @Test
+    void testBuildVariantSchemaAcceptsEmptyInnerStruct() {
+        // An empty typed_value struct shreds no field, and stays a legal schema.
+        RowType physicalType = variantShreddingSchema(RowType.of(new DataType[0], new String[0]));
+        assertThat(buildVariantSchema(physicalType).objectSchema).isEmpty();
+    }
+
+    @Test
+    void testBuildVariantSchemaRejectsNonStructInnerField() {
+        RowType physicalType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.BYTES(),
+                            DataTypes.BYTES(),
+                            RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"x"})
+                        },
+                        new String[] {"metadata", "value", "typed_value"});
+        // Everything except the inner field's type is valid here, and the message is what
+        // separates the two outcomes: before, the cast below raised a bare ClassCastException.
+        assertThatThrownBy(() -> buildVariantSchema(physicalType))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Invalid variant shredding schema");
+    }
+
+    @Test
+    void testAssembleColumnarShreddedVariant() {
+        RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
+        RowType physicalType = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(physicalType);
+        RowToColumnConverter converter = new RowToColumnConverter(physicalType);
+        WritableColumnVector[] writableVectors =
+                physicalType.getFieldTypes().stream()
+                        .map(type -> ColumnVectorUtils.createWritableColumnVector(2, type))
+                        .toArray(WritableColumnVector[]::new);
+        converter.convert(
+                castShredded(GenericVariant.fromJson("{\"a\":0}"), variantSchema), writableVectors);
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"a\":1,\"leftover\":{\"payload\":\"value\"}}");
+        converter.convert(castShredded(expected, variantSchema), writableVectors);
+
+        ColumnVector[] vectors =
+                ColumnVectorUtils.createReadableColumnVectors(
+                        physicalType.getFieldTypes(), writableVectors);
+        ColumnarRow row = new ColumnarRow(new VectorizedColumnBatch(vectors), 1);
+        ByteBuffer metadata = row.getBinaryBuffer(variantSchema.topLevelMetadataIdx);
+
+        assertThat(metadata.arrayOffset()).isGreaterThan(0);
+        assertThat(assembleVariant(row, variantSchema).toJson()).isEqualTo(expected.toJson());
+        FieldToExtract[] fields =
+                new FieldToExtract[] {
+                    buildFieldsToExtract(
+                            DataTypes.STRING(),
+                            "$.leftover.payload",
+                            new VariantCastArgs(true, ZoneOffset.UTC),
+                            variantSchema)
+                };
+        assertThat(assembleVariantStruct(row, variantSchema, fields))
+                .isEqualTo(GenericRow.of(BinaryString.fromString("value")));
+    }
 
     @Test
     void testAssembleAllTypes() {

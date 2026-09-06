@@ -361,6 +361,69 @@ public class VortexPredicateConverterTest {
         assertEquals(BinaryString.fromString("hello"), rows.get(0).getString(2));
     }
 
+    @Test
+    public void testDateSemantic(@TempDir java.nio.file.Path tempDir) throws Exception {
+        // f_date >= 20 (epoch day) should return rows with f_date=20,30
+        RowType dateRowType = RowType.builder().field("f_date", DataTypes.DATE()).build();
+        PredicateBuilder dateBuilder = new PredicateBuilder(dateRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        dateRowType,
+                        new GenericRow[] {GenericRow.of(10), GenericRow.of(20), GenericRow.of(30)},
+                        Collections.singletonList(dateBuilder.greaterOrEqual(0, 20)));
+        assertEquals(2, rows.size());
+        assertEquals(20, rows.get(0).getInt(0));
+        assertEquals(30, rows.get(1).getInt(0));
+    }
+
+    @Test
+    public void testTimestampSecondsPrecisionSemantic(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // f_ts >= 2000s should return rows with f_ts=2000s,3000s
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {
+                            GenericRow.of(Timestamp.fromEpochMillis(1_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(2_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(3_000_000L))
+                        },
+                        Collections.singletonList(
+                                tsBuilder.greaterOrEqual(
+                                        0, Timestamp.fromEpochMillis(2_000_000L))));
+        assertEquals(2, rows.size());
+        assertEquals(2_000_000L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+        assertEquals(3_000_000L, rows.get(1).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampLtzSecondsPrecisionSemantic(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // f_ts_ltz == 2000s should return only the row with f_ts_ltz=2000s
+        RowType tsRowType =
+                RowType.builder()
+                        .field("f_ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0))
+                        .build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {
+                            GenericRow.of(Timestamp.fromEpochMillis(1_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(2_000_000L)),
+                            GenericRow.of(Timestamp.fromEpochMillis(3_000_000L))
+                        },
+                        Collections.singletonList(
+                                tsBuilder.equal(0, Timestamp.fromEpochMillis(2_000_000L))));
+        assertEquals(1, rows.size());
+        assertEquals(2_000_000L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
     private List<InternalRow> roundTrip(
             java.nio.file.Path tempDir,
             RowType rowType,

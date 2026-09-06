@@ -118,6 +118,7 @@ public abstract class ConflictDetection {
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled,
+            boolean dataEvolutionNestedFieldEnabled,
             boolean pkClusteringOverride,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
@@ -130,6 +131,7 @@ public abstract class ConflictDetection {
                     pathFactory,
                     bucketMode,
                     deletionVectorsEnabled,
+                    dataEvolutionNestedFieldEnabled,
                     indexFileHandler,
                     snapshotManager,
                     commitScanner);

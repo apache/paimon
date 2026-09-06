@@ -79,7 +79,9 @@ public class BlockCache implements Closeable {
                             },
                             blocks::remove);
             container = new SegmentContainer(segment);
-            blocks.put(cacheKey, container);
+            if (cacheManager.contains(cacheKey)) {
+                blocks.put(cacheKey, container);
+            }
         }
         return container.access();
     }

@@ -411,6 +411,77 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
         }
     }
 
+    /** SQL positions: one-based, zero means one, negative counts back from the end. */
+    public BinaryString substringSQL(int pos, int length) {
+        int len = numChars();
+        int start = 0;
+        if (pos > 0) {
+            start = pos - 1;
+        } else if (pos < 0) {
+            start = len + pos;
+        }
+        int end;
+        if ((long) start + length > Integer.MAX_VALUE) {
+            end = Integer.MAX_VALUE;
+        } else if ((long) start + length < Integer.MIN_VALUE) {
+            end = Integer.MIN_VALUE;
+        } else {
+            end = start + length;
+        }
+        return substring(start, end);
+    }
+
+    /** Removes leading whole characters contained in {@code trimString}, null for null. */
+    public BinaryString trimLeft(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        int start = 0;
+        while (start < sizeInBytes) {
+            int charBytes = numBytesForFirstByte(byteAt(start));
+            // a truncated sequence is not a character
+            if (charBytes > sizeInBytes - start) {
+                break;
+            }
+            if (!trimString.contains(fromAddress(segments, offset + start, charBytes))) {
+                break;
+            }
+            start += charBytes;
+        }
+        return start >= sizeInBytes ? EMPTY_UTF8 : copyBinaryString(start, sizeInBytes - 1);
+    }
+
+    /** Trailing counterpart of {@link #trimLeft(BinaryString)}. */
+    public BinaryString trimRight(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        int end = sizeInBytes;
+        while (end > 0) {
+            int charStart = end - 1;
+            while (charStart > 0 && (byteAt(charStart) & 0xC0) == 0x80) {
+                charStart--;
+            }
+            // a truncated sequence is not a character
+            if (numBytesForFirstByte(byteAt(charStart)) != end - charStart) {
+                break;
+            }
+            if (!trimString.contains(fromAddress(segments, offset + charStart, end - charStart))) {
+                break;
+            }
+            end = charStart;
+        }
+        return end == 0 ? EMPTY_UTF8 : copyBinaryString(0, end - 1);
+    }
+
+    /** Both-sides counterpart of {@link #trimLeft(BinaryString)}. */
+    public BinaryString trim(BinaryString trimString) {
+        if (trimString == null) {
+            return null;
+        }
+        return trimLeft(trimString).trimRight(trimString);
+    }
+
     private BinaryString trimMultiSegs() {
         int s = 0;
         int e = this.sizeInBytes - 1;

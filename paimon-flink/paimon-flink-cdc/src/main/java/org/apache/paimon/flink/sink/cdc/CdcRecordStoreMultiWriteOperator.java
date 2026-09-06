@@ -35,6 +35,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -42,6 +43,8 @@ import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -62,6 +65,17 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
+ *
+ * <p>When {@code stateDatabaseName} is given, this operator assumes its input is partitioned by
+ * {@link CdcMultiplexRecordChannelComputer} and that every incoming record belongs to that
+ * database. {@link FlinkCdcMultiTableSink} guarantees both by applying the partitioner itself. The
+ * {@link StoreSinkWriteState} filter below then distributes state values among subtasks with
+ * exactly the same formula as the channel computer, so a record and the state of the bucket it
+ * belongs to always end up in the same subtask.
+ *
+ * <p>The compatibility constructor does not have a database name and therefore keeps the legacy
+ * behavior of restoring all union state values into every subtask. It does not guarantee unique
+ * bucket-state ownership after a restore.
  */
 public class CdcRecordStoreMultiWriteOperator
         extends PrepareCommitOperator<CdcMultiplexRecord, MultiTableCommittable> {
@@ -71,6 +85,7 @@ public class CdcRecordStoreMultiWriteOperator
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final CatalogLoader catalogLoader;
+    @Nullable private final String stateDatabaseName;
 
     private Catalog catalog;
     private Map<Identifier, FileStoreTable> tables;
@@ -84,11 +99,13 @@ public class CdcRecordStoreMultiWriteOperator
             CatalogLoader catalogLoader,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser,
+            @Nullable String stateDatabaseName,
             Options options) {
         super(parameters, options);
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
+        this.stateDatabaseName = stateDatabaseName;
     }
 
     @Override
@@ -104,12 +121,28 @@ public class CdcRecordStoreMultiWriteOperator
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        // TODO: should use CdcRecordMultiChannelComputer to filter
-        state =
-                new StoreSinkWriteStateImpl(
-                        RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
-                        context,
-                        (tableName, partition, bucket) -> true);
+        int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
+        int subtaskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
+        StoreSinkWriteState.StateValueFilter stateFilter;
+        if (stateDatabaseName == null) {
+            // Preserve the behavior of the old constructor for compatibility. Without a database
+            // name, every subtask restores all union state and bucket ownership is not guaranteed.
+            stateFilter = (tableName, partition, bucket) -> true;
+        } else {
+            // Keep this filter in sync with CdcMultiplexRecordChannelComputer, which partitions the
+            // input of this operator. Otherwise state values would be restored into a subtask which
+            // never writes the corresponding bucket.
+            stateFilter =
+                    (tableName, partition, bucket) ->
+                            subtaskId
+                                    == CdcMultiplexRecordChannelComputer.computeChannel(
+                                            stateDatabaseName,
+                                            tableName,
+                                            partition,
+                                            bucket,
+                                            numTasks);
+        }
+        state = new StoreSinkWriteStateImpl(subtaskId, context, stateFilter);
         tables = new HashMap<>();
         writes = new HashMap<>();
         compactExecutor =
@@ -123,6 +156,11 @@ public class CdcRecordStoreMultiWriteOperator
         CdcMultiplexRecord record = element.getValue();
 
         String databaseName = record.databaseName();
+        Preconditions.checkArgument(
+                stateDatabaseName == null || stateDatabaseName.equals(databaseName),
+                "This writer only accepts records from database %s, but received a record from %s.",
+                stateDatabaseName,
+                databaseName);
         String tableName = record.tableName();
         Identifier tableId = Identifier.create(databaseName, tableName);
 
@@ -226,8 +264,12 @@ public class CdcRecordStoreMultiWriteOperator
     @Override
     public void close() throws Exception {
         super.close();
-        for (StoreSinkWrite write : writes.values()) {
-            write.close();
+        // initializeState may have failed before these were assigned, and Flink still closes the
+        // operator. Do not mask the original failure with a NullPointerException.
+        if (writes != null) {
+            for (StoreSinkWrite write : writes.values()) {
+                write.close();
+            }
         }
         if (compactExecutor != null) {
             compactExecutor.shutdownNow();
@@ -275,13 +317,25 @@ public class CdcRecordStoreMultiWriteOperator
         return commitUser;
     }
 
+    @VisibleForTesting
+    public StoreSinkWriteState state() {
+        return state;
+    }
+
     /** {@link StreamOperatorFactory} of {@link CdcRecordStoreMultiWriteOperator}. */
     public static class Factory
             extends PrepareCommitOperator.Factory<CdcMultiplexRecord, MultiTableCommittable> {
         private final StoreSinkWrite.Provider storeSinkWriteProvider;
         private final String initialCommitUser;
         private final CatalogLoader catalogLoader;
+        @Nullable private final String stateDatabaseName;
 
+        /**
+         * @deprecated Use {@link #Factory(CatalogLoader, StoreSinkWrite.Provider, String, String,
+         *     Options)} instead. Without a database name, every subtask restores all union writer
+         *     state and unique bucket-state ownership is not guaranteed.
+         */
+        @Deprecated
         public Factory(
                 CatalogLoader catalogLoader,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
@@ -291,6 +345,20 @@ public class CdcRecordStoreMultiWriteOperator
             this.catalogLoader = catalogLoader;
             this.storeSinkWriteProvider = storeSinkWriteProvider;
             this.initialCommitUser = initialCommitUser;
+            this.stateDatabaseName = null;
+        }
+
+        public Factory(
+                CatalogLoader catalogLoader,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser,
+                String stateDatabaseName,
+                Options options) {
+            super(options);
+            this.catalogLoader = catalogLoader;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+            this.stateDatabaseName = Preconditions.checkNotNull(stateDatabaseName);
         }
 
         @Override
@@ -303,6 +371,7 @@ public class CdcRecordStoreMultiWriteOperator
                             catalogLoader,
                             storeSinkWriteProvider,
                             initialCommitUser,
+                            stateDatabaseName,
                             options);
         }
 

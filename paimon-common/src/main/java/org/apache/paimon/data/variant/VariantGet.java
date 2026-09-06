@@ -45,7 +45,7 @@ public class VariantGet {
             GenericVariantBuilder builder = new GenericVariantBuilder(false);
             builder.appendVariant(v);
             GenericVariant result = builder.result();
-            return new GenericVariant(result.value(), result.metadata());
+            return new GenericVariant(result.valueBuffer(), result.metadataBuffer());
         }
 
         Type variantType = v.getType();

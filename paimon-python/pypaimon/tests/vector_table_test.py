@@ -349,6 +349,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         opts = {
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
+            'data-evolution.write-cols-optimization.enabled': 'true',
             'vector.file.format': 'parquet',
         }
         s = Schema.from_pyarrow_schema(vector_schema, options=opts)
@@ -366,7 +367,21 @@ class VectorTableWriteReadTest(unittest.TestCase):
             },
             schema=vector_schema,
         ))
-        wb.new_commit().commit(w.prepare_commit())
+        initial_messages = w.prepare_commit()
+        initial_files = [
+            file for message in initial_messages for file in message.new_files
+        ]
+        normal_file = next(
+            file for file in initial_files
+            if not DataFileMeta.is_vector_file(file.file_name)
+        )
+        vector_file = next(
+            file for file in initial_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        )
+        self.assertIsNone(normal_file.write_cols)
+        self.assertEqual(['embedding'], vector_file.write_cols)
+        wb.new_commit().commit(initial_messages)
         w.close()
 
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER

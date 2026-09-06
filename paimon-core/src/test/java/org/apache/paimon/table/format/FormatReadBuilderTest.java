@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -27,8 +28,10 @@ import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.csv.CsvFileFormat;
+import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -50,8 +53,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -257,6 +262,59 @@ public class FormatReadBuilderTest {
         assertThat(partialResult.get(0).getString(1).toString()).isEqualTo("Alice");
     }
 
+    @Test
+    public void testExternalSplitUsesCatalogContextFileIOAfterSerialization() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .build();
+        LocalFileIO clientFileIO = LocalFileIO.create();
+        Path externalPath = new Path(tempPath.resolve("external").toUri());
+        Path csvFile = new Path(externalPath, "data.csv");
+        clientFileIO.mkdirs(externalPath);
+        try (PositionOutputStream out = clientFileIO.newOutputStream(csvFile, false)) {
+            out.write("1,Alice\n".getBytes(StandardCharsets.UTF_8));
+        }
+
+        Path tablePath = new Path(tempPath.resolve("table").toUri());
+        FileIOLoader clientLoader = new LocalFileIOLoader(clientFileIO);
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(new TableRootOnlyLocalFileIO(tablePath))
+                        .identifier(Identifier.create("test_db", "external_csv"))
+                        .rowType(rowType)
+                        .partitionKeys(Collections.emptyList())
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(Collections.singletonMap("file.format", "csv"))
+                        .catalogContext(CatalogContext.create(new Options(), clientLoader, null))
+                        .build();
+        FormatReadBuilder readBuilder =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(new FormatReadBuilder(table)),
+                        getClass().getClassLoader());
+        FormatDataSplit split =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(
+                                new FormatDataSplit(
+                                        Collections.singletonList(
+                                                new FormatDataSplit.FileMeta(
+                                                        csvFile,
+                                                        clientFileIO.getFileSize(csvFile))),
+                                        null,
+                                        true)),
+                        getClass().getClassLoader());
+
+        List<InternalRow> rows = readAllRows(readBuilder.createReader(split), rowType);
+
+        assertThatNoException().isThrownBy(() -> InstantiationUtil.serializeObject(readBuilder));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(split.useCatalogContextFileIO()).isTrue();
+    }
+
     private List<InternalRow> readAllRows(RecordReader<InternalRow> reader, RowType rowType)
             throws IOException {
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
@@ -310,5 +368,41 @@ public class FormatReadBuilderTest {
             batch.releaseBatch();
         }
         return size;
+    }
+
+    private static class TableRootOnlyLocalFileIO extends LocalFileIO {
+
+        private final Path tableRoot;
+
+        private TableRootOnlyLocalFileIO(Path tableRoot) {
+            this.tableRoot = tableRoot;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            if (!FormatTablePartitionPathResolver.isWithin(path, tableRoot)) {
+                throw new AssertionError("The table FileIO must not read an external split.");
+            }
+            return super.newInputStream(path);
+        }
+    }
+
+    private static class LocalFileIOLoader implements FileIOLoader {
+
+        private final LocalFileIO fileIO;
+
+        private LocalFileIOLoader(LocalFileIO fileIO) {
+            this.fileIO = fileIO;
+        }
+
+        @Override
+        public String getScheme() {
+            return "file";
+        }
+
+        @Override
+        public LocalFileIO load(Path path) {
+            return fileIO;
+        }
     }
 }

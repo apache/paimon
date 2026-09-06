@@ -54,10 +54,109 @@ for batch_idx, batch_data in enumerate(dataloader):
 #   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
 ```
 
-When the `streaming` parameter is true, it will iteratively read;
-when it is false, it will read the full amount of data into memory.
+When the `streaming` parameter is true, it will iteratively read. When it is
+false, eligible data-evolution reads fetch each DataLoader batch lazily by row
+ID; other reads retain an Arrow table in memory for map-style access.
 
-**`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
+**`prefetch_concurrency`** (default: 1): In streaming row mode, controls
+reader threads per DataLoader worker. It has no effect in non-streaming mode.
+
+### Distributed Sharding
+
+Streaming reads shard splits across DDP ranks and DataLoader workers:
+
+```python
+def main():
+    dataset = table_read.to_torch(
+        splits,
+        streaming=True,
+        auto_detect_rank=True,
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,
+        num_workers=2,
+        multiprocessing_context="spawn",
+    )
+
+    with model.join():
+        for batch in dataloader:
+            train(batch)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Automatic rank sharding is opt-in. Enable it only when every rank receives the
+same ordered, complete splits from one snapshot; leave it disabled for splits
+already sharded by the application.
+Automatic detection uses the default process group. For subgroup DDP, resolve
+the context from the group before creating the DataLoader:
+
+```python
+import torch.distributed as dist
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    sharding_rank=dist.get_rank(ddp_group),
+    sharding_world_size=dist.get_world_size(ddp_group),
+)
+```
+
+With multi-worker DDP, use `spawn` (or `forkserver`) and create and iterate the
+DataLoader through an `if __name__ == "__main__":` guarded entry point.
+A rank may receive fewer rows because splits have different sizes; `join()`
+keeps DDP collectives aligned while preserving every row without duplication.
+A limit that may truncate the input is rejected when multiple ranks are active.
+
+### Batch Streaming
+
+For batch-oriented training, make the streaming dataset yield batches directly:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for batch in dataloader:
+    train(batch["features"], batch["label"])
+```
+
+`batch_format="pyarrow"` yields PyArrow `RecordBatch` objects instead;
+`batch_format="torch"` yields dictionaries of tensors. The default Tensor
+converter supports non-null numeric, boolean, and numeric fixed-size-list
+columns. Use `to_tensor_fn` for other types or custom conversion.
+
+Omit `batch_size` to preserve native reader batches. Otherwise, batches are
+combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
+disable a second batching step. Batch streaming does not support `shuffle=True`.
+Numeric tensors may share read-only Arrow buffers; clone them before in-place
+mutation. Batch formats currently require `prefetch_concurrency=1`.
+
+## Video frame descriptors
+
+For a multimodal frame table, use the higher-level scan API:
+
+```python
+dataset = (
+    frames.scan()
+    .select(["episode_id", "state", "action", "video"])
+    .to_torch(streaming=True)
+)
+```
+
+The `.video` column yields serialized `VideoFrameDescriptor` values whose
+embedded frame ordinals keep frame mapping out of the normal data file. Use
+`pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
+physical video ranges and cache decoder sessions per worker. See
+[Multimodal API: Video Frame Storage](multimodal-api#video-frame-storage)
+for the write path and a complete decoder example.
 
 ## File Format Metadata Cache
 

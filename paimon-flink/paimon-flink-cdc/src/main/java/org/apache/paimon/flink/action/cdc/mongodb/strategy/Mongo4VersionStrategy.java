@@ -92,7 +92,10 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
 
         switch (op) {
             case OP_INSERT:
-                records.add(processRecord(fullDocument, RowKind.INSERT));
+                RichCdcMultiplexRecord insertRecord = processRecord(fullDocument, RowKind.INSERT);
+                if (insertRecord != null) {
+                    records.add(insertRecord);
+                }
                 break;
             case OP_REPLACE:
             case OP_UPDATE:
@@ -100,7 +103,10 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
                 // information. Therefore, data is first deleted using the primary key '_id', and
                 // then inserted.
                 records.add(processRecord(documentKey, RowKind.DELETE));
-                records.add(processRecord(fullDocument, RowKind.INSERT));
+                RichCdcMultiplexRecord updateRecord = processRecord(fullDocument, RowKind.INSERT);
+                if (updateRecord != null) {
+                    records.add(updateRecord);
+                }
                 break;
             case OP_DELETE:
                 records.add(processRecord(documentKey, RowKind.DELETE));
@@ -125,6 +131,9 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
         CdcSchema.Builder schemaBuilder = CdcSchema.newBuilder();
         Map<String, String> record =
                 getExtractRow(fullDocument, schemaBuilder, computedColumns, mongodbConfig);
+        if (record == null) {
+            return null;
+        }
         schemaBuilder.primaryKey(extractPrimaryKeys());
         return new RichCdcMultiplexRecord(
                 databaseName, collection, schemaBuilder.build(), new CdcRecord(rowKind, record));

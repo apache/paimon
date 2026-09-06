@@ -648,6 +648,14 @@ class ToFilesystemPathTest(unittest.TestCase):
             "/foo/bar",
         )
 
+    def test_hdfs_uri_preserves_paimon_escaped_partition_path(self):
+        fio = self._make("hdfs://ns1/")
+        self.assertEqual(
+            fio.to_filesystem_path(
+                "hdfs://ns1/warehouse/t/p=a%2Fb/data.parquet"),
+            "/warehouse/t/p=a%2Fb/data.parquet",
+        )
+
     def test_hdfs_uri_different_ns_unchanged(self):
         fio = self._make("hdfs://ns1/")
         self.assertEqual(

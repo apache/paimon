@@ -25,10 +25,14 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
+import org.apache.paimon.schema.TableSchema;
 
 import org.apache.commons.io.IOUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 /** Utils for copy files. */
@@ -49,10 +53,25 @@ public class CopyFilesUtil {
 
     public static DataFileMeta toNewDataFileMeta(
             DataFileMeta oldFileMeta, String newFileName, long newSchemaId) {
+        return toNewDataFileMeta(oldFileMeta, newFileName, newSchemaId, null);
+    }
+
+    public static DataFileMeta toNewDataFileMeta(
+            DataFileMeta oldFileMeta,
+            String newFileName,
+            long newSchemaId,
+            @Nullable TableSchema sourceFileSchema) {
         String newExternalPath =
                 externalPathDir(oldFileMeta.externalPath().orElse(null))
                         .map(dir -> dir + "/" + newFileName)
                         .orElse(null);
+        List<String> writeCols = oldFileMeta.writeCols();
+        if (sourceFileSchema != null && writeCols == null) {
+            // A null value is interpreted using the schema id. Materialize its source meaning
+            // before rebinding the file to the target schema, whether it denotes the full schema
+            // (legacy) or all non-dedicated columns (compact metadata).
+            writeCols = sourceFileSchema.dataFileSchema(null).fieldNames();
+        }
         return new PojoDataFileMeta(
                 newFileName,
                 oldFileMeta.fileSize(),
@@ -73,7 +92,7 @@ public class CopyFilesUtil {
                 oldFileMeta.valueStatsCols(),
                 newExternalPath,
                 oldFileMeta.firstRowId(),
-                oldFileMeta.writeCols(),
+                writeCols,
                 // Column sequence numbers are positional and cannot be safely reused after
                 // changing the schema id. A null value makes readers fall back conservatively.
                 null);

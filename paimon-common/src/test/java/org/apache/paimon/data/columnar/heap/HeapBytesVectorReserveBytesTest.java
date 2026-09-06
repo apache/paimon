@@ -20,6 +20,8 @@ package org.apache.paimon.data.columnar.heap;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -28,6 +30,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * the capacity-growth calculation in {@link HeapBytesVector#calculateNewBytesCapacity}.
  */
 class HeapBytesVectorReserveBytesTest {
+
+    @Test
+    void testPutAndAppendByteBufferRespectSlices() {
+        ByteBuffer heapSlice = ByteBuffer.wrap(new byte[] {9, 1, 2, 3, 9}, 1, 3).slice();
+        ByteBuffer directSlice = ByteBuffer.allocateDirect(5);
+        directSlice.put(new byte[] {9, 4, 5, 6, 9}).position(1).limit(4);
+
+        HeapBytesVector putVector = new HeapBytesVector(2);
+        putVector.putByteBuffer(0, heapSlice);
+        putVector.putByteBuffer(1, directSlice);
+
+        assertThat(putVector.getBytes(0).getBytes()).containsExactly(1, 2, 3);
+        assertThat(putVector.getBytes(1).getBytes()).containsExactly(4, 5, 6);
+
+        HeapBytesVector appendVector = new HeapBytesVector(2);
+        appendVector.appendByteBuffer(heapSlice);
+        appendVector.appendByteBuffer(directSlice);
+
+        assertThat(appendVector.getBytes(0).getBytes()).containsExactly(1, 2, 3);
+        assertThat(appendVector.getBytes(1).getBytes()).containsExactly(4, 5, 6);
+        assertThat(heapSlice.position()).isZero();
+        assertThat(directSlice.position()).isEqualTo(1);
+    }
 
     @Test
     void testNormalGrowthDoublesCapacity() {

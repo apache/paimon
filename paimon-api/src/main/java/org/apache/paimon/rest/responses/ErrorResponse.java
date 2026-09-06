@@ -51,6 +51,8 @@ public class ErrorResponse implements RESTResponse {
 
     public static final String RESOURCE_TYPE_FUNCTION = "FUNCTION";
 
+    public static final String RESOURCE_TYPE_POLICY = "POLICY";
+
     public static final String RESOURCE_TYPE_DEFINITION = "DEFINITION";
 
     private static final String FIELD_MESSAGE = "message";

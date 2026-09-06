@@ -303,6 +303,12 @@ class FileScanner:
             return self.table.table_schema.fields
         return self.table.schema_manager.get_schema(schema_id).fields
 
+    def _schema(self, schema_id: int):
+        """Resolve the complete schema including its dedicated-file options."""
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema
+        return self.table.schema_manager.get_schema(schema_id)
+
     def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
         if not self.deletion_vectors_enabled:
             return {}
@@ -501,7 +507,7 @@ class FileScanner:
             group_stats_filter = DataEvolutionGroupStatsFilter(
                 stats_predicate,
                 self.table.fields,
-                self._schema_fields,
+                self._schema,
             )
 
         return entries, DataEvolutionSplitGenerator(

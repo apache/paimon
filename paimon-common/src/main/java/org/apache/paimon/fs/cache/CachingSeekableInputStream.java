@@ -195,7 +195,11 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
         }
         synchronized (stream) {
             stream.seek(offset);
-            return readFully(stream, size);
+            // must not tolerate a short read: the block is handed to putBlock, so a zero-padded
+            // tail would be cached and returned as file content for every later read
+            byte[] buf = new byte[size];
+            IOUtils.readFully(stream, buf, 0, size);
+            return buf;
         }
     }
 
@@ -234,21 +238,6 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
         if (closed) {
             throw new IOException("Stream is closed: " + path);
         }
-    }
-
-    private static byte[] readFully(SeekableInputStream in, int size) throws IOException {
-        byte[] buf = new byte[size];
-        int remaining = size;
-        int off = 0;
-        while (remaining > 0) {
-            int n = in.read(buf, off, remaining);
-            if (n < 0) {
-                break;
-            }
-            off += n;
-            remaining -= n;
-        }
-        return buf;
     }
 
     @Override

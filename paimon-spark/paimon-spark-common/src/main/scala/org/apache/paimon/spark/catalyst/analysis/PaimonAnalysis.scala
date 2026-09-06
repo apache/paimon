@@ -84,6 +84,12 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         throw new UnsupportedOperationException(
           "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
 
+      // Only the table-level form. Spark's own analyzer already rejects the partition form with a
+      // structured AnalysisException, and replacing it here would be a worse error.
+      case SetTableLocation(ResolvedTable(_, _, _: PaimonFormatTable, _), None, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
       case r: ReplaceColumns if r.resolved && isPaimonTable(r.table) =>
         // Spark rewrites REPLACE COLUMNS into a batch that drops every existing column and re-adds
         // the new set. Re-adding columns assigns brand-new field ids while existing data files keep

@@ -21,7 +21,7 @@ package org.apache.paimon.flink.source.statistics;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -34,7 +34,7 @@ public class AppendOnlyTableStatisticsTest extends FileStoreTableStatisticsTestB
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
-                new SchemaManager(LocalFileIO.create(), tablePath)
+                new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
                         .createTable(schemaBuilder().partitionKeys("pt").build());
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }

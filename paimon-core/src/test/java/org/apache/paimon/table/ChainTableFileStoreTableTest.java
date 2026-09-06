@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -355,7 +356,8 @@ public class ChainTableFileStoreTableTest {
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         String branchName = CoreOptions.branch(options.toMap());
-        Optional<TableSchema> schemaOpt = new SchemaManager(fileIO, tablePath, branchName).latest();
+        Optional<TableSchema> schemaOpt =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName).latest();
         assertThat(schemaOpt.isPresent()).isTrue();
         return FileStoreTableFactory.create(
                 fileIO, tablePath, schemaOpt.get(), CatalogEnvironment.empty());
@@ -364,7 +366,7 @@ public class ChainTableFileStoreTableTest {
     private void createChainTable(Consumer<Options> optionCustomizer) throws Exception {
         Path tablePath = new Path(tempDir.toUri().toString(), tableName);
         LocalFileIO fileIO = LocalFileIO.create();
-        SchemaManager mainSchemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager mainSchemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         Options options = new Options();
         options.set(BUCKET, 1);
@@ -415,7 +417,7 @@ public class ChainTableFileStoreTableTest {
             throws Exception {
         Path tablePath = new Path(tempDir.toUri().toString(), tableName);
         LocalFileIO fileIO = LocalFileIO.create();
-        SchemaManager mainSchemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager mainSchemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         Options options = new Options();
         options.set(BUCKET, 1);
@@ -462,7 +464,8 @@ public class ChainTableFileStoreTableTest {
 
     private void configureBranchOptions(LocalFileIO fileIO, Path tablePath, String branchName)
             throws Exception {
-        SchemaManager branchSchemaManager = new SchemaManager(fileIO, tablePath, branchName);
+        SchemaManager branchSchemaManager =
+                new FileSystemSchemaManager(fileIO, tablePath, branchName);
         branchSchemaManager.commitChanges(
                 SchemaChange.setOption(
                         CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), SNAPSHOT_BRANCH),

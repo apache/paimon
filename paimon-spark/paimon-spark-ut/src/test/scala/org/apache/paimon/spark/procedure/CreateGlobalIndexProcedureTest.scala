@@ -26,6 +26,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
 import org.apache.paimon.utils.Range
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.streaming.StreamTest
@@ -34,6 +35,7 @@ import java.io.File
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
+import scala.collection.mutable
 
 class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
 
@@ -322,15 +324,34 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       values = (0 until 33333).map(i => s"($i, 'name_$i', 'p2')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
+      val submittedStageTasks = mutable.ListBuffer.empty[Int]
+      val listener = new SparkListener {
+        override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+          submittedStageTasks += stageSubmitted.stageInfo.numTasks
+        }
+      }
       val output =
-        spark
-          .sql(
-            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
-              " options => 'btree-index.records-per-range=1000')")
-          .collect()
-          .head
+        try {
+          spark.sparkContext.addSparkListener(listener)
+          spark
+            .sql(
+              "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+                " options => 'btree-index.records-per-range=1000')")
+            .collect()
+            .head
+        } finally {
+          Utils.waitUntilEventEmpty(spark)
+          spark.sparkContext.removeSparkListener(listener)
+        }
 
       assert(output.getBoolean(0))
+
+      val expectedBuildParallelism = (189088L / 1000).toInt
+      assert(
+        submittedStageTasks.count(_ == expectedBuildParallelism) == 1,
+        s"Expected one global build stage with $expectedBuildParallelism tasks, " +
+          s"but observed stages with ${submittedStageTasks.mkString(", ")} tasks"
+      )
 
       assertMultiplePartitionsResult("T", 189088L, 3)
     }

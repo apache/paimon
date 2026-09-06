@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -204,7 +205,10 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
     }
 
     private long columnSequence(DataFileMeta file, int fieldId) throws Exception {
-        List<DataField> fields = fileFields(getTableDefault().schemaManager()::schema, file);
+        TableSchema fileSchema = getTableDefault().schemaManager().schema(file.schemaId());
+        boolean nestedFieldEnabled =
+                new CoreOptions(fileSchema.options()).dataEvolutionNestedFieldEnabled();
+        List<DataField> fields = fileFields(fileSchema.fields(), file, nestedFieldEnabled);
         long[] sequences = file.columnMaxSequenceNumbers();
         assertThat(sequences).hasSize(fields.size());
         for (int i = 0; i < fields.size(); i++) {

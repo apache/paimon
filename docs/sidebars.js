@@ -31,7 +31,8 @@ const sidebars = {
           "concepts/rest/dlf",
           "concepts/rest/tables",
           "concepts/rest/pvfs",
-          "concepts/rest/rest-api"
+          "concepts/rest/rest-api",
+          "concepts/rest/management-api"
         ]
       },
       {
@@ -129,6 +130,7 @@ const sidebars = {
           "multimodal-table/global-index/btree",
           "multimodal-table/global-index/bitmap",
           "multimodal-table/global-index/multivalue",
+          "multimodal-table/global-index/fm",
           "multimodal-table/global-index/vector",
           "multimodal-table/global-index/full-text",
           "multimodal-table/global-index/hybrid-search"

@@ -34,6 +34,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.NestedRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -318,6 +319,8 @@ public class InternalRowUtils {
             return copy;
         } else if (o instanceof Decimal) {
             return ((Decimal) o).copy();
+        } else if (o instanceof Variant) {
+            return ((Variant) o).copy();
         }
         return o;
     }

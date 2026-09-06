@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -125,6 +126,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         if (isPrimaryKeyVectorSearch()) {
             return new PrimaryKeyVectorScan(
                     table,
@@ -138,6 +140,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public BatchVectorRead newBatchVectorRead() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(vectorColumn, "Vector column must be set via withVectorColumn()");
         checkArgument(

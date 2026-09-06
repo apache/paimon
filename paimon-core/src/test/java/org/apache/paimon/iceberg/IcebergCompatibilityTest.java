@@ -38,6 +38,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
@@ -46,10 +47,13 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -78,6 +82,9 @@ import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.math.BigDecimal;
@@ -101,6 +108,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -528,7 +536,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -580,7 +588,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         write = table.newWrite(commitUser);
@@ -630,7 +638,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -684,7 +692,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.dropColumn("w"));
 
@@ -730,7 +738,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -789,7 +797,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -832,7 +840,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
         TableWriteImpl<?> write2 = evolved.newWrite(commitUser);
@@ -887,7 +895,7 @@ public class IcebergCompatibilityTest {
         write.close();
         commit.close();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
         schemaManager.commitChanges(SchemaChange.addColumn("y", DataTypes.INT()));
         FileStoreTable evolved = table.copyWithLatestSchema();
@@ -943,7 +951,7 @@ public class IcebergCompatibilityTest {
         commit.commit(1, write.prepareCommit(false, 1));
         assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         table = table.copyWithLatestSchema();
         write.close();
@@ -1648,6 +1656,164 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testDynamicallyEnablingIcebergRefusesHistoricalTimestampPrecisions(int precision)
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(precision)},
+                        new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        FileStoreTable table;
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            paimonCatalog.alterTable(identifier, SchemaChange.dropColumn("ts"), false);
+            table = (FileStoreTable) paimonCatalog.getTable(identifier);
+        }
+
+        FileStoreTable currentTable = table;
+        assertThatThrownBy(
+                        () ->
+                                currentTable.copy(
+                                        Collections.singletonMap(
+                                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                                IcebergOptions.StorageType.TABLE_LOCATION
+                                                        .toString())))
+                .hasMessageContaining("precision from 3 to 6");
+    }
+
+    /** Below the floor, and above the ceiling in both timestamp families. */
+    static Stream<DataType> unpublishableTimestampTypes() {
+        return Stream.of(
+                DataTypes.TIMESTAMP(2),
+                DataTypes.TIMESTAMP(9),
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unpublishableTimestampTypes")
+    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(
+            DataType timestampType) throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), timestampType}, new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, warehouse)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            paimonCatalog.alterTable(identifier, SchemaChange.dropColumn("ts"), false);
+        }
+
+        Path tablePath = new Path(warehouse, "mydb.db/t");
+        TableSchema latest = new FileSystemSchemaManager(fileIO, tablePath).latest().get();
+        Map<String, String> upgraded = new HashMap<>(latest.options());
+        upgraded.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        FileStoreTable table =
+                FileStoreTableFactory.create(fileIO, tablePath, latest.copy(upgraded));
+
+        String commitUser = UUID.randomUUID().toString();
+        assertThatThrownBy(
+                        () -> {
+                            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                                write.write(GenericRow.of(2));
+                                commit.commit(2, write.prepareCommit(false, 2));
+                            }
+                        })
+                .hasMessageContaining("precision from 3 to 6");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(fileIO.exists(new Path(tablePath, "metadata"))).isFalse();
+    }
+
+    @Test
+    public void testCommitOnBranchMirrorsTheBranchSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        table.branchManager().createBranch("b1");
+        new FileSystemSchemaManager(table.fileIO(), table.location(), "b1")
+                .commitChanges(SchemaChange.addColumn("branch_only", DataTypes.INT()));
+
+        FileStoreTable branchTable = table.switchToBranch("b1");
+        try (TableWriteImpl<?> write = branchTable.newWrite(commitUser);
+                TableCommitImpl commit = branchTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(2, 20, 200));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        branchTable.fileIO(),
+                        new Path(
+                                branchTable.location(),
+                                "metadata/v"
+                                        + branchTable.snapshotManager().latestSnapshotId()
+                                        + ".metadata.json"));
+        assertThat(
+                        metadata.schemas().get(metadata.currentSchemaId()).fields().stream()
+                                .map(IcebergDataField::name))
+                .containsExactly("k", "v", "branch_only");
     }
 
     /*

@@ -57,6 +57,12 @@ public abstract class FlinkFormatTableSinkBase
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
+        if (overwrite && !context.isBounded()) {
+            // An overwrite replaces its target once the input ends, which an unbounded input
+            // never does.
+            throw new UnsupportedOperationException(
+                    "Paimon doesn't support streaming INSERT OVERWRITE.");
+        }
         return new PaimonDataStreamSinkProvider(
                 (dataStream) ->
                         new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)

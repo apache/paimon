@@ -18,7 +18,9 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -50,6 +52,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -110,6 +113,7 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriterFactory;
     private final long targetFileSize;
     private final long targetFileRowNum;
+    private final int[] videoFrameFieldIndexes;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -123,6 +127,8 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriter;
     private long recordCount = 0;
     private long currentFileRecordCount = 0;
+    private @Nullable List<BlobDescriptor> currentVideoGroup;
+    private boolean pendingGroupAwareRoll;
     private boolean closed = false;
 
     public DedicatedFormatRollingFileWriter(
@@ -142,7 +148,8 @@ public class DedicatedFormatRollingFileWriter
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean statsDenseStore,
-            @Nullable BlobFileContext context) {
+            @Nullable BlobFileContext context,
+            boolean omitAllNonDedicatedWriteCols) {
         // Initialize basic fields
         Preconditions.checkArgument(
                 targetFileRowNum > 0,
@@ -150,6 +157,7 @@ public class DedicatedFormatRollingFileWriter
                 targetFileRowNum);
         this.targetFileSize = targetFileSize;
         this.targetFileRowNum = targetFileRowNum;
+        this.videoFrameFieldIndexes = videoFrameFieldIndexes(writeSchema, context);
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -189,7 +197,8 @@ public class DedicatedFormatRollingFileWriter
                             fileIndexOptions,
                             fileSource,
                             asyncFileWrite,
-                            statsDenseStore);
+                            statsDenseStore,
+                            omitAllNonDedicatedWriteCols);
         }
 
         if (context != null) {
@@ -205,12 +214,7 @@ public class DedicatedFormatRollingFileWriter
                                     asyncFileWrite,
                                     statsDenseStore,
                                     blobTargetFileSize,
-                                    context.blobConsumer(),
-                                    context.blobInlineFields(),
-                                    context.writeNullOnMissingFile(),
-                                    context.writeNullOnFetchFailure(),
-                                    context.blobFetchMetricReporter(),
-                                    context.copyBufferSize());
+                                    context);
         } else {
             this.blobWriterFactory = null;
         }
@@ -258,7 +262,8 @@ public class DedicatedFormatRollingFileWriter
                     FileIndexOptions fileIndexOptions,
                     FileSource fileSource,
                     boolean asyncFileWrite,
-                    boolean statsDenseStore) {
+                    boolean statsDenseStore,
+                    boolean omitAllNonDedicatedWriteCols) {
         RowType normalRowType = new RowType(fieldsInNormalFile);
         List<String> normalColumnNames = normalRowType.getFieldNames();
         int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
@@ -281,7 +286,7 @@ public class DedicatedFormatRollingFileWriter
                             asyncFileWrite,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
-                            normalColumnNames,
+                            omitAllNonDedicatedWriteCols ? null : normalColumnNames,
                             null,
                             null);
             return new ProjectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
@@ -346,6 +351,10 @@ public class DedicatedFormatRollingFileWriter
     @Override
     public void write(InternalRow row) throws IOException {
         try {
+            List<BlobDescriptor> nextVideoGroup = videoPayloadDescriptors(row);
+            if (pendingGroupAwareRoll && !Objects.equals(currentVideoGroup, nextVideoGroup)) {
+                closeCurrentWriter();
+            }
             if (writerFactory != null && currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
@@ -366,9 +375,14 @@ public class DedicatedFormatRollingFileWriter
             }
             recordCount++;
             currentFileRecordCount++;
+            currentVideoGroup = nextVideoGroup;
 
             if (rollingFile()) {
-                closeCurrentWriter();
+                if (nextVideoGroup == null) {
+                    closeCurrentWriter();
+                } else {
+                    pendingGroupAwareRoll = true;
+                }
             }
         } catch (Throwable e) {
             handleWriteException(e);
@@ -478,6 +492,37 @@ public class DedicatedFormatRollingFileWriter
         // Reset current writer
         currentWriter = null;
         currentFileRecordCount = 0;
+        currentVideoGroup = null;
+        pendingGroupAwareRoll = false;
+    }
+
+    private static int[] videoFrameFieldIndexes(
+            RowType writeSchema, @Nullable BlobFileContext context) {
+        if (context == null || context.videoFrameFields().isEmpty()) {
+            return new int[0];
+        }
+        Set<String> configured = context.videoFrameFields();
+        return writeSchema.getFieldNames().stream()
+                .filter(configured::contains)
+                .mapToInt(writeSchema::getFieldIndex)
+                .toArray();
+    }
+
+    private @Nullable List<BlobDescriptor> videoPayloadDescriptors(InternalRow row) {
+        if (videoFrameFieldIndexes.length == 0) {
+            return null;
+        }
+        List<BlobDescriptor> descriptors = new ArrayList<>(videoFrameFieldIndexes.length);
+        boolean hasVideo = false;
+        for (int index : videoFrameFieldIndexes) {
+            BlobDescriptor descriptor =
+                    row.isNullAt(index)
+                            ? null
+                            : VideoFrameDescriptor.payloadDescriptor(row.getBlob(index));
+            descriptors.add(descriptor);
+            hasVideo |= descriptor != null;
+        }
+        return hasVideo ? descriptors : null;
     }
 
     /** Closes the main writer and returns its metadata. */
