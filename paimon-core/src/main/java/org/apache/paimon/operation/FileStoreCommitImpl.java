@@ -1412,6 +1412,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Pair<String, Long> deltaManifestList,
             @Nullable String indexManifest,
             @Nullable Long nextRowId) {
+        // The manifest layout is replaced wholesale and callers may drop files along with it, so
+        // the file statistics cannot be carried over from the previous snapshot. Recompute them
+        // from the manifests actually being committed: this reads every entry, which is acceptable
+        // because this path only serves metadata repair, never regular commits.
+        List<ManifestFileMeta> committedManifests = new ArrayList<>();
+        committedManifests.addAll(
+                manifestList.read(baseManifestList.getLeft(), baseManifestList.getRight()));
+        committedManifests.addAll(
+                manifestList.read(deltaManifestList.getLeft(), deltaManifestList.getRight()));
+        FileStats fileStats = computeFileStats(committedManifests);
+
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1437,10 +1448,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.properties(),
                         nextRowId,
                         null,
-                        // the manifest layout is rewritten wholesale here, so the incremental file
-                        // statistics cannot be carried over; leave them unknown
-                        null,
-                        null);
+                        fileStats.numFiles,
+                        fileStats.totalFileSizeInBytes);
 
         return commitSnapshotImpl(latest, newSnapshot, emptyList());
     }
@@ -1646,13 +1655,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         manifestCompactionOptions(options, mergeBeforeManifests, partitionType),
                         ioManager);
 
-        if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
+        boolean statsUnknown =
+                latestSnapshot.numFiles() == null || latestSnapshot.totalFileSizeInBytes() == null;
+        if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))
+                && !statsUnknown) {
             // no need to commit this snapshot, because no compact were happened
             return true;
         }
 
         Pair<String, Long> baseManifestList = manifestList.write(mergeAfterManifests);
         Pair<String, Long> deltaManifestList = manifestList.write(emptyList());
+
+        // Manifest compaction only rewrites metadata, so known statistics carry over untouched.
+        // When they are unknown - a table whose snapshots predate the fields, or one that went
+        // through a metadata repair - this is the place to seed them: the manifest set has just
+        // been rewritten, and the compacted form is the cheapest one to fold.
+        Long numFiles = latestSnapshot.numFiles();
+        Long totalFileSizeInBytes = latestSnapshot.totalFileSizeInBytes();
+        if (statsUnknown) {
+            FileStats fileStats = computeFileStats(mergeAfterManifests);
+            numFiles = fileStats.numFiles;
+            totalFileSizeInBytes = fileStats.totalFileSizeInBytes;
+        }
 
         // prepare snapshot file
         Snapshot newSnapshot =
@@ -1679,9 +1703,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.properties(),
                         latestSnapshot.nextRowId(),
                         null,
-                        // manifest compaction only rewrites metadata, the data files are untouched
-                        latestSnapshot.numFiles(),
-                        latestSnapshot.totalFileSizeInBytes());
+                        numFiles,
+                        totalFileSizeInBytes);
 
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
     }
@@ -1698,6 +1721,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
         }
         return new CoreOptions(compactOptions);
+    }
+
+    /**
+     * Folds the live data file count and total size out of a manifest set by reading every entry.
+     *
+     * <p>This is the expensive way to obtain what {@link Snapshot#numFiles()} and {@link
+     * Snapshot#totalFileSizeInBytes()} normally maintain incrementally, so it belongs to
+     * maintenance operations only and must never run on the regular commit path.
+     */
+    private FileStats computeFileStats(List<ManifestFileMeta> manifests) {
+        long numFiles = 0L;
+        long totalFileSizeInBytes = 0L;
+        for (ManifestFileMeta manifest : manifests) {
+            for (ManifestEntry entry :
+                    manifestFile.read(manifest.fileName(), manifest.fileSize())) {
+                long sign = entry.kind() == FileKind.ADD ? 1L : -1L;
+                numFiles += sign;
+                totalFileSizeInBytes += sign * entry.file().fileSize();
+            }
+        }
+        return new FileStats(numFiles, totalFileSizeInBytes);
+    }
+
+    /** Live data file count and total size of a snapshot. */
+    private static class FileStats {
+
+        private final long numFiles;
+        private final long totalFileSizeInBytes;
+
+        private FileStats(long numFiles, long totalFileSizeInBytes) {
+            this.numFiles = numFiles;
+            this.totalFileSizeInBytes = totalFileSizeInBytes;
+        }
     }
 
     private boolean commitSnapshotImpl(

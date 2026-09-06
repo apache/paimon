@@ -76,11 +76,14 @@ costs nothing extra, and they cover data files only: changelog files, index file
 vectors are not counted.
 
 Both columns are nullable, and `NULL` means unknown rather than zero. It appears for snapshots
-written before these columns existed, and for commits that could not derive the values from the
-previous snapshot, such as metadata repair operations that replace the manifest layout wholesale.
-Once a snapshot reports unknown, the snapshots committed after it report unknown as well, until the
-values are recomputed. Fall back to scanning the manifests when you read `NULL`; never read it as
-zero.
+written before these columns existed, and once a snapshot reports unknown the snapshots committed
+after it report unknown as well, because there is no baseline to fold the next commit onto. Fall
+back to scanning the manifests when you read `NULL`; never read it as zero.
+
+Run the `compact_manifest` procedure to recover the values on such a table. It rewrites the whole
+manifest set anyway, so it folds the counters from the compacted manifests and commits them, after
+which the incremental chain continues on its own. The procedure commits a snapshot for this even
+when the manifests themselves need no merging.
 
 ### Schemas Table
 

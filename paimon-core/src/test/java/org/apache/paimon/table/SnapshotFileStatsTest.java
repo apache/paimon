@@ -181,8 +181,12 @@ public class SnapshotFileStatsTest extends TableTestBase {
         assertThat(readRows(table))
                 .containsExactlyInAnyOrder("1:a", "2:b", "10:n0", "11:n1", "12:n2");
 
-        // a full scan still answers the question the statistics would have answered
+        // a full scan still answers the question the statistics would have answered, and
+        // compacting the manifests is what brings the counters back
         assertThat(scannedNumFiles(table)).isGreaterThan(0L);
+        compactManifests(table);
+        table = reload("legacy_write");
+        assertStatsMatchManifests(table);
     }
 
     @Test
@@ -309,19 +313,70 @@ public class SnapshotFileStatsTest extends TableTestBase {
     }
 
     @Test
-    public void testManifestCompactionOnLegacyTableStaysUnknown() throws Exception {
+    public void testManifestCompactionSeedsLegacyTable() throws Exception {
         FileStoreTable table = createTable("manifest_compact_legacy", false);
         for (int i = 0; i < 6; i++) {
             write(table, row(i, "v" + i));
         }
+        long expectedFiles = scannedNumFiles(table);
 
         table = degradeToLegacy("manifest_compact_legacy");
+        assertThat(latest(table).numFiles()).isNull();
+
+        // manifest compaction rewrites the whole manifest set anyway, so it seeds the counters
         compactManifests(table);
         table = reload("manifest_compact_legacy");
 
-        assertThat(latest(table).numFiles()).isNull();
+        assertThat(latest(table).numFiles()).isEqualTo(expectedFiles);
+        assertStatsMatchManifests(table);
         assertThat(readRows(table))
                 .containsExactlyInAnyOrder("0:v0", "1:v1", "2:v2", "3:v3", "4:v4", "5:v5");
+
+        // once seeded, the incremental chain picks up again
+        write(table, row(9, "z"));
+        assertStatsMatchManifests(table);
+    }
+
+    @Test
+    public void testManifestCompactionSeedsEvenWhenNothingToMerge() throws Exception {
+        // a legacy table small enough that the manifests need no merging must still get seeded,
+        // otherwise compact_manifest would be an unreliable way to recover the counters
+        FileStoreTable table = createTable("manifest_compact_noop", false);
+        write(table, row(1, "a"));
+        long expectedFiles = scannedNumFiles(table);
+
+        table = degradeToLegacy("manifest_compact_noop");
+        long snapshotsBefore = latest(table).id();
+
+        compactManifests(table);
+        table = reload("manifest_compact_noop");
+
+        assertThat(latest(table).id()).isGreaterThan(snapshotsBefore);
+        assertThat(latest(table).numFiles()).isEqualTo(expectedFiles);
+        assertStatsMatchManifests(table);
+
+        // and a second run is a no-op now that the counters are known
+        long seededId = latest(table).id();
+        compactManifests(table);
+        table = reload("manifest_compact_noop");
+        assertThat(latest(table).id()).isEqualTo(seededId);
+    }
+
+    @Test
+    public void testManifestCompactionSeedsLegacyPrimaryKeyTable() throws Exception {
+        FileStoreTable table = createTable("manifest_compact_legacy_pk", true);
+        for (int i = 0; i < 8; i++) {
+            write(table, row(i % 3, "v" + i));
+        }
+        long expectedFiles = scannedNumFiles(table);
+
+        table = degradeToLegacy("manifest_compact_legacy_pk");
+        compactManifests(table);
+        table = reload("manifest_compact_legacy_pk");
+
+        // deletion entries left behind by compaction must cancel their adds, not be counted
+        assertThat(latest(table).numFiles()).isEqualTo(expectedFiles);
+        assertStatsMatchManifests(table);
     }
 
     @Test
@@ -353,26 +408,25 @@ public class SnapshotFileStatsTest extends TableTestBase {
     }
 
     @Test
-    public void testReplaceManifestListReportsUnknown() throws Exception {
+    public void testReplaceManifestListRecomputes() throws Exception {
         FileStoreTable table = createTable("replace_manifests", false);
         write(table, row(1, "a"), row(2, "b"));
         write(table, row(3, "c"));
         List<String> before = readRows(table);
-        assertThat(latest(table).numFiles()).isNotNull();
+        Long filesBefore = latest(table).numFiles();
+        assertThat(filesBefore).isNotNull();
 
         replaceManifestListWithSameLayout(table);
         table = reload("replace_manifests");
 
-        // this path swaps the manifest layout wholesale, so the counters cannot be carried over.
-        // Reporting unknown is the only honest answer; reporting the previous numbers would be
-        // wrong for callers such as RemoveUnexistingManifestsAction, which drops files.
-        assertThat(latest(table).numFiles()).isNull();
-        assertThat(latest(table).totalFileSizeInBytes()).isNull();
+        // the layout was replaced with an equivalent one, so recomputing lands on the same numbers
+        assertStatsMatchManifests(table);
+        assertThat(latest(table).numFiles()).isEqualTo(filesBefore);
 
-        // the data itself is untouched, and the table keeps taking writes
+        // the data itself is untouched, and the chain continues from the recomputed values
         assertThat(readRows(table)).containsExactlyInAnyOrderElementsOf(before);
         write(table, row(4, "d"));
-        assertThat(latest(table).numFiles()).isNull();
+        assertStatsMatchManifests(table);
         assertThat(readRows(table)).containsExactlyInAnyOrder("1:a", "2:b", "3:c", "4:d");
     }
 
@@ -413,16 +467,16 @@ public class SnapshotFileStatsTest extends TableTestBase {
         }
         table = reload("replace_manifests_drop");
 
-        // the live file set really did shrink, so carrying the previous counters over would have
-        // published a number that is simply wrong; unknown is the correct answer
+        // the live file set really did shrink; carrying the previous counters over would have
+        // published a number that no longer matches it, so the values are recomputed instead
         long filesAfter = scannedNumFiles(table);
         assertThat(filesAfter).isLessThan(filesBefore);
-        assertThat(latest(table).numFiles()).isNull();
-        assertThat(latest(table).totalFileSizeInBytes()).isNull();
+        assertThat(latest(table).numFiles()).isEqualTo(filesAfter);
+        assertStatsMatchManifests(table);
 
-        // and the table stays usable afterwards
+        // and the table stays usable afterwards, with the chain continuing from the new values
         write(table, row(4, "d"));
-        assertThat(latest(table).numFiles()).isNull();
+        assertStatsMatchManifests(table);
         assertThat(readRows(table)).contains("4:d");
     }
 
