@@ -162,7 +162,9 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.operation() == null
                                     ? null
                                     : BinaryString.fromString(snapshot.operation().toString()),
-                            BinaryString.fromString(snapshot.writerVersion())));
+                            BinaryString.fromString(snapshot.writerVersion()),
+                            snapshot.numFiles(),
+                            snapshot.totalFileSizeInBytes()));
         }
 
         return expectedRow;
