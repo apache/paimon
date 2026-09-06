@@ -45,6 +45,24 @@ under the License.
             <td>If true, it disables altering column type from null to not null. Default is true. Users can disable this option to explicitly convert null column type to not null.</td>
         </tr>
         <tr>
+            <td><h5>append.compaction.row-group-copy.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable Parquet RowGroup copy fast path for append-only table compaction. When enabled and all whitelist conditions are met, compaction concatenates compressed RowGroups without decoding and re-encoding rows.</td>
+        </tr>
+        <tr>
+            <td><h5>append.compaction.row-group-copy.footer-read.parallelism</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Maximum number of Parquet footer metadata reads that a single RowGroup copy compaction batch may perform in parallel. The effective parallelism is capped by the input file count and an internal hard limit of 8. The default value 1 keeps footer reads serial.</td>
+        </tr>
+        <tr>
+            <td><h5>append.compaction.row-group-copy.preserve-page-index</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether Parquet RowGroup copy compaction preserves existing ColumnIndex and OffsetIndex metadata. This keeps page-level predicate pruning at the cost of reading and rewriting the page indexes during compaction.</td>
+        </tr>
+        <tr>
             <td><h5>async-file-write</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -1266,6 +1284,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
         </tr>
         <tr>
+            <td><h5>scan.bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
+        </tr>
+        <tr>
             <td><h5>scan.creation-time-millis</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1318,12 +1342,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The parallelism of scanning manifest files, default value is the size of cpu processor. Note: Scale-up this parameter will increase memory usage while scanning manifest files. We can consider downsize it when we encounter an out of memory exception while scanning</td>
-        </tr>
-        <tr>
-            <td><h5>scan.bucket</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
         </tr>
         <tr>
             <td><h5>scan.max-splits-per-task</h5></td>
