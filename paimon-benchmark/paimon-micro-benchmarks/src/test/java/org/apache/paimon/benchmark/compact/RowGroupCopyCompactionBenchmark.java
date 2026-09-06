@@ -397,7 +397,8 @@ public class RowGroupCopyCompactionBenchmark {
                 Path path = pathFactory.toPath(file);
                 try (FileRecordReader<InternalRow> reader =
                         readerFactory.createReader(
-                                new FormatReaderContext(fileIO, path, file.fileSize(), null, null))) {
+                                new FormatReaderContext(
+                                        fileIO, path, file.fileSize(), null, null))) {
                     RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
                     while (iterator != null) {
                         InternalRow row;

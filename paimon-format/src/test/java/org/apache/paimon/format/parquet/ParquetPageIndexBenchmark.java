@@ -412,10 +412,7 @@ class ParquetPageIndexBenchmark {
         private final Integer hitHi;
 
         private QuerySpec(
-                String name,
-                @Nullable List<Predicate> filter,
-                Integer hitLo,
-                Integer hitHi) {
+                String name, @Nullable List<Predicate> filter, Integer hitLo, Integer hitHi) {
             this.name = name;
             this.filter = filter;
             this.hitLo = hitLo;
