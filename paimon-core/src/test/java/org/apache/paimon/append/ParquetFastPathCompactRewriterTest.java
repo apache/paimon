@@ -21,8 +21,10 @@ package org.apache.paimon.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -39,11 +41,15 @@ import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.metrics.CompactionFastPathMetrics;
 import org.apache.paimon.operation.metrics.CompactionFastPathMetrics.MissReason;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsMerger;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -58,12 +64,15 @@ import org.apache.paimon.shade.org.apache.parquet.internal.column.columnindex.Of
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
@@ -217,12 +226,230 @@ public class ParquetFastPathCompactRewriterTest {
         PreparedTable prepared = prepareTable(options, 4, 200);
 
         List<DataFileMeta> rewriteResult = compact(prepared, false);
-        List<DataFileMeta> fastPathResult = compact(prepared, true);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
 
+        // forbid silent fallback to rewrite
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
         assertThat(fastPathResult.size()).isGreaterThan(1);
         assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
         assertThat(readRows(prepared, fastPathResult))
                 .containsExactlyInAnyOrderElementsOf(readRows(prepared, rewriteResult));
+        // rolling splits input RowGroups across output files, so value stats must be
+        // (partially) rebuilt from block metadata; merged stats must match the rewrite path
+        assertThat(mergedValueStats(prepared, fastPathResult))
+                .isEqualTo(mergedValueStats(prepared, rewriteResult));
+    }
+
+    private SimpleStats mergedValueStats(PreparedTable prepared, List<DataFileMeta> files) {
+        return SimpleStatsMerger.merge(
+                files.stream().map(DataFileMeta::valueStats).collect(Collectors.toList()),
+                prepared.table.rowType(),
+                files.get(0).valueStatsCols());
+    }
+
+    @Test
+    public void testFastPathWithDictionaryNullDecimalAndTimestamp() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("price", DataTypes.DECIMAL(20, 2));
+        schemaBuilder.column("ts", DataTypes.TIMESTAMP(3));
+        schemaBuilder.column("tag", DataTypes.STRING());
+        int rowsPerFile = 50;
+        PreparedTable prepared =
+                prepareTable(
+                        schemaBuilder,
+                        Collections.emptyMap(),
+                        5,
+                        rowsPerFile,
+                        (file, row) -> {
+                            int id = file * rowsPerFile + row;
+                            return GenericRow.of(
+                                    id,
+                                    id % 3 == 0
+                                            ? null
+                                            : Decimal.fromBigDecimal(
+                                                    BigDecimal.valueOf(id, 2), 20, 2),
+                                    id % 4 == 0 ? null : Timestamp.fromEpochMillis(id * 1000L),
+                                    // low cardinality to trigger dictionary encoding
+                                    BinaryString.fromString("tag-" + (id % 5)));
+                        });
+
+        assertInputHasDictionaryEncoding(prepared);
+
+        List<DataFileMeta> rewriteResult = compact(prepared, false);
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        // forbid silent fallback to rewrite
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+        assertThat(sumRows(fastPathResult)).isEqualTo(sumRows(rewriteResult));
+        List<String> fastPathRows =
+                readRows(
+                        prepared,
+                        fastPathResult,
+                        Collections.emptyList(),
+                        this::complexRowToString);
+        List<String> rewriteRows =
+                readRows(
+                        prepared, rewriteResult, Collections.emptyList(), this::complexRowToString);
+        assertThat(fastPathRows).containsExactlyInAnyOrderElementsOf(rewriteRows);
+        // make sure nulls are really exercised, not just an all-non-null run
+        assertThat(fastPathRows.stream().filter(row -> row.contains("null")).count())
+                .isGreaterThan(0);
+    }
+
+    private String complexRowToString(InternalRow row) {
+        return row.getInt(0)
+                + ","
+                + (row.isNullAt(1) ? "null" : row.getDecimal(1, 20, 2).toString())
+                + ","
+                + (row.isNullAt(2) ? "null" : row.getTimestamp(2, 3).toString())
+                + ","
+                + row.getString(3);
+    }
+
+    private void assertInputHasDictionaryEncoding(PreparedTable prepared) throws Exception {
+        DataFilePathFactory pathFactory =
+                prepared.table
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
+        DataFileMeta file = prepared.files.get(0);
+        Path path = pathFactory.toPath(file);
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        prepared.table.fileIO(),
+                        path,
+                        file.fileSize(),
+                        prepared.table.coreOptions().toConfiguration())) {
+            boolean hasDictionary =
+                    reader.getFooter().getBlocks().stream()
+                            .flatMap(block -> block.getColumns().stream())
+                            .anyMatch(ColumnChunkMetaData::hasDictionaryPage);
+            assertThat(hasDictionary).isTrue();
+        }
+    }
+
+    @Test
+    public void testFastPathPredicateReadSkipsRowGroups() throws Exception {
+        // each input file is one RowGroup with a disjoint id range
+        PreparedTable prepared = prepareTable(Collections.emptyMap(), 5, 100);
+
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        // forbid silent fallback to rewrite
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+
+        // predicate boundary aligns with RowGroup boundaries, so stats-based RowGroup
+        // pruning must skip the first three RowGroups exactly
+        Predicate predicate = new PredicateBuilder(prepared.table.rowType()).greaterOrEqual(0, 300);
+        List<String> filtered =
+                readRows(
+                        prepared,
+                        fastPathResult,
+                        Collections.singletonList(predicate),
+                        this::rowToString);
+
+        List<String> expected = new ArrayList<>();
+        for (int id = 300; id < 500; id++) {
+            expected.add(id + "," + ((long) id * 3) + ",value-" + id + "," + (id % 7));
+        }
+        assertThat(filtered).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    public void testFastPathOutputFooterAlignsWithInputRowGroups() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("parquet.block.size", "1024");
+        PreparedTable prepared = prepareTable(options, 4, 200);
+
+        CompactionFastPathMetrics metrics =
+                new CompactionFastPathMetrics(new TestMetricRegistry(), "test");
+        List<DataFileMeta> fastPathResult = compactWithMetrics(prepared, true, metrics, null);
+
+        // forbid silent fallback to rewrite
+        assertThat(getCounter(metrics, CompactionFastPathMetrics.HIT_COUNT)).isEqualTo(1L);
+
+        // copied output must keep the input RowGroups in order, with identical
+        // row counts and per-column statistics
+        List<BlockMetaData> inputBlocks = readBlocks(prepared, prepared.files);
+        List<BlockMetaData> outputBlocks = readBlocks(prepared, fastPathResult);
+        assertThat(outputBlocks).hasSameSizeAs(inputBlocks);
+        for (int i = 0; i < inputBlocks.size(); i++) {
+            BlockMetaData inputBlock = inputBlocks.get(i);
+            BlockMetaData outputBlock = outputBlocks.get(i);
+            assertThat(outputBlock.getRowCount()).isEqualTo(inputBlock.getRowCount());
+            assertThat(outputBlock.getColumns()).hasSameSizeAs(inputBlock.getColumns());
+            for (int c = 0; c < inputBlock.getColumns().size(); c++) {
+                ColumnChunkMetaData inputColumn = inputBlock.getColumns().get(c);
+                ColumnChunkMetaData outputColumn = outputBlock.getColumns().get(c);
+                assertThat(outputColumn.getPath()).isEqualTo(inputColumn.getPath());
+                assertThat(outputColumn.getTotalSize()).isEqualTo(inputColumn.getTotalSize());
+                assertThat(outputColumn.getStatistics().toString())
+                        .isEqualTo(inputColumn.getStatistics().toString());
+            }
+        }
+
+        // column chunk offsets must stay inside the output file and blocks must be
+        // laid out in increasing order starting right after the "PAR1" magic
+        DataFilePathFactory pathFactory =
+                prepared.table
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
+        for (DataFileMeta file : fastPathResult) {
+            Path path = pathFactory.toPath(file);
+            try (ParquetFileReader reader =
+                    ParquetUtil.getParquetReader(
+                            prepared.table.fileIO(),
+                            path,
+                            file.fileSize(),
+                            prepared.table.coreOptions().toConfiguration())) {
+                long previousBlockStart = -1;
+                List<BlockMetaData> blocks = reader.getFooter().getBlocks();
+                for (int i = 0; i < blocks.size(); i++) {
+                    BlockMetaData block = blocks.get(i);
+                    long blockStart = block.getStartingPos();
+                    if (i == 0) {
+                        assertThat(blockStart).isEqualTo(4L);
+                    }
+                    assertThat(blockStart).isGreaterThan(previousBlockStart);
+                    previousBlockStart = blockStart;
+                    for (ColumnChunkMetaData column : block.getColumns()) {
+                        assertThat(column.getStartingPos()).isGreaterThanOrEqualTo(blockStart);
+                        assertThat(column.getStartingPos() + column.getTotalSize())
+                                .isLessThanOrEqualTo(file.fileSize());
+                    }
+                }
+            }
+        }
+    }
+
+    private List<BlockMetaData> readBlocks(PreparedTable prepared, List<DataFileMeta> files)
+            throws Exception {
+        DataFilePathFactory pathFactory =
+                prepared.table
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(prepared.partition, UNAWARE_BUCKET);
+        List<BlockMetaData> blocks = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            Path path = pathFactory.toPath(file);
+            try (ParquetFileReader reader =
+                    ParquetUtil.getParquetReader(
+                            prepared.table.fileIO(),
+                            path,
+                            file.fileSize(),
+                            prepared.table.coreOptions().toConfiguration())) {
+                blocks.addAll(reader.getFooter().getBlocks());
+            }
+        }
+        return blocks;
     }
 
     @Test
@@ -296,15 +523,34 @@ public class ParquetFastPathCompactRewriterTest {
 
     private PreparedTable prepareTable(
             Map<String, String> extraOptions, int fileCount, int rowsPerFile) throws Exception {
-        FileIO fileIO = LocalFileIO.create();
-        org.apache.paimon.fs.Path path =
-                new org.apache.paimon.fs.Path(
-                        tempDir.resolve(UUID.randomUUID().toString()).toString());
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("id", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.BIGINT());
         schemaBuilder.column("name", DataTypes.STRING());
         schemaBuilder.column("mod", DataTypes.INT());
+        return prepareTable(
+                schemaBuilder,
+                extraOptions,
+                fileCount,
+                rowsPerFile,
+                (file, row) -> {
+                    int id = file * rowsPerFile + row;
+                    return GenericRow.of(
+                            id, (long) id * 3, BinaryString.fromString("value-" + id), id % 7);
+                });
+    }
+
+    private PreparedTable prepareTable(
+            Schema.Builder schemaBuilder,
+            Map<String, String> extraOptions,
+            int fileCount,
+            int rowsPerFile,
+            BiFunction<Integer, Integer, InternalRow> rowGenerator)
+            throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        org.apache.paimon.fs.Path path =
+                new org.apache.paimon.fs.Path(
+                        tempDir.resolve(UUID.randomUUID().toString()).toString());
         schemaBuilder.option(CoreOptions.BUCKET.key(), "-1");
         schemaBuilder.option(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET);
         schemaBuilder.option(CoreOptions.WRITE_ONLY.key(), "true");
@@ -318,13 +564,7 @@ public class ParquetFastPathCompactRewriterTest {
         try (StreamTableWrite writer = table.newStreamWriteBuilder().newWrite()) {
             for (int file = 0; file < fileCount; file++) {
                 for (int row = 0; row < rowsPerFile; row++) {
-                    int id = file * rowsPerFile + row;
-                    writer.write(
-                            GenericRow.of(
-                                    id,
-                                    (long) id * 3,
-                                    BinaryString.fromString("value-" + id),
-                                    id % 7));
+                    writer.write(rowGenerator.apply(file, row));
                 }
                 try (TableCommitImpl commit = table.newCommit(commitUser)) {
                     commit.commit(writer.prepareCommit(true, file));
@@ -459,12 +699,20 @@ public class ParquetFastPathCompactRewriterTest {
 
     private List<String> readRows(PreparedTable prepared, List<DataFileMeta> files)
             throws Exception {
+        return readRows(prepared, files, Collections.emptyList(), this::rowToString);
+    }
+
+    private List<String> readRows(
+            PreparedTable prepared,
+            List<DataFileMeta> files,
+            List<Predicate> filters,
+            Function<InternalRow, String> rowConverter)
+            throws Exception {
         FileStoreTable table = prepared.table;
         FormatReaderFactory readerFactory =
                 FileFormat.fromIdentifier(
                                 FILE_FORMAT_PARQUET, table.coreOptions().toConfiguration())
-                        .createReaderFactory(
-                                table.rowType(), table.rowType(), Collections.emptyList());
+                        .createReaderFactory(table.rowType(), table.rowType(), filters);
         DataFilePathFactory pathFactory =
                 table.store()
                         .pathFactory()
@@ -480,7 +728,7 @@ public class ParquetFastPathCompactRewriterTest {
                 while (iterator != null) {
                     InternalRow row;
                     while ((row = iterator.next()) != null) {
-                        rows.add(rowToString(row));
+                        rows.add(rowConverter.apply(row));
                     }
                     iterator.releaseBatch();
                     iterator = reader.readBatch();
