@@ -1,0 +1,908 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.format;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
+import org.apache.paimon.table.format.FormatTablePartitionStatsCollector;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/** Tests for the catalog-managed partition repair engine of Format Tables. */
+class FormatTablePartitionRepairTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    void applyDiffsAgainstTheWholeUnfilteredCatalogListing() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Arrays.asList(spec("dt", "20260701"), spec("dt", "20260702")));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Arrays.asList(
+                                spec("dt", "20260701"),
+                                spec("dt", "20260702"),
+                                spec("dt", "20260703")),
+                        Collections.singletonList("dt"),
+                        true,
+                        false);
+
+        // Only the partition missing from the catalog listing is registered.
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260703")));
+        // The diff needs every registered partition, so the listing is asked for all of them.
+        assertThat(catalog.requestedPrefixes).containsExactly(Collections.emptyMap());
+    }
+
+    @Test
+    void applyCreatesTheWholeDiffAsAnIdempotentBatch() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Arrays.asList(spec("dt", "20260701"), spec("dt", "20260702")),
+                        Collections.singletonList("dt"),
+                        true,
+                        false);
+
+        assertThat(applied).isEqualTo(2);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Arrays.asList(spec("dt", "20260701"), spec("dt", "20260702")));
+        assertThat(catalog.createIgnoreFlags).containsExactly(true);
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void applyPassesALargeAddDiffToTheCatalogInOneCall() {
+        List<Map<String, String>> filesystemPartitions = new ArrayList<>();
+        for (int index = 0; index < 1001; index++) {
+            filesystemPartitions.add(spec("dt", String.format("%04d", index)));
+        }
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        filesystemPartitions,
+                        Collections.singletonList("dt"),
+                        true,
+                        false);
+
+        // Splitting a diff into per-request batches belongs to the partition catalog, so the
+        // repair hands over the complete diff in a single call.
+        assertThat(applied).isEqualTo(1001);
+        assertThat(catalog.createdPartitions).hasSize(1);
+        assertThat(catalog.createdPartitions.get(0)).isEqualTo(filesystemPartitions);
+        assertThat(catalog.createIgnoreFlags).containsExactly(true);
+    }
+
+    @Test
+    void applyPassesALargeDropDiffToTheCatalogInOneCall() {
+        List<Map<String, String>> registered = new ArrayList<>();
+        for (int index = 0; index < 1001; index++) {
+            registered.add(spec("dt", String.format("%04d", index)));
+        }
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(registered);
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        assertThat(applied).isEqualTo(1001);
+        assertThat(catalog.droppedPartitions).hasSize(1);
+        assertThat(catalog.droppedPartitions.get(0)).isEqualTo(registered);
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void dropOnlyUnregistersOnlyMissingDirectories() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Arrays.asList(spec("dt", "20260714"), spec("dt", "20260715")));
+
+        // dt=20260715 exists on the filesystem, dt=20260714 does not: only the latter is dropped.
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.singletonList(spec("dt", "20260715")),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.droppedPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260714")));
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void dropRepairNeverUnregistersACustomLocation() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerAtLocation(
+                spec("dt", "20260714"), tempDir.resolve("external").toUri().toString());
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        // Its absence below the table root says nothing about a custom-located partition.
+        assertThat(applied).isZero();
+        assertThat(catalog.droppedPartitions).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void unrelatedPartitionOptionDoesNotMakeTheLocationCustom() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerWithOptions(
+                spec("dt", "20260714"), Collections.singletonMap("owner", "spark"));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        false,
+                        true);
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.droppedPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260714")));
+    }
+
+    @Test
+    void nullPathOptionFailsClosed() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(CoreOptions.PATH.key(), null);
+        catalog.registerWithOptions(spec("dt", "20260714"), options);
+
+        assertThatThrownBy(
+                        () ->
+                                FormatTablePartitionRepair.apply(
+                                        catalog,
+                                        Collections.emptyList(),
+                                        Collections.singletonList("dt"),
+                                        false,
+                                        true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("path option must not be null");
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void addOnlyNeverDropsStaleCatalogPartitions() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Collections.singletonList(spec("dt", "20260714")));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.singletonList(spec("dt", "20260715")),
+                        Collections.singletonList("dt"),
+                        true,
+                        false);
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260715")));
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void syncAddsAndDropsInOneCall() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Collections.singletonList(spec("dt", "20260714")));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.singletonList(spec("dt", "20260715")),
+                        Collections.singletonList("dt"),
+                        true,
+                        true);
+
+        assertThat(applied).isEqualTo(2);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260715")));
+        assertThat(catalog.droppedPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260714")));
+    }
+
+    @Test
+    void applyWithNoDiffDoesNotIssueAnEmptyMutation() {
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Collections.singletonList(spec("dt", "20260701")));
+
+        int applied =
+                FormatTablePartitionRepair.apply(
+                        catalog,
+                        Collections.singletonList(spec("dt", "20260701")),
+                        Collections.singletonList("dt"),
+                        true,
+                        true);
+
+        assertThat(applied).isZero();
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void applyPropagatesFailureAfterAPartiallyAppliedMutation() {
+        IllegalStateException failure =
+                new IllegalStateException("injected partition drop failure");
+        RecordingPartitionManager catalog =
+                new RecordingPartitionManager() {
+                    @Override
+                    public void dropPartitions(List<Map<String, String>> partitions) {
+                        throw failure;
+                    }
+                };
+        catalog.register(Collections.singletonList(spec("dt", "20260714")));
+
+        assertThatThrownBy(
+                        () ->
+                                FormatTablePartitionRepair.apply(
+                                        catalog,
+                                        Collections.singletonList(spec("dt", "20260715")),
+                                        Collections.singletonList("dt"),
+                                        true,
+                                        true))
+                .isSameAs(failure);
+        // The ADD half is already committed; a rerun converges from there.
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260715")));
+    }
+
+    @Test
+    void repairRegistersRawDirectoryValuesWithoutCastingThem() throws Exception {
+        java.nio.file.Path partitionDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260701/month=01"));
+        Files.write(
+                partitionDirectory.resolve("data.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(
+                        monthPartitionedTable(
+                                LocalFileIO.create(), tempDir.toUri().toString(), catalog));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, false);
+
+        // The raw directory value must survive: a scan-based discovery would cast month=01 to 1
+        // and register a spec that no longer round-trips to the real directory.
+        Map<String, String> expected = new LinkedHashMap<>();
+        expected.put("dt", "20260701");
+        expected.put("month", "01");
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.createdPartitions).containsExactly(Collections.singletonList(expected));
+        assertThat(catalog.createIgnoreFlags).containsExactly(true);
+    }
+
+    @Test
+    void repairAddsTheNullPartitionDirectoryInValueOnlyLayout() throws Exception {
+        // A value-only layout writes the null partition as a bare __DEFAULT_PARTITION__ directory,
+        // which the generic hidden-directory rule ("_" prefix) would swallow.
+        writeDataFile(tempDir.resolve("20260701"));
+        writeDataFile(tempDir.resolve("__DEFAULT_PARTITION__"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), true, catalog));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, false);
+
+        assertThat(applied).isEqualTo(2);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(
+                        Arrays.asList(spec("dt", "20260701"), spec("dt", "__DEFAULT_PARTITION__")));
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairKeepsTheRegisteredNullPartitionInValueOnlyLayout() throws Exception {
+        // Both directories exist, so a SYNC must be a no-op. Missing the null partition on the
+        // filesystem side makes it look "registered but deleted" and silently unregisters live
+        // data.
+        writeDataFile(tempDir.resolve("20260701"));
+        writeDataFile(tempDir.resolve("__DEFAULT_PARTITION__"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(
+                Arrays.asList(spec("dt", "20260701"), spec("dt", "__DEFAULT_PARTITION__")));
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), true, catalog));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, true);
+
+        assertThat(applied).isZero();
+        assertThat(catalog.droppedPartitions).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void repairReadsTheDefaultPartitionNameFromTableOptions() throws Exception {
+        // Pins that the rescued name comes from partition.default-name rather than a literal:
+        // hardcoding "__DEFAULT_PARTITION__" reproduces the bug for anyone who overrides it.
+        writeDataFile(tempDir.resolve("20260701"));
+        writeDataFile(tempDir.resolve("__MY_NULL__"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        Map<String, String> extra = new LinkedHashMap<>();
+        extra.put(CoreOptions.PARTITION_DEFAULT_NAME.key(), "__MY_NULL__");
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(
+                        formatTable(tempDir.toUri().toString(), true, catalog, extra));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, false);
+
+        assertThat(applied).isEqualTo(2);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Arrays.asList(spec("dt", "20260701"), spec("dt", "__MY_NULL__")));
+    }
+
+    @Test
+    void repairDescendsIntoANullPartitionSubtreeInValueOnlyLayout() throws Exception {
+        // A null value on a non-leaf level hides the whole subtree, not just one directory:
+        // listStatusRecursively applies the same hidden-name rule while descending.
+        writeDataFile(tempDir.resolve("20260701").resolve("01"));
+        writeDataFile(tempDir.resolve("__DEFAULT_PARTITION__").resolve("01"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(twoLevelValueOnlyTable(tempDir.toUri().toString(), catalog));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, false);
+
+        Map<String, String> real = new LinkedHashMap<>();
+        real.put("dt", "20260701");
+        real.put("month", "01");
+        Map<String, String> nullDt = new LinkedHashMap<>();
+        nullDt.put("dt", "__DEFAULT_PARTITION__");
+        nullDt.put("month", "01");
+        assertThat(applied).isEqualTo(2);
+        assertThat(catalog.createdPartitions).containsExactly(Arrays.asList(real, nullDt));
+    }
+
+    @Test
+    void repairKeepsAnUnderscoreValueInTheKeyValueLayout() throws Exception {
+        // The hidden-name rule reads the directory name, and in a key=value layout that name is
+        // "dt=_abc" - the underscore sits on the value, not on the first character. Pins that the
+        // value-only defect does not extend to the default layout.
+        writeDataFile(tempDir.resolve("dt=20260701"));
+        writeDataFile(tempDir.resolve("dt=_abc"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Arrays.asList(spec("dt", "20260701"), spec("dt", "_abc")));
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), catalog));
+
+        int applied = FormatTablePartitionRepair.repair(sparkTable, true, true);
+
+        assertThat(applied).isZero();
+        assertThat(catalog.droppedPartitions).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+    }
+
+    @Test
+    void repairRejectsUnsafeValueOnlyDirectoryBeforeCatalogMutation() throws Exception {
+        Files.createDirectories(tempDir.resolve("%2E%2E"));
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), true, catalog));
+
+        assertThatThrownBy(() -> FormatTablePartitionRepair.repair(sparkTable, true, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("..");
+        assertThat(catalog.requestedPrefixes).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairFailsClosedWhenTheCatalogListingFails() throws Exception {
+        java.nio.file.Path partitionDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260715"));
+        Files.write(
+                partitionDirectory.resolve("data.csv"),
+                Collections.singletonList("15"),
+                StandardCharsets.UTF_8);
+
+        IllegalStateException listFailure =
+                new IllegalStateException("injected catalog listing failure");
+        AtomicInteger listCount = new AtomicInteger();
+        RecordingPartitionManager catalog =
+                new RecordingPartitionManager() {
+                    @Override
+                    public List<Partition> listPartitions(
+                            Map<String, String> prefix, @Nullable Predicate filter) {
+                        listCount.incrementAndGet();
+                        throw listFailure;
+                    }
+                };
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), catalog));
+
+        assertThatThrownBy(() -> FormatTablePartitionRepair.repair(sparkTable, true, true))
+                .isSameAs(listFailure);
+        assertThat(listCount).hasValue(1);
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+        assertThat(partitionDirectory).exists();
+    }
+
+    @Test
+    void repairFailsClosedWhenFilesystemDiscoveryFailsPartway() throws Exception {
+        Files.createDirectories(tempDir.resolve("dt=20260715/month=01"));
+        Files.createDirectories(tempDir.resolve("dt=20260716/month=01"));
+
+        IOException listFailure = new IOException("injected nested filesystem LIST failure");
+        AtomicInteger completedPartitionListings = new AtomicInteger();
+        FileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        if ("dt=20260716".equals(path.getName())) {
+                            throw listFailure;
+                        }
+                        FileStatus[] statuses = super.listStatus(path);
+                        Arrays.sort(
+                                statuses,
+                                Comparator.comparing(status -> status.getPath().toString()));
+                        if ("dt=20260715".equals(path.getName())) {
+                            completedPartitionListings.incrementAndGet();
+                        }
+                        return statuses;
+                    }
+                };
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(
+                        monthPartitionedTable(fileIO, tempDir.toUri().toString(), catalog));
+
+        assertThatThrownBy(() -> FormatTablePartitionRepair.repair(sparkTable, true, true))
+                .isInstanceOf(RuntimeException.class)
+                .hasCause(listFailure);
+        // A truncated listing must never reach the diff: no catalog call at all.
+        assertThat(completedPartitionListings).hasValue(1);
+        assertThat(catalog.requestedPrefixes).isEmpty();
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairMeasuresEveryPartitionOnDiskAndReplacesTheirStatistics() throws Exception {
+        java.nio.file.Path known = Files.createDirectories(tempDir.resolve("dt=20260701"));
+        Files.write(known.resolve("data.csv"), Arrays.asList("1", "2"), StandardCharsets.UTF_8);
+        java.nio.file.Path fresh = Files.createDirectories(tempDir.resolve("dt=20260702"));
+        Files.write(
+                fresh.resolve("data.csv"), Collections.singletonList("3"), StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Collections.singletonList(spec("dt", "20260701")));
+        FormatTable table = formatTable(tempDir.toUri().toString(), catalog);
+        PaimonFormatTable sparkTable = new PaimonFormatTable(table);
+
+        int applied =
+                FormatTablePartitionRepair.repair(
+                        sparkTable, true, false, new FormatTablePartitionStatsCollector(table, 1));
+
+        // Only one partition was missing from the registration, but a repair that measures corrects
+        // the numbers of the already-registered one too — being behind is why it is running.
+        assertThat(applied).isEqualTo(1);
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Arrays.asList(spec("dt", "20260701"), spec("dt", "20260702")));
+        assertThat(catalog.replaceFlags).containsExactly(true);
+        // One measurement per spec, in the same order: the catalog reads the two lists side by
+        // side, so a short or reordered statistics list would describe the wrong partitions.
+        List<PartitionStatistics> reported = catalog.reportedStatistics.get(0);
+        assertThat(reported).hasSize(2);
+        assertThat(reported.get(0).spec()).isEqualTo(spec("dt", "20260701"));
+        assertThat(reported.get(0).fileCount()).isEqualTo(1);
+        assertThat(reported.get(0).fileSizeInBytes()).isPositive();
+        assertThat(reported.get(0).lastFileCreationTime()).isPositive();
+        // CSV carries no footer, so the row count is unknown rather than a number nobody measured.
+        assertThat(PartitionStatistics.isKnown(reported.get(0).recordCount())).isFalse();
+        assertThat(reported.get(1).spec()).isEqualTo(spec("dt", "20260702"));
+        assertThat(reported.get(1).fileCount()).isEqualTo(1);
+        assertThat(reported.get(1).fileSizeInBytes()).isPositive();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairNeverMeasuresACustomLocationFromTheDefaultDirectory() throws Exception {
+        java.nio.file.Path defaultDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260701"));
+        Files.write(
+                defaultDirectory.resolve("stale.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.registerAtLocation(
+                spec("dt", "20260701"), tempDir.resolve("external").toUri().toString());
+        FormatTable table = formatTable(tempDir.toUri().toString(), catalog);
+
+        int applied =
+                FormatTablePartitionRepair.repair(
+                        new PaimonFormatTable(table),
+                        true,
+                        true,
+                        new FormatTablePartitionStatsCollector(table, 1));
+
+        // The directory below the table root is residue, not the custom partition's data.
+        assertThat(applied).isZero();
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.reportedStatistics).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairWritesNothingWhenMeasuringAPartitionFailsToList() throws Exception {
+        Files.write(
+                Files.createDirectories(tempDir.resolve("dt=20260701")).resolve("data.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+        Files.createDirectories(tempDir.resolve("dt=20260702"));
+
+        IOException listFailure = new IOException("injected partition measurement LIST failure");
+        FileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        if ("dt=20260702".equals(path.getName())) {
+                            throw listFailure;
+                        }
+                        return super.listStatus(path);
+                    }
+                };
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        FormatTable table = formatTable(fileIO, tempDir.toUri().toString(), false, catalog);
+        PaimonFormatTable sparkTable = new PaimonFormatTable(table);
+
+        assertThatThrownBy(
+                        () ->
+                                FormatTablePartitionRepair.repair(
+                                        sparkTable,
+                                        true,
+                                        false,
+                                        new FormatTablePartitionStatsCollector(table, 1)))
+                .isInstanceOf(UncheckedIOException.class)
+                .hasCause(listFailure);
+        // The partition that did list measured fine, but half a measurement written as if it were
+        // the whole one is the corruption the abort exists to prevent: nothing reaches the catalog,
+        // and the registration the repair would have added is not applied either.
+        assertThat(catalog.createdPartitions).isEmpty();
+        assertThat(catalog.reportedStatistics).isEmpty();
+        assertThat(catalog.droppedPartitions).isEmpty();
+    }
+
+    @Test
+    void repairWithoutAddNeverRegistersAPartitionJustToMeasureIt() throws Exception {
+        java.nio.file.Path registeredDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260701"));
+        Files.write(
+                registeredDirectory.resolve("data.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+        java.nio.file.Path unregisteredDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260702"));
+        Files.write(
+                unregisteredDirectory.resolve("data.csv"),
+                Collections.singletonList("2"),
+                StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        catalog.register(Collections.singletonList(spec("dt", "20260701")));
+        FormatTable table = formatTable(tempDir.toUri().toString(), catalog);
+        PaimonFormatTable sparkTable = new PaimonFormatTable(table);
+
+        FormatTablePartitionRepair.repair(
+                sparkTable, false, true, new FormatTablePartitionStatsCollector(table, 1));
+
+        // MSCK DROP PARTITIONS asked for no registrations; measuring must not smuggle one in.
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260701")));
+    }
+
+    @Test
+    void repairWithoutMeasuringKeepsTheSpecOnlyRegistration() throws Exception {
+        java.nio.file.Path partitionDirectory =
+                Files.createDirectories(tempDir.resolve("dt=20260701"));
+        Files.write(
+                partitionDirectory.resolve("data.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+
+        RecordingPartitionManager catalog = new RecordingPartitionManager();
+        PaimonFormatTable sparkTable =
+                new PaimonFormatTable(formatTable(tempDir.toUri().toString(), catalog));
+
+        FormatTablePartitionRepair.repair(sparkTable, true, false);
+
+        assertThat(catalog.createdPartitions)
+                .containsExactly(Collections.singletonList(spec("dt", "20260701")));
+        // Registering without measuring is one call that carries no statistics, not the absence of
+        // a call: the repair still has to register what it found.
+        assertThat(catalog.reportedStatistics).hasSize(1).containsOnlyNulls();
+        assertThat(catalog.replaceFlags).containsExactly(false);
+    }
+
+    private static void writeDataFile(java.nio.file.Path partitionDirectory) throws IOException {
+        Files.createDirectories(partitionDirectory);
+        Files.write(
+                partitionDirectory.resolve("data.csv"),
+                Collections.singletonList("1"),
+                StandardCharsets.UTF_8);
+    }
+
+    private static Map<String, String> spec(String key, String value) {
+        Map<String, String> spec = new LinkedHashMap<>();
+        spec.put(key, value);
+        return spec;
+    }
+
+    private static FormatTable formatTable(String location, FormatTablePartitionManager catalog) {
+        return formatTable(location, false, catalog);
+    }
+
+    private static FormatTable formatTable(
+            String location,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager catalog,
+            Map<String, String> extraOptions) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("dt", DataTypes.STRING())
+                        .build();
+        return build(
+                LocalFileIO.create(),
+                location,
+                rowType,
+                Collections.singletonList("dt"),
+                onlyValueInPath,
+                catalog,
+                extraOptions);
+    }
+
+    /** Two STRING partition keys in a value-only layout, so a null value can sit on a non-leaf. */
+    private static FormatTable twoLevelValueOnlyTable(
+            String location, FormatTablePartitionManager catalog) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("dt", DataTypes.STRING())
+                        .field("month", DataTypes.STRING())
+                        .build();
+        return build(
+                LocalFileIO.create(),
+                location,
+                rowType,
+                Arrays.asList("dt", "month"),
+                true,
+                catalog,
+                Collections.emptyMap());
+    }
+
+    private static FormatTable formatTable(
+            String location, boolean onlyValueInPath, FormatTablePartitionManager catalog) {
+        return formatTable(LocalFileIO.create(), location, onlyValueInPath, catalog);
+    }
+
+    private static FormatTable formatTable(
+            FileIO fileIO,
+            String location,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager catalog) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("dt", DataTypes.STRING())
+                        .build();
+        return build(
+                fileIO,
+                location,
+                rowType,
+                Collections.singletonList("dt"),
+                onlyValueInPath,
+                catalog);
+    }
+
+    /** A table whose second partition key is an INT, so a cast would rewrite {@code 01} to 1. */
+    private static FormatTable monthPartitionedTable(
+            FileIO fileIO, String location, FormatTablePartitionManager catalog) {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("dt", DataTypes.STRING())
+                        .field("month", DataTypes.INT())
+                        .build();
+        return build(fileIO, location, rowType, Arrays.asList("dt", "month"), false, catalog);
+    }
+
+    private static FormatTable build(
+            FileIO fileIO,
+            String location,
+            RowType rowType,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager catalog) {
+        return build(
+                fileIO,
+                location,
+                rowType,
+                partitionKeys,
+                onlyValueInPath,
+                catalog,
+                Collections.emptyMap());
+    }
+
+    private static FormatTable build(
+            FileIO fileIO,
+            String location,
+            RowType rowType,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager catalog,
+            Map<String, String> extraOptions) {
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true");
+        options.put(
+                CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key(),
+                Boolean.toString(onlyValueInPath));
+        options.putAll(extraOptions);
+        return FormatTable.builder()
+                .fileIO(fileIO)
+                .identifier(Identifier.create("db", "t"))
+                .rowType(rowType)
+                .partitionKeys(partitionKeys)
+                .location(new Path(location).toString())
+                .format(FormatTable.Format.CSV)
+                .options(options)
+                .partitionManager(catalog)
+                .build();
+    }
+
+    private static class RecordingPartitionManager implements FormatTablePartitionManager {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<Map<String, String>> registered = new ArrayList<>();
+        private final Map<Map<String, String>, Map<String, String>> partitionOptions =
+                new LinkedHashMap<>();
+        private final List<Map<String, String>> requestedPrefixes = new ArrayList<>();
+        private final List<List<Map<String, String>>> createdPartitions = new ArrayList<>();
+        private final List<Boolean> createIgnoreFlags = new ArrayList<>();
+        private final List<List<Map<String, String>>> droppedPartitions = new ArrayList<>();
+        private final List<List<PartitionStatistics>> reportedStatistics = new ArrayList<>();
+        private final List<Boolean> replaceFlags = new ArrayList<>();
+
+        private void register(List<Map<String, String>> partitions) {
+            registered.addAll(partitions);
+        }
+
+        private void registerAtLocation(Map<String, String> partition, String location) {
+            registerWithOptions(
+                    partition, Collections.singletonMap(CoreOptions.PATH.key(), location));
+        }
+
+        private void registerWithOptions(
+                Map<String, String> partition, Map<String, String> options) {
+            registered.add(partition);
+            partitionOptions.put(partition, options);
+        }
+
+        @Override
+        public void createPartitions(
+                List<Map<String, String>> partitions,
+                boolean ignoreIfExists,
+                @Nullable List<PartitionStatistics> statistics,
+                boolean replaceStatistics,
+                @Nullable List<Map<String, String>> partitionOptions) {
+            createdPartitions.add(new ArrayList<>(partitions));
+            createIgnoreFlags.add(ignoreIfExists);
+            reportedStatistics.add(statistics == null ? null : new ArrayList<>(statistics));
+            replaceFlags.add(replaceStatistics);
+        }
+
+        @Override
+        public void dropPartitions(List<Map<String, String>> partitions) {
+            droppedPartitions.add(new ArrayList<>(partitions));
+        }
+
+        @Override
+        public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<Partition> listPartitions(
+                Map<String, String> prefix, @Nullable Predicate filter) {
+            requestedPrefixes.add(prefix);
+            List<Partition> partitions = new ArrayList<>(registered.size());
+            for (Map<String, String> spec : registered) {
+                partitions.add(
+                        new Partition(
+                                spec,
+                                0L,
+                                0L,
+                                0L,
+                                0L,
+                                0,
+                                false,
+                                null,
+                                null,
+                                null,
+                                null,
+                                partitionOptions.get(spec)));
+            }
+            return partitions;
+        }
+    }
+}

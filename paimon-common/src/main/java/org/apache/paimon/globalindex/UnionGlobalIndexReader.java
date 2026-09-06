@@ -19,7 +19,11 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.utils.IOUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -27,17 +31,24 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 
 /**
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
  * (OR) operation on their results.
  */
-public class UnionGlobalIndexReader implements GlobalIndexReader {
+public class UnionGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
 
     private final List<GlobalIndexReader> readers;
+    private final LongConsumer durationConsumer;
 
     public UnionGlobalIndexReader(List<GlobalIndexReader> readers) {
+        this(readers, null);
+    }
+
+    UnionGlobalIndexReader(List<GlobalIndexReader> readers, LongConsumer durationConsumer) {
         this.readers = readers;
+        this.durationConsumer = durationConsumer;
     }
 
     @Override
@@ -66,6 +77,54 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
             FieldRef fieldRef, Object literal) {
         return unionAsync(reader -> reader.visitContains(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        if (candidates != null && candidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return unionAsync(
+                reader ->
+                        reader instanceof ContainsRefiningGlobalIndexReader
+                                ? ((ContainsRefiningGlobalIndexReader) reader)
+                                        .visitContainsCandidates(fieldRef, literals, candidates)
+                                : visitContainsConjunctionFallback(
+                                        reader, fieldRef, literals, candidates));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        if (candidates != null && candidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return unionAsync(
+                reader ->
+                        reader instanceof ContainsRefiningGlobalIndexReader
+                                ? ((ContainsRefiningGlobalIndexReader) reader)
+                                        .visitContainsConjunction(fieldRef, literals, candidates)
+                                : visitContainsConjunctionFallback(
+                                        reader, fieldRef, literals, candidates));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return unionAsync(reader -> reader.visitArrayContains(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return unionAsync(reader -> reader.visitArraysOverlap(fieldRef, literals));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return unionAsync(reader -> reader.visitArrayContainsAll(fieldRef, literals));
     }
 
     @Override
@@ -129,8 +188,15 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return unionAsync(reader -> reader.visitNotBetween(fieldRef, from, to));
+    }
+
+    @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
+        long start = durationConsumer == null ? 0L : System.nanoTime();
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
@@ -139,43 +205,92 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
-                            Optional<ScoredGlobalIndexResult> result = Optional.empty();
+                            List<ScoredGlobalIndexResult> results = new ArrayList<>(futures.size());
                             for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
                                 Optional<ScoredGlobalIndexResult> current = f.join();
-                                if (!current.isPresent()) {
-                                    continue;
-                                }
-                                if (!result.isPresent()) {
-                                    result = current;
-                                } else {
-                                    result = Optional.of(result.get().or(current.get()));
+                                if (current.isPresent()) {
+                                    results.add(current.get());
                                 }
                             }
-                            return result;
+                            if (results.isEmpty()) {
+                                return Optional.<ScoredGlobalIndexResult>empty();
+                            }
+                            return Optional.of(ScoredGlobalIndexResult.merge(results));
+                        })
+                .whenComplete(
+                        (ignored, throwable) -> {
+                            if (durationConsumer != null) {
+                                durationConsumer.accept(System.nanoTime() - start);
+                            }
                         });
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return unionAsync(reader -> reader.visitTopN(topN));
     }
 
     private CompletableFuture<Optional<GlobalIndexResult>> unionAsync(
             Function<GlobalIndexReader, CompletableFuture<Optional<GlobalIndexResult>>> visitor) {
+        long start = durationConsumer == null ? 0L : System.nanoTime();
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
             futures.add(visitor.apply(reader));
         }
+        CompletableFuture<Optional<GlobalIndexResult>> result =
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .thenApply(
+                                v -> {
+                                    Optional<GlobalIndexResult> union = Optional.empty();
+                                    for (CompletableFuture<Optional<GlobalIndexResult>> f :
+                                            futures) {
+                                        Optional<GlobalIndexResult> current = f.join();
+                                        if (!current.isPresent()) {
+                                            return Optional.empty();
+                                        }
+                                        if (!union.isPresent()) {
+                                            union = current;
+                                        } else {
+                                            union = Optional.of(union.get().or(current.get()));
+                                        }
+                                    }
+                                    return union;
+                                });
+        if (durationConsumer != null) {
+            return result.whenComplete(
+                    (ignored, throwable) -> durationConsumer.accept(System.nanoTime() - start));
+        }
+        return result;
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunctionFallback(
+            GlobalIndexReader reader,
+            FieldRef fieldRef,
+            List<Object> literals,
+            @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            futures.add(reader.visitContains(fieldRef, literal));
+        }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(
-                        v -> {
+                        ignored -> {
                             Optional<GlobalIndexResult> result = Optional.empty();
-                            for (CompletableFuture<Optional<GlobalIndexResult>> f : futures) {
-                                Optional<GlobalIndexResult> current = f.join();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                                Optional<GlobalIndexResult> current = future.join();
                                 if (!current.isPresent()) {
                                     continue;
                                 }
-                                if (!result.isPresent()) {
-                                    result = current;
-                                } else {
-                                    result = Optional.of(result.get().or(current.get()));
-                                }
+                                result =
+                                        Optional.of(
+                                                result.isPresent()
+                                                        ? result.get().and(current.get())
+                                                        : current.get());
+                            }
+                            if (result.isPresent() && candidates != null) {
+                                result = Optional.of(result.get().and(candidates));
                             }
                             return result;
                         });
@@ -183,8 +298,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        for (GlobalIndexReader reader : readers) {
-            reader.close();
+        try {
+            IOUtils.closeAll(readers);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Failed to close union global index readers", e);
         }
     }
 }

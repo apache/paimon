@@ -52,7 +52,13 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
     private Comparator<KeyValue> createSequenceComparator(
             @Nullable FieldsComparator userDefinedSeqComparator) {
         if (userDefinedSeqComparator == null) {
-            return (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber());
+            return (e1, e2) -> {
+                int result = Long.compare(e2.sequenceNumber(), e1.sequenceNumber());
+                if (result != 0) {
+                    return result;
+                }
+                return Boolean.compare(e2.isAdd(), e1.isAdd());
+            };
         }
 
         return (o1, o2) -> {
@@ -60,7 +66,11 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
             if (result != 0) {
                 return result;
             }
-            return Long.compare(o2.sequenceNumber(), o1.sequenceNumber());
+            result = Long.compare(o2.sequenceNumber(), o1.sequenceNumber());
+            if (result != 0) {
+                return result;
+            }
+            return Boolean.compare(o2.isAdd(), o1.isAdd());
         };
     }
 

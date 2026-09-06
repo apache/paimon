@@ -96,14 +96,46 @@ public class PartitionTimeExtractor implements Serializable {
         if (pattern == null) {
             timestampString = partitionValues.get(0).toString();
         } else {
-            timestampString = pattern;
-            for (int i = 0; i < partitionKeys.size(); i++) {
-                timestampString =
-                        timestampString.replaceAll(
-                                "\\$" + partitionKeys.get(i), partitionValues.get(i).toString());
-            }
+            timestampString = replacePattern(pattern, partitionKeys, partitionValues);
         }
         return toLocalDateTime(timestampString, this.formatter);
+    }
+
+    private static String replacePattern(
+            String pattern, List<String> partitionKeys, List<?> partitionValues) {
+        // Prefer longer keys so that a short key does not accidentally match a prefix of a
+        // longer key (e.g. $dt should not match inside $dt1).
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            indices.add(i);
+        }
+        indices.sort(
+                (i, j) ->
+                        Integer.compare(
+                                partitionKeys.get(j).length(), partitionKeys.get(i).length()));
+
+        StringBuilder builder = new StringBuilder(pattern.length());
+        for (int i = 0; i < pattern.length(); ) {
+            char c = pattern.charAt(i);
+            if (c == '$' && i + 1 < pattern.length()) {
+                String matchedValue = null;
+                for (int idx : indices) {
+                    String key = partitionKeys.get(idx);
+                    if (pattern.regionMatches(i + 1, key, 0, key.length())) {
+                        matchedValue = partitionValues.get(idx).toString();
+                        i += 1 + key.length();
+                        break;
+                    }
+                }
+                if (matchedValue != null) {
+                    builder.append(matchedValue);
+                    continue;
+                }
+            }
+            builder.append(c);
+            i++;
+        }
+        return builder.toString();
     }
 
     private static LocalDateTime toLocalDateTime(

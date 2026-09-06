@@ -20,14 +20,14 @@ package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.format.FormatMetadataUtils;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.parquet.type.ParquetField;
+import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -41,24 +41,22 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
-import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createReadableColumnVectors;
+import static org.apache.paimon.data.columnar.ColumnVectorUtils.createReadableColumnVectors;
 
 /** Record reader for parquet. */
-public class VectorizedParquetRecordReader
-        implements FileRecordReader<InternalRow>, SupportsReaderFieldMetadata {
+public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
 
     private ParquetFileReader reader;
 
     // The capacity of vectorized batch.
-    private final int batchSize;
+    private int batchSize;
 
     /**
      * The total number of rows this RecordReader will eventually read. The sum of the rows of all
@@ -85,6 +83,9 @@ public class VectorizedParquetRecordReader
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
+    private final int defaultBatchSize;
+    @Nullable private final ReadBatchSizer readBatchSizer;
+    @Nullable private final IntFunction<WritableColumnVector[]> vectorFactory;
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
@@ -96,7 +97,10 @@ public class VectorizedParquetRecordReader
             List<ParquetField> fields,
             WritableColumnVector[] vectors,
             int batchSize,
-            FileIO fileIO)
+            int defaultBatchSize,
+            FileIO fileIO,
+            @Nullable ReadBatchSizer readBatchSizer,
+            @Nullable IntFunction<WritableColumnVector[]> vectorFactory)
             throws IOException {
         this.filePath = filePath;
         this.reader = reader;
@@ -104,8 +108,11 @@ public class VectorizedParquetRecordReader
         this.fields = fields;
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
+        this.defaultBatchSize = defaultBatchSize;
         this.fileIO = fileIO;
         this.rowIndexGenerator = new RowIndexGenerator();
+        this.readBatchSizer = readBatchSizer;
+        this.vectorFactory = vectorFactory;
 
         // fetch writer version from file metadata
         try {
@@ -118,10 +125,10 @@ public class VectorizedParquetRecordReader
         // Check if all the required columns are present in the file.
         checkMissingColumns();
         // Initialize the columnarBatch and columnVectors,
-        initBatch(vectors);
+        initBatch(vectors, batchSize);
     }
 
-    private void initBatch(WritableColumnVector[] vectors) {
+    private void initBatch(WritableColumnVector[] vectors, int capacity) {
         columnarBatch =
                 new ColumnarBatch(
                         filePath,
@@ -135,7 +142,7 @@ public class VectorizedParquetRecordReader
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =
                     new ParquetColumnVector(
-                            fields.get(i), vectors[i], batchSize, missingColumns, true);
+                            fields.get(i), vectors[i], capacity, missingColumns, true);
         }
     }
 
@@ -155,6 +162,10 @@ public class VectorizedParquetRecordReader
                 ColumnDescriptor fd = fileSchema.getColumnDescription(desc.getPath());
                 if (!fd.equals(desc)) {
                     throw new IOException("Schema evolution not supported.");
+                }
+            } else {
+                for (ParquetField child : ((ParquetGroupField) field).getChildren()) {
+                    checkColumn(child);
                 }
             }
         } else {
@@ -185,13 +196,19 @@ public class VectorizedParquetRecordReader
             if (rowsReturned >= totalRowCount) {
                 return false;
             }
+            // Snapshot once so a concurrent update only affects the next physical batch.
+            int nextBatchSize =
+                    readBatchSizer == null
+                            ? defaultBatchSize
+                            : readBatchSizer.batchSize().orElse(defaultBatchSize);
+            resizeBatchIfNeeded(nextBatchSize);
             for (ParquetColumnVector vector : columnVectors) {
                 vector.reset();
             }
             columnarBatch.setNumRows(0);
             checkEndOfRowGroup();
 
-            int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
+            int num = (int) Math.min(nextBatchSize, totalCountLoadedSoFar - rowsReturned);
             for (ParquetColumnVector cv : columnVectors) {
                 for (ParquetColumnVector leafCv : cv.getLeaves()) {
                     VectorizedColumnReader columnReader = leafCv.getColumnReader();
@@ -222,6 +239,33 @@ public class VectorizedParquetRecordReader
                             "Exception in nextBatch, filePath: %s fileSchema: %s",
                             filePath, fileSchema),
                     e);
+        }
+    }
+
+    private void resizeBatchIfNeeded(int nextBatchSize) {
+        if (nextBatchSize == batchSize) {
+            return;
+        }
+
+        ParquetColumnVector[] previousVectors = columnVectors;
+        // A new physical batch starts only after the prior iterator is released, so replacing the
+        // wrappers here cannot mutate vectors still visible to the consumer.
+        initBatch(vectorFactory.apply(nextBatchSize), nextBatchSize);
+        for (int i = 0; i < columnVectors.length; i++) {
+            copyColumnReaders(previousVectors[i], columnVectors[i]);
+        }
+        batchSize = nextBatchSize;
+    }
+
+    private static void copyColumnReaders(
+            ParquetColumnVector previous, ParquetColumnVector replacement) {
+        if (previous.getColumn().isPrimitive()) {
+            replacement.setColumnReader(previous.getColumnReader());
+            return;
+        }
+
+        for (int i = 0; i < previous.getChildren().size(); i++) {
+            copyColumnReaders(previous.getChildren().get(i), replacement.getChildren().get(i));
         }
     }
 
@@ -272,24 +316,6 @@ public class VectorizedParquetRecordReader
         } else {
             return null;
         }
-    }
-
-    @Override
-    public Map<String, Map<String, String>> readFieldMetadata() throws IOException {
-        String encodedSchema =
-                reader.getFooter()
-                        .getFileMetaData()
-                        .getKeyValueMetaData()
-                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY);
-        if (encodedSchema == null) {
-            return FormatMetadataUtils.readFieldMetadata(null);
-        }
-        return FormatMetadataUtils.readFieldMetadata(
-                FormatMetadataUtils.decodeMetadata(
-                                Collections.singletonMap(
-                                        FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
-                                        encodedSchema))
-                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
     }
 
     @Override

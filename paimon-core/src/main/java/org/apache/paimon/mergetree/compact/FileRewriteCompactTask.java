@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
@@ -28,6 +29,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
 
@@ -38,18 +40,21 @@ public class FileRewriteCompactTask extends CompactTask {
     private final int outputLevel;
     private final List<DataFileMeta> files;
     private final boolean dropDelete;
+    private final Supplier<CompactDeletionFile> compactDfSupplier;
 
     public FileRewriteCompactTask(
             CompactRewriter rewriter,
             CompactUnit unit,
             boolean dropDelete,
             @Nullable CompactionMetrics.Reporter metricsReporter,
+            Supplier<CompactDeletionFile> compactDfSupplier,
             String bucketInfo) {
         super(metricsReporter, bucketInfo);
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();
         this.files = unit.files();
         this.dropDelete = dropDelete;
+        this.compactDfSupplier = compactDfSupplier;
     }
 
     @Override
@@ -58,6 +63,7 @@ public class FileRewriteCompactTask extends CompactTask {
         for (DataFileMeta file : files) {
             rewriteFile(file, result);
         }
+        result.setDeletionFile(compactDfSupplier.get());
         return result;
     }
 

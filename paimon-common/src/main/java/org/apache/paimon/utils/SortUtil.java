@@ -164,11 +164,16 @@ public class SortUtil {
         }
     }
 
-    /** Support the compact precision TimestampData. */
+    /** Support TimestampData of any precision. */
     public static void putTimestampNormalizedKey(
             Timestamp value, MemorySegment target, int offset, int numBytes) {
-        assert value.getNanoOfMillisecond() == 0;
-        putLongNormalizedKey(value.getMillisecond(), target, offset, numBytes);
+        // millisecond occupies the most significant 8 bytes
+        putLongNormalizedKey(value.getMillisecond(), target, offset, Math.min(numBytes, 8));
+        if (numBytes > 8) {
+            // nanoOfMillisecond is in [0, 999_999], so an unsigned key preserves order
+            putUnsignedIntegerNormalizedKey(
+                    value.getNanoOfMillisecond(), target, offset + 8, numBytes - 8);
+        }
     }
 
     public static void putUnsignedIntegerNormalizedKey(

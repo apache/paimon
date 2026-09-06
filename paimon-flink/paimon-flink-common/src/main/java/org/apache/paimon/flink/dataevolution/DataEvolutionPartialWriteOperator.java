@@ -54,7 +54,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -71,6 +70,7 @@ public class DataEvolutionPartialWriteOperator
 
     private final FileStoreTable table;
     private final Long baseSnapshotId;
+    private final boolean nestedFieldEnabled;
 
     // dataType
     private final RowType dataType;
@@ -92,18 +92,29 @@ public class DataEvolutionPartialWriteOperator
     private transient AbstractFileStoreWrite<InternalRow> tableWrite;
     private transient Writer writer;
 
+    private static Map<String, String> dataEvolutionWriteOptions() {
+        // Data evolution requires a single output file: disable both size and row rolling.
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), String.valueOf(Long.MAX_VALUE));
+        return options;
+    }
+
     public DataEvolutionPartialWriteOperator(
-            FileStoreTable table, RowType dataType, Long baseSnapshotId) {
-        this.table =
-                table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"));
+            FileStoreTable table,
+            RowType sourceType,
+            List<String> writePaths,
+            Long baseSnapshotId) {
+        this.table = table.copy(dataEvolutionWriteOptions());
         this.baseSnapshotId = baseSnapshotId;
-        List<String> fieldNames =
-                dataType.getFieldNames().stream()
-                        .filter(name -> !SpecialFields.ROW_ID.name().equals(name))
-                        .collect(Collectors.toList());
-        this.writeType = table.rowType().project(fieldNames);
-        this.dataType =
-                SpecialFields.rowTypeWithRowId(table.rowType()).project(dataType.getFieldNames());
+        this.nestedFieldEnabled = this.table.coreOptions().dataEvolutionNestedFieldEnabled();
+        this.writeType =
+                nestedFieldEnabled
+                        ? table.rowType().projectByPaths(writePaths)
+                        : table.rowType().project(writePaths);
+        // sourceType is already pruned to the written columns (with partial nested structs) and
+        // carries the table's field ids, so it is used directly as the read/data type.
+        this.dataType = sourceType;
         this.rowIdIndex = this.dataType.getFieldIndex(SpecialFields.ROW_ID.name());
     }
 

@@ -24,15 +24,13 @@ import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, 
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
-import org.apache.paimon.types.DataType
-import org.apache.paimon.types.DataTypeRoot.BLOB
+import org.apache.paimon.types.BlobType
+import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-
-import java.util.Collections
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -40,18 +38,44 @@ import scala.collection.mutable
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
   extends WriteHelper {
 
-  // File rolling will never be performed
-  override val table: FileStoreTable =
-    paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
+  // File rolling will never be performed: disable both size and row rolling.
+  override val table: FileStoreTable = {
+    val writeOptions = Map(
+      CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
+      CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
+    paimonTable.copy(writeOptions.asJava)
+  }
 
+  private val dataEvolutionNestedFieldEnabled =
+    table.coreOptions().dataEvolutionNestedFieldEnabled()
+
+  // Whole top-level column write (kept for callers that only update full columns).
   def writePartialFields(
       data: DataFrame,
       columnNames: Seq[String],
       rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
+    writePartialFields(
+      data,
+      if (dataEvolutionNestedFieldEnabled) {
+        table.rowType().projectByPaths(columnNames.asJava)
+      } else {
+        table.rowType().project(columnNames.asJava)
+      },
+      rawBlobPlaceholderMarkerColumns
+    )
+  }
+
+  // Sub-field-aware write: writeType is already pruned to the written top-level columns and
+  // (possibly) nested sub-fields via dotted paths.
+  def writePartialFields(
+      data: DataFrame,
+      writeType: RowType,
+      rawBlobPlaceholderMarkerColumns: Map[String, String]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
+    val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
-    assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
-    val writeType = table.rowType().project(columnNames.asJava)
+    assert(
+      data.columns.length == writeType.getFieldCount + 2 + rawBlobPlaceholderMarkerColumns.size)
 
     val options = new CoreOptions(table.schema().options())
     val blobInlineFields = options.blobInlineField().asScala.toSeq
@@ -59,7 +83,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     val rawBlobPlaceholderMarkerIndexes = writeType.getFields.asScala.flatMap {
       field =>
         if (
-          field.`type`().is(BLOB) &&
+          BlobType.isBlobFileField(field.`type`()) &&
           !blobInlineFields.exists(inlineField => resolver(inlineField, field.name()))
         ) {
           val markerColumn = rawBlobPlaceholderMarkerColumns.getOrElse(
@@ -111,7 +135,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
               writeBuilder,
               writeType,
               firstRowIdToPartitionMapBroadcast.value,
-              catalogContextForBlobDescriptor,
+              uriReaderFactory,
               rawBlobPlaceholderMarkerIndexes)
             try {
               iter.foreach(row => write.write(row))

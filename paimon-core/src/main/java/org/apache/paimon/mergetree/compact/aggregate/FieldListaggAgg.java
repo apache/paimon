@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BinaryStringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -50,21 +51,17 @@ public class FieldListaggAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null || inputField == null) {
-            return accumulator == null ? inputField : accumulator;
+        if (inputField == null || StringUtils.isBlank(inputField.toString())) {
+            return accumulator;
         }
         // ordered by type root definition
 
+        if (accumulator == null || StringUtils.isBlank(accumulator.toString())) {
+            return inputField;
+        }
+
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
-
-        if (inFieldSD.getSizeInBytes() <= 0) {
-            return mergeFieldSD;
-        }
-
-        if (mergeFieldSD.getSizeInBytes() <= 0) {
-            return inFieldSD;
-        }
 
         if (distinct) {
             BinaryString[] accumulatorTokens =
@@ -78,7 +75,7 @@ public class FieldListaggAgg extends FieldAggregator {
             result.add(mergeFieldSD);
             for (BinaryString str :
                     splitByWholeSeparatorPreserveAllTokens(inFieldSD, delimiterBinaryString)) {
-                if (str.getSizeInBytes() == 0 || existingTokens.contains(str)) {
+                if (StringUtils.isBlank(str.toString()) || existingTokens.contains(str)) {
                     continue;
                 }
 

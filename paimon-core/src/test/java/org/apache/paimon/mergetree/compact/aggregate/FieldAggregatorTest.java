@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
@@ -51,6 +52,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -64,6 +66,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.HllSketchUtil;
 import org.apache.paimon.utils.RoaringBitmap32;
 import org.apache.paimon.utils.RoaringBitmap64;
+import org.apache.paimon.utils.TypeCheckUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -75,8 +78,11 @@ import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -412,6 +418,92 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldListAggWithDefaultDelimiterIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertThat(result.toString()).isEqualTo("user1,user2");
+    }
+
+    @Test
+    public void testFieldListAggWithDefaultDelimiterAndDistinctIgnoringBlankValues() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+
+        BinaryString result =
+                Stream.of(
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user1"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString(""),
+                                BinaryString.fromString(" "),
+                                BinaryString.fromString("   "),
+                                BinaryString.fromString("\t"),
+                                BinaryString.fromString("\n"),
+                                BinaryString.fromString("\r"),
+                                BinaryString.fromString("\r\n"),
+                                BinaryString.fromString(" \t\n "),
+                                BinaryString.fromString(" \t\n\r\n \u3000 "),
+                                BinaryString.fromString("user2"),
+                                BinaryString.fromString("user3"),
+                                BinaryString.fromString("\u3000"),
+                                BinaryString.fromString("\u2000"))
+                        .sequential()
+                        .reduce((l, r) -> (BinaryString) fieldListaggAgg.agg(l, r))
+                        .orElse(null);
+
+        assertNotNull(result);
+        assertEquals("user1,user2,user3", result.toString());
+    }
+
+    @Test
+    public void testFieldListAggFirstNonBlankValueWithoutLeadingDelimiter() {
+        FieldListaggAgg fieldListaggAgg =
+                new FieldListaggAggFactory()
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
+
+        BinaryString accumulator = null;
+        accumulator = (BinaryString) fieldListaggAgg.agg(accumulator, BinaryString.fromString(" "));
+        accumulator =
+                (BinaryString)
+                        fieldListaggAgg.agg(accumulator, BinaryString.fromString("first line"));
+
+        assertThat(accumulator.toString()).isEqualTo("first line");
+    }
+
+    @Test
     public void testFieldMaxAgg() {
         FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new IntType(), null, null);
         Integer accumulator = 1;
@@ -425,6 +517,107 @@ public class FieldAggregatorTest {
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMinAgg.agg(accumulator, inputField)).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldMaxMinAggWithBooleanType() {
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMaxAgg.agg(null, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(false, null)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, false)).isEqualTo(false);
+        assertThat(fieldMaxAgg.agg(false, true)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, false)).isEqualTo(true);
+        assertThat(fieldMaxAgg.agg(true, true)).isEqualTo(true);
+
+        FieldMinAgg fieldMinAgg = new FieldMinAggFactory().create(new BooleanType(), null, null);
+        assertThat(fieldMinAgg.agg(null, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(true, null)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, true)).isEqualTo(true);
+        assertThat(fieldMinAgg.agg(true, false)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, true)).isEqualTo(false);
+        assertThat(fieldMinAgg.agg(false, false)).isEqualTo(false);
+    }
+
+    @Test
+    public void testFieldMaxMinAggComparableTypesAreAllSupported() {
+        // The factory admits a field iff TypeCheckUtils.isComparable, so every admitted type must
+        // be one InternalRowUtils.compare can actually order. Keep the two in lockstep: a new
+        // comparable type must be added to compare() in the same change.
+        Map<DataType, Object> samples = new LinkedHashMap<>();
+        samples.put(DataTypes.BOOLEAN(), true);
+        samples.put(DataTypes.TINYINT(), (byte) 1);
+        samples.put(DataTypes.SMALLINT(), (short) 1);
+        samples.put(DataTypes.INT(), 1);
+        samples.put(DataTypes.BIGINT(), 1L);
+        samples.put(DataTypes.FLOAT(), 1.0f);
+        samples.put(DataTypes.DOUBLE(), 1.0d);
+        samples.put(DataTypes.DECIMAL(4, 2), Decimal.fromUnscaledLong(1, 4, 2));
+        samples.put(DataTypes.CHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.VARCHAR(1), BinaryString.fromString("a"));
+        samples.put(DataTypes.BINARY(1), new byte[] {1});
+        samples.put(DataTypes.VARBINARY(1), new byte[] {1});
+        samples.put(DataTypes.DATE(), 1);
+        samples.put(DataTypes.TIME(), 1);
+        samples.put(DataTypes.TIMESTAMP(), Timestamp.fromEpochMillis(1));
+        samples.put(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(), Timestamp.fromEpochMillis(1));
+
+        for (Map.Entry<DataType, Object> entry : samples.entrySet()) {
+            DataType type = entry.getKey();
+            Object value = entry.getValue();
+            assertThat(TypeCheckUtils.isComparable(type)).as("isComparable(%s)", type).isTrue();
+            assertThat(new FieldMaxAggFactory().create(type, null, "f").agg(value, value))
+                    .as("max on %s", type)
+                    .isEqualTo(value);
+            assertThat(new FieldMinAggFactory().create(type, null, "f").agg(value, value))
+                    .as("min on %s", type)
+                    .isEqualTo(value);
+        }
+
+        // Guard against a new comparable type root slipping in without being covered above: the
+        // sampled roots must be exactly the roots that are not excluded by isComparable.
+        Set<DataTypeRoot> sampledRoots = new HashSet<>();
+        samples.keySet().forEach(type -> sampledRoots.add(type.getTypeRoot()));
+        Set<DataTypeRoot> expectedRoots = new HashSet<>(Arrays.asList(DataTypeRoot.values()));
+        expectedRoots.removeAll(
+                Arrays.asList(
+                        DataTypeRoot.MAP,
+                        DataTypeRoot.MULTISET,
+                        DataTypeRoot.ROW,
+                        DataTypeRoot.ARRAY,
+                        DataTypeRoot.VECTOR,
+                        DataTypeRoot.VARIANT,
+                        DataTypeRoot.BLOB,
+                        DataTypeRoot.GEOMETRY,
+                        DataTypeRoot.GEOGRAPHY));
+        assertThat(sampledRoots)
+                .as("a comparable type root must be covered here and in InternalRowUtils.compare")
+                .isEqualTo(expectedRoots);
+    }
+
+    @Test
+    public void testFieldMaxMinAggWithIncomparableTypeShouldFail() {
+        // These types have no ordering, so max/min must be rejected when the aggregator is
+        // created rather than failing later during merging.
+        for (DataType incomparable :
+                Arrays.asList(
+                        DataTypes.ARRAY(DataTypes.INT()),
+                        DataTypes.MAP(DataTypes.INT(), DataTypes.INT()),
+                        DataTypes.MULTISET(DataTypes.INT()),
+                        DataTypes.ROW(DataTypes.FIELD(0, "f0", DataTypes.INT())),
+                        DataTypes.VARIANT(),
+                        DataTypes.BLOB(),
+                        DataTypes.GEOMETRY(),
+                        DataTypes.GEOGRAPHY(),
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()))) {
+            assertThatThrownBy(() -> new FieldMaxAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for max column 'label' must be comparable but was");
+            assertThatThrownBy(() -> new FieldMinAggFactory().create(incomparable, null, "label"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Data type for min column 'label' must be comparable but was");
+        }
     }
 
     @Test
@@ -1911,6 +2104,60 @@ public class FieldAggregatorTest {
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2, 3);
     }
 
+    /**
+     * Elements of a binary array are {@code byte[]}, which has identity equality, so distinct
+     * collection has to compare them by content rather than dropping them into a {@link
+     * java.util.HashSet}.
+     */
+    @Test
+    public void testFieldCollectAggWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+    }
+
+    /** Retraction of a binary element must match by content too. */
+    @Test
+    public void testFieldCollectAggRetractWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}),
+                                new GenericArray(new Object[] {new byte[] {1, 2}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {3, 4});
+    }
+
     @Test
     public void testFiledCollectAggWithRowType() {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
@@ -2299,6 +2546,72 @@ public class FieldAggregatorTest {
         assertThat(toJavaMap(result)).containsExactlyInAnyOrderEntriesOf(toMap(3, "C"));
     }
 
+    /**
+     * A binary key is a {@code byte[]}, which has identity equality, so without wrapping it the
+     * merged map keeps one entry per occurrence instead of one per distinct key.
+     */
+    @Test
+    public void testFieldMergeMapAggWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> first = new HashMap<>();
+        first.put(new byte[] {1, 2}, 1);
+        Map<Object, Object> second = new HashMap<>();
+        second.put(new byte[] {1, 2}, 2);
+        second.put(new byte[] {3, 4}, 3);
+
+        InternalMap merged = (InternalMap) agg.agg(new GenericMap(first), new GenericMap(second));
+
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(binaryKeyed(merged)).containsOnlyKeys("0102", "0304").containsValues(2, 3);
+    }
+
+    /** The same for retraction: a retracted binary key must match the accumulated one. */
+    @Test
+    public void testFieldMergeMapAggRetractWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> acc = new HashMap<>();
+        acc.put(new byte[] {1, 2}, 1);
+        acc.put(new byte[] {3, 4}, 2);
+        Map<Object, Object> retract = new HashMap<>();
+        retract.put(new byte[] {1, 2}, 1);
+
+        InternalMap result =
+                (InternalMap) agg.retract(new GenericMap(acc), new GenericMap(retract));
+
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(binaryKeyed(result)).containsOnlyKeys("0304");
+    }
+
+    /** Render an {@code InternalMap} with binary keys as hex so it can be asserted by value. */
+    private Map<String, Object> binaryKeyed(InternalMap map) {
+        InternalArray.ElementGetter keyGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(DataTypes.INT());
+        Map<String, Object> out = new HashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            byte[] key = (byte[]) keyGetter.getElementOrNull(map.keyArray(), i);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : key) {
+                hex.append(String.format("%02x", b));
+            }
+            out.put(hex.toString(), valueGetter.getElementOrNull(map.valueArray(), i));
+        }
+        return out;
+    }
+
     @Test
     public void testFieldThetaSketchAgg() {
         FieldThetaSketchAgg agg =
@@ -2423,7 +2736,8 @@ public class FieldAggregatorTest {
                                         DataTypes.FIELD(0, "k", DataTypes.INT()),
                                         DataTypes.FIELD(1, "v1", DataTypes.INT()),
                                         DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
-                        Collections.singletonList("k"));
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE);
 
         InternalArray accumulator;
         InternalArray.ElementGetter elementGetter =
@@ -2448,6 +2762,92 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(1, 2, "C")));
+
+        // Verify MERGE strategy keeps rows with null nested keys.
+        current = row(null, 0, "D");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B"), row(1, 2, "C"), row(null, 0, "D")));
+    }
+
+    @Test
+    public void testFieldNestedPartialUpdateAggWithNestedKeyNullUseIgnoreStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE);
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // Verify rows with null nested keys are ignored.
+        current = row(null, null, "A_ignore");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, null)));
+
+        // Verify IGNORE strategy is also applied during the first aggregation.
+        current = row(null, null, "FirstInput");
+        InternalArray result = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(result, elementGetter)).isEmpty();
+    }
+
+    @Test
+    public void testFieldNestedPartialUpdateAggWithNestedKeyNullUseThrowErrorStrategy() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v2", DataTypes.STRING()));
+        FieldNestedPartialUpdateAgg agg =
+                new FieldNestedPartialUpdateAgg(
+                        FieldNestedPartialUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "v1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v2", DataTypes.STRING()))),
+                        Collections.singletonList("k"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR);
+
+        InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalRow current = row(0, 0, null);
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        // Verify ERROR strategy rejects rows with null nested keys.
+        assertThatThrownBy(() -> agg.agg(accumulator, singletonArray(row(null, 0, "A", 2))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+
+        // Verify ERROR strategy is also applied during the first aggregation.
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(null, null, "FirstInput"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
     }
 
     private Map<Object, Object> toMap(Object... kvs) {
@@ -2505,6 +2905,58 @@ public class FieldAggregatorTest {
                 createExpectedEntry("key1", "A1"),
                 createExpectedEntry("key2", "B"),
                 createExpectedEntry("key3", "C"));
+    }
+
+    /**
+     * With a binary key the timestamp comparison never runs, because the lookup of the existing
+     * entry misses: the newer row is appended as a second entry under the same logical key, and a
+     * null row fails to remove anything.
+     */
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggWithBinaryKey() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.VARBINARY(10),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
+
+        // Newer timestamp for the same key wins, and does not become a second entry.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A1", "200"));
+        InternalMap merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // Older timestamp is ignored rather than appended.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A0", "050"));
+        merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // A null row is a tombstone and must remove the entry.
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(new byte[] {1, 2}, null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    private GenericMap binaryKeyedMap(byte[] key, String value, String ts) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(key, GenericRow.of(BinaryString.fromString(value), BinaryString.fromString(ts)));
+        return new GenericMap(map);
+    }
+
+    private String firstRowValue(InternalMap map) {
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        InternalRow row = (InternalRow) valueGetter.getElementOrNull(map.valueArray(), 0);
+        return row.getString(0).toString();
     }
 
     private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {

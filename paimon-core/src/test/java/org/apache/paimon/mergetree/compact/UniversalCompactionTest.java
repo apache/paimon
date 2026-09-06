@@ -169,6 +169,21 @@ public class UniversalCompactionTest {
     }
 
     @Test
+    public void testFileNumCompactionConsidersLevel2() {
+        UniversalCompaction compaction = ofTesting(200, 1, 3);
+
+        // File count first picks the two level 0 runs. Together with level 1, they are large
+        // enough to pick level 2 as well.
+        Optional<CompactUnit> pick =
+                compaction.pick(
+                        3, Arrays.asList(level(0, 10), level(0, 20), level(1, 97), level(2, 100)));
+
+        assertThat(pick).isPresent();
+        assertThat(pick.get().files()).hasSize(4);
+        assertThat(pick.get().outputLevel()).isEqualTo(2);
+    }
+
+    @Test
     public void testExtremeCaseNoOutputLevel0() {
         UniversalCompaction compaction = ofTesting(200, 1, 5);
 

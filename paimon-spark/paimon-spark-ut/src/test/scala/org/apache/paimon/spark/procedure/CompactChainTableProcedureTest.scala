@@ -305,72 +305,105 @@ class CompactChainTableProcedureTest extends PaimonSparkTestBase {
   }
 
   test("Paimon Procedure: compact_chain_table - test multiple partitions with group") {
-    withTable("chain_compact_t4") {
-      spark.sql(
-        """
-          |CREATE TABLE IF NOT EXISTS chain_compact_t4 (
-          |    `t1` BIGINT COMMENT 't1',
-          |    `t2` BIGINT COMMENT 't2',
-          |    `t3` STRING COMMENT 't3'
-          |  ) PARTITIONED BY (`region` STRING COMMENT 'region', `dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour')
-          |TBLPROPERTIES (
-          |     'chain-table.enabled' = 'true',
-          |     'primary-key' = 'region,dt,hour,t1',
-          |     'sequence.field' = 't2',
-          |     'bucket-key' = 't1',
-          |     'bucket' = '1',
-          |     'partition.timestamp-pattern' = '$dt $hour:00:00',
-          |     'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',
-          |     'merge-engine' = 'deduplicate',
-          |     'chain-table.chain-partition-keys' = 'dt,hour'
-          |  )
-          |""".stripMargin)
+    Seq(true, false).foreach(
+      overwrite => {
+        withTable("chain_compact_t4") {
+          spark.sql(
+            s"""
+               |CREATE TABLE IF NOT EXISTS chain_compact_t4 (
+               |    `t1` BIGINT COMMENT 't1',
+               |    `t2` BIGINT COMMENT 't2',
+               |    `t3` STRING COMMENT 't3'
+               |  ) PARTITIONED BY (`region` STRING COMMENT 'region', `dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour')
+               |TBLPROPERTIES (
+               |     'dynamic-partition-overwrite' = '$overwrite',
+               |     'chain-table.enabled' = 'true',
+               |     'primary-key' = 'region,dt,hour,t1',
+               |     'sequence.field' = 't2',
+               |     'bucket-key' = 't1',
+               |     'bucket' = '1',
+               |     'partition.timestamp-pattern' = '$$dt $$hour:00:00',
+               |     'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',
+               |     'merge-engine' = 'deduplicate',
+               |     'chain-table.chain-partition-keys' = 'dt,hour'
+               |  )
+               |""".stripMargin)
 
-      // Create branches
-      setupChainTableBranches("chain_compact_t4")
+          // Create branches
+          setupChainTableBranches("chain_compact_t4")
 
-      // Write snapshot branch data
-      spark.sql(
-        "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '20') values (1, 1, '1')")
-      spark.sql(
-        "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '21') values (2, 1, '1')")
-      spark.sql(
-        "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '22') values (3, 1, '1')")
-      spark.sql(
-        "insert into `chain_compact_t4$branch_snapshot` partition (region='UK', dt = '20250810', hour = '21') values (21, 1, '1')")
+          // Write snapshot branch data
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '20') values (1, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '21') values (2, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='CN', dt = '20250810', hour = '22') values (3, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='UK', dt = '20250810', hour = '21') values (21, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='FR', dt = '20250810', hour = '22') values (31, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_snapshot` partition (region='CA', dt = '20250810', hour = '21') values (41, 1, '1')")
 
-      // Write delta branch data
-      spark.sql(
-        "insert into `chain_compact_t4$branch_delta` partition (region='CN', dt = '20250810', hour = '22') values (4, 1, '1')")
-      spark.sql(
-        "insert into `chain_compact_t4$branch_delta` partition (region='US', dt = '20250810', hour = '22') values (11, 1, '1')")
-      spark.sql(
-        "insert into `chain_compact_t4$branch_delta` partition (region='UK', dt = '20250810', hour = '22') values (22, 1, '1' )")
+          // Write delta branch data
+          spark.sql(
+            "insert into `chain_compact_t4$branch_delta` partition (region='CN', dt = '20250810', hour = '22') values (4, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_delta` partition (region='US', dt = '20250810', hour = '22') values (11, 1, '1')")
+          spark.sql(
+            "insert into `chain_compact_t4$branch_delta` partition (region='UK', dt = '20250810', hour = '22') values (22, 1, '1' )")
 
-      checkAnswer(
-        sql(
-          "SELECT * FROM `chain_compact_t4$branch_snapshot` where dt = '20250810' and hour = '22'"),
-        Seq(
-          Row(3, 1, "1", "CN", "20250810", "22")
-        )
-      )
-      checkAnswer(
-        spark.sql(
-          "CALL sys.compact_chain_table(table => '`chain_compact_t4`', partition => 'dt=\"20250810\", hour=\"22\"', overwrite => true)"),
-        Row(true) :: Nil
-      )
-      checkAnswer(
-        sql(
-          "SELECT * FROM `chain_compact_t4$branch_snapshot` where dt = '20250810' and hour = '22' order by region"),
-        Seq(
-          Row(2, 1, "1", "CN", "20250810", "22"),
-          Row(4, 1, "1", "CN", "20250810", "22"),
-          Row(21, 1, "1", "UK", "20250810", "22"),
-          Row(22, 1, "1", "UK", "20250810", "22"),
-          Row(11, 1, "1", "US", "20250810", "22")
-        )
-      )
-    }
+          checkAnswer(
+            sql(
+              "SELECT * FROM `chain_compact_t4$branch_snapshot` where dt = '20250810' and hour = '22'"),
+            Seq(
+              Row(3, 1, "1", "CN", "20250810", "22"),
+              Row(31, 1, "1", "FR", "20250810", "22")
+            )
+          )
+          checkAnswer(
+            spark.sql(
+              "CALL sys.compact_chain_table(table => '`chain_compact_t4`', partition => 'dt=\"20250810\", hour=\"22\"', overwrite => true)"),
+            Row(true) :: Nil
+          )
+          checkAnswer(
+            sql("select snapshot_id,commit_kind from `chain_compact_t4$branch_snapshot$snapshots`"),
+            Seq(
+              Row(1, "APPEND"),
+              Row(2, "APPEND"),
+              Row(3, "APPEND"),
+              Row(4, "APPEND"),
+              Row(5, "APPEND"),
+              Row(6, "APPEND"),
+              Row(7, "OVERWRITE")
+            )
+          )
+
+          checkAnswer(
+            sql(
+              "SELECT * FROM `chain_compact_t4$branch_snapshot` where dt = '20250810' and hour = '21'"),
+            Seq(
+              Row(2, 1, "1", "CN", "20250810", "21"),
+              Row(21, 1, "1", "UK", "20250810", "21"),
+              Row(41, 1, "1", "CA", "20250810", "21")
+            )
+          )
+
+          checkAnswer(
+            sql(
+              "SELECT * FROM `chain_compact_t4$branch_snapshot` where dt = '20250810' and hour = '22'"),
+            Seq(
+              Row(2, 1, "1", "CN", "20250810", "22"),
+              Row(4, 1, "1", "CN", "20250810", "22"),
+              Row(11, 1, "1", "US", "20250810", "22"),
+              Row(21, 1, "1", "UK", "20250810", "22"),
+              Row(22, 1, "1", "UK", "20250810", "22"),
+              Row(31, 1, "1", "FR", "20250810", "22")
+            )
+          )
+        }
+      })
   }
 
   def setupChainTableBranches(tableName: String): Unit = {

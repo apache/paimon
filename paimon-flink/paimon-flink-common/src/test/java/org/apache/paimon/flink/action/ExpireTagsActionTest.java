@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +28,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
@@ -128,8 +128,8 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
 
         // tag-3 as the base older_than time
         LocalDateTime olderThanTime = table.tagManager().getOrThrow("tag-3").getTagCreateTime();
-        java.sql.Timestamp timestamp =
-                new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime).getMillisecond());
+        String timestamp =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").format(olderThanTime);
 
         createAction(
                         ExpireTagsAction.class,
@@ -141,7 +141,7 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
                         "--table",
                         "T",
                         "--older_than",
-                        timestamp.toString(),
+                        timestamp,
                         "--force_start_flink_job",
                         Boolean.toString(forceStartFlinkJob))
                 .run();

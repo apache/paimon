@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import scala.collection.JavaConverters._
@@ -44,6 +45,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
         .map(i => s"($i, 'document number $i about paimon lake format')")
         .mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
+      val scanSnapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
 
       val output = spark
         .sql(
@@ -61,12 +63,63 @@ class FullTextSearchTest extends PaimonSparkTestBase {
         .filter(_.indexFile().indexType() == indexType)
 
       assert(indexEntries.nonEmpty)
+      assert(
+        indexEntries.forall(
+          entry =>
+            DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile()).scanSnapshotId() ==
+              scanSnapshotId))
       val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100L)
     }
   }
 
   // ========== Index Read/Search Tests ==========
+
+  test("primary-key full-text search uses physical splits and exposes scores") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id',
+                  |  'bucket' = '1',
+                  |  'deletion-vectors.enabled' = 'true',
+                  |  'pk-full-text.index.columns' = 'content')
+                  |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (0, 'lake format')")
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (1, 'paimon full text search'),
+                  |  (2, 'apache paimon storage')
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      val compactedFiles = spark.sql("SELECT level FROM `T$files`").collect()
+      assert(compactedFiles.exists(_.getInt(0) > 0))
+      val payloads = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "full-text")
+      assert(payloads.nonEmpty)
+
+      val rows = spark
+        .sql("""
+               |SELECT id, __paimon_search_score
+               |FROM full_text_search(
+               |  'T',
+               |  'content',
+               |  '{"match":{"column":"content","terms":"paimon"}}',
+               |  10)
+               |ORDER BY id
+               |""".stripMargin)
+        .collect()
+
+      assert(rows.map(_.getInt(0)).toSeq == Seq(1, 2))
+      assert(rows.forall(row => !row.isNullAt(1) && row.getFloat(1) > 0.0f))
+    }
+  }
 
   test("full-text search - basic search") {
     withTable("T") {
@@ -91,7 +144,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
 
       val result = spark
         .sql("""
-               |SELECT * FROM full_text_search('T', '{"match":{"column":"content","terms":"paimon"}}', 5)
+               |SELECT * FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"paimon"}}', 5)
                |""".stripMargin)
         .collect()
       assert(result.length == 5)
@@ -122,7 +175,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       // Test with k=1
       var result = spark
         .sql("""
-               |SELECT * FROM full_text_search('T', '{"match":{"column":"content","terms":"paimon"}}', 1)
+               |SELECT * FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"paimon"}}', 1)
                |""".stripMargin)
         .collect()
       assert(result.length == 1)
@@ -130,7 +183,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       // Test with k=10
       result = spark
         .sql("""
-               |SELECT * FROM full_text_search('T', '{"match":{"column":"content","terms":"paimon"}}', 10)
+               |SELECT * FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"paimon"}}', 10)
                |""".stripMargin)
         .collect()
       assert(result.length == 10)
@@ -164,7 +217,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
 
       val defaultOrResult = spark
         .sql("""
-               |SELECT id FROM full_text_search('T', '{"match":{"column":"content","terms":"Paimon search"}}', 5)
+               |SELECT id FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"Paimon search"}}', 5)
                |ORDER BY id
                |""".stripMargin)
         .collect()
@@ -173,7 +226,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
 
       val explicitAndResult = spark
         .sql("""
-               |SELECT id FROM full_text_search('T', '{"match":{"column":"content","terms":"Paimon search","operator":"And"}}', 5)
+               |SELECT id FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"Paimon search","operator":"And"}}', 5)
                |ORDER BY id
                |""".stripMargin)
         .collect()
@@ -209,7 +262,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       val phraseQuery = """{"phrase":{"column":"content","terms":"full-text search"}}"""
       val phraseResult = spark
         .sql(s"""
-                |SELECT id FROM full_text_search('T', '$phraseQuery', 10)
+                |SELECT id FROM full_text_search('T', 'content', '$phraseQuery', 10)
                 |ORDER BY id
                 |""".stripMargin)
         .collect()
@@ -217,10 +270,10 @@ class FullTextSearchTest extends PaimonSparkTestBase {
       assert(phraseResult.map(_.getInt(0)).toSeq == Seq(1, 2))
 
       val booleanQuery =
-        """{"boolean":{"must":[{"match":{"column":"content","terms":"Paimon"}},{"match":{"column":"content","terms":"search"}}],"must_not":[{"match":{"column":"content","terms":"vector"}}]}}"""
+        """{"boolean":{"queries":[["Must",{"match":{"column":"content","terms":"Paimon"}}],["Must",{"match":{"column":"content","terms":"search"}}],["MustNot",{"match":{"column":"content","terms":"vector"}}]]}}"""
       val booleanResult = spark
         .sql(s"""
-                |SELECT id FROM full_text_search('T', '$booleanQuery', 10)
+                |SELECT id FROM full_text_search('T', 'content', '$booleanQuery', 10)
                 |ORDER BY id
                 |""".stripMargin)
         .collect()
@@ -265,7 +318,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
 
       val searchResult = spark
         .sql("""
-               |SELECT id, title FROM full_text_search('T', '{"match":{"column":"content","terms":"paimon"}}', 10)
+               |SELECT id, title FROM full_text_search('T', 'content', '{"match":{"column":"content","terms":"paimon"}}', 10)
                |""".stripMargin)
         .collect()
 

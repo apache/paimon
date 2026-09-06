@@ -224,6 +224,51 @@ public class BinaryExternalSortBufferTest {
         innerTestSpilling(buffer);
     }
 
+    @Test
+    public void testNoCascadingMergeAtFinalIterator() throws Exception {
+        // Use a tiny memory so that writing a moderate number of records produces many spill
+        // files, and a very small fan-in (maxNumFileHandles = 2) so that a correct final merge
+        // must invoke mergeChannelList more than once.
+        final int maxNumFileHandles = 2;
+        initMemorySegmentPool(128 * 1024); // 4 pages of 32 KB
+
+        BinaryExternalSortBuffer sorter = createBuffer(maxNumFileHandles);
+
+        int size = 50_000;
+        MockBinaryRowReader reader = new MockBinaryRowReader(size);
+        sorter.write(reader);
+        assertThat(sorter.size()).isEqualTo(size);
+
+        // No merge should happen during write(): the number of spilled files must exceed
+        // maxNumFileHandles^2. The previous (cascading) implementation merged during write()
+        // and re-added the merged output to the spill list, which would leave at most
+        // maxNumFileHandles files here and cause O(N^2) re-merge.
+        int spilledFilesAfterWrite = spillChannelCount(sorter);
+        assertThat(spilledFilesAfterWrite).isGreaterThan(maxNumFileHandles * maxNumFileHandles);
+
+        MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
+
+        // The final merge must bring the number of opened files within the fan-in limit.
+        // When spilledFilesAfterWrite > maxNumFileHandles^2 a single mergeChannelList call is
+        // not enough, so this also guards against using a one-shot `if` instead of `while`.
+        int finalFileHandles = spillChannelCount(sorter);
+        assertThat(finalFileHandles).isLessThanOrEqualTo(maxNumFileHandles);
+
+        BinaryRow next = serializer.createInstance();
+        for (int i = 0; i < size; i++) {
+            next = iterator.next(next);
+            assertThat(next.getInt(0)).isEqualTo(i);
+            assertThat(next.getString(1).toString()).isEqualTo(getString(i));
+        }
+        sorter.clear();
+    }
+
+    private static int spillChannelCount(BinaryExternalSortBuffer sorter) throws Exception {
+        Field field = BinaryExternalSortBuffer.class.getDeclaredField("spillChannelIDs");
+        field.setAccessible(true);
+        return ((List<?>) field.get(sorter)).size();
+    }
+
     private void innerTestSpilling(BinaryExternalSortBuffer sorter) throws Exception {
         int size = 2000_000;
 

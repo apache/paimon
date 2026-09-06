@@ -36,18 +36,40 @@ public class IcebergDataFileMetaSerializer extends ObjectSerializer<IcebergDataF
     private final InternalMapSerializer nullValueCountsSerializer;
     private final InternalMapSerializer lowerBoundsSerializer;
     private final InternalMapSerializer upperBoundsSerializer;
+    private final boolean withFirstRowId;
 
     public IcebergDataFileMetaSerializer(RowType partitionType) {
-        super(IcebergDataFileMeta.schema(partitionType));
+        this(partitionType, false);
+    }
+
+    public IcebergDataFileMetaSerializer(RowType partitionType, boolean withFirstRowId) {
+        super(IcebergDataFileMeta.schema(partitionType, withFirstRowId));
         this.partSerializer = new InternalRowSerializer(partitionType);
         this.nullValueCountsSerializer =
                 new InternalMapSerializer(DataTypes.INT(), DataTypes.BIGINT());
         this.lowerBoundsSerializer = new InternalMapSerializer(DataTypes.INT(), DataTypes.BYTES());
         this.upperBoundsSerializer = new InternalMapSerializer(DataTypes.INT(), DataTypes.BYTES());
+        this.withFirstRowId = withFirstRowId;
     }
 
     @Override
     public InternalRow toRow(IcebergDataFileMeta file) {
+        if (withFirstRowId) {
+            return GenericRow.of(
+                    file.content().id(),
+                    BinaryString.fromString(file.filePath()),
+                    BinaryString.fromString(file.fileFormat()),
+                    file.partition(),
+                    file.recordCount(),
+                    file.fileSizeInBytes(),
+                    file.nullValueCounts(),
+                    file.lowerBounds(),
+                    file.upperBounds(),
+                    BinaryString.fromString(file.referencedDataFile()),
+                    file.contentOffset(),
+                    file.contentSizeInBytes(),
+                    file.firstRowId());
+        }
         return GenericRow.of(
                 file.content().id(),
                 BinaryString.fromString(file.filePath()),
@@ -77,6 +99,7 @@ public class IcebergDataFileMetaSerializer extends ObjectSerializer<IcebergDataF
                 upperBoundsSerializer.copy(row.getMap(8)),
                 row.isNullAt(9) ? null : row.getString(9).toString(),
                 row.isNullAt(10) ? null : row.getLong(10),
-                row.isNullAt(11) ? null : row.getLong(11));
+                row.isNullAt(11) ? null : row.getLong(11),
+                withFirstRowId && !row.isNullAt(12) ? row.getLong(12) : null);
     }
 }

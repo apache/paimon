@@ -129,12 +129,12 @@ public class FileTypeTest {
                                         TABLE_ROOT
                                                 + "/index/lumina-vector-ann-global-index-a1b2c3d4.index")))
                 .isEqualTo(FileType.GLOBAL_INDEX);
-        // tantivy fulltext global index
+        // full-text global index
         assertThat(
                         FileType.classify(
                                 new Path(
                                         TABLE_ROOT
-                                                + "/index/tantivy-fulltext-global-index-a1b2c3d4.index")))
+                                                + "/index/full-text-global-index-a1b2c3d4.index")))
                 .isEqualTo(FileType.GLOBAL_INDEX);
     }
 

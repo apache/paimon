@@ -84,6 +84,57 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Procedure: rescale reads deletion-vector level-0 files") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING)
+                   |TBLPROPERTIES (
+                   |  'primary-key' = 'id',
+                   |  'bucket' = '1',
+                   |  'deletion-vectors.enabled' = 'true',
+                   |  'deletion-vectors.merge-on-read' = 'false',
+                   |  'deletion-vectors.bitmap64' = 'true'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (1, 'one'), (2, 'two'), (3, 'three')")
+      spark.sql("INSERT INTO T VALUES (2, 'updated-two')")
+      val tableWithDv = loadTable("T")
+      val splitsWithDv = tableWithDv.newSnapshotReader().read().dataSplits().asScala
+      assert(
+        splitsWithDv.exists(
+          _.deletionFiles().orElse(Collections.emptyList()).asScala.exists(_ != null)))
+
+      // Ordinary non-MOR scans skip level 0. Keep a real level-0 file to verify that rescale's
+      // explicit split scan is not subject to the ordinary batch-scan pruning.
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('write-only' = 'true')")
+      spark.sql("INSERT INTO T VALUES (4, 'level-zero')")
+      assert(
+        loadTable("T")
+          .newSnapshotReader()
+          .read()
+          .dataSplits()
+          .asScala
+          .flatMap(_.dataFiles().asScala)
+          .exists(_.level() == 0))
+      checkAnswer(spark.sql("SELECT * FROM T WHERE id = 4"), Seq.empty)
+
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '2', 'write-only' = 'false')")
+      checkAnswer(spark.sql("CALL sys.rescale(table => 'T', bucket_num => 2)"), Row(true) :: Nil)
+
+      val rescaledTable = loadTable("T")
+      val rescaledSplits = rescaledTable.newSnapshotReader().read().dataSplits().asScala
+      assert(rescaledSplits.flatMap(_.dataFiles().asScala).forall(_.level() > 0))
+      assert(
+        rescaledSplits
+          .flatMap(_.deletionFiles().orElse(Collections.emptyList()).asScala)
+          .forall(_ == null))
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY id"),
+        Seq(Row(1, "one"), Row(2, "updated-two"), Row(3, "three"), Row(4, "level-zero")))
+    }
+  }
+
   test("Paimon Procedure: rescale partitioned tables") {
     withTable("T") {
       spark.sql(s"""

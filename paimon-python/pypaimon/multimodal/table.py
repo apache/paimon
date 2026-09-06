@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
@@ -22,7 +23,6 @@ from typing import Dict, Mapping, Optional, Sequence
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
     HybridQuery,
@@ -30,7 +30,7 @@ from pypaimon.multimodal.query import (
     TextQuery,
     VectorQuery,
 )
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import PyarrowFieldParser, is_blob_type
 from pypaimon.table.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -60,6 +60,7 @@ class TextRoute:
     """Full-text route spec for hybrid search."""
 
     query: object
+    column: Optional[str] = None
     weight: float = 1.0
     limit: Optional[int] = None
     options: Optional[Dict[str, str]] = None
@@ -77,11 +78,12 @@ def vector_route(column, vector, *, weight: float = 1.0,
     )
 
 
-def text_route(query, *, weight: float = 1.0,
+def text_route(query, *, column: Optional[str] = None, weight: float = 1.0,
                limit: Optional[int] = None,
                options: Optional[Dict[str, str]] = None) -> TextRoute:
     return TextRoute(
         query=query,
+        column=column,
         weight=weight,
         limit=limit,
         options=dict(options or {}),
@@ -111,6 +113,134 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def add_video(
+            self,
+            video,
+            frames,
+            *,
+            video_column=None,
+            first_frame=0):
+        """Append logical frame rows backed by one complete encoded video.
+
+        ``frames`` supplies every table column except the configured
+        ``video-frame-field``. Frame ordinals are generated from
+        ``first_frame`` and stored in the video descriptor, not in the normal
+        data file.
+        """
+        return self.add_videos(
+            [(video, frames, first_frame)], video_column=video_column
+        )
+
+    def add_videos(self, videos, *, video_column=None):
+        """Append several encoded videos with one writer and one commit.
+
+        Each item is ``(video, frames)`` or ``(video, frames, first_frame)``.
+        Keeping one writer open lets a single ``.video`` object pack multiple
+        complete encoded videos up to the configured rolling target.
+        """
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+
+        def frame_batches():
+            for item in videos:
+                try:
+                    item = tuple(item)
+                except TypeError as error:
+                    raise ValueError(
+                        "Each videos item must be (video, frames) or "
+                        "(video, frames, first_frame)."
+                    ) from error
+                if len(item) == 2:
+                    video, frames = item
+                    first_frame = 0
+                elif len(item) == 3:
+                    video, frames, first_frame = item
+                else:
+                    raise ValueError(
+                        "Each videos item must be (video, frames) or "
+                        "(video, frames, first_frame)."
+                    )
+                yield _video_frame_table(
+                    video,
+                    frames,
+                    column,
+                    first_frame,
+                    target_schema,
+                )
+
+        return self.add_batches(frame_batches())
+
+    def _resolve_video_frame_column(self, requested):
+        configured = self.raw_table.options.video_frame_fields()
+        if not configured:
+            raise ValueError(
+                "add_video requires table option 'video-frame-field'."
+            )
+        if requested is None and len(configured) > 1:
+            raise ValueError(
+                "video_column is required when 'video-frame-field' configures "
+                "multiple fields."
+            )
+        column = requested or next(iter(configured))
+        if column not in configured:
+            raise ValueError(
+                "Video column %r is not configured by 'video-frame-field'."
+                % column
+            )
+        return column
+
+    def add_batches(self, batches):
+        """Append an iterable of batches with one writer and one commit.
+
+        Keeping the writer open across batches also preserves video payload
+        groups and lets one ``.video`` file pack several encoded videos.
+        """
+        try:
+            iterator = iter(batches)
+        except TypeError as error:
+            raise ValueError("batches must be an iterable of input batches.") from error
+
+        target_schema = _target_schema(self.raw_table)
+        table_write = None
+        table_commit = None
+        commit_started = False
+        try:
+            for data in iterator:
+                arrow_table = _to_arrow_table(data, target_schema)
+                if arrow_table.num_rows == 0:
+                    continue
+                if table_write is None:
+                    write_builder = self.raw_table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+                table_write.write_arrow(arrow_table)
+
+            close_iterator = getattr(iterator, "close", None)
+            iterator = None
+            if close_iterator is not None:
+                close_iterator()
+            if table_write is None:
+                return self
+            commit_messages = table_write.prepare_commit()
+            commit_started = True
+            table_commit.commit(commit_messages)
+            return self
+        except BaseException:
+            if table_write is not None and not commit_started:
+                table_write.abort()
+            raise
+        finally:
+            if iterator is not None:
+                close_iterator = getattr(iterator, "close", None)
+                if close_iterator is not None:
+                    close_iterator()
+            try:
+                if table_write is not None:
+                    table_write.close()
+            finally:
+                if table_commit is not None:
+                    table_commit.close()
+
     def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         overwrite_partition = dict(partition) if partition is not None else None
@@ -129,6 +259,15 @@ class MultimodalTable:
         return self
 
     def update(self, where, values):
+        video_columns = self.raw_table.options.video_frame_fields()
+        if isinstance(values, Mapping):
+            assigned_video_columns = video_columns.intersection(values)
+            if assigned_video_columns:
+                raise ValueError(
+                    "update() cannot write video-frame-field %r; use "
+                    "replace_video() with a complete encoded video."
+                    % sorted(assigned_video_columns)[0]
+                )
         query = self.scan().where(where)
         predicate = query._predicate
         write_builder = self.raw_table.new_batch_write_builder()
@@ -136,6 +275,56 @@ class MultimodalTable:
         table_commit = write_builder.new_commit()
         try:
             messages = table_update.update_by_predicate(predicate, values)
+            table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        return self
+
+    def replace_video(
+            self,
+            where,
+            video,
+            *,
+            video_column=None,
+            first_frame=0):
+        """Replace the video backing the logical frame rows matching ``where``.
+
+        Matching rows are ordered by ``_ROW_ID`` and assigned consecutive
+        frame ordinals starting at ``first_frame``. Only the configured video
+        column is updated; ordinary columns and the normal data files remain
+        untouched.
+        """
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+        payload, first_frame = _video_payload(video, first_frame)
+
+        row_ids = (
+            self.scan()
+            .where(where)
+            .select([])
+            .with_row_id()
+            .to_arrow()[SpecialFields.ROW_ID.name]
+            .to_pylist()
+        )
+        row_ids.sort()
+        if not row_ids:
+            return self
+
+        descriptors = _video_frame_descriptors(
+            payload, len(row_ids), first_frame)
+        update_data = pa.Table.from_arrays(
+            [
+                pa.array(row_ids, type=pa.int64()),
+                pa.array(descriptors, type=target_schema.field(column).type),
+            ],
+            names=[SpecialFields.ROW_ID.name, column],
+        )
+
+        write_builder = self.raw_table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type([column])
+        table_commit = write_builder.new_commit()
+        try:
+            messages = table_update.update_by_arrow_with_row_id(update_data)
             table_commit.commit(messages)
         finally:
             table_commit.close()
@@ -156,6 +345,18 @@ class MultimodalTable:
 
     def merge(self, on):
         return _MergeBuilder(self, on)
+
+    def map_with_blobs(self, dataset, columns, fn, **kwargs):
+        from pypaimon.ray import map_with_blobs
+
+        return map_with_blobs(
+            dataset,
+            columns,
+            fn,
+            file_io=self.raw_table.file_io,
+            all_blob_columns=_blob_columns(self.raw_table),
+            **kwargs,
+        )
 
     def scan(
             self,
@@ -203,7 +404,8 @@ class MultimodalTable:
         if isinstance(query, str):
             return TextQuery(
                 read_table,
-                text_query=_coerce_full_text_query(query, "search", schema),
+                text_query=_coerce_full_text_query(
+                    query, "search", schema, column=column),
                 pre_filter=pre_filter,
             )
         vector = _coerce_vector(query, "search")
@@ -214,7 +416,8 @@ class MultimodalTable:
         return VectorQuery(
             read_table,
             vector=vector,
-            vector_column=column or _infer_vector_column(schema, "column"),
+            vector_column=_resolve_vector_column(
+                schema, column, len(vector)),
             vector_options=options,
             pre_filter=pre_filter,
         )
@@ -232,7 +435,13 @@ class MultimodalTable:
             self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
         schema = _target_schema(read_table)
         vectors = _coerce_vectors(vectors)
-        vector_column = column or _infer_vector_column(schema, "column")
+        dimension = len(vectors[0])
+        if any(len(vector) != dimension for vector in vectors):
+            raise ValueError(
+                "search_vectors requires all query vectors to have the same "
+                "dimension.")
+        vector_column = _resolve_vector_column(
+            schema, column, dimension)
         return BatchVectorQuery(
             read_table,
             vectors=vectors,
@@ -357,7 +566,16 @@ class _MergeBuilder:
         )
 
 
+def _blob_columns(table):
+    return tuple(
+        field.name for field in table.fields
+        if is_blob_type(field.type)
+    )
+
+
 def _to_arrow_table(data, target_schema=None):
+    if target_schema is not None:
+        data = _serialize_blob_values(data, target_schema)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):
@@ -374,6 +592,91 @@ def _to_arrow_table(data, target_schema=None):
     if target_schema is None:
         return table
     return _align_to_schema(table, target_schema)
+
+
+def _serialize_blob_values(data, target_schema):
+    if isinstance(data, (pa.Table, pa.RecordBatch)):
+        return data
+    binary_fields = {
+        field.name: field.type
+        for field in target_schema
+        if _contains_binary(field.type)
+    }
+    if not binary_fields:
+        return data
+
+    if isinstance(data, list):
+        return [
+            {
+                name: _serialize_blob_value(value, binary_fields.get(name))
+                for name, value in row.items()
+            }
+            if isinstance(row, Mapping)
+            else row
+            for row in data
+        ]
+    if isinstance(data, dict):
+        converted = dict(data)
+        for name, arrow_type in binary_fields.items():
+            if name not in converted:
+                continue
+            column = converted[name]
+            if isinstance(column, (pa.Array, pa.ChunkedArray)):
+                column = column.to_pylist()
+            converted[name] = [
+                _serialize_blob_value(value, arrow_type)
+                for value in column
+            ]
+        return converted
+    if (
+        hasattr(data, "__dataframe__")
+        or data.__class__.__module__.startswith("pandas")
+    ):
+        converted = data.copy()
+        for name, arrow_type in binary_fields.items():
+            if name in converted.columns:
+                converted[name] = converted[name].map(
+                    lambda value: _serialize_blob_value(value, arrow_type)
+                )
+        return converted
+    return data
+
+
+def _contains_binary(arrow_type):
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        return True
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return _contains_binary(arrow_type.value_type)
+    if pa.types.is_map(arrow_type):
+        return _contains_binary(arrow_type.item_type)
+    return False
+
+
+def _serialize_blob_value(value, arrow_type):
+    if value is None or arrow_type is None:
+        return value
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        if isinstance(value, BlobDescriptor):
+            return value.serialize()
+        if isinstance(value, Blob):
+            try:
+                return value.to_descriptor().serialize()
+            except RuntimeError:
+                return value.to_data()
+        return value
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return [
+            _serialize_blob_value(element, arrow_type.value_type)
+            for element in value
+        ]
+    if pa.types.is_map(arrow_type):
+        entries = value.items() if isinstance(value, Mapping) else value
+        return [
+            (key, _serialize_blob_value(element, arrow_type.item_type))
+            for key, element in entries
+        ]
+    return value
 
 
 def _coerce_row_ids(row_ids):
@@ -409,6 +712,73 @@ def _time_travel_table(table, snapshot_id=None, tag_name=None):
 
 def _target_schema(table):
     return PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+
+
+def _video_payload(video, first_frame):
+    from pypaimon.table.row.blob import (
+        Blob,
+        BlobDescriptor,
+        VideoFrameDescriptor,
+    )
+
+    if isinstance(first_frame, bool) or not isinstance(first_frame, int):
+        raise ValueError("first_frame must be a non-negative int.")
+    if first_frame < 0:
+        raise ValueError("first_frame must be a non-negative int.")
+
+    if isinstance(video, str):
+        video = Blob.from_local(video)
+    if isinstance(video, Blob):
+        try:
+            payload = video.to_descriptor()
+        except RuntimeError as error:
+            raise ValueError(
+                "video must be descriptor-backed; inline video bytes are not "
+                "accepted by video write APIs."
+            ) from error
+    elif isinstance(video, BlobDescriptor):
+        payload = video
+    else:
+        raise ValueError(
+            "video must be a path, Blob, or BlobDescriptor, got %r."
+            % type(video)
+        )
+    if isinstance(payload, VideoFrameDescriptor):
+        payload = payload.payload_descriptor
+
+    return payload, first_frame
+
+
+def _video_frame_descriptors(payload, count, first_frame):
+    from pypaimon.table.row.blob import VideoFrameDescriptor
+
+    return [
+        VideoFrameDescriptor(
+            payload.uri,
+            payload.offset,
+            payload.length,
+            first_frame + index,
+        ).serialize()
+        for index in range(count)
+    ]
+
+
+def _video_frame_table(video, frames, video_column, first_frame, target_schema):
+    payload, first_frame = _video_payload(video, first_frame)
+
+    non_video_schema = pa.schema([
+        field for field in target_schema if field.name != video_column
+    ])
+    frame_table = _to_arrow_table(frames, non_video_schema)
+    descriptor_values = _video_frame_descriptors(
+        payload, frame_table.num_rows, first_frame)
+    arrays = []
+    for field in target_schema:
+        if field.name == video_column:
+            arrays.append(pa.array(descriptor_values, type=field.type))
+        else:
+            arrays.append(frame_table[field.name])
+    return pa.Table.from_arrays(arrays, schema=target_schema)
 
 
 def _align_to_schema(
@@ -561,9 +931,9 @@ def _rewrite_merge_refs(text):
 def _normalize_index_type(index_type):
     if not isinstance(index_type, str):
         return index_type
-    normalized = index_type.strip().lower().replace("_", "-")
-    if normalized in ("full-text", "fulltext"):
-        return "tantivy-fulltext"
+    normalized = index_type.strip().lower()
+    if normalized == "full-text":
+        return "full-text"
     return index_type
 
 
@@ -683,16 +1053,13 @@ def _normalize_vector_route(route, method, schema):
 
 def _normalize_text_route(route, method, schema):
     if isinstance(route, TextRoute):
+        column = route.column
         query = route.query
         weight = route.weight
         limit = route.limit
         options = route.options
     elif isinstance(route, Mapping):
-        column = route.get("column") or route.get("text_column") or route.get("field")
-        if column is not None:
-            raise ValueError(
-                "%s text routes do not accept a column; use a full-text "
-                "query DSL to target a column." % method)
+        column = route.get("column")
         query = (
             route.get("query")
             or route.get("text")
@@ -706,8 +1073,10 @@ def _normalize_text_route(route, method, schema):
         raise ValueError(
             "%s text routes require a route spec with a query."
             % method)
+    text_query = _coerce_full_text_query(query, method, schema, column=column)
     return {
-        "query": _coerce_full_text_query(query, method, schema),
+        "column": text_query["column"],
+        "query": text_query["query"],
         "weight": weight,
         "limit": limit,
         "options": dict(options or {}),
@@ -755,26 +1124,65 @@ def _is_column_vector_pair(route):
     )
 
 
-def _coerce_full_text_query(query, method, schema):
-    if isinstance(query, FullTextQuery):
-        return query
+def _coerce_full_text_query(query, method, schema, column=None):
+    field_name = column or _infer_text_column(schema, "text")
     if isinstance(query, str):
-        return FullTextQuery.from_dict({
-            "match": {
-                "column": _infer_text_column(schema, "text"),
-                "terms": query,
-            },
-        })
-    raise ValueError("%s requires a text string." % method)
+        stripped = query.lstrip()
+        query_json = (
+            query
+            if stripped.startswith("{")
+            else json.dumps({"match": {"query": query}}, separators=(",", ":"))
+        )
+        return {"column": field_name, "query": query_json}
+    if isinstance(query, Mapping):
+        return {
+            "column": field_name,
+            "query": json.dumps(query, separators=(",", ":")),
+        }
+    raise ValueError("%s requires a text string or query mapping." % method)
 
 
-def _infer_vector_column(schema: pa.Schema, parameter: str = "vector_column"):
-    columns = [
-        field.name
+def _resolve_vector_column(
+        schema: pa.Schema,
+        column: Optional[str],
+        dimension: int) -> str:
+    if column is not None:
+        try:
+            field = schema.field(column)
+        except KeyError as e:
+            raise ValueError(
+                "Vector column '%s' not found in table schema." % column) from e
+        if not pa.types.is_fixed_size_list(field.type):
+            raise ValueError(
+                "Column '%s' is not a fixed-size vector column." % column)
+        if field.type.list_size != dimension:
+            raise ValueError(
+                "Vector dimension %d does not match column '%s' dimension %d."
+                % (dimension, column, field.type.list_size))
+        return column
+
+    candidates = [
+        (field.name, field.type.list_size)
         for field in schema
         if pa.types.is_fixed_size_list(field.type)
     ]
-    return _infer_single_column(columns, "vector", parameter)
+    matches = [
+        name
+        for name, column_dimension in candidates
+        if column_dimension == dimension
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        available = ", ".join(
+            "%s(%d)" % candidate for candidate in candidates) or "none"
+        raise ValueError(
+            "No vector column found with dimension %d; available vector "
+            "columns: %s."
+            % (dimension, available))
+    raise ValueError(
+        "Multiple vector columns found with dimension %d: %s; pass column."
+        % (dimension, ", ".join(matches)))
 
 
 def _infer_text_column(schema: pa.Schema, parameter: str = "text_column"):

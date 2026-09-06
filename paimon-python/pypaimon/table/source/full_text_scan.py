@@ -21,11 +21,15 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import List
 
-from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
-from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
-    TANTIVY_FULLTEXT_IDENTIFIER,
+from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+    FULL_TEXT_IDENTIFIER,
 )
-from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
+from pypaimon.table.source.full_text_search_split import (
+    FullTextSearchSplit,
+    IndexFullTextSearchSplit,
+    RawFullTextSearchSplit,
+)
 from pypaimon.utils.range import Range
 
 
@@ -47,7 +51,7 @@ class FullTextScan(ABC):
         pass
 
 
-class FullTextScanImpl(FullTextScan):
+class DataEvolutionFullTextScan(FullTextScan):
     """Implementation for FullTextScan."""
 
     def __init__(
@@ -90,7 +94,7 @@ class FullTextScanImpl(FullTextScan):
                 return False
             return (
                 global_index_meta.index_field_id in text_column_ids
-                and entry.index_file.index_type == TANTIVY_FULLTEXT_IDENTIFIER
+                and _supports_full_text_search(entry.index_file.index_type)
             )
 
         entries = index_file_handler.scan(snapshot, index_file_filter)
@@ -109,21 +113,24 @@ class FullTextScanImpl(FullTextScan):
         for column_name, by_range in by_column_and_range.items():
             for range_key, files in by_range.items():
                 splits.append(
-                    FullTextSearchSplit(
+                    IndexFullTextSearchSplit(
                         column_name, range_key.from_, range_key.to, files))
 
         if all_index_files:
-            raw_row_ranges = GlobalIndexCoverage(
+            raw_row_ranges = DataEvolutionGlobalIndexCoverage(
                 self._table,
                 snapshot,
                 partition_filter,
                 all_index_files,
-            ).unindexed_ranges(list(text_column_ids))
+            ).unindexed_ranges(
+                list(text_column_ids),
+                search_mode=self._table.options.full_text_index_search_mode(),
+            )
             if raw_row_ranges:
-                raise NotImplementedError(
-                    "Python full-text search does not support "
-                    "global-index.search-mode=full/detail for uncovered row "
-                    "ranges yet. Raw full-text search requires rebuilding "
-                    "temporary full-text indexes.")
+                splits.append(RawFullTextSearchSplit(raw_row_ranges))
 
         return FullTextScanPlan(splits)
+
+
+def _supports_full_text_search(index_type):
+    return index_type == FULL_TEXT_IDENTIFIER

@@ -20,12 +20,19 @@
 import threading
 from collections import deque
 from concurrent.futures import Future
-from typing import Callable, Collection, Dict, List, Optional
+from typing import Callable, Collection, Dict, FrozenSet, List, NamedTuple, Optional
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.common.predicate import Predicate
 from pypaimon.schema.data_types import DataField
+
+
+class GlobalIndexEvaluation(NamedTuple):
+    """Matches and fields whose supported indexes contributed."""
+
+    result: GlobalIndexResult
+    contributing_field_ids: FrozenSet[int]
 
 
 class GlobalIndexEvaluator:
@@ -51,8 +58,17 @@ class GlobalIndexEvaluator:
     ) -> Optional[GlobalIndexResult]:
         if predicate is None:
             return None
-        future = self._visit_async(predicate)
-        return future.result()
+        evaluation = self._visit_async(predicate).result()
+        return evaluation.result if evaluation is not None else None
+
+    def evaluate_with_contributing_fields(
+        self,
+        predicate: Optional[Predicate]
+    ) -> Optional[GlobalIndexEvaluation]:
+        """Return matches and fields whose supported indexes contributed."""
+        if predicate is None:
+            return None
+        return self._visit_async(predicate).result()
 
     def _visit_async(self, predicate) -> Future:
         if isinstance(predicate, Predicate) and predicate.method in ('and', 'or'):
@@ -94,7 +110,8 @@ class GlobalIndexEvaluator:
                 if remaining[0] == 0:
                     try:
                         all_done.set_result(
-                            self._combine_reader_results(reader_futures)
+                            self._combine_reader_results(
+                                reader_futures, field_id)
                         )
                     except Exception as e:
                         all_done.set_exception(e)
@@ -105,8 +122,8 @@ class GlobalIndexEvaluator:
         return all_done
 
     def _combine_reader_results(
-        self, reader_futures: List[Future]
-    ) -> Optional[GlobalIndexResult]:
+        self, reader_futures: List[Future], field_id: int,
+    ) -> Optional[GlobalIndexEvaluation]:
         compound_result: Optional[GlobalIndexResult] = None
         for f in reader_futures:
             child_result = f.result()
@@ -117,8 +134,10 @@ class GlobalIndexEvaluator:
             else:
                 compound_result = child_result
             if compound_result.is_empty():
-                return compound_result
-        return compound_result
+                break
+        if compound_result is None:
+            return None
+        return GlobalIndexEvaluation(compound_result, frozenset([field_id]))
 
     def _visit_compound_async(self, predicate: Predicate) -> Future:
         children = self._flatten_children(predicate.method, predicate.literals)
@@ -150,26 +169,34 @@ class GlobalIndexEvaluator:
         return all_done
 
     def _combine_results(
-        self, results: List[Optional[GlobalIndexResult]], method: str
-    ) -> Optional[GlobalIndexResult]:
+        self, results: List[Optional[GlobalIndexEvaluation]], method: str
+    ) -> Optional[GlobalIndexEvaluation]:
+        contributing_field_ids = set()
         if method == 'or':
             compound_result = GlobalIndexResult.create_empty()
-            for child_result in results:
-                if child_result is None:
+            for child in results:
+                if child is None:
                     return None
-                compound_result = compound_result.or_(child_result)
-            return compound_result
+                compound_result = compound_result.or_(child.result)
+                contributing_field_ids.update(child.contributing_field_ids)
+            return GlobalIndexEvaluation(compound_result,
+                                         frozenset(contributing_field_ids))
         else:
             compound_result: Optional[GlobalIndexResult] = None
-            for child_result in results:
-                if child_result is not None:
+            for child in results:
+                if child is not None:
                     if compound_result is not None:
-                        compound_result = compound_result.and_(child_result)
+                        compound_result = compound_result.and_(child.result)
                     else:
-                        compound_result = child_result
+                        compound_result = child.result
+                    contributing_field_ids.update(
+                        child.contributing_field_ids)
                 if compound_result is not None and compound_result.is_empty():
-                    return compound_result
-            return compound_result
+                    break
+            if compound_result is None:
+                return None
+            return GlobalIndexEvaluation(compound_result,
+                                         frozenset(contributing_field_ids))
 
     def _flatten_children(self, method: str, children) -> list:
         result = []

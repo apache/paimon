@@ -39,6 +39,14 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
 
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LATERAL_JOIN_PARALLELISM =
+            key("vector-search.lateral-join.parallelism")
+                    .intType()
+                    .defaultValue(16)
+                    .withDescription(
+                            "Parallelism used to repartition a single-partition LIMIT input before "
+                                    + "executing a lateral vector search.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
@@ -73,6 +81,16 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.");
+
+    public static final ConfigOption<Boolean> HIVE_STYLE_DYNAMIC_PARTITION_ENABLED =
+            key("write.hive-style-dynamic-partition.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, positional SQL inserts with explicit dynamic partitions "
+                                    + "use Hive's column order, with non-dynamic columns followed by "
+                                    + "dynamic partition columns. If false, the query output follows "
+                                    + "the table schema order.");
 
     public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
             key("write.data-evolution.update-conflict-retry.max-attempts")
@@ -136,6 +154,24 @@ public class SparkConnectorOptions {
                     .defaultValue(true)
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
+
+    public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =
+            key("format-table.repair.collect-statistics")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether MSCK REPAIR TABLE on a Format Table also measures the partitions it "
+                                    + "finds. Off by default: measuring lists the files inside every partition, "
+                                    + "not only the partition directories.");
+
+    public static final ConfigOption<Integer> FORMAT_TABLE_STATISTICS_PARALLELISM =
+            key("format-table.statistics.parallelism")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to "
+                                    + "measure Format Table partitions, so that a large table does not burst "
+                                    + "them at storage.");
 
     public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
             key("source.split.target-size-with-column-pruning")

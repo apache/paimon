@@ -60,6 +60,11 @@ public abstract class AbstractOrcColumnVector
         return !vector.noNulls && vector.isNull[rowMapper(i)];
     }
 
+    @Override
+    public int getCapacity() {
+        return vector.isNull.length;
+    }
+
     public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
             ColumnVector vector,
             VectorizedRowBatch orcBatch,

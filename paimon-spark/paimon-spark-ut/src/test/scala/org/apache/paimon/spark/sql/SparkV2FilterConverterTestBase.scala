@@ -217,6 +217,38 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 1)
   }
 
+  test("V2Filter: EqualTo NaN") {
+    sql("CREATE TABLE nan_tbl (id INT, f FLOAT, d DOUBLE) USING paimon")
+    // Separate files so finite-range stats would incorrectly prune the NaN file under equal(NaN).
+    sql("INSERT INTO nan_tbl VALUES (1, 1.0, 1.0)")
+    sql("INSERT INTO nan_tbl VALUES (2, CAST('NaN' AS FLOAT), CAST('NaN' AS DOUBLE))")
+    sql("INSERT INTO nan_tbl VALUES (3, 3.0, 3.0)")
+
+    val nanRowType = loadTable("nan_tbl").rowType()
+    val nanBuilder = new PredicateBuilder(nanRowType)
+    val nanConverter = SparkV2FilterConverter(nanRowType)
+
+    var filter = "f = CAST('NaN' AS FLOAT)"
+    var actual = nanConverter.convert(v2Filter(filter, "nan_tbl")).get
+    assert(actual.equals(nanBuilder.isNaN(1)))
+    checkAnswer(sql(s"SELECT id FROM nan_tbl WHERE $filter"), Seq(Row(2)))
+    assert(scanFilesCount(filter, "nan_tbl") >= 1)
+
+    filter = "d = CAST('NaN' AS DOUBLE)"
+    actual = nanConverter.convert(v2Filter(filter, "nan_tbl")).get
+    assert(actual.equals(nanBuilder.isNaN(2)))
+    checkAnswer(sql(s"SELECT id FROM nan_tbl WHERE $filter"), Seq(Row(2)))
+    assert(scanFilesCount(filter, "nan_tbl") >= 1)
+
+    // Non-NaN equality is unchanged.
+    filter = "f = 1.0"
+    actual = nanConverter.convert(v2Filter(filter, "nan_tbl")).get
+    assert(actual.equals(nanBuilder.equal(1, 1.0f)))
+    checkAnswer(sql(s"SELECT id FROM nan_tbl WHERE $filter"), Seq(Row(1)))
+
+    sql("DROP TABLE IF EXISTS nan_tbl")
+  }
+
   test("V2Filter: EqualNullSafe") {
     var filter = "int_col <=> 1"
     var actual = converter.convert(v2Filter(filter)).get

@@ -82,6 +82,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> TIMESTAMP_TYPES =
             Arrays.asList(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE);
 
+    private static final List<DataTypeRoot> TIME_TYPES =
+            Arrays.asList(DataTypeRoot.TIME_WITHOUT_TIME_ZONE);
+
     protected UpdatedDataFieldsProcessFunctionBase(
             CatalogLoader catalogLoader, TypeMapping typeMapping) {
         this.catalogLoader = catalogLoader;
@@ -255,6 +258,17 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         oldIdx = TIMESTAMP_TYPES.indexOf(oldType.getTypeRoot());
         newIdx = TIMESTAMP_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
+            return DataTypeChecks.getPrecision(oldType) <= DataTypeChecks.getPrecision(newType)
+                    ? ConvertAction.CONVERT
+                    : ConvertAction.IGNORE;
+        }
+
+        oldIdx = TIME_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = TIME_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            // Debezium encodes every PostgreSQL time(0..3) column as millis (TIME(3)), while the
+            // JDBC schema path keeps the declared TIME(n); widen on precision so time(0..2) can
+            // converge on TIME(3) instead of failing schema evolution.
             return DataTypeChecks.getPrecision(oldType) <= DataTypeChecks.getPrecision(newType)
                     ? ConvertAction.CONVERT
                     : ConvertAction.IGNORE;

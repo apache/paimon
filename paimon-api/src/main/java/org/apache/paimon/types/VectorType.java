@@ -163,7 +163,7 @@ public class VectorType extends DataType {
             return false;
         }
         VectorType vectorType = (VectorType) o;
-        return elementType.isPrunedFrom(vectorType.elementType);
+        return elementType.isPrunedFrom(vectorType.elementType) && length == vectorType.length;
     }
 
     @Override

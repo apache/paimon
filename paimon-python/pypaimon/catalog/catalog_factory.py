@@ -44,3 +44,20 @@ class CatalogFactory:
         if identifier in ("jdbc", "rest"):
             return catalog_class(CatalogContext.create_from_options(Options(catalog_options)))
         return catalog_class(Options(catalog_options))
+
+    @staticmethod
+    def create_from_context(
+            context: CatalogContext,
+            config_required: bool = True
+    ) -> Catalog:
+        identifier = context.options.get(CatalogOptions.METASTORE)
+        catalog_class = CatalogFactory.CATALOG_REGISTRY.get(identifier)
+        if catalog_class is None:
+            raise ValueError(
+                "Unknown catalog identifier: {}. Available types: {}".format(
+                    identifier, list(CatalogFactory.CATALOG_REGISTRY.keys())))
+        if identifier == "filesystem":
+            return catalog_class(context.options)
+        if identifier == "rest":
+            return catalog_class(context, config_required=config_required)
+        return catalog_class(context)

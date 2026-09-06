@@ -19,12 +19,13 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, Transform}
-import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonLiteral, toPaimonTransform}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonArrayLiteral, toPaimonLiteral, toPaimonTransform}
+import org.apache.paimon.types.{ArrayType, RowType}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.expressions.{Expression, Literal}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
+import org.apache.spark.sql.types.{ArrayType => SparkArrayType}
 
 import scala.collection.JavaConverters._
 
@@ -49,8 +50,11 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case EQUAL_TO =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            // TODO deal with isNaN
-            builder.equal(transform, literal)
+            if (isNaN(literal)) {
+              builder.isNaN(transform)
+            } else {
+              builder.equal(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -158,6 +162,11 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
 
       case STRING_CONTAINS =>
         sparkPredicate match {
+          case ArrayLiteralPredicate(transform, literals) =>
+            builder.arraysOverlap(transform, literals.asJava)
+          case BinaryPredicate(transform, literal)
+              if transform.outputType().isInstanceOf[ArrayType] =>
+            builder.arrayContains(transform, literal)
           case BinaryPredicate(transform, literal) =>
             builder.contains(transform, literal)
           case _ =>
@@ -214,6 +223,17 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       }
     }
   }
+
+  private object ArrayLiteralPredicate {
+    def unapply(sparkPredicate: SparkPredicate): Option[(Transform, Seq[Object])] = {
+      sparkPredicate.children() match {
+        case Array(e: Expression, literal: Literal[_])
+            if literal.dataType().isInstanceOf[SparkArrayType] =>
+          toPaimonTransform(e, rowType).map((_, toPaimonArrayLiteral(literal)))
+        case _ => None
+      }
+    }
+  }
 }
 
 object SparkV2FilterConverter extends Logging {
@@ -235,5 +255,11 @@ object SparkV2FilterConverter extends Logging {
   private val STRING_CONTAINS = "CONTAINS"
   private val ALWAYS_TRUE = "ALWAYS_TRUE"
   private val ALWAYS_FALSE = "ALWAYS_FALSE"
+
+  private def isNaN(value: Object): Boolean = value match {
+    case f: java.lang.Float => f.isNaN
+    case d: java.lang.Double => d.isNaN
+    case _ => false
+  }
 
 }

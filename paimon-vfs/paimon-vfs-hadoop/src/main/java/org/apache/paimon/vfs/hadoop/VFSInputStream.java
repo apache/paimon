@@ -83,9 +83,7 @@ public class VFSInputStream extends FSInputStream {
         while ((n = read(oneByteBuf, 0, 1)) == 0) {
             /* no op */
         }
-        if (statistics != null && n >= 0) {
-            statistics.incrementBytesRead(n);
-        }
+        // read(byte[], int, int) already updated statistics; do not count again.
         return (n == -1) ? -1 : oneByteBuf[0] & 0xff;
     }
 

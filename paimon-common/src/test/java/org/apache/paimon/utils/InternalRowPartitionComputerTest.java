@@ -21,12 +21,14 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Test for {@link InternalRowPartitionComputer}. */
 public class InternalRowPartitionComputerTest {
@@ -53,5 +55,57 @@ public class InternalRowPartitionComputerTest {
         writer.writeInt(1, 10);
         assertThat(InternalRowPartitionComputer.partToSimpleString(rowType, binaryRow, "-", 30))
                 .isEqualTo("null-10");
+    }
+
+    @Test
+    public void testPartitionColumnNotAtRowPrefix() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "dt", "region", "extra"});
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer(
+                        "__DEFAULT_PARTITION__", rowType, new String[] {"region", "dt"}, false);
+
+        BinaryRow binaryRow = new BinaryRow(4);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, 1);
+        writer.writeString(1, BinaryString.fromString("20240731"));
+        writer.writeString(2, BinaryString.fromString("hangzhou"));
+        writer.writeString(3, BinaryString.fromString("ignored"));
+        writer.complete();
+
+        // "region" sits at row position 2, which is out of range for an array sized by the
+        // number of partition columns.
+        assertThat(computer.generatePartValues(binaryRow))
+                .containsExactly(entry("region", "hangzhou"), entry("dt", "20240731"));
+    }
+
+    @Test
+    public void testPartitionColumnsReorderedWithinRowPrefix() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"id", "dt", "region"});
+        InternalRowPartitionComputer computer =
+                new InternalRowPartitionComputer(
+                        "__DEFAULT_PARTITION__", rowType, new String[] {"dt", "id"}, false);
+
+        BinaryRow binaryRow = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, 1);
+        writer.writeString(1, BinaryString.fromString("20240731"));
+        writer.writeString(2, BinaryString.fromString("hangzhou"));
+        writer.complete();
+
+        // Both row positions are in range here, so indexing by row position did not throw: it
+        // paired each column name with the other column's getter and cast executor.
+        assertThat(computer.generatePartValues(binaryRow))
+                .containsExactly(entry("dt", "20240731"), entry("id", "1"));
     }
 }

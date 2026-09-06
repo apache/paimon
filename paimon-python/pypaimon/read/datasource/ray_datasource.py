@@ -238,6 +238,7 @@ class RayDatasource(Datasource):
             metadata = BlockMetadata(**metadata_kwargs)
 
             read_fn = partial(get_read_task, chunk_splits)
+            read_fn.__name__ = "read_paimon_table"
             read_task_kwargs = {
                 'read_fn': read_fn,
                 'metadata': metadata,

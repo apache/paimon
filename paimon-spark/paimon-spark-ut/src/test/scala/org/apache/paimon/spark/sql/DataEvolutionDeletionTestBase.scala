@@ -22,6 +22,8 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
+import scala.collection.JavaConverters._
+
 abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
 
   test("Data Evolution deletion: delete from table with deletion vectors") {
@@ -153,10 +155,18 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |  (5, 5, X'05'), (6, 6, X'06'), (7, 7, X'07'), (8, 8, X'08'), (9, 9, X'09')
             |  AS v(id, b, picture)
             |""".stripMargin)
-      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9)")
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, b, picture FROM VALUES
+            |  (10, 10, X'0A'), (11, 11, X'0B'), (12, 12, X'0C'),
+            |  (13, 13, X'0D'), (14, 14, X'0E')
+            |  AS v(id, b, picture)
+            |""".stripMargin)
+      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9, 14)")
 
       sql("CREATE TABLE s (id INT, picture BINARY)")
-      sql("INSERT INTO s VALUES (2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79')")
+      sql(
+        "INSERT INTO s VALUES " +
+          "(2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79'), (12, X'7A')")
 
       sql("""
             |MERGE INTO t
@@ -170,7 +180,13 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
         Seq(
           Row(5, 5, Array[Byte](5), 5L),
           Row(7, 7, Array[Byte](77), 7L),
-          Row(8, 8, Array[Byte](8), 8L)))
+          Row(8, 8, Array[Byte](8), 8L),
+          Row(10, 10, Array[Byte](10), 10L),
+          Row(11, 11, Array[Byte](11), 11L),
+          Row(12, 12, Array[Byte](122), 12L),
+          Row(13, 13, Array[Byte](13), 13L)
+        )
+      )
     }
   }
 
@@ -579,5 +595,142 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
         )
       )
     }
+  }
+
+  test("Data Evolution deletion: non-materialized compact after delete and merge") {
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("DELETE FROM t WHERE id IN (1, 6)")
+
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (2, 200), (6, 600), (7, 700)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      compactDataEvolutionTable()
+
+      checkAnswer(
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0, 0L),
+          Row(2, 200, 2, 2L),
+          Row(3, 3, 3, 3L),
+          Row(4, 4, 4, 4L),
+          Row(5, 5, 5, 5L),
+          Row(7, 700, 7, 7L),
+          Row(8, 8, 8, 8L),
+          Row(9, 9, 9, 9L)
+        )
+      )
+    }
+  }
+
+  test("Data Evolution deletion: materialize deletion vectors after delete and merge") {
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("DELETE FROM t WHERE id IN (1, 6)")
+
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (2, 200), (6, 600), (7, 700)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      materializeDeletionVectors()
+
+      checkAnswer(
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0, 10L),
+          Row(2, 200, 2, 11L),
+          Row(3, 3, 3, 12L),
+          Row(4, 4, 4, 13L),
+          Row(5, 5, 5, 14L),
+          Row(7, 700, 7, 15L),
+          Row(8, 8, 8, 16L),
+          Row(9, 9, 9, 17L))
+      )
+    }
+  }
+
+  test("Data Evolution deletion: materialized compact drops global index after merge") {
+    withTable("t", "s") {
+      sql("""
+            |CREATE TABLE t (id INT, name STRING, b INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'global-index.search-mode' = 'full',
+            |  'btree-index.records-per-range' = '1000')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, concat('name-', id), id AS b
+            |FROM range(0, 5)
+            |""".stripMargin)
+      sql("CREATE TABLE s (id INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 100), (3, 300)")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      assert(btreeIndexEntryCount("t") > 0)
+
+      sql("DELETE FROM t WHERE id IN (2, 4)")
+      materializeDeletionVectors()
+
+      checkAnswer(
+        sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
+        Seq(Row(1, "name-1", 100)))
+      assert(btreeIndexEntryCount("t") == 0)
+    }
+  }
+
+  private def compactDataEvolutionTable(): Unit = {
+    sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
+  }
+
+  private def materializeDeletionVectors(): Unit = {
+    sql(
+      "CALL sys.materialize_deletion_vectors(" +
+        "table => 't', options => 'compaction.min.file-num=2')")
+  }
+
+  private def btreeIndexEntryCount(tableName: String): Int = {
+    loadTable(tableName)
+      .store()
+      .newIndexFileHandler()
+      .scanEntries()
+      .asScala
+      .count(_.indexFile().indexType() == "btree")
   }
 }

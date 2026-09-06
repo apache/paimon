@@ -29,6 +29,7 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FieldsComparator;
@@ -49,6 +50,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     protected final int maxLevel;
     protected final MergeEngine mergeEngine;
     private final boolean produceChangelog;
+    private final boolean changelogIgnoreUpdateBefore;
+    private final boolean changelogIgnoreDelete;
     private final boolean forceDropDelete;
 
     public ChangelogMergeTreeRewriter(
@@ -61,6 +64,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             boolean produceChangelog,
+            boolean changelogIgnoreUpdateBefore,
+            boolean changelogIgnoreDelete,
             boolean forceDropDelete) {
         super(
                 readerFactory,
@@ -72,6 +77,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         this.maxLevel = maxLevel;
         this.mergeEngine = mergeEngine;
         this.produceChangelog = produceChangelog;
+        this.changelogIgnoreUpdateBefore = changelogIgnoreUpdateBefore;
+        this.changelogIgnoreDelete = changelogIgnoreDelete;
         this.forceDropDelete = forceDropDelete;
     }
 
@@ -150,6 +157,13 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                 }
                 if (produceChangelog) {
                     for (KeyValue kv : result.changelogs()) {
+                        if (changelogIgnoreUpdateBefore
+                                && kv.valueKind() == RowKind.UPDATE_BEFORE) {
+                            continue;
+                        }
+                        if (changelogIgnoreDelete && kv.valueKind() == RowKind.DELETE) {
+                            continue;
+                        }
                         changelogFileWriter.write(kv);
                     }
                 }

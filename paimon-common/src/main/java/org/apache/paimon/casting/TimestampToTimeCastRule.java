@@ -45,7 +45,8 @@ class TimestampToTimeCastRule extends AbstractCastRule<Timestamp, Number> {
     @Override
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
         if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
-            return value -> (int) (value.getMillisecond() % DateTimeUtils.MILLIS_PER_DAY);
+            return value ->
+                    (int) Math.floorMod(value.getMillisecond(), DateTimeUtils.MILLIS_PER_DAY);
         } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
             return value ->
                     DateTimeUtils.timestampWithLocalZoneToTime(value, TimeZone.getDefault());

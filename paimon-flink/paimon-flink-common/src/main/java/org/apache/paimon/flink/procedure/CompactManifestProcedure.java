@@ -47,13 +47,28 @@ public class CompactManifestProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
-                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_enabled",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_partition_field",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_max_rewrite_size",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             @Nullable String options,
-            @Nullable Boolean dryRun)
+            @Nullable Boolean dryRun,
+            @Nullable Boolean manifestSortEnabled,
+            @Nullable String manifestSortPartitionField,
+            @Nullable String manifestSortMaxRewriteSize)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -61,6 +76,18 @@ public class CompactManifestProcedure extends ProcedureBase {
         ProcedureUtils.putIfNotEmpty(
                 dynamicOptions, CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
         ProcedureUtils.putAllOptions(dynamicOptions, options);
+        if (manifestSortEnabled != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.toString(manifestSortEnabled));
+        }
+        if (manifestSortPartitionField != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), manifestSortPartitionField);
+        }
+        if (manifestSortMaxRewriteSize != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), manifestSortMaxRewriteSize);
+        }
 
         table = table.copy(dynamicOptions);
 

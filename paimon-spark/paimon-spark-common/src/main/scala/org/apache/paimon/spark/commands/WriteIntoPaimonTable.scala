@@ -60,7 +60,7 @@ case class WriteIntoPaimonTable(
 
     val writer = PaimonSparkWriter(table, batchId = batchId)
     if (overwritePartition != null) {
-      writer.writeBuilder.withOverwrite(overwritePartition.asJava)
+      writer.withOverwrite(overwritePartition.asJava)
     }
     val operation = Option(options.get(PaimonWriteOptions.OPERATION_OPTION))
       .map(Snapshot.Operation.valueOf)

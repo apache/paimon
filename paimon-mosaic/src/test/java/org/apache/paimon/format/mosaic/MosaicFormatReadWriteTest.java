@@ -188,7 +188,8 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
                 fileFormat()
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             reader.forEachRemaining(
                     r -> {
                         arrSummary.add(

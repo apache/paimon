@@ -37,6 +37,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /** Cache records to {@link SegmentsCache} by compacted serializer. */
 @ThreadSafe
@@ -58,8 +59,10 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
     }
 
     @Override
-    protected List<V> readFromSegments(Segments segments, Filters<V> filters) throws IOException {
-        return readFromSegments(formatSerializer.get(), projectedSerializer, segments, filters);
+    protected <R> List<R> readFromSegments(
+            Segments segments, Filters<V> filters, Function<V, R> convertor) throws IOException {
+        return readFromSegments(
+                formatSerializer.get(), projectedSerializer, segments, filters, convertor);
     }
 
     @Override
@@ -81,13 +84,14 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
         }
     }
 
-    public static <V> List<V> readFromSegments(
+    public static <V, R> List<R> readFromSegments(
             InternalRowSerializer formatSerializer,
             ObjectSerializer<V> projectedSerializer,
             Segments segments,
-            Filters<V> filters)
+            Filters<V> filters,
+            Function<V, R> convertor)
             throws IOException {
-        List<V> entries = new ArrayList<>();
+        List<R> entries = new ArrayList<>();
         RandomAccessInputView view = createInputView(segments);
         BinaryRow binaryRow = new BinaryRow(formatSerializer.getArity());
         Filter<InternalRow> readFilter = filters.readFilter();
@@ -98,7 +102,7 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
                 if (readFilter.test(binaryRow)) {
                     V v = projectedSerializer.fromRow(binaryRow);
                     if (readVFilter.test(v)) {
-                        entries.add(v);
+                        entries.add(convertor.apply(v));
                     }
                 }
             } catch (EOFException e) {

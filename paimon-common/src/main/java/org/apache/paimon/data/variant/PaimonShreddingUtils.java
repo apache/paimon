@@ -25,6 +25,9 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
@@ -40,6 +43,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarBinaryType;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -121,9 +126,19 @@ public class PaimonShreddingUtils {
         }
 
         @Override
+        public ByteBuffer getBinaryBuffer(int ordinal) {
+            return binaryBuffer(row, ordinal);
+        }
+
+        @Override
         public UUID getUuid(int ordinal) {
             // Paimon currently does not shred UUID.
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Timestamp getTimestamp(int ordinal, int precision) {
+            return row.getTimestamp(ordinal, precision);
         }
 
         @Override
@@ -140,6 +155,16 @@ public class PaimonShreddingUtils {
         public int numElements() {
             return ((InternalArray) row).size();
         }
+    }
+
+    static ByteBuffer binaryBuffer(DataGetters row, int ordinal) {
+        if (row instanceof ColumnarRow) {
+            return ((ColumnarRow) row).getBinaryBuffer(ordinal);
+        }
+        if (row instanceof ColumnarArray) {
+            return ((ColumnarArray) row).getBinaryBuffer(ordinal);
+        }
+        return ByteBuffer.wrap(row.getBinary(ordinal)).order(ByteOrder.LITTLE_ENDIAN);
     }
 
     /** The search result of a `VariantPathSegment` in a `VariantSchema`. */
@@ -279,6 +304,9 @@ public class PaimonShreddingUtils {
             case BIGINT:
             case FLOAT:
             case DOUBLE:
+            case DATE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
                 builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES());
                 builder.field(TYPED_VALUE_FIELD_NAME, dataType);
                 break;
@@ -320,22 +348,19 @@ public class PaimonShreddingUtils {
                         case ROW:
                             RowType r = (RowType) dataType;
                             List<DataField> rFields = r.getFields();
-                            // The struct must not be empty or contain duplicate field names.
-                            if (fields.isEmpty()
-                                    || fields.stream().distinct().count() != fields.size()) {
-                                throw invalidVariantShreddingSchema(rowType);
-                            }
+                            // Every field of an object's typed_value is itself a
+                            // value/typed_value struct. An empty struct shreds nothing and
+                            // stays legal.
                             objectSchema = new VariantSchema.ObjectField[rFields.size()];
                             for (int index = 0; index < rFields.size(); index++) {
-                                if (field.type() instanceof RowType) {
-                                    DataField f = rFields.get(index);
-                                    objectSchema[index] =
-                                            new VariantSchema.ObjectField(
-                                                    f.name(),
-                                                    buildVariantSchema((RowType) f.type(), false));
-                                } else {
+                                DataField f = rFields.get(index);
+                                if (!(f.type() instanceof RowType)) {
                                     throw invalidVariantShreddingSchema(rowType);
                                 }
+                                objectSchema[index] =
+                                        new VariantSchema.ObjectField(
+                                                f.name(),
+                                                buildVariantSchema((RowType) f.type(), false));
                             }
                             break;
                         case ARRAY:
@@ -374,14 +399,22 @@ public class PaimonShreddingUtils {
                         case DOUBLE:
                             scalarSchema = new VariantSchema.DoubleType();
                             break;
+                        case CHAR:
                         case VARCHAR:
                             scalarSchema = new VariantSchema.StringType();
                             break;
                         case BINARY:
+                        case VARBINARY:
                             scalarSchema = new VariantSchema.BinaryType();
                             break;
                         case DATE:
                             scalarSchema = new VariantSchema.DateType();
+                            break;
+                        case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                            scalarSchema = new VariantSchema.TimestampType();
+                            break;
+                        case TIMESTAMP_WITHOUT_TIME_ZONE:
+                            scalarSchema = new VariantSchema.TimestampNTZType();
                             break;
                         case DECIMAL:
                             DecimalType d = (DecimalType) dataType;
@@ -513,6 +546,9 @@ public class PaimonShreddingUtils {
             } else if (schema.scalarSchema instanceof VariantSchema.DecimalType) {
                 VariantSchema.DecimalType dt = (VariantSchema.DecimalType) schema.scalarSchema;
                 paimonValue = Decimal.fromBigDecimal((BigDecimal) result, dt.precision, dt.scale);
+            } else if (schema.scalarSchema instanceof VariantSchema.TimestampType
+                    || schema.scalarSchema instanceof VariantSchema.TimestampNTZType) {
+                paimonValue = Timestamp.fromMicros((Long) result);
             } else {
                 paimonValue = result;
             }
@@ -559,7 +595,7 @@ public class PaimonShreddingUtils {
         if (inputRow.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
-        byte[] topLevelMetadata = inputRow.getBinary(schema.topLevelMetadataIdx);
+        ByteBuffer topLevelMetadata = binaryBuffer(inputRow, schema.topLevelMetadataIdx);
         int numFields = fields.length;
         GenericRow resultRow = new GenericRow(numFields);
         int fieldIdx = 0;
@@ -664,7 +700,7 @@ public class PaimonShreddingUtils {
      */
     private static Object extractField(
             InternalRow inputRow,
-            byte[] topLevelMetadata,
+            ByteBuffer topLevelMetadata,
             VariantSchema inputSchema,
             SchemaPathSegment[] pathList,
             BaseVariantReader reader) {
@@ -683,7 +719,8 @@ public class PaimonShreddingUtils {
                 if (variantIdx < 0 || row.isNullAt(variantIdx)) {
                     return null;
                 }
-                GenericVariant v = new GenericVariant(row.getBinary(variantIdx), topLevelMetadata);
+                GenericVariant v =
+                        new GenericVariant(binaryBuffer(row, variantIdx), topLevelMetadata);
                 while (pathIdx < pathLen) {
                     VariantPathSegment rowPath = pathList[pathIdx].rawPath();
                     if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {
@@ -749,10 +786,8 @@ public class PaimonShreddingUtils {
                 output.setNullAt(i);
             } else {
                 Variant v = assembleVariant(input.getRow(i), variantSchema);
-                byte[] value = v.value();
-                byte[] metadata = v.metadata();
-                valueChild.putByteArray(i, value, 0, value.length);
-                metadataChild.putByteArray(i, metadata, 0, metadata.length);
+                valueChild.putByteBuffer(i, v.valueBuffer());
+                metadataChild.putByteBuffer(i, v.metadataBuffer());
             }
         }
     }

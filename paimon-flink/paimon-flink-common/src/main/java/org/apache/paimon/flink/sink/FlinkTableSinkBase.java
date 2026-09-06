@@ -21,7 +21,9 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
+import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -34,6 +36,8 @@ import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -57,6 +61,8 @@ public abstract class FlinkTableSinkBase
 
     protected final Table table;
 
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkTableSinkBase.class);
+
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
 
@@ -72,19 +78,24 @@ public abstract class FlinkTableSinkBase
         if (table.primaryKeys().isEmpty()) {
             // Don't check this, for example, only inserts are available from the database, but the
             // plan phase contains all changelogs
+            warnKeyOnlyDeletesIgnored("the table has no primary key");
             return requestedMode;
         } else {
             Options options = Options.fromMap(table.options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
+                warnKeyOnlyDeletesIgnored("'changelog-producer' is 'input'");
                 return requestedMode;
             }
 
             if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
+                warnKeyOnlyDeletesIgnored("'merge-engine' is 'aggregation'");
                 return requestedMode;
             }
 
             if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE
                     && new CoreOptions(options).definedAggFunc()) {
+                warnKeyOnlyDeletesIgnored(
+                        "'merge-engine' is 'partial-update' with aggregation functions");
                 return requestedMode;
             }
 
@@ -95,7 +106,21 @@ public abstract class FlinkTableSinkBase
                     builder.addContainedKind(kind);
                 }
             }
+            if (options.get(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED)) {
+                ChangelogModeUtils.enableKeyOnlyDeletes(builder);
+            }
             return builder.build();
+        }
+    }
+
+    private void warnKeyOnlyDeletesIgnored(String reason) {
+        if (Options.fromMap(table.options())
+                .get(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED)) {
+            LOG.warn(
+                    "'{}' is set to true for table {}, but it has no effect because {}.",
+                    FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED.key(),
+                    tableIdentifier.asSummaryString(),
+                    reason);
         }
     }
 

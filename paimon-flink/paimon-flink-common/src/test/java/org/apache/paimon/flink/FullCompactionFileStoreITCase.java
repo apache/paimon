@@ -166,6 +166,90 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIgnoreUpdateBeforeAuditLog() throws Exception {
+        sql("ALTER TABLE %s SET ('changelog-producer.ignore-update-before' = 'true')", table);
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s$audit_log", table));
+
+        sql("INSERT INTO %s VALUES ('1', '2', '3')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "1", "2", "3"));
+
+        // update: should only produce +U, no -U
+        sql("INSERT INTO %s VALUES ('1', '4', '5')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+U", "1", "4", "5"));
+
+        // delete: should still produce -D
+        sql("DELETE FROM %s WHERE a = '1'", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "-D", "1", "4", "5"));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testIgnoreDeleteAuditLog() throws Exception {
+        sql("ALTER TABLE %s SET ('changelog-producer.ignore-delete' = 'true')", table);
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s$audit_log", table));
+
+        sql("INSERT INTO %s VALUES ('1', '2', '3')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "1", "2", "3"));
+
+        // update: should produce both -U and +U
+        sql("INSERT INTO %s VALUES ('1', '4', '5')", table);
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, "-U", "1", "2", "3"),
+                        Row.ofKind(RowKind.INSERT, "+U", "1", "4", "5"));
+
+        // delete: should not produce -D
+        sql("DELETE FROM %s WHERE a = '1'", table);
+        // insert a new record to trigger compaction and verify no -D appeared
+        sql("INSERT INTO %s VALUES ('2', '3', '4')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "2", "3", "4"));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testIgnoreUpdateBeforeAndDeleteAuditLog() throws Exception {
+        sql(
+                "ALTER TABLE %s SET ("
+                        + "'changelog-producer.ignore-update-before' = 'true', "
+                        + "'changelog-producer.ignore-delete' = 'true')",
+                table);
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s$audit_log", table));
+
+        sql("INSERT INTO %s VALUES ('1', '2', '3'), ('2', '5', '6')", table);
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, "+I", "1", "2", "3"),
+                        Row.ofKind(RowKind.INSERT, "+I", "2", "5", "6"));
+
+        // update: should only produce +U, no -U
+        sql("INSERT INTO %s VALUES ('1', '4', '5')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+U", "1", "4", "5"));
+
+        // delete key '2': should not produce -D
+        // update key '1' again to trigger compaction and verify no -D appeared
+        sql("DELETE FROM %s WHERE a = '2'", table);
+        sql("INSERT INTO %s VALUES ('1', '7', '8')", table);
+        assertThat(iterator.collect(1))
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+U", "1", "7", "8"));
+
+        iterator.close();
+    }
+
+    @Test
     public void testRowDeduplicateWithArrayRow() throws Exception {
         String table = "T_ARRAY_ROW";
         tEnv.executeSql(

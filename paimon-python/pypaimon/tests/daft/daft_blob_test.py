@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import struct
 import unittest
 
 import pyarrow as pa
@@ -26,7 +27,11 @@ daft = pytest.importorskip("daft")
 from daft.datatype import DataType
 from daft.io import IOConfig, S3Config
 
-from pypaimon.daft.daft_blob import blob_column_to_file_array
+from pypaimon.daft.daft_blob import (
+    blob_array_column_to_file_array,
+    blob_column_to_file_array,
+    blob_map_column_to_file_array,
+)
 from pypaimon.daft.daft_compat import (
     file_range_position_field,
     file_range_size_field,
@@ -46,6 +51,23 @@ def _descriptor_column(specs):
     return pa.array(out, type=pa.large_binary())
 
 
+def _descriptor_bytes(version=BlobDescriptor.CURRENT_VERSION,
+                      magic=BlobDescriptor.MAGIC,
+                      uri=b"oss://b/k",
+                      offset=0,
+                      length=1):
+    data = bytes([version])
+    if version > 1:
+        data += struct.pack("<Q", magic)
+    data += struct.pack("<I", len(uri))
+    data += uri
+    if offset is not None:
+        data += struct.pack("<q", offset)
+    if length is not None:
+        data += struct.pack("<q", length)
+    return data
+
+
 class BlobColumnToFileArrayTest(unittest.TestCase):
     # Pure config/arrow tests run on any installed Daft; only File-cast needs file ranges.
 
@@ -61,6 +83,88 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         blob = serialize_io_config(IOConfig(s3=S3Config(key_id="AK", access_key="SK")))
         self.assertEqual(blob_column_to_file_array(col, blob).field("io_config").to_pylist(),
                          [blob, None, blob])
+
+    def test_blob_array_column_to_file_array(self):
+        descriptor_a = BlobDescriptor("oss://b/a", 1, 2).serialize()
+        descriptor_b = BlobDescriptor("oss://b/b", 3, 4).serialize()
+        column = pa.array(
+            [[descriptor_a, None, descriptor_b], None, []],
+            type=pa.list_(pa.large_binary()),
+        )
+
+        converted = blob_array_column_to_file_array(column)
+
+        files = converted[0].as_py()
+        self.assertEqual(
+            [None if value is None else value["url"] for value in files],
+            ["oss://b/a", None, "oss://b/b"],
+        )
+        self.assertEqual([
+            None if value is None else value[file_range_position_field()]
+            for value in files
+        ], [1, None, 3])
+        self.assertFalse(converted[1].is_valid)
+        self.assertEqual(converted[2].as_py(), [])
+
+    def test_blob_map_column_to_file_array(self):
+        descriptor_a = BlobDescriptor("oss://b/a", 1, 2).serialize()
+        descriptor_b = BlobDescriptor("oss://b/b", 3, 4).serialize()
+        io_config = b"serialized-io-config"
+        column = pa.array(
+            [
+                [(1, descriptor_a), (1, None), (2, descriptor_b)],
+                None,
+                [],
+            ],
+            type=pa.map_(pa.int32(), pa.large_binary()),
+        )
+
+        converted = blob_map_column_to_file_array(column, io_config)
+
+        files = converted[0].as_py()
+        self.assertEqual([key for key, _ in files], [1, 1, 2])
+        self.assertEqual(
+            [None if value is None else value["url"] for _, value in files],
+            ["oss://b/a", None, "oss://b/b"],
+        )
+        self.assertEqual(
+            [
+                None if value is None else value[file_range_position_field()]
+                for _, value in files
+            ],
+            [1, None, 3],
+        )
+        self.assertEqual(
+            [None if value is None else value["io_config"] for _, value in files],
+            [io_config, None, io_config],
+        )
+        self.assertFalse(converted[1].is_valid)
+        self.assertEqual(converted[2].as_py(), [])
+
+    def test_malformed_blob_descriptor_raises_value_error(self):
+        cases = [
+            ("empty", b"", "too short"),
+            ("unknown version",
+             _descriptor_bytes(version=BlobDescriptor.CURRENT_VERSION + 1),
+             "version"),
+            ("bad magic", _descriptor_bytes(magic=0), "magic header"),
+            ("truncated uri",
+             bytes([BlobDescriptor.CURRENT_VERSION])
+             + struct.pack("<Q", BlobDescriptor.MAGIC)
+             + struct.pack("<I", 5)
+             + b"ab",
+             "URI length exceeds data size"),
+            ("truncated offset", _descriptor_bytes(uri=b"", offset=None, length=None) + b"\x00" * 7,
+             "missing offset/length"),
+            ("truncated length", _descriptor_bytes(uri=b"", length=None) + b"\x00" * 7,
+             "missing offset/length"),
+            ("invalid utf8 uri", _descriptor_bytes(uri=b"\xff"), "Invalid BlobDescriptor data"),
+        ]
+
+        for name, raw, message in cases:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, message):
+                    blob_column_to_file_array(pa.array([raw], type=pa.large_binary()))
 
     def test_serialize_io_config_roundtrips(self):
         s3 = IOConfig(s3=S3Config(key_id="AK", access_key="SK", session_token="TOK"))

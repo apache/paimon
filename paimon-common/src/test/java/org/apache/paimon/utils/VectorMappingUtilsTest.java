@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
 import org.apache.paimon.data.columnar.ByteColumnVector;
 import org.apache.paimon.data.columnar.BytesColumnVector;
@@ -90,6 +91,19 @@ public class VectorMappingUtilsTest {
         for (int i = 0; i < mapping.length; i++) {
             Assertions.assertThat(newColumnVectors[i]).isEqualTo(columnVectors[mapping[i]]);
         }
+    }
+
+    @Test
+    public void testCreateIndexMappedVectorsWithMissingColumns() {
+        ColumnVector existingVector = i -> false;
+
+        ColumnVector[] newColumnVectors =
+                VectorMappingUtils.createMappedVectors(
+                        new int[] {-1, 0, -1}, new ColumnVector[] {existingVector});
+
+        Assertions.assertThat(newColumnVectors)
+                .containsExactly(
+                        AllNullColumnVector.INSTANCE, existingVector, AllNullColumnVector.INSTANCE);
     }
 
     @Test

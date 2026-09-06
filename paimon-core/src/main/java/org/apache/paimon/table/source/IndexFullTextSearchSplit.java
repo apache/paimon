@@ -22,6 +22,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -44,6 +45,7 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
     private String columnName;
     private long rowRangeStart;
     private long rowRangeEnd;
+    private List<Range> searchRowRanges;
     private transient List<IndexFileMeta> fullTextIndexFiles;
 
     public IndexFullTextSearchSplit(
@@ -56,10 +58,34 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexFileMeta> fullTextIndexFiles) {
+        this(
+                columnName,
+                rowRangeStart,
+                rowRangeEnd,
+                fullTextIndexFiles,
+                Collections.singletonList(new Range(rowRangeStart, rowRangeEnd)));
+    }
+
+    public IndexFullTextSearchSplit(
+            String columnName,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> fullTextIndexFiles,
+            List<Range> searchRowRanges) {
         this.columnName = columnName;
         this.rowRangeStart = rowRangeStart;
         this.rowRangeEnd = rowRangeEnd;
         this.fullTextIndexFiles = Collections.unmodifiableList(new ArrayList<>(fullTextIndexFiles));
+        List<Range> ranges = new ArrayList<>(searchRowRanges);
+        for (Range range : ranges) {
+            if (range.from < rowRangeStart || range.to > rowRangeEnd) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Search range %s is outside physical index range [%s, %s]",
+                                range, rowRangeStart, rowRangeEnd));
+            }
+        }
+        this.searchRowRanges = Collections.unmodifiableList(ranges);
     }
 
     public String columnName() {
@@ -72,6 +98,10 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
 
     public long rowRangeEnd() {
         return rowRangeEnd;
+    }
+
+    public List<Range> searchRowRanges() {
+        return searchRowRanges;
     }
 
     public List<IndexFileMeta> fullTextIndexFiles() {
@@ -96,6 +126,11 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
         this.fullTextIndexFiles =
                 Collections.unmodifiableList(new ArrayList<>(serializer.deserializeList(view)));
+        if (searchRowRanges == null) {
+            searchRowRanges = Collections.singletonList(new Range(rowRangeStart, rowRangeEnd));
+        } else {
+            searchRowRanges = Collections.unmodifiableList(new ArrayList<>(searchRowRanges));
+        }
     }
 
     @Override
@@ -107,12 +142,14 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
         return rowRangeStart == that.rowRangeStart
                 && rowRangeEnd == that.rowRangeEnd
                 && Objects.equals(columnName, that.columnName)
+                && Objects.equals(searchRowRanges, that.searchRowRanges)
                 && Objects.equals(fullTextIndexFiles, that.fullTextIndexFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(columnName, rowRangeStart, rowRangeEnd, fullTextIndexFiles);
+        return Objects.hash(
+                columnName, rowRangeStart, rowRangeEnd, searchRowRanges, fullTextIndexFiles);
     }
 
     @Override
@@ -125,6 +162,8 @@ public class IndexFullTextSearchSplit extends FullTextSearchSplit {
                 + rowRangeStart
                 + ", rowRangeEnd="
                 + rowRangeEnd
+                + ", searchRowRanges="
+                + searchRowRanges
                 + ", fullTextIndexFiles="
                 + fullTextIndexFiles
                 + '}';

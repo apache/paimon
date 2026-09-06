@@ -40,6 +40,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStats;
@@ -102,7 +103,8 @@ public class ExpireSnapshotsTest {
         store = createStore();
         snapshotManager = store.snapshotManager();
         changelogManager = store.changelogManager();
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -299,6 +301,7 @@ public class ExpireSnapshotsTest {
                         null,
                         null,
                         null,
+                        null,
                         null);
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
@@ -360,6 +363,7 @@ public class ExpireSnapshotsTest {
                         null,
                         myDataFile.toString(),
                         null,
+                        null,
                         null);
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
@@ -411,6 +415,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 "test",
+                null,
                 0L,
                 Snapshot.CommitKind.APPEND,
                 0L,
@@ -632,7 +637,8 @@ public class ExpireSnapshotsTest {
                         blockingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
 
         expire.expireUntil(1, latestSnapshotId);
 
@@ -958,7 +964,8 @@ public class ExpireSnapshotsTest {
                         failingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
         expire.config(config);
         expire.setCurrentTimeMillis(() -> 6000L);
 
@@ -1214,7 +1221,11 @@ public class ExpireSnapshotsTest {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion) {
         return new ExpireSnapshotsImpl(
-                snapshotManager, store.changelogManager(), snapshotDeletion, store.newTagManager());
+                snapshotManager,
+                store.changelogManager(),
+                snapshotDeletion,
+                store.newTagManager(),
+                store.options().scanManifestParallelism());
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
@@ -1350,7 +1361,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
             this.minBlockedSnapshotId = minBlockedSnapshotId;
             this.maxBlockedSnapshotId = maxBlockedSnapshotId;
         }
@@ -1423,7 +1435,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
         }
 
         @Override

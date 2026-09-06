@@ -25,6 +25,8 @@ reader to ensure correctness.
 
 from __future__ import annotations
 
+import os
+
 import pyarrow as pa
 import pytest
 
@@ -35,6 +37,7 @@ from pypaimon.daft.daft_compat import file_range_position_field, has_file_range_
 from pypaimon.daft.daft_catalog import PaimonTable
 from pypaimon.daft.daft_datasink import PaimonDataSink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
+from daft.recordbatch.micropartition import MicroPartition
 
 requires_blob = pytest.mark.skipif(not has_file_range_reads(), reason="BLOB support requires daft >= 0.7.11")
 
@@ -57,6 +60,16 @@ def _write_to_paimon(table, arrow_table, mode="append", overwrite_partition=None
     finally:
         table_write.close()
         table_commit.close()
+
+
+def _table_data_files(table):
+    data_files = []
+    for dirpath, _, filenames in os.walk(table.table_path):
+        for filename in filenames:
+            if filename.endswith((".parquet", ".orc", ".avro")):
+                path = os.path.join(dirpath, filename)
+                data_files.append(os.path.relpath(path, table.table_path))
+    return sorted(data_files)
 
 
 def _create_id_dt_table(catalog, table_name: str):
@@ -337,6 +350,42 @@ def test_write_paimon_rejects_extra_columns(local_paimon_catalog):
         _write_table(df, table)
 
 
+def test_write_paimon_aborts_data_files_after_later_micropartition_fails(local_paimon_catalog):
+    """A failed write task must not leave files from earlier micropartitions."""
+    catalog, _ = local_paimon_catalog
+    schema = pypaimon.Schema.from_pyarrow_schema(
+        pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.string()),
+        ]),
+        options={
+            "bucket": "1",
+            "file.format": "parquet",
+            "target-file-size": "1kb",
+        },
+    )
+    catalog.create_table("test_db.abort_failed_write", schema, ignore_if_exists=False)
+    table = catalog.get_table("test_db.abort_failed_write")
+
+    valid = MicroPartition.from_arrow(
+        pa.table({
+            "id": pa.array(list(range(128)), type=pa.int64()),
+            "name": pa.array([f"name-{i:03d}" for i in range(128)], type=pa.string()),
+        })
+    )
+    invalid = MicroPartition.from_arrow(
+        pa.table({
+            "id": pa.array([999], type=pa.int64()),
+            "extra": pa.array(["bad"], type=pa.string()),
+        })
+    )
+
+    with pytest.raises(ValueError, match="Paimon write schema mismatch"):
+        list(PaimonDataSink(table).write(iter([valid, invalid])))
+
+    assert _table_data_files(table) == []
+
+
 def test_write_paimon_pk_table(pk_table):
     """Writing to a PK table should work and be readable back."""
     table, _ = pk_table
@@ -486,6 +535,111 @@ class TestBlobType:
             assert getattr(ref, file_range_position_field()) is not None
             file_size = ref.size() if callable(getattr(ref, "size", None)) else ref.length
             assert file_size is not None
+
+    def test_read_array_blob_type(self, local_paimon_catalog):
+        """ARRAY<BLOB> columns are returned as lists of File objects."""
+        catalog, _ = local_paimon_catalog
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("cover", pa.large_binary()),
+            ("payloads", array_blob_type),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "bucket": "1",
+                "file.format": "parquet",
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+        catalog.create_table(
+            "test_db.array_blob_table",
+            paimon_schema,
+            ignore_if_exists=True,
+        )
+        table = catalog.get_table("test_db.array_blob_table")
+        _write_to_paimon(table, pa.table({
+            "id": [1, 2],
+            "cover": [b"cover", None],
+            "payloads": pa.array(
+                [[b"hello", None, b"world"], None],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema))
+
+        result_df = _read_table(table).sort("id")
+        assert str(result_df.schema()["cover"].dtype) == "File[Unknown]"
+        assert str(result_df.schema()["payloads"].dtype) == "List[File[Unknown]]"
+
+        result = result_df.to_pydict()
+        payloads = result["payloads"]
+        assert isinstance(result["cover"][0], daft.File)
+        assert result["cover"][1] is None
+        with result["cover"][0].open() as stream:
+            assert stream.read() == b"cover"
+        assert payloads[1] is None
+        assert payloads[0][1] is None
+        assert all(
+            isinstance(ref, daft.File)
+            for ref in (payloads[0][0], payloads[0][2])
+        )
+        with payloads[0][0].open() as stream:
+            assert stream.read() == b"hello"
+        with payloads[0][2].open() as stream:
+            assert stream.read() == b"world"
+
+    def test_read_map_blob_type(self, local_paimon_catalog):
+        """MAP<STRING, BLOB> values are returned as File objects."""
+        catalog, _ = local_paimon_catalog
+        map_blob_type = pa.map_(pa.string(), pa.large_binary())
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("payloads", map_blob_type),
+        ])
+        paimon_schema = pypaimon.Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "bucket": "1",
+                "file.format": "parquet",
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+        catalog.create_table(
+            "test_db.map_blob_table",
+            paimon_schema,
+            ignore_if_exists=True,
+        )
+        table = catalog.get_table("test_db.map_blob_table")
+        _write_to_paimon(table, pa.table({
+            "id": [1, 2],
+            "payloads": pa.array(
+                [{"first": b"hello", "null": None, "second": b"world"}, None],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema))
+
+        result_df = _read_table(table).sort("id")
+        assert str(result_df.schema()["payloads"].dtype) == "Map[String: File[Unknown]]"
+
+        projected = result_df.select(
+            "id",
+            result_df["payloads"].map_get("first").alias("first"),
+            result_df["payloads"].map_get("null").alias("null"),
+            result_df["payloads"].map_get("second").alias("second"),
+        ).to_pydict()
+        assert projected["id"] == [1, 2]
+        assert projected["null"] == [None, None]
+        assert projected["first"][1] is None
+        assert projected["second"][1] is None
+        assert isinstance(projected["first"][0], daft.File)
+        assert isinstance(projected["second"][0], daft.File)
+        with projected["first"][0].open() as stream:
+            assert stream.read() == b"hello"
+        with projected["second"][0].open() as stream:
+            assert stream.read() == b"world"
 
 
 # ---------------------------------------------------------------------------

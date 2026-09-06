@@ -1,0 +1,143 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+################################################################################
+
+# Orchestrate Java and PyPaimon packaging. Java signing and Nexus staging, plus
+# the signed ASF source archives, remain Release Manager responsibilities.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "release-[0-9]+.[0-9]+.[0-9]+"
+      - "release-[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validation:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      release_kind: ${{ steps.release.outputs.release_kind }}
+      rc_number: ${{ steps.release.outputs.rc_number }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v5
+        with:
+          java-version: 8
+          distribution: temurin
+          cache: maven
+
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@12eb41b233df95d49b0c11fc1b5bc8312e5d4ce0 # v5.1
+        with:
+          maven-version: 3.8.8
+
+      - name: Validate tag against project version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "Release workflow must run from a tag, got ${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+          release_version="$(
+            mvn -q -DforceStdout help:evaluate \
+              -Dexpression=project.version
+          )"
+          if [[ -z "${release_version}" || "${release_version}" == *-SNAPSHOT ]]; then
+            echo "Project release version is invalid: ${release_version:-missing}" >&2
+            exit 1
+          fi
+
+          python_release_version="$(
+            sed -n 's/^VERSION = "\(.*\)"/\1/p' \
+              paimon-python/setup.py
+          )"
+          if [[ "${python_release_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${python_release_version:-missing} does not match Paimon ${release_version}" >&2
+            exit 1
+          fi
+
+          final_tag="release-${release_version}"
+          rc_prefix="${final_tag}-rc"
+          release_kind=""
+          rc_number=""
+          if [[ "${GITHUB_REF_NAME}" == "${final_tag}" ]]; then
+            release_kind="final"
+          elif [[ "${GITHUB_REF_NAME}" == "${rc_prefix}"* ]]; then
+            rc_number="${GITHUB_REF_NAME#"${rc_prefix}"}"
+            if [[ ! "${rc_number}" =~ ^[0-9]+$ ]]; then
+              echo "RC tag must be ${rc_prefix}N, got ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            release_kind="rc"
+          else
+            echo "Tag must be ${final_tag} or ${rc_prefix}N, got ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "release_kind=${release_kind}" >> "${GITHUB_OUTPUT}"
+          echo "rc_number=${rc_number}" >> "${GITHUB_OUTPUT}"
+
+          echo "Validated ${release_kind} tag ${GITHUB_REF_NAME}"
+          java -version
+          mvn -version
+
+  java:
+    name: Java packages
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      contains(github.ref_name, '-rc')
+    uses: ./.github/workflows/release-java.yml
+
+  python-package:
+    name: PyPaimon package
+    needs: validation
+    uses: ./.github/workflows/release-python.yml
+    with:
+      release_version: ${{ needs.validation.outputs.release_version }}
+
+  python-publish:
+    name: PyPaimon publish
+    needs: [validation, python-package]
+    if: >-
+      needs.validation.result == 'success' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      needs.python-package.result == 'success'
+    uses: ./.github/workflows/release-python-publish.yml
+    with:
+      release_version: ${{ needs.validation.outputs.release_version }}
+    secrets:
+      TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}

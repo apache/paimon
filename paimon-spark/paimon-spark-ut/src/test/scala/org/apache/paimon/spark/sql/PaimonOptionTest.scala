@@ -120,6 +120,44 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Option: global deletion-vector merge-on-read supports mixed tables") {
+    withTable("non_dv", "dv") {
+      sql("CREATE TABLE non_dv (id INT, v STRING)")
+      sql("""
+            |CREATE TABLE dv (id INT, v STRING)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO non_dv VALUES (1, 'append')")
+      sql("INSERT INTO dv VALUES (2, 'dv')")
+
+      checkAnswer(sql("SELECT * FROM dv"), Nil)
+      withSparkSQLConf("spark.paimon.deletion-vectors.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("""
+                |SELECT * FROM non_dv
+                |UNION ALL
+                |SELECT * FROM dv
+                |ORDER BY id
+                |""".stripMargin),
+          Row(1, "append") :: Row(2, "dv") :: Nil
+        )
+      }
+
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .option("deletion-vectors.merge-on-read", "true")
+          .table("non_dv"),
+        Row(1, "append"))
+    }
+  }
+
   test("Paimon Table Options: query one table with sql conf and table options") {
     sql("CREATE TABLE T (id INT)")
     sql("INSERT INTO T VALUES 1")

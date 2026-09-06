@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>1.5-SNAPSHOT</version>
+    <version>2.1-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -75,12 +75,12 @@ under the License.
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
         <module>paimon-mosaic</module>
-        <module>paimon-tantivy</module>
+        <module>paimon-full-text</module>
         <module>paimon-vector</module>
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2025-09-16T01:56:37Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-07-31T02:24:07Z</project.build.outputTimestamp>
         <paimon.shade.version>0.8.0</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
@@ -101,7 +101,7 @@ under the License.
         <airlift.version>2.0.3</airlift.version>
         <lz4.version>1.10.4</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
-        <log4j.version>2.25.4</log4j.version>
+        <log4j.version>2.25.5</log4j.version>
         <junit4.version>4.13.2</junit4.version>
         <junit5.version>5.8.1</junit5.version>
         <spotless.version>2.13.0</spotless.version>
@@ -118,6 +118,7 @@ under the License.
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
         <arrow.version>15.0.0</arrow.version>
+        <paimon.full-text-index.version>0.1.0</paimon.full-text-index.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
@@ -520,6 +521,16 @@ under the License.
         </profile>
 
         <profile>
+            <!-- paimon-eslib and its external ESLib/Lucene dependencies require Java 11+. Keep
+                 this module opt-in so the default reactor is independent of the external ESLib
+                 repository. Build it explicitly with -Ppaimon-eslib on JDK 11+. -->
+            <id>paimon-eslib</id>
+            <modules>
+                <module>paimon-eslib</module>
+            </modules>
+        </profile>
+
+        <profile>
             <!-- JDK 9+ supports the ignore-source-errors flag for javadoc -->
             <id>javadoc-jdk9+</id>
             <activation>
@@ -661,6 +672,8 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
+                        <!-- Binary compatibility fixtures -->
+                        <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-python/pypaimon/sample/data/**</exclude>
                         <exclude>**/*.proto</exclude>

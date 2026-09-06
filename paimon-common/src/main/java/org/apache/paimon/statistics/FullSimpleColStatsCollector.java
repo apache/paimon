@@ -20,6 +20,7 @@ package org.apache.paimon.statistics;
 
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.utils.SortUtil;
 
 /** The full stats collector which will report null count, min value, max value if available. */
 public class FullSimpleColStatsCollector extends AbstractSimpleColStatsCollector {
@@ -31,7 +32,17 @@ public class FullSimpleColStatsCollector extends AbstractSimpleColStatsCollector
             return;
         }
 
-        // TODO use comparator for not comparable types and extract this logic to a util class
+        if (field instanceof byte[]) {
+            byte[] b = (byte[]) field;
+            if (minValue == null || SortUtil.compareBinary(b, (byte[]) minValue) < 0) {
+                minValue = fieldSerializer.copy(field);
+            }
+            if (maxValue == null || SortUtil.compareBinary(b, (byte[]) maxValue) > 0) {
+                maxValue = fieldSerializer.copy(field);
+            }
+            return;
+        }
+
         if (!(field instanceof Comparable)) {
             return;
         }

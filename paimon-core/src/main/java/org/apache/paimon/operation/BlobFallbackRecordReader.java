@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.append.ForceSingleBatchReader;
+import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -28,6 +30,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
@@ -59,10 +62,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
-    private final int blobIndex;
     private final int fieldCount;
     private final int rowIdIndex;
     private final int seqNumIndex;
+    private final Object blobPlaceholder;
+    private final InternalRow.FieldGetter blobGetter;
     private boolean returned;
 
     BlobFallbackRecordReader(
@@ -73,21 +77,54 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             RowType readRowType,
             int blobIndex)
             throws IOException {
-        this.blobIndex = blobIndex;
+        this(
+                files,
+                readerFactory,
+                readerWrapper,
+                enclosingRange(files),
+                rowRanges,
+                readRowType,
+                blobIndex);
+    }
+
+    BlobFallbackRecordReader(
+            List<DataFileMeta> files,
+            BlobFileReaderFactory readerFactory,
+            ReaderWrapper readerWrapper,
+            Range logicalRange,
+            List<Range> rowRanges,
+            RowType readRowType,
+            int blobIndex)
+            throws IOException {
         this.fieldCount = readRowType.getFieldCount();
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        this.blobPlaceholder = blobPlaceholder(readRowType, blobIndex);
+        this.blobGetter =
+                InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
         checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
-        long firstRowId = Long.MAX_VALUE;
-        long lastRowId = Long.MIN_VALUE;
+        long firstRowId = logicalRange.from;
+        long lastRowId = logicalRange.to;
 
         // sort group readers in descending order
         Map<Long, List<DataFileMeta>> sequenceGroups = new TreeMap<>(reverseOrder());
         for (DataFileMeta file : files) {
             Range fileRange = file.nonNullRowIdRange();
-            firstRowId = Math.min(firstRowId, fileRange.from);
-            lastRowId = Math.max(lastRowId, fileRange.to);
+            if (rowRanges == null) {
+                checkArgument(
+                        fileRange.from >= firstRowId && fileRange.to <= lastRowId,
+                        "Blob file range %s should be within logical range %s.",
+                        fileRange,
+                        logicalRange);
+            } else {
+                // A pushed range may select one normal-file range from a spanning Blob file.
+                checkArgument(
+                        fileRange.hasIntersection(logicalRange),
+                        "Blob file range %s should intersect logical range %s.",
+                        fileRange,
+                        logicalRange);
+            }
 
             sequenceGroups
                     .computeIfAbsent(file.maxSequenceNumber(), ignored -> new ArrayList<>())
@@ -126,6 +163,18 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
         }
     }
 
+    private static Range enclosingRange(List<DataFileMeta> files) {
+        checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
+        long firstRowId = Long.MAX_VALUE;
+        long lastRowId = Long.MIN_VALUE;
+        for (DataFileMeta file : files) {
+            Range range = file.nonNullRowIdRange();
+            firstRowId = Math.min(firstRowId, range.from);
+            lastRowId = Math.max(lastRowId, range.to);
+        }
+        return new Range(firstRowId, lastRowId);
+    }
+
     @Nullable
     @Override
     public RecordIterator<InternalRow> readBatch() throws IOException {
@@ -159,14 +208,20 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             public InternalRow next() throws IOException {
                 InternalRow result = null;
                 long rowId = -1L;
-                // We should always move each iterator forward
-                // This may significantly increase memory usage and decrease read efficiency
-                // if `blob-as-descriptor` is disabled and many non-null blobs are updated
-                // TODO: Do not read stale records if there's a newer non-placeholder
-                //   record. e.g. introduce a discard method to directly discard the
-                //   next record?
+                // We should always move each iterator forward, but stale blobs do not need to be
+                // materialized after finding a newer non-placeholder record.
                 for (int i = 0; i < iterators.length; i++) {
                     RecordIterator<InternalRow> iterator = iterators[i];
+                    // If result is not null, skip all older blobs.
+                    if (result != null) {
+                        if (!iterator.skip()) {
+                            throw new IllegalStateException(
+                                    "All readers of each max_seq group should have the same number "
+                                            + "of records.");
+                        }
+                        continue;
+                    }
+
                     InternalRow row = iterator.next();
                     if (row == null) {
                         if (i != 0) {
@@ -174,7 +229,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     "All readers of each max_seq group should have the same number of records.");
                         }
                         for (int j = i + 1; j < iterators.length; j++) {
-                            if (iterators[j].next() != null) {
+                            if (iterators[j].skip()) {
                                 throw new IllegalStateException(
                                         "All readers of each max_seq group should have the same number of records.");
                             }
@@ -217,7 +272,21 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
     }
 
     private boolean isPlaceHolder(InternalRow row) {
-        return !row.isNullAt(blobIndex) && row.getBlob(blobIndex) == BlobPlaceholder.INSTANCE;
+        return blobGetter.getFieldOrNull(row) == blobPlaceholder;
+    }
+
+    private static Object blobPlaceholder(RowType rowType, int blobIndex) {
+        DataTypeRoot typeRoot = rowType.getTypeAt(blobIndex).getTypeRoot();
+        switch (typeRoot) {
+            case ARRAY:
+                return BlobArrayPlaceholder.INSTANCE;
+            case MAP:
+                return BlobMapPlaceholder.INSTANCE;
+            case BLOB:
+                return BlobPlaceholder.INSTANCE;
+            default:
+                throw new UnsupportedOperationException("Unsupported Blob Type: " + typeRoot);
+        }
     }
 
     @Override

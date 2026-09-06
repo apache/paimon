@@ -54,6 +54,8 @@ class VindexVectorIndexWriter:
         self._index_type = index_type
         self._native_options = native_options(
             data_type, options, index_type, field_name)
+        self._train_sample_ratio = train_sample_ratio(
+            options, index_type, field_name)
         self._dimension = int(self._native_options["dimension"])
         self._row_count = 0
         self._vector_count = 0
@@ -96,11 +98,11 @@ class VindexVectorIndexWriter:
 
             try:
                 import numpy as np
-                from paimon_vindex import VectorIndexWriter
+                from paimon_vindex import VectorIndexTrainer, VectorIndexWriter
             except ImportError as e:
                 raise ImportError(
                     "paimon-vindex is required to build vindex vector indexes. "
-                    "Install paimon-vindex==0.1.0 or pypaimon[vindex].") from e
+                    "Install paimon-vindex==0.4.0 or pypaimon[vindex].") from e
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)
@@ -109,12 +111,19 @@ class VindexVectorIndexWriter:
                 dtype=np.float32,
                 count=self._vector_count * self._dimension,
             ).reshape(self._vector_count, self._dimension)
-            with VectorIndexWriter(self._native_options) as writer:
-                writer.train(vectors)
+            training_vectors = _sample_training_vectors(
+                np, vectors, self._train_sample_ratio)
+            training = VectorIndexTrainer.train(
+                self._training_options(), training_vectors)
+            try:
+                del training_vectors
                 del vectors
-                self._add_vectors_in_batches(np, writer)
-                with self._file_io.new_output_stream(file_path) as output_stream:
-                    writer.write(output_stream)
+                with VectorIndexWriter(training) as writer:
+                    self._add_vectors_in_batches(np, writer)
+                    with self._file_io.new_output_stream(file_path) as output_stream:
+                        writer.write(output_stream)
+            finally:
+                training.close()
         except Exception:
             self._file_io.delete_quietly(file_path)
             raise
@@ -125,6 +134,17 @@ class VindexVectorIndexWriter:
 
     def _file_path(self) -> str:
         return "%s/%s" % (self._index_path, self.file_name)
+
+    def _training_options(self) -> Dict[str, str]:
+        options = dict(self._native_options)
+        nlist = options.get("nlist")
+        if (
+            options.get("index.type", "").startswith("ivf_")
+            and nlist in (None, "auto")
+            and "expected-vector-count" not in options
+        ):
+            options["expected-vector-count"] = str(self._vector_count)
+        return options
 
     def close(self) -> None:
         if not self._closed:
@@ -207,7 +227,33 @@ def native_options(
 
     result["index.type"] = index_type.replace('-', '_')
     result["dimension"] = str(_dimension(data_type, result, index_type))
+    result.setdefault("metric", "inner_product")
     return result
+
+
+def train_sample_ratio(
+    options: Mapping[str, object], index_type: str, field_name: str
+) -> float:
+    field_key = "fields.%s.train.sample-ratio" % field_name
+    index_key = "%s.train.sample-ratio" % index_type
+    key = field_key if field_key in options else index_key
+    if key not in options:
+        return 1.0
+
+    value = options[key]
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "Invalid value for '%s': %s. Must be greater than 0 and less "
+            "than or equal to 1." % (key, value)
+        ) from e
+    if not math.isfinite(ratio) or ratio <= 0 or ratio > 1:
+        raise ValueError(
+            "Invalid value for '%s': %s. Must be greater than 0 and less "
+            "than or equal to 1." % (key, value)
+        )
+    return ratio
 
 
 def validate_vector_type(data_type: DataType) -> None:
@@ -237,14 +283,40 @@ def _native_option_key(option_key: str) -> Optional[str]:
         return "metric"
     if option_key in (
         "nlist",
+        "expected-vector-count",
         "pq.m",
-        "hnsw.m",
-        "hnsw.ef-construction",
-        "hnsw.max-level",
+        "pq.code-ratio",
+        "pq.bits",
+        "rq.bits",
+        "target-recall",
+        "max-bytes-per-vector",
+        "deployment-profile",
     ):
         return option_key
     if option_key in ("pq.use-opq", "use-opq"):
         return "use-opq"
+    diskann_options = {
+        "build-preset": "diskann.build-preset",
+        "diskann.build-preset": "diskann.build-preset",
+        "max-degree": "diskann.max-degree",
+        "diskann.max-degree": "diskann.max-degree",
+        "build-search-list-size": "diskann.build-search-list-size",
+        "diskann.build-search-list-size": "diskann.build-search-list-size",
+        "alpha": "diskann.alpha",
+        "diskann.alpha": "diskann.alpha",
+        "seed": "diskann.seed",
+        "diskann.seed": "diskann.seed",
+        "memory-budget-bytes": "diskann.memory-budget-bytes",
+        "diskann.memory-budget-bytes": "diskann.memory-budget-bytes",
+        "storage-layout": "diskann.storage-layout",
+        "diskann.storage-layout": "diskann.storage-layout",
+        "raw-vector-encoding": "diskann.raw-vector-encoding",
+        "diskann.raw-vector-encoding": "diskann.raw-vector-encoding",
+        "build-distance": "diskann.build-distance",
+        "diskann.build-distance": "diskann.build-distance",
+    }
+    if option_key in diskann_options:
+        return diskann_options[option_key]
     return None
 
 
@@ -269,6 +341,18 @@ def _is_float_type(data_type: DataType) -> bool:
         isinstance(data_type, AtomicType)
         and data_type.type.upper() == "FLOAT"
     )
+
+
+def _sample_training_vectors(np, vectors, sample_ratio: float):
+    vector_count = vectors.shape[0]
+    train_count = max(1, min(vector_count, int(math.ceil(
+        vector_count * sample_ratio))))
+    if train_count == vector_count:
+        return vectors
+    indexes = (
+        np.arange(train_count, dtype=np.int64) * vector_count // train_count
+    )
+    return np.ascontiguousarray(vectors[indexes])
 
 
 def _materialize_vector(

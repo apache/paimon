@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for Lumina vector options. */
 public class LuminaVectorOptionsTest {
@@ -115,6 +116,36 @@ public class LuminaVectorOptionsTest {
         assertThat(meta.dim()).isEqualTo(256);
         assertThat(meta.distanceMetric()).isEqualTo("inner_product");
         assertThat(meta.metric()).isEqualTo(LuminaVectorMetric.INNER_PRODUCT);
+    }
+
+    @Test
+    public void enumFormMetricIsNormalizedToNativeNameInMeta() {
+        // A user may configure the metric using the enum-form name (e.g. "L2"), which
+        // parseMetric() accepts. The meta must persist the native name ("l2") so that the read
+        // path LuminaIndexMeta.metric() -> fromLuminaName() can resolve it without throwing.
+        Map<String, String> enumFormL2 = new HashMap<>();
+        enumFormL2.put("lumina.distance.metric", "L2");
+        enumFormL2.put("lumina.index.dimension", "128");
+
+        Map<String, String> l2Meta =
+                new LuminaVectorIndexOptions(Options.fromMap(enumFormL2)).toLuminaOptions();
+        assertThat(l2Meta).containsEntry("distance.metric", "l2");
+        assertThatCode(() -> new LuminaIndexMeta(l2Meta).metric()).doesNotThrowAnyException();
+        assertThat(new LuminaIndexMeta(l2Meta).metric()).isEqualTo(LuminaVectorMetric.L2);
+
+        // Same normalization for another enum-form metric.
+        Map<String, String> enumFormIp = new HashMap<>();
+        enumFormIp.put("lumina.distance.metric", "INNER_PRODUCT");
+        enumFormIp.put("lumina.index.dimension", "128");
+        assertThat(new LuminaVectorIndexOptions(Options.fromMap(enumFormIp)).toLuminaOptions())
+                .containsEntry("distance.metric", "inner_product");
+
+        // No regression: a native-form name stays as-is.
+        Map<String, String> nativeFormL2 = new HashMap<>();
+        nativeFormL2.put("lumina.distance.metric", "l2");
+        nativeFormL2.put("lumina.index.dimension", "128");
+        assertThat(new LuminaVectorIndexOptions(Options.fromMap(nativeFormL2)).toLuminaOptions())
+                .containsEntry("distance.metric", "l2");
     }
 
     /** Builds the native lumina meta map (what gets serialized into the index file) for a field. */

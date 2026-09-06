@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.data.BlobArrayPlaceholder;
+import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -25,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -41,6 +44,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
     private final long firstRowId;
     private final int fieldCount;
     private final int blobIndex;
+    private final Object blobPlaceholder;
     private final int rowIdIndex;
     private final int seqNumIndex;
     private final long sequenceNumber;
@@ -57,10 +61,24 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         this.firstRowId = firstRowId;
         this.fieldCount = readRowType.getFieldCount();
         this.blobIndex = blobIndex;
+        this.blobPlaceholder = blobPlaceholder(readRowType.getTypeAt(blobIndex).getTypeRoot());
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
         this.sequenceNumber = sequenceNumber;
         this.selectedRanges = selectedRanges(firstRowId, rowCount, rowRanges);
+    }
+
+    private static Object blobPlaceholder(DataTypeRoot typeRoot) {
+        switch (typeRoot) {
+            case ARRAY:
+                return BlobArrayPlaceholder.INSTANCE;
+            case MAP:
+                return BlobMapPlaceholder.INSTANCE;
+            case BLOB:
+                return BlobPlaceholder.INSTANCE;
+            default:
+                throw new UnsupportedOperationException("Unsupported BlobType: " + typeRoot);
+        }
     }
 
     @Nullable
@@ -95,7 +113,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
 
     private InternalRow placeholderRow(long rowId) {
         GenericRow row = new GenericRow(fieldCount);
-        row.setField(blobIndex, BlobPlaceholder.INSTANCE);
+        row.setField(blobIndex, blobPlaceholder);
         if (rowIdIndex >= 0) {
             row.setField(rowIdIndex, rowId);
         }
@@ -125,12 +143,21 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
         @Nullable
         @Override
         public InternalRow next() {
+            return advance() ? placeholderRow(returnedRowId) : null;
+        }
+
+        @Override
+        public boolean skip() {
+            return advance();
+        }
+
+        private boolean advance() {
             while (rangeIndex < selectedRanges.size()) {
                 Range range = selectedRanges.get(rangeIndex);
                 if (nextRowId <= range.to) {
                     returnedRowId = nextRowId;
                     nextRowId++;
-                    return placeholderRow(returnedRowId);
+                    return true;
                 }
 
                 rangeIndex++;
@@ -138,7 +165,7 @@ class AllPlaceholdersRecordReader implements FileRecordReader<InternalRow> {
                     nextRowId = selectedRanges.get(rangeIndex).from;
                 }
             }
-            return null;
+            return false;
         }
 
         @Override

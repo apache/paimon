@@ -103,7 +103,8 @@ public class MemorySliceOutput {
             return;
         }
 
-        int newCapacity = segment.size();
+        // Doubling never leaves zero, so an empty segment has to grow from one byte.
+        int newCapacity = Math.max(segment.size(), 1);
         int minNewCapacity = segment.size() + minWritableBytes;
         while (newCapacity < minNewCapacity) {
             newCapacity <<= 1;

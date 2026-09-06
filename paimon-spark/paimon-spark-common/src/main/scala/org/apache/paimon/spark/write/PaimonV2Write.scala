@@ -84,11 +84,16 @@ class PaimonV2Write(
       PaimonAddedTableFilesMetric()
     )
     if (copyOnWriteScan.isEmpty) {
-      // todo: support record metrics for row level ops
       buffer += PaimonInsertedRecordsMetric()
     }
     if (copyOnWriteScan.nonEmpty) {
       buffer += PaimonDeletedTableFilesMetric()
+      // For DELETE, the number of deleted records is exactly the row count difference between
+      // the removed files and the rewritten files. For UPDATE and MERGE, the rewritten files
+      // mix copied rows with modified rows, so record metrics cannot be derived from file stats.
+      if (operationType.contains(Snapshot.Operation.DELETE)) {
+        buffer += PaimonDeletedRecordsMetric()
+      }
     }
     if (!coreOptions.changelogProducer().equals(ChangelogProducer.NONE)) {
       buffer += PaimonAppendedChangelogFilesMetric()

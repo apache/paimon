@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -63,7 +64,7 @@ public class MultisetType extends DataType {
 
     @Override
     public int defaultSize() {
-        return elementType.defaultSize() + 4;
+        return MathUtils.addSafely(elementType.defaultSize(), 4);
     }
 
     @Override
@@ -98,6 +99,36 @@ public class MultisetType extends DataType {
         }
         MultisetType that = (MultisetType) o;
         return elementType.equals(that.elementType);
+    }
+
+    @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.equalsIgnoreFieldId(that.elementType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.isPrunedFrom(that.elementType);
     }
 
     @Override

@@ -61,7 +61,8 @@ public class SortLookupStoreTest {
 
     // 256 records per block
     private static final int BLOCK_SIZE = (10) * 256;
-    private static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.ofMebiBytes(10));
+    private static final CacheManager CACHE_MANAGER =
+            new CacheManager(MemorySize.ofMebiBytes(10), 0);
     @TempDir java.nio.file.Path tempPath;
 
     private final boolean bloomFilterEnabled;
@@ -238,15 +239,18 @@ public class SortLookupStoreTest {
     }
 
     private void writeData(int recordCount, boolean withBloomFilter) throws Exception {
-        BloomFilter.Builder bloomFilter = null;
+        BloomFilter.Builder bloomFilterBuilder = null;
         if (withBloomFilter) {
-            bloomFilter = BloomFilter.builder(recordCount, 0.05);
+            bloomFilterBuilder = BloomFilter.fixedBuilder(recordCount, 0.05);
         }
         BlockCompressionFactory compressionFactory = BlockCompressionFactory.create(compress);
         try (PositionOutputStream outputStream = fileIO.newOutputStream(file, true);
                 SortLookupStoreWriter writer =
                         new SortLookupStoreWriter(
-                                outputStream, BLOCK_SIZE, bloomFilter, compressionFactory); ) {
+                                outputStream,
+                                BLOCK_SIZE,
+                                bloomFilterBuilder,
+                                compressionFactory); ) {
             MemorySliceOutput keyOut = new MemorySliceOutput(4);
             MemorySliceOutput valueOut = new MemorySliceOutput(4);
             long start = System.currentTimeMillis();

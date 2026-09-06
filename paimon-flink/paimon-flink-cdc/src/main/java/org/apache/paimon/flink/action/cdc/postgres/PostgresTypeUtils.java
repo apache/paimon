@@ -69,7 +69,9 @@ public class PostgresTypeUtils {
     private static final String PG_CHARACTER_VARYING = "varchar";
     private static final String PG_CHARACTER_VARYING_ARRAY = "_varchar";
     private static final String PG_JSON = "json";
+    private static final String PG_JSONB = "jsonb";
     private static final String PG_ENUM = "enum";
+    private static final String PG_UUID = "uuid";
 
     public static DataType toDataType(
             String typeName,
@@ -124,16 +126,28 @@ public class PostgresTypeUtils {
                 return DataTypes.ARRAY(DataTypes.DOUBLE());
             case PG_NUMERIC:
                 // see SPARK-26538: handle numeric without explicit precision and scale.
-                if (precision > 0) {
-                    return DataTypes.DECIMAL(precision, scale);
+                // Postgres numeric allows precision up to 1000 and (since PG 15) a scale
+                // outside [0, precision], but Paimon DECIMAL requires precision <= 38 and
+                // 0 <= scale <= precision. Fall back to STRING when out of range, mirroring
+                // MySqlTypeUtils.
+                if (precision <= 0) {
+                    return DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18);
                 }
-                return DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18);
+                return isDecimalOutOfRange(precision, scale)
+                        ? DataTypes.STRING()
+                        : DataTypes.DECIMAL(precision, scale);
             case PG_NUMERIC_ARRAY:
                 // see SPARK-26538: handle numeric without explicit precision and scale.
-                if (precision > 0) {
-                    return DataTypes.ARRAY(DataTypes.DECIMAL(precision, scale));
+                // Postgres numeric allows precision up to 1000 and (since PG 15) a scale
+                // outside [0, precision], but Paimon DECIMAL requires precision <= 38 and
+                // 0 <= scale <= precision. Fall back to STRING when out of range, mirroring
+                // MySqlTypeUtils.
+                if (precision <= 0) {
+                    return DataTypes.ARRAY(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18));
                 }
-                return DataTypes.ARRAY(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18));
+                return isDecimalOutOfRange(precision, scale)
+                        ? DataTypes.ARRAY(DataTypes.STRING())
+                        : DataTypes.ARRAY(DataTypes.DECIMAL(precision, scale));
             case PG_CHAR:
             case PG_CHARACTER:
                 return DataTypes.CHAR(precision);
@@ -146,7 +160,9 @@ public class PostgresTypeUtils {
                 return DataTypes.ARRAY(DataTypes.VARCHAR(precision));
             case PG_TEXT:
             case PG_JSON:
+            case PG_JSONB:
             case PG_ENUM:
+            case PG_UUID:
                 return DataTypes.STRING();
             case PG_TEXT_ARRAY:
                 return DataTypes.ARRAY(DataTypes.STRING());
@@ -170,6 +186,15 @@ public class PostgresTypeUtils {
                 throw new UnsupportedOperationException(
                         String.format("Doesn't support Postgres type '%s' yet", typeName));
         }
+    }
+
+    private static boolean isDecimalOutOfRange(int precision, int scale) {
+        // Paimon DECIMAL requires precision <= 38 and 0 <= scale <= precision; Postgres
+        // numeric can exceed both (precision up to 1000, and negative or over-precision
+        // scale since PG 15), which would otherwise throw from the DecimalType constructor.
+        return precision > DecimalType.MAX_PRECISION
+                || scale < DecimalType.MIN_SCALE
+                || scale > precision;
     }
 
     public static JdbcToPaimonTypeVisitor toPaimonTypeVisitor() {

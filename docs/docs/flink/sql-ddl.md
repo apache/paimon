@@ -34,6 +34,32 @@ Paimon catalogs currently support three types of metastores:
 
 See [CatalogOptions](../maintenance/configurations#catalogoptions) for detailed options when creating a catalog.
 
+:::info
+
+For an internal Format Table in a REST catalog, `metastore.partitioned-table = true` makes the
+catalog the source of truth for partitions, which requires an internal table in a catalog that supports it (currently the REST
+catalog) and cannot be combined with `format-table.implementation = engine`. On a Paimon table
+the same option keeps its existing meaning (synchronize partitions into the metastore); on a
+Format Table it only takes effect in a REST catalog, and elsewhere partitions are still discovered
+from the filesystem.
+
+**A Flink job reads only the partitions the catalog knows.** Directories written before the option
+was enabled, by an older writer, or by anything that does not register what it wrote are invisible,
+and a table whose catalog holds no partitions reads as empty. Flink has no SQL command to register
+them: use Spark's `MSCK REPAIR TABLE` or the catalog's partition API. Flink writes on a current
+version do register the partitions they produce.
+
+Flink SQL cannot set a custom partition `LOCATION`. Upgrade Flink readers before registering custom
+locations through the catalog API.
+
+In a REST catalog, asking for catalog-managed partitions on a table that cannot have them — an
+external table, or `format-table.implementation = engine` — fails. In any other catalog the option
+keeps the meaning it has always had on a Format Table — none — and partitions come from the
+filesystem. Removing the option needs a catalog that can alter the table; Flink's Format Table path
+cannot, so use another engine.
+
+:::
+
 ### Create Filesystem Catalog
 
 The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
@@ -85,7 +111,7 @@ You can define any default table options with the prefix `table-default.` for ta
 
 Also, you can create [FlinkGenericCatalog](./quick-start).
 
-> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
+> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false` on the **Hive Metastore server** (in its `hive-site.xml`, then restart HMS). Setting this on the Paimon catalog or via Flink SQL `SET` only configures the client-side HiveConf and is not propagated to the remote HMS over Thrift. See [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
 
 > If you are using Hive3, please disable Hive ACID:
 >

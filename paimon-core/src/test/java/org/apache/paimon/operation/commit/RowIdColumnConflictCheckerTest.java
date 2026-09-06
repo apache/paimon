@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
@@ -78,6 +79,25 @@ class RowIdColumnConflictCheckerTest {
     }
 
     @Test
+    void testTreatsNullWriteColumnsAsAllNonDedicatedColumns() {
+        RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 3L, null));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, Arrays.asList("blob"))))
+                .isFalse();
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, Arrays.asList("value"))))
+                .isTrue();
+
+        checker = checker(file("current", 0L, 10L, 3L, Arrays.asList("blob")));
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 3L, null))).isFalse();
+
+        checker = checker(file("legacy-current", 0L, 10L, 4L, null));
+        assertThat(
+                        checker.conflictsWith(
+                                file("legacy-historical", 0L, 10L, 4L, Arrays.asList("blob"))))
+                .isTrue();
+    }
+
+    @Test
     void testMergesOverlappedDeltaRangesAndWriteColumns() {
         RowIdColumnConflictChecker checker =
                 checker(
@@ -114,9 +134,64 @@ class RowIdColumnConflictCheckerTest {
                 .hasMessageContaining("Cannot find write column 'missing'");
     }
 
+    @Test
+    void testSubFieldDisjointLeavesDoNotConflict() {
+        // schema 2: id INT, nest ROW<a INT, b INT>
+        RowIdColumnConflictChecker checker =
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.b"))))
+                .isFalse();
+    }
+
+    @Test
+    void testSubFieldSameLeafConflicts() {
+        RowIdColumnConflictChecker checker =
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
+    @Test
+    void testWholeStructConflictsWithSubField() {
+        // a whole-struct write expands to all of its leaves, so it conflicts with a sub-field write
+        RowIdColumnConflictChecker checker =
+                nestedChecker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
+    @Test
+    void testFullSchemaWriteConflictsWithSubField() {
+        RowIdColumnConflictChecker checker = nestedChecker(file("current", 0L, 10L, 2L, null));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
+    @Test
+    void testNestedWriteColumnIsUnknownWhenOptionDisabled() {
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+
+        assertThatThrownBy(
+                        () ->
+                                checker.conflictsWith(
+                                        file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find write column 'nest.a'");
+    }
+
     private RowIdColumnConflictChecker checker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
-                createSchemaManager(), Arrays.asList(files));
+                createSchemaManager(), Arrays.asList(files), false);
+    }
+
+    private RowIdColumnConflictChecker nestedChecker(DataFileMeta... files) {
+        return RowIdColumnConflictChecker.fromDataFiles(
+                createSchemaManager(), Arrays.asList(files), true);
     }
 
     private DataFileMeta file(
@@ -170,7 +245,58 @@ class RowIdColumnConflictCheckerTest {
                                 Collections.singletonList("id"),
                                 Collections.emptyMap(),
                                 "")));
+        schemas.put(
+                2L,
+                org.apache.paimon.schema.TableSchema.create(
+                        2L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "id", DataTypes.INT()),
+                                        new DataField(
+                                                1,
+                                                "nest",
+                                                DataTypes.ROW(
+                                                        new DataField(2, "a", DataTypes.INT()),
+                                                        new DataField(3, "b", DataTypes.INT())))),
+                                Collections.emptyList(),
+                                Collections.singletonList("id"),
+                                Collections.emptyMap(),
+                                "")));
+        schemas.put(
+                3L,
+                org.apache.paimon.schema.TableSchema.create(
+                        3L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "value", DataTypes.INT()),
+                                        new DataField(1, "blob", DataTypes.BLOB())),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                dataEvolutionOptions(true),
+                                "")));
+        schemas.put(
+                4L,
+                org.apache.paimon.schema.TableSchema.create(
+                        4L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "value", DataTypes.INT()),
+                                        new DataField(1, "blob", DataTypes.BLOB())),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true"),
+                                "")));
         return new TestingSchemaManager(
                 new Path("/tmp/row-id-column-conflict-checker-test"), schemas);
+    }
+
+    private static Map<String, String> dataEvolutionOptions(boolean optimized) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        if (optimized) {
+            options.put(CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED.key(), "true");
+        }
+        return options;
     }
 }

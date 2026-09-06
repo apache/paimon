@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.utils.SnapshotManager;
@@ -64,6 +65,73 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testGetSnapshotFromBranchTag() throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        table.createTag("tag1", 1);
+        table.createBranch("delta", "tag1");
+
+        FileStoreTable deltaTable = table.switchToBranch("delta");
+        String branchOnlyTag = "branch_only_tag";
+        deltaTable.createTag(branchOnlyTag, 1);
+
+        assertThat(deltaTable.tagManager().tagExists(branchOnlyTag)).isTrue();
+        assertThat(table.tagManager().tagExists(branchOnlyTag)).isFalse();
+
+        StaticFromTagStartingScanner scanner =
+                new StaticFromTagStartingScanner(deltaTable.snapshotManager(), branchOnlyTag);
+        assertThat(scanner.getSnapshot().id()).isEqualTo(1);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testScanFromBranchTag() throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        table.createBranch("delta");
+        FileStoreTable deltaTable = table.switchToBranch("delta");
+
+        StreamTableWrite deltaWrite = deltaTable.newWrite(commitUser);
+        StreamTableCommit deltaCommit = deltaTable.newCommit(commitUser);
+
+        deltaWrite.write(rowData(1, 10, 100L));
+        deltaCommit.commit(0, deltaWrite.prepareCommit(true, 0));
+
+        deltaWrite.write(rowData(2, 30, 101L));
+        deltaCommit.commit(1, deltaWrite.prepareCommit(true, 1));
+
+        String tagName = "branch_only_tag";
+        deltaTable.createTag(tagName, 2);
+
+        assertThat(deltaTable.tagManager().tagExists(tagName)).isTrue();
+        assertThat(table.tagManager().tagExists(tagName)).isFalse();
+
+        SnapshotManager deltaSnapshotManager = deltaTable.snapshotManager();
+        StaticFromTagStartingScanner scanner =
+                new StaticFromTagStartingScanner(deltaSnapshotManager, tagName);
+        StartingScanner.ScannedResult result =
+                (StartingScanner.ScannedResult) scanner.scan(deltaTable.newSnapshotReader());
+        assertThat(result.currentSnapshotId()).isEqualTo(2);
+        assertThat(getResult(deltaTable.newRead(), result.splits()))
+                .hasSameElementsAs(Arrays.asList("+I 1|10|100", "+I 2|30|101"));
+
+        write.close();
+        commit.close();
+        deltaWrite.close();
+        deltaCommit.close();
     }
 
     @Test

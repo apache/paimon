@@ -26,12 +26,10 @@ from pypaimon.common.file_io import pread, supports_pread
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 
-VINDEX_IDENTIFIERS = ("ivf-flat", "ivf-pq", "ivf-hnsw-flat", "ivf-hnsw-sq")
+VINDEX_IDENTIFIERS = ("ivf-flat", "ivf-pq", "ivf-sq", "ivf-rq", "diskann")
 
 NPROBE_PARAMETER = "ivf.nprobe"
-EF_SEARCH_PARAMETER = "hnsw.ef_search"
-DEFAULT_NPROBE = 16
-DEFAULT_EF_SEARCH = 0
+L_SEARCH_PARAMETER = "diskann.l_search"
 
 
 class PaimonVindexInput:
@@ -67,6 +65,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
         self._index_input = None
         self._reader = None
         self._metadata = None
+        self._search_params_type = None
         self._load_lock = threading.Lock()
 
     def visit_vector_search(self, vector_search):
@@ -97,21 +96,18 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
             return [None] * n
 
         options = query_options or {}
-        nprobe = _int_parameter(options, NPROBE_PARAMETER, DEFAULT_NPROBE)
-        ef_search = _int_parameter(options, EF_SEARCH_PARAMETER, DEFAULT_EF_SEARCH)
+        params = _search_params(self._search_params_type, options, effective_k)
         filter_bytes = _filter_bytes(include_row_ids)
 
         if n == 1:
             ids, distances = self._reader.search(
-                queries[0], effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+                queries[0], params, filter_bytes=filter_bytes)
             return [_result_from_scores(ids, distances, self._metadata.metric)]
 
         if hasattr(self._reader, "search_batch"):
             batch_result = self._reader.search_batch(
                 np.ascontiguousarray(queries),
-                effective_k,
-                nprobe,
-                ef_search,
+                params,
                 filter_bytes=filter_bytes,
             )
             return _batch_results(batch_result, n, effective_k, self._metadata.metric)
@@ -119,7 +115,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
         results = []
         for query in queries:
             ids, distances = self._reader.search(
-                query, effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+                query, params, filter_bytes=filter_bytes)
             results.append(_result_from_scores(ids, distances, self._metadata.metric))
         return results
 
@@ -160,24 +156,29 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
                 return
 
             try:
-                from paimon_vindex import VectorIndexReader
+                from paimon_vindex import SearchParams, VectorIndexReader
             except ImportError as e:
                 raise ImportError(
                     "paimon-vindex is required to read vindex vector indexes. "
-                    "Install paimon-vindex==0.1.0 or pypaimon[vindex].") from e
+                    "Install paimon-vindex==0.4.0 or pypaimon[vindex].") from e
 
             file_path = (self._io_meta.external_path
                          if self._io_meta.external_path
                          else os.path.join(self._index_path, self._io_meta.file_name))
             stream = self._file_io.new_input_stream(file_path)
+            reader = None
             try:
                 index_input = PaimonVindexInput(stream)
                 reader = VectorIndexReader(index_input)
                 self._metadata = reader.metadata()
+                reader.optimize_for_search()
                 self._index_input = index_input
                 self._reader = reader
+                self._search_params_type = SearchParams
                 self._stream = stream
             except Exception:
+                if reader is not None:
+                    reader.close()
                 stream.close()
                 raise
 
@@ -262,12 +263,27 @@ def _convert_distance_to_score(distance, metric):
     raise ValueError("Unknown vector search metric: %s" % metric)
 
 
-def _int_parameter(options, key, default_value):
+def _search_params(search_params_type, options, top_k):
+    nprobe = _int_parameter(options, NPROBE_PARAMETER)
+    l_search = _int_parameter(options, L_SEARCH_PARAMETER)
+    if nprobe is not None and l_search is not None:
+        raise ValueError(
+            "Cannot set both '%s' and '%s'."
+            % (NPROBE_PARAMETER, L_SEARCH_PARAMETER)
+        )
+    if nprobe is not None:
+        return search_params_type.ivf(top_k=top_k, nprobe=nprobe)
+    if l_search is not None:
+        return search_params_type.diskann(top_k=top_k, l_search=l_search)
+    return search_params_type.automatic(top_k=top_k)
+
+
+def _int_parameter(options, key):
     value = options.get(key)
     if value is None:
-        return default_value
+        return None
     try:
         return int(value)
-    except ValueError as e:
+    except (TypeError, ValueError) as e:
         raise ValueError(
             "Invalid value for '%s': %s. Must be an integer." % (key, value)) from e

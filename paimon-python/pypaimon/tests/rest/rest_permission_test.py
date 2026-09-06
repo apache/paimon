@@ -156,6 +156,7 @@ class RESTPermissionTest(RESTBaseTest):
             self.rest_catalog.commit_snapshot(
                 identifier,
                 "test-uuid",
+                None,
                 test_snapshot,
                 test_statistics
             )

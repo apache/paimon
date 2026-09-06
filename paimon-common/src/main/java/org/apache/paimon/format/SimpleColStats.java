@@ -20,6 +20,7 @@ package org.apache.paimon.format;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
@@ -70,18 +71,25 @@ public class SimpleColStats {
             return false;
         }
         SimpleColStats that = (SimpleColStats) o;
-        return Objects.equals(min, that.min)
-                && Objects.equals(max, that.max)
+        return Objects.deepEquals(min, that.min)
+                && Objects.deepEquals(max, that.max)
                 && Objects.equals(nullCount, that.nullCount);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(min, max, nullCount);
+        return Objects.hash(
+                min instanceof byte[] ? Arrays.hashCode((byte[]) min) : min,
+                max instanceof byte[] ? Arrays.hashCode((byte[]) max) : max,
+                nullCount);
     }
 
     @Override
     public String toString() {
-        return String.format("{%s, %s, %d}", min, max, nullCount);
+        return String.format(
+                "{%s, %s, %d}",
+                min instanceof byte[] ? Arrays.toString((byte[]) min) : min,
+                max instanceof byte[] ? Arrays.toString((byte[]) max) : max,
+                nullCount);
     }
 }

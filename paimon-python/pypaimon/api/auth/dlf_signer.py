@@ -307,13 +307,19 @@ class DLFOpenApiSigner(DLFRequestSigner):
     X_ACS_SECURITY_TOKEN = "x-acs-security-token"
 
     # Values
-    DATE_FORMAT = "%a, %d %b %Y %H:%M:%S GMT"
     ACCEPT_VALUE = "application/json"
     CONTENT_TYPE_VALUE = "application/json"
     SIGNATURE_METHOD_VALUE = "HMAC-SHA1"
     SIGNATURE_VERSION_VALUE = "1.0"
     API_VERSION = "2026-01-18"
     HMAC_SHA1 = "sha1"
+
+    # English weekday/month abbreviations for RFC 1123 dates. strftime's
+    # %a/%b follow LC_TIME and get localized under non-English locales,
+    # which would break the Aliyun OpenAPI signature.
+    WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
     def sign_headers(
             self,
@@ -333,7 +339,12 @@ class DLFOpenApiSigner(DLFRequestSigner):
             gmt_time = now.replace(tzinfo=timezone.utc)
         else:
             gmt_time = now.astimezone(timezone.utc)
-        headers[self.DATE_HEADER] = gmt_time.strftime(self.DATE_FORMAT)
+        # RFC 1123 date, e.g. "Wed, 16 Apr 2025 03:44:46 GMT"
+        headers[self.DATE_HEADER] = (
+            f"{self.WEEKDAYS[gmt_time.weekday()]}, {gmt_time.day:02d} "
+            f"{self.MONTHS[gmt_time.month - 1]} {gmt_time.year:04d} "
+            f"{gmt_time.hour:02d}:{gmt_time.minute:02d}:{gmt_time.second:02d} GMT"
+        )
 
         headers[self.ACCEPT_HEADER] = self.ACCEPT_VALUE
 

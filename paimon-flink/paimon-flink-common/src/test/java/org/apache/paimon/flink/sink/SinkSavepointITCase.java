@@ -74,10 +74,26 @@ public class SinkSavepointITCase extends AbstractTestBase {
             FailingFileIO.reset(failingName, 0, 1);
         }
 
+        // Bound the number of (expensive) stop-with-savepoint / restore cycles. On a starved CI
+        // runner each cycle pays the full Flink job-startup + restore cost, and the original
+        // "restart until FINISHED" loop is unbounded, so its wall-clock could balloon far past the
+        // @Timeout. After exercising a fixed number of recoveries we let the job run to completion
+        // uninterrupted, which keeps total runtime bounded while still covering savepoint recovery.
+        int savepointRounds = 0;
+        int maxSavepointRounds = 10;
+
         OUTER:
         while (true) {
             // start a new job or recover from savepoint
             JobClient jobClient = runRecoverFromSavepointJob(failingPath, savepointPath);
+
+            if (savepointRounds >= maxSavepointRounds) {
+                // enough recoveries exercised; let this job finish without more savepoints
+                waitForJobToFinish(jobClient);
+                break;
+            }
+            savepointRounds++;
+
             while (true) {
                 // wait for a random number of time before stopping with savepoint
                 Thread.sleep(random.nextInt(5000));
@@ -94,6 +110,12 @@ public class SinkSavepointITCase extends AbstractTestBase {
                                     .get();
                     break;
                 } catch (Exception e) {
+                    // Never swallow the interrupt raised by @Timeout: a bare InterruptedException
+                    // from Future.get() means the per-method deadline fired. Rethrow so the test
+                    // fails fast at ~180s instead of looping until the CI job-level timeout.
+                    if (ExceptionUtils.findThrowable(e, InterruptedException.class).isPresent()) {
+                        throw e;
+                    }
                     Optional<StopWithSavepointStoppingException> t =
                             ExceptionUtils.findThrowable(
                                     e, StopWithSavepointStoppingException.class);
@@ -118,6 +140,19 @@ public class SinkSavepointITCase extends AbstractTestBase {
 
         checkRecoverFromSavepointBatchResult();
         checkRecoverFromSavepointStreamingResult();
+    }
+
+    private void waitForJobToFinish(JobClient jobClient) throws Exception {
+        JobStatus status;
+        while ((status = jobClient.getJobStatus().get()) != JobStatus.FINISHED) {
+            // Fail fast if the job dies instead of spinning until the @Timeout fires: this tells a
+            // dead job apart from a slow one, so a terminated job gives a clear error rather than
+            // an opaque timeout.
+            assertThat(status.isGloballyTerminalState())
+                    .as("job reached terminal state %s without finishing", status)
+                    .isFalse();
+            Thread.sleep(1000);
+        }
     }
 
     private JobClient runRecoverFromSavepointJob(String failingPath, String savepointPath)

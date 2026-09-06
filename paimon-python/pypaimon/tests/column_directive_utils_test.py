@@ -25,7 +25,7 @@ from pypaimon.schema.column_directive_utils import (
     remove_dropped_directive_options,
 )
 from pypaimon.schema.data_types import (
-    ArrayType, AtomicType, DataField, VectorType,
+    ArrayType, AtomicType, DataField, MapType, VectorType,
 )
 
 
@@ -98,6 +98,79 @@ class TestApplyAddColumnDirective(unittest.TestCase):
         self.assertEqual(result.type.type, "BLOB")
         self.assertEqual(result.comment, "pic")
         self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "pic")
+
+    def test_blob_field_array_source_type(self):
+        opts = {}
+        result = apply_add_column_directive(
+            "__BLOB_FIELD; pictures",
+            "pictures",
+            ArrayType(True, AtomicType("BYTES", False)),
+            opts,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result.type, ArrayType)
+        self.assertEqual(result.type.element.type, "BLOB")
+        self.assertFalse(result.type.element.nullable)
+        self.assertEqual(result.comment, "pictures")
+        self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "pictures")
+
+    def test_inline_blob_directive_rejects_array_source_type(self):
+        with self.assertRaisesRegex(ValueError, "ARRAY<BLOB> is only supported"):
+            apply_add_column_directive(
+                "__BLOB_DESCRIPTOR_FIELD",
+                "pictures",
+                ArrayType(True, AtomicType("BYTES")),
+                {},
+            )
+
+    def test_blob_field_map_source_type(self):
+        opts = {}
+        result = apply_add_column_directive(
+            "__BLOB_FIELD; pictures",
+            "pictures",
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                AtomicType("BYTES", False),
+            ),
+            opts,
+        )
+
+        self.assertIsInstance(result.type, MapType)
+        self.assertEqual(result.type.key, AtomicType("STRING", False))
+        self.assertEqual(result.type.value, AtomicType("BLOB", False))
+        self.assertEqual(result.comment, "pictures")
+        self.assertEqual(opts[CoreOptions.BLOB_FIELD.key()], "pictures")
+
+    def test_inline_blob_directive_rejects_map_source_type(self):
+        with self.assertRaisesRegex(ValueError, "MAP<X, BLOB> is only supported"):
+            apply_add_column_directive(
+                "__BLOB_DESCRIPTOR_FIELD",
+                "pictures",
+                MapType(
+                    True,
+                    AtomicType("INT", False),
+                    AtomicType("BYTES"),
+                ),
+                {},
+            )
+
+    def test_blob_field_map_allows_unsupported_key_type(self):
+        result = apply_add_column_directive(
+            "__BLOB_FIELD",
+            "pictures",
+            MapType(
+                True,
+                AtomicType("BOOLEAN", False),
+                AtomicType("BYTES"),
+            ),
+            {},
+        )
+
+        self.assertIsInstance(result.type, MapType)
+        self.assertEqual(result.type.key, AtomicType("BOOLEAN", False))
+        self.assertEqual(result.type.value, AtomicType("BLOB"))
 
     def test_vector_field(self):
         opts = {}

@@ -24,11 +24,11 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -47,7 +47,9 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -55,16 +57,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Chain table which mainly read from the snapshot branch. However, if the snapshot branch does not
  * have a partition, it will fall back to chain read.
  */
 public class ChainGroupReadTable extends FallbackReadFileStoreTable {
+
+    /**
+     * Options that cannot be safely passed to branch tables during copy because they would
+     * interfere with branch-specific configurations. If dynamic options contain any of these, an
+     * error is thrown since we cannot fulfill the copy contract (which expects all options to be
+     * passed through).
+     */
+    private static final Set<String> UNSAFE_COPY_OPTIONS =
+            Collections.unmodifiableSet(
+                    new HashSet<>(
+                            Arrays.asList(
+                                    CoreOptions.MERGE_ENGINE.key(),
+                                    CoreOptions.BUCKET.key(),
+                                    CoreOptions.BUCKET_KEY.key(),
+                                    CoreOptions.SEQUENCE_FIELD.key(),
+                                    CoreOptions.SCAN_MODE.key(),
+                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                                    CoreOptions.SCAN_TIMESTAMP.key(),
+                                    CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+                                    CoreOptions.SCAN_TAG_NAME.key(),
+                                    CoreOptions.SCAN_VERSION.key(),
+                                    CoreOptions.SCAN_WATERMARK.key())));
 
     public ChainGroupReadTable(FileStoreTable snapshotStoreTable, FileStoreTable deltaStoreTable) {
         super(snapshotStoreTable, deltaStoreTable, true);
@@ -78,38 +103,108 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         return new ChainTableBatchScan(((AbstractFileStoreTable) wrapped).tableSchema, this);
     }
 
-    private DataTableScan newSnapshotScan() {
-        return wrapped.newScan();
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        super.validateSchema();
+        return new ChainTableBatchScan(
+                ((AbstractFileStoreTable) wrapped).tableSchema,
+                this,
+                table -> table.newScan(snapshotReaderFactory));
     }
 
-    private DataTableScan newDeltaScan() {
-        return other().newScan();
+    private DataTableScan newSnapshotScan(Function<FileStoreTable, DataTableScan> scanCreator) {
+        return scanCreator.apply(wrapped);
+    }
+
+    private DataTableScan newDeltaScan(Function<FileStoreTable, DataTableScan> scanCreator) {
+        return scanCreator.apply(other());
+    }
+
+    /**
+     * Returns the primary-key comparator of the snapshot branch. It is used by batch scans to split
+     * each bucket's snapshot and delta files into key-range splits. Both branches share the same
+     * primary-key schema, so the snapshot branch's comparator correctly orders keys from either
+     * branch.
+     */
+    Comparator<InternalRow> chainKeyComparator() {
+        return ((PrimaryKeyFileStoreTable) wrapped).store().newKeyComparator();
     }
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        return new ChainGroupReadTable(
-                wrapped.copy(dynamicOptions), other().copy(rewriteOtherOptions(dynamicOptions)));
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(dynamicOptions, wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(dynamicOptions),
+                        other().coreOptions().branch(),
+                        other());
+
+        return new ChainGroupReadTable(wrapped.copy(wrappedOptions), other().copy(otherOptions));
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(
+                        newTableSchema.options(), wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(newTableSchema.options()),
+                        other().coreOptions().branch(),
+                        other());
+
         return new ChainGroupReadTable(
-                wrapped.copy(newTableSchema),
-                other().copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))));
+                wrapped.copy(newTableSchema.copy(wrappedOptions)),
+                other().copy(newTableSchema.copy(otherOptions)));
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(dynamicOptions, wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(dynamicOptions),
+                        other().coreOptions().branch(),
+                        other());
+
         return new ChainGroupReadTable(
-                wrapped.copyWithoutTimeTravel(dynamicOptions),
-                other().copyWithoutTimeTravel(rewriteOtherOptions(dynamicOptions)));
+                wrapped.copyWithoutTimeTravel(wrappedOptions),
+                other().copyWithoutTimeTravel(otherOptions));
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
         return new ChainGroupReadTable(
                 wrapped.copyWithLatestSchema(), other().copyWithLatestSchema());
+    }
+
+    /**
+     * Prepares options for a branch table. Starts from the new schema's options, but overrides
+     * branch-owned options (like merge-engine, bucket) with the branch's own values to preserve
+     * branch-specific configurations.
+     */
+    private static Map<String, String> prepareBranchOptions(
+            Map<String, String> newOptions, String branch, FileStoreTable sourceTable) {
+        Map<String, String> result = new HashMap<>(newOptions);
+
+        // Override branch-owned options with sourceTable's values to preserve
+        // branch-specific configurations
+        for (String key : UNSAFE_COPY_OPTIONS) {
+            String sourceValue = sourceTable.schema().options().get(key);
+            if (sourceValue != null) {
+                result.put(key, sourceValue);
+            }
+        }
+
+        // Set branch name (each sub-table has its own branch identity)
+        result.put(CoreOptions.BRANCH.key(), branch);
+
+        return result;
     }
 
     @Override
@@ -132,11 +227,18 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         public ChainTableBatchScan(
                 TableSchema tableSchema, ChainGroupReadTable chainGroupReadTable) {
+            this(tableSchema, chainGroupReadTable, FileStoreTable::newScan);
+        }
+
+        private ChainTableBatchScan(
+                TableSchema tableSchema,
+                ChainGroupReadTable chainGroupReadTable,
+                Function<FileStoreTable, DataTableScan> scanCreator) {
             super(
                     chainGroupReadTable.wrapped,
                     chainGroupReadTable.other(),
                     tableSchema,
-                    FileStoreTable::newScan);
+                    scanCreator);
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
             this.partitionConverter =
@@ -245,6 +347,17 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             Set<BinaryRow> snapshotPartitions = preloadTargetSnapshotSplits(splits);
 
+            // Key-range splitting parameters are loop-invariant; compute them once. When key-range
+            // splitting is enabled, each bucket's snapshot and delta files are split into multiple
+            // splits to improve read parallelism (files with intersecting key ranges stay
+            // together).
+            Comparator<InternalRow> keyComparator =
+                    options.chainTableKeyRangeSplitEnabled()
+                            ? chainGroupReadTable.chainKeyComparator()
+                            : null;
+            long targetSplitSize = options.splitTargetSize();
+            long openFileCost = options.splitOpenFileCost();
+
             DataTableScan deltaPartitionScan =
                     newChainPartitionListingScan(false, getFallbackPartitionPredicate());
             List<BinaryRow> deltaPartitions =
@@ -268,7 +381,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 for (List<BinaryRow> deltaPartitionsInGroup : groupedDeltaPartitions.values()) {
 
                     // Sort delta by chain dimension ascending.
-                    // chainPartitionForCompare avoids copying BinaryRow in the comparator hot path.
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
@@ -340,69 +452,29 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                             deltaScan.withPartitionFilter(selectedDeltaPartitions);
                         }
 
-                        List<Split> subSplits = deltaScan.plan().splits();
-                        Set<String> snapshotFileNames = new HashSet<>();
+                        List<DataSplit> deltaSubSplits =
+                                deltaScan.plan().splits().stream()
+                                        .map(s -> (DataSplit) s)
+                                        .collect(Collectors.toList());
+                        List<DataSplit> snapshotSubSplits = new ArrayList<>();
                         if (partitionPairs.getValue() != null) {
                             snapshotScan.withPartitionFilter(
                                     Collections.singletonList(partitionPairs.getValue()));
-                            List<Split> mainSubSplits = snapshotScan.plan().splits();
-                            snapshotFileNames =
-                                    mainSubSplits.stream()
-                                            .flatMap(
-                                                    s ->
-                                                            ((DataSplit) s)
-                                                                    .dataFiles().stream()
-                                                                            .map(
-                                                                                    DataFileMeta
-                                                                                            ::fileName))
-                                            .collect(Collectors.toSet());
-                            subSplits.addAll(mainSubSplits);
+                            snapshotSubSplits =
+                                    snapshotScan.plan().splits().stream()
+                                            .map(s -> (DataSplit) s)
+                                            .collect(Collectors.toList());
                         }
-                        Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
-                        Integer bucketInAll = null;
-                        for (Split split : subSplits) {
-                            DataSplit dataSplit = (DataSplit) split;
-                            Integer totalBuckets = dataSplit.totalBuckets();
-                            checkNotNull(totalBuckets);
-                            if (bucketInAll == null) {
-                                bucketInAll = totalBuckets;
-                            } else {
-                                checkArgument(
-                                        totalBuckets.equals(bucketInAll),
-                                        "Inconsistent bucket num " + dataSplit.bucket());
-                            }
-
-                            bucketSplits
-                                    .computeIfAbsent(dataSplit.bucket(), k -> new ArrayList<>())
-                                    .add(dataSplit);
-                        }
-                        for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
-                            HashMap<String, String> fileBucketPathMapping = new HashMap<>();
-                            HashMap<String, String> fileBranchMapping = new HashMap<>();
-                            List<DataSplit> splitList = entry.getValue();
-                            for (DataSplit dataSplit : splitList) {
-                                for (DataFileMeta file : dataSplit.dataFiles()) {
-                                    fileBucketPathMapping.put(
-                                            file.fileName(), dataSplit.bucketPath());
-                                    String branch =
-                                            snapshotFileNames.contains(file.fileName())
-                                                    ? options.scanFallbackSnapshotBranch()
-                                                    : options.scanFallbackDeltaBranch();
-                                    fileBranchMapping.put(file.fileName(), branch);
-                                }
-                            }
-                            ChainSplit split =
-                                    new ChainSplit(
-                                            partitionPairs.getKey(),
-                                            entry.getValue().stream()
-                                                    .flatMap(
-                                                            dataSplit ->
-                                                                    dataSplit.dataFiles().stream())
-                                                    .collect(Collectors.toList()),
-                                            fileBranchMapping,
-                                            fileBucketPathMapping);
-                            splits.add(split);
-                        }
+                        splits.addAll(
+                                ChainTableUtils.buildChainSplits(
+                                        partitionPairs.getKey(),
+                                        snapshotSubSplits,
+                                        deltaSubSplits,
+                                        options.scanFallbackSnapshotBranch(),
+                                        options.scanFallbackDeltaBranch(),
+                                        keyComparator,
+                                        targetSplitSize,
+                                        openFileCost));
                     }
                 }
             }
@@ -432,8 +504,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 boolean snapshot, PartitionPredicate scanPartitionPredicate) {
             DataTableScan scan =
                     snapshot
-                            ? chainGroupReadTable.newSnapshotScan()
-                            : chainGroupReadTable.newDeltaScan();
+                            ? chainGroupReadTable.newSnapshotScan(scanCreator)
+                            : chainGroupReadTable.newDeltaScan(scanCreator);
             if (scanPartitionPredicate != null) {
                 scan.withPartitionFilter(scanPartitionPredicate);
             }
@@ -448,18 +520,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
-                HashMap<String, String> fileBucketPathMapping = new HashMap<>();
-                HashMap<String, String> fileBranchMapping = new HashMap<>();
-                for (DataFileMeta file : dataSplit.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
-                    fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
-                }
-                splits.add(
-                        new ChainSplit(
-                                dataSplit.partition(),
-                                dataSplit.dataFiles(),
-                                fileBranchMapping,
-                                fileBucketPathMapping));
+                splits.add(ChainSplit.from(dataSplit, options.scanFallbackSnapshotBranch()));
             }
 
             snapshotPartitions.addAll(
@@ -471,8 +532,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private DataTableScan newFilteredScan(boolean snapshot) {
             DataTableScan scan =
                     snapshot
-                            ? chainGroupReadTable.newSnapshotScan()
-                            : chainGroupReadTable.newDeltaScan();
+                            ? chainGroupReadTable.newSnapshotScan(scanCreator)
+                            : chainGroupReadTable.newDeltaScan(scanCreator);
             if (dataPredicate != null) {
                 scan.withFilter(dataPredicate);
             }
@@ -530,6 +591,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         public TableRead withIOManager(IOManager ioManager) {
             mainRead.withIOManager(ioManager);
             fallbackRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            mainRead.withReadBatchSizer(sizer);
+            fallbackRead.withReadBatchSizer(sizer);
             return this;
         }
 

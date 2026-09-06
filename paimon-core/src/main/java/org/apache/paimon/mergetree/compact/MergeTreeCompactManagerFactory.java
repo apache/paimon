@@ -72,7 +72,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
-import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
+import static org.apache.paimon.lookup.LookupStoreFactory.bloomFilterBuilderFactory;
 import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 
 /** Factory to create {@link MergeTreeCompactManager}. */
@@ -272,6 +272,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
         LookupStrategy lookupStrategy = options.lookupStrategy();
+        boolean changelogIgnoreUpdateBefore = options.changelogProducerIgnoreUpdateBefore();
+        boolean changelogIgnoreDelete = options.changelogProducerIgnoreDelete();
         if (changelogProducer.equals(FULL_COMPACTION)) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
@@ -282,7 +284,9 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    logDedupEqualSupplier.get());
+                    logDedupEqualSupplier.get(),
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete);
         } else if (lookupStrategy.needLookup) {
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -307,6 +311,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         processorFactory = PersistValueAndPosProcessor.factory(valueType);
                     } else {
                         processorFactory = PersistPositionProcessor.factory();
+                        // Record-level expiration still inspects value fields.
+                        if (recordLevelExpire == null) {
+                            lookupReaderFactory =
+                                    readerFactoryBuilder
+                                            .copyWithoutProjection()
+                                            .withReadValueType(RowType.of())
+                                            .build(partition, bucket, dvFactory);
+                        }
                     }
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
@@ -342,6 +354,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     mergeSorter,
                     wrapperFactory,
                     lookupStrategy.produceChangelog && !ignorePreviousFiles,
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete,
                     dvMaintainer,
                     options,
                     remoteLookupFileManager);
@@ -393,7 +407,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                         localFilePrefix(partitionType, partition, bucket, file))
                                 .getPathFile(),
                 lookupStoreFactory,
-                bfGenerator(options),
+                bloomFilterBuilderFactory(options),
                 lookupFileCache);
     }
 

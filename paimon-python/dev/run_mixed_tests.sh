@@ -98,6 +98,7 @@ run_batched_java_write_tests() {
     local result=0
 
     local core_tests="org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable"
+    core_tests="${core_tests}+testJavaWriteDynamicBucketHashIndex"
     core_tests="${core_tests}+testPKDeletionVectorWrite"
     core_tests="${core_tests}+testBtreeIndexWrite"
     core_tests="${core_tests}+testBtreeRawFallbackWrite"
@@ -108,6 +109,8 @@ run_batched_java_write_tests() {
     core_tests="${core_tests}+testCompactConflictWriteBase"
     core_tests="${core_tests}+testBlobCompactConflictWriteBase"
     core_tests="${core_tests}+testBlobWriteAlterCompact"
+    core_tests="${core_tests}+testJavaWriteArrayBlobTable"
+    core_tests="${core_tests}+testJavaWriteMapBlobTable"
     core_tests="${core_tests}+testDataEvolutionWrite"
     core_tests="${core_tests}+testJavaWriteRowAppendTable"
     if [[ "$PYTHON_MINOR" -ge 7 ]]; then
@@ -117,10 +120,13 @@ run_batched_java_write_tests() {
         result=1
     fi
 
-    local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
-    lance_tests="${lance_tests}+testDataEvolutionWriteLance"
-    if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
-        result=1
+    # lance has no Python wheel on <3.8; its readers are all skipped there.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lance_tests="org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance"
+        lance_tests="${lance_tests}+testDataEvolutionWriteLance"
+        if ! run_maven_test_batch "paimon-lance Java write tests" "paimon-lance" "$lance_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 11 ]]; then
@@ -131,20 +137,23 @@ run_batched_java_write_tests() {
         fi
     fi
 
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
         if ! run_maven_test_batch \
-            "paimon-tantivy Java write tests" \
-            "paimon-tantivy/paimon-tantivy-index" \
-            "org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite" \
+            "paimon-full-text Java write tests" \
+            "paimon-full-text" \
+            "org.apache.paimon.fulltext.index.JavaPyNativeFullTextE2ETest#testNativeFullTextIndexWrite" \
             -q; then
             result=1
         fi
     fi
 
-    local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
-    lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
-    if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
-        result=1
+    # Lumina vector reads need BitMap64 (>=3.8); skip the write below it too.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        local lumina_tests="org.apache.paimon.lumina.index.JavaPyLuminaE2ETest#testLuminaVectorIndexWrite"
+        lumina_tests="${lumina_tests}+testLuminaVectorWithBTreeIndexWrite"
+        if ! run_maven_test_batch "paimon-lumina Java write tests" "paimon-lumina" "$lumina_tests" -q; then
+            result=1
+        fi
     fi
 
     if [[ "$PYTHON_MINOR" -ge 9 ]]; then
@@ -177,7 +186,7 @@ run_java_write_test() {
     echo "Running Maven test for JavaPyE2ETest.testJavaWriteReadPkTable (Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable -pl paimon-core -Drun.e2e.tests=true; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteReadPkTable+testJavaWriteDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true; then
         echo -e "${GREEN}✓ Java write Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java write Parquet/Orc/Avro test failed${NC}"
@@ -186,15 +195,17 @@ run_java_write_test() {
 
     echo ""
 
-    # Run the Java test method for lance format
-    echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Run the Java test method for lance format (readers skipped on <3.8).
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
-        echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Java write lance test failed${NC}"
-        lance_result=1
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testJavaWriteReadPkTableLance (Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testJavaWriteReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+            echo -e "${GREEN}✓ Java write lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java write lance test failed${NC}"
+            lance_result=1
+        fi
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -213,7 +224,7 @@ run_python_read_test() {
 
     # Run the parameterized Python test method (runs for both Parquet/Orc/Avro and Lance)
     echo "Running Python test for JavaPyReadWriteTest.test_read_pk_table..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_pk_table or test_read_java_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
 #        source deactivate
         return 0
@@ -232,7 +243,7 @@ run_python_write_test() {
 
     # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
     echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table" -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table or test_py_write_dynamic_bucket_hash_index" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
     else
@@ -251,7 +262,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable+testReadPythonDynamicBucketHashIndex -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read Parquet/Orc/Avro test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read Parquet/Orc/Avro test failed${NC}"
@@ -260,15 +271,19 @@ run_java_read_test() {
 
     echo ""
 
-    # Run Java test for lance format in paimon-lance
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
+        echo "Note: Maven may download dependencies on first run, this may take a while..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java read lance test failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java read lance test failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
@@ -556,15 +571,15 @@ run_multi_vector_dedicated_file_py_write_test() {
     fi
 }
 
-# Function to run Tantivy full-text index test (Java write index, Python read and search)
-run_tantivy_fulltext_test() {
-    echo -e "${YELLOW}=== Step 8: Running Tantivy Full-Text Index Test (Java Write, Python Read) ===${NC}"
+# Function to run native full-text index test (Java write index, Python read and search)
+run_native_fulltext_test() {
+    echo -e "${YELLOW}=== Step 8: Running Native Full-Text Index Test (Java Write, Python Read) ===${NC}"
 
     if ! skip_batched_java_write; then
         cd "$PROJECT_ROOT"
 
-        echo "Running Maven test for JavaPyTantivyE2ETest.testTantivyFullTextIndexWrite..."
-        if mvn test -Dtest=org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite -pl paimon-tantivy/paimon-tantivy-index -q -Drun.e2e.tests=true; then
+        echo "Running Maven test for JavaPyNativeFullTextE2ETest.testNativeFullTextIndexWrite..."
+        if mvn test -Dtest=org.apache.paimon.fulltext.index.JavaPyNativeFullTextE2ETest#testNativeFullTextIndexWrite -pl paimon-full-text -q -Drun.e2e.tests=true; then
             echo -e "${GREEN}✓ Java test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java test failed${NC}"
@@ -572,13 +587,13 @@ run_tantivy_fulltext_test() {
         fi
     fi
     cd "$PAIMON_PYTHON_DIR"
-    echo "Installing Python jieba tokenizer dependency for Tantivy jieba index reads..."
-    if ! python -m pip install 'jieba>=0.42,<1'; then
-        echo -e "${RED}✗ Failed to install jieba${NC}"
+    echo "Checking paimon-ftindex Python dependency for native full-text index reads..."
+    if ! python -c "import paimon_ftindex"; then
+        echo -e "${RED}✗ paimon-ftindex is not installed or its native FFI library is unavailable${NC}"
         return 1
     fi
-    echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_tantivy_full_text_index -v; then
+    echo "Running Python test for JavaPyReadWriteTest.test_read_native_full_text_index..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_native_full_text_index -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
         return 0
     else
@@ -645,14 +660,14 @@ ensure_paimon_vindex() {
     fi
 
     echo "Installing Python paimon-vindex dependency..."
-    if python -m pip install 'paimon-vindex==0.1.0'; then
+    if python -m pip install 'paimon-vindex==0.4.0'; then
         return 0
     fi
 
     echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
     local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
     rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-vindex==0.1.0'; then
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.4.0'; then
         export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
         return 0
     fi
@@ -660,7 +675,7 @@ ensure_paimon_vindex() {
     if python -c "import numpy" >/dev/null 2>&1; then
         echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
         rm -rf "$target_dir"
-        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.1.0'; then
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.4.0'; then
             export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
             return 0
         fi
@@ -799,13 +814,15 @@ run_data_evolution_test() {
             core_result=1
         fi
 
-        # Java write data evolution table (lance)
-        echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
-        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
-            echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
-        else
-            echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
-            lance_result=1
+        # Java write data evolution table (lance) -- only read back on >=3.8.
+        if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+            echo "Running Maven test for JavaPyLanceE2ETest.testDataEvolutionWriteLance..."
+            if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testDataEvolutionWriteLance -pl paimon-lance -q -Drun.e2e.tests=true; then
+                echo -e "${GREEN}✓ Java data evolution write (lance) completed successfully${NC}"
+            else
+                echo -e "${RED}✗ Java data evolution write (lance) failed${NC}"
+                lance_result=1
+            fi
         fi
     fi
 
@@ -875,14 +892,18 @@ run_data_evolution_py_write_test() {
         core_result=1
     fi
 
-    # Java read data evolution table (lance)
-    echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+    # Java read Lance reads a Python-written table; Python skips lance on <3.8.
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        echo "Running Maven test for JavaPyLanceE2ETest.testReadDataEvolutionTableLance..."
+        if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadDataEvolutionTableLance -pl paimon-lance -q -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
+            echo -e "${GREEN}✓ Java data evolution read (lance) completed successfully${NC}"
+        else
+            echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
+            lance_result=1
+        fi
     else
-        echo -e "${RED}✗ Java data evolution read (lance) failed${NC}"
-        lance_result=1
+        echo -e "${YELLOW}⏭ Skipping Java data evolution read Lance (lance needs Python >= 3.8, current: $PYTHON_VERSION)${NC}"
     fi
 
     if [[ $core_result -ne 0 || $lance_result -ne 0 ]]; then
@@ -914,6 +935,80 @@ run_blob_alter_compact_test() {
         echo -e "${RED}✗ Python blob read test failed${NC}"
         return 1
     fi
+}
+
+run_array_blob_interop_test() {
+    echo -e "${YELLOW}=== Running ARRAY<BLOB> Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
+
+    if ! skip_batched_java_write; then
+        cd "$PROJECT_ROOT"
+        echo "Running Maven test for JavaPyE2ETest.testJavaWriteArrayBlobTable..."
+        if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteArrayBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+            echo -e "${RED}✗ Java ARRAY<BLOB> write test failed${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ Java ARRAY<BLOB> write test completed successfully${NC}"
+    fi
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python ARRAY<BLOB> read test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_array_blob_written_by_java -v; then
+        echo -e "${RED}✗ Python ARRAY<BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ARRAY<BLOB> read test completed successfully${NC}"
+
+    echo "Running Python ARRAY<BLOB> write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_array_blob_for_java -v; then
+        echo -e "${RED}✗ Python ARRAY<BLOB> write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ARRAY<BLOB> write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadArrayBlobTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadArrayBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java ARRAY<BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java ARRAY<BLOB> read test completed successfully${NC}"
+}
+
+run_map_blob_interop_test() {
+    echo -e "${YELLOW}=== Running MAP<K, BLOB> Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
+
+    if ! skip_batched_java_write; then
+        cd "$PROJECT_ROOT"
+        echo "Running Maven test for JavaPyE2ETest.testJavaWriteMapBlobTable..."
+        if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteMapBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+            echo -e "${RED}✗ Java MAP<K, BLOB> write test failed${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ Java MAP<K, BLOB> write test completed successfully${NC}"
+    fi
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python MAP<K, BLOB> read test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_map_blob_written_by_java -v; then
+        echo -e "${RED}✗ Python MAP<K, BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python MAP<K, BLOB> read test completed successfully${NC}"
+
+    echo "Running Python MAP<K, BLOB> write test..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_map_blob_for_java -v; then
+        echo -e "${RED}✗ Python MAP<K, BLOB> write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python MAP<K, BLOB> write test completed successfully${NC}"
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testJavaReadMapBlobTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadMapBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java MAP<K, BLOB> read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java MAP<K, BLOB> read test completed successfully${NC}"
 }
 
 # Function to run VARIANT test (Java write, Python read)
@@ -1024,7 +1119,7 @@ main() {
     local compressed_global_index_result=0
     local compressed_text_result=0
     local vector_append_table_result=0
-    local tantivy_fulltext_result=0
+    local native_fulltext_result=0
     local lumina_vector_result=0
     local lumina_vector_btree_result=0
     local vindex_vector_result=0
@@ -1032,6 +1127,8 @@ main() {
     local compact_conflict_result=0
     local blob_compact_conflict_result=0
     local blob_alter_compact_result=0
+    local array_blob_interop_result=0
+    local map_blob_interop_result=0
     local data_evolution_result=0
     local data_evolution_deletion_vector_result=0
     local data_evolution_py_write_result=0
@@ -1112,22 +1209,31 @@ main() {
 
     echo ""
 
-    # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
-    if ! run_btree_raw_fallback_test; then
-        btree_raw_fallback_result=1
-    fi
+    # Raw fallback / bitmap / global index need pyroaring BitMap64 (>=1.0,
+    # Python >=3.8) on the Python read side; skip on older interpreters.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
+        if ! run_btree_raw_fallback_test; then
+            btree_raw_fallback_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Bitmap index test (Java write, Python read)
-    if ! run_bitmap_index_test; then
-        bitmap_index_result=1
-    fi
+        # Run Bitmap index test (Java write, Python read)
+        if ! run_bitmap_index_test; then
+            bitmap_index_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    if ! run_compressed_global_index_test; then
-        compressed_global_index_result=1
+        if ! run_compressed_global_index_test; then
+            compressed_global_index_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping BTree raw fallback / bitmap / global index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        btree_raw_fallback_result=0
+        bitmap_index_result=0
+        compressed_global_index_result=0
     fi
 
     echo ""
@@ -1182,28 +1288,35 @@ main() {
 
     echo ""
 
-    # Run Tantivy full-text index test (requires Python >= 3.10)
-    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        if ! run_tantivy_fulltext_test; then
-            tantivy_fulltext_result=1
+    # Run native full-text index test (requires Python >= 3.8)
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        if ! run_native_fulltext_test; then
+            native_fulltext_result=1
         fi
     else
-        echo -e "${YELLOW}⏭ Skipping Tantivy Full-Text Index Test (requires Python >= 3.10, current: $PYTHON_VERSION)${NC}"
-        tantivy_fulltext_result=0
+        echo -e "${YELLOW}⏭ Skipping Native Full-Text Index Test (requires Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        native_fulltext_result=0
     fi
 
     echo ""
 
-    # Run Lumina vector index test (Java write, Python read)
-    if ! run_lumina_vector_test; then
-        lumina_vector_result=1
-    fi
+    # Lumina vector index needs BitMap64 (Python >= 3.8) on the read side.
+    if [[ "$PYTHON_MINOR" -ge 8 ]]; then
+        # Run Lumina vector index test (Java write, Python read)
+        if ! run_lumina_vector_test; then
+            lumina_vector_result=1
+        fi
 
-    echo ""
+        echo ""
 
-    # Run Lumina vector + BTree pre-filter test (Java write, Python read)
-    if ! run_lumina_vector_btree_test; then
-        lumina_vector_btree_result=1
+        # Run Lumina vector + BTree pre-filter test (Java write, Python read)
+        if ! run_lumina_vector_btree_test; then
+            lumina_vector_btree_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Lumina Vector Index tests (need BitMap64, Python >= 3.8, current: $PYTHON_VERSION)${NC}"
+        lumina_vector_result=0
+        lumina_vector_btree_result=0
     fi
 
     echo ""
@@ -1248,7 +1361,20 @@ main() {
 
     echo ""
 
-    # Run data evolution test (Java write, Python read)
+    if ! run_array_blob_interop_test; then
+        array_blob_interop_result=1
+    fi
+
+    echo ""
+
+    if ! run_map_blob_interop_test; then
+        map_blob_interop_result=1
+    fi
+
+    echo ""
+
+    # Run data evolution test (Java write, Python read). Lance variant skips
+    # itself on <3.8 (get_file_format_params + gated Java lance read).
     if ! run_data_evolution_test; then
         data_evolution_result=1
     fi
@@ -1387,10 +1513,10 @@ main() {
         echo -e "${RED}✗ Multi-Vector Dedicated File Test (Python Write, Java Read): FAILED${NC}"
     fi
 
-    if [[ $tantivy_fulltext_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Tantivy Full-Text Index Test (Java Write, Python Read): PASSED${NC}"
+    if [[ $native_fulltext_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Native Full-Text Index Test (Java Write, Python Read): PASSED${NC}"
     else
-        echo -e "${RED}✗ Tantivy Full-Text Index Test (Java Write, Python Read): FAILED${NC}"
+        echo -e "${RED}✗ Native Full-Text Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
     if [[ $lumina_vector_result -eq 0 ]]; then
@@ -1435,6 +1561,18 @@ main() {
         echo -e "${RED}✗ Blob Alter+Compact Test (Java Write+Alter+Compact, Python Read): FAILED${NC}"
     fi
 
+    if [[ $array_blob_interop_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ ARRAY<BLOB> Interoperability Test (Java ↔ Python): PASSED${NC}"
+    else
+        echo -e "${RED}✗ ARRAY<BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
+    fi
+
+    if [[ $map_blob_interop_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ MAP<K, BLOB> Interoperability Test (Java ↔ Python): PASSED${NC}"
+    else
+        echo -e "${RED}✗ MAP<K, BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
+    fi
+
     if [[ $data_evolution_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Data Evolution Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -1476,7 +1614,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $array_blob_interop_result -eq 0 && $map_blob_interop_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

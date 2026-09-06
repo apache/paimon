@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg.metadata;
 
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -27,14 +28,19 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.DisplayName;
@@ -151,6 +157,53 @@ class IcebergDataFieldTest {
     }
 
     @Test
+    @DisplayName("Test Iceberg v3 geospatial type conversions")
+    void testGeospatialTypeConversions() {
+        IcebergDataField geometry =
+                new IcebergDataField(
+                        new DataField(1, "geom", new GeometryType(false, "EPSG:3857")));
+        assertThat(geometry.type()).isEqualTo("geometry(EPSG:3857)");
+
+        IcebergDataField geography =
+                new IcebergDataField(
+                        new DataField(
+                                2,
+                                "geog",
+                                new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.KARNEY)));
+        assertThat(geography.type()).isEqualTo("geography(OGC:CRS84, karney)");
+
+        assertThat(new IcebergDataField(3, "geom", true, "geometry(EPSG:3857)", null).dataType())
+                .isEqualTo(new GeometryType(false, "EPSG:3857"));
+        assertThat(
+                        new IcebergDataField(
+                                        4, "geog", false, "geography(OGC:CRS84, vincenty)", null)
+                                .dataType())
+                .isEqualTo(new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.VINCENTY));
+
+        assertThat(new IcebergDataField(5, "geom", false, "geometry", null).dataType())
+                .isEqualTo(new GeometryType());
+        assertThat(new IcebergDataField(6, "geog", false, "geography", null).dataType())
+                .isEqualTo(new GeographyType());
+        assertThat(new IcebergDataField(7, "geog", false, "geography(EPSG:4326)", null).dataType())
+                .isEqualTo(new GeographyType(true, "EPSG:4326", GeographyType.DEFAULT_ALGORITHM));
+        assertThat(
+                        new IcebergDataField(8, "geom", false, "geometry(custom, definition)", null)
+                                .dataType())
+                .isEqualTo(new GeometryType("custom, definition"));
+
+        assertThatThrownBy(
+                        () ->
+                                new IcebergDataField(
+                                        new DataField(
+                                                9,
+                                                "geog",
+                                                new GeographyType("custom, definition"))))
+                .hasMessageContaining("Geography CRS")
+                .hasMessageContaining("custom, definition")
+                .hasMessageContaining("Iceberg metadata");
+    }
+
+    @Test
     @DisplayName("Test decimal type conversion")
     void testDecimalTypeConversion() {
         DataField decimalField = new DataField(1, "decimal", new DecimalType(false, 10, 2));
@@ -173,38 +226,17 @@ class IcebergDataFieldTest {
         IcebergDataField icebergTimestampLtz = new IcebergDataField(timestampLtzField);
         assertThat(icebergTimestampLtz.type()).isEqualTo("timestamptz");
 
-        // Test timestamp_ns (precision 7)
-        DataField timestampNs7Field = new DataField(3, "timestamp_ns", new TimestampType(false, 7));
-        IcebergDataField icebergTimestampNs7 = new IcebergDataField(timestampNs7Field);
-        assertThat(icebergTimestampNs7.type()).isEqualTo("timestamp_ns");
+        // Nanoseconds name the Iceberg v3 type; SchemaValidation decides who may publish one.
+        for (int precision = 7; precision <= 9; precision++) {
+            DataField nanosField =
+                    new DataField(3, "timestamp_ns", new TimestampType(false, precision));
+            assertThat(new IcebergDataField(nanosField).type()).isEqualTo("timestamp_ns");
 
-        // Test timestamp_ns (precision 8)
-        DataField timestampNs8Field = new DataField(4, "timestamp_ns", new TimestampType(false, 8));
-        IcebergDataField icebergTimestampNs8 = new IcebergDataField(timestampNs8Field);
-        assertThat(icebergTimestampNs8.type()).isEqualTo("timestamp_ns");
-
-        // Test timestamp_ns (precision 9)
-        DataField timestampNs9Field = new DataField(5, "timestamp_ns", new TimestampType(false, 9));
-        IcebergDataField icebergTimestampNs9 = new IcebergDataField(timestampNs9Field);
-        assertThat(icebergTimestampNs9.type()).isEqualTo("timestamp_ns");
-
-        // Test timestamptz_ns (precision 7)
-        DataField timestampLtzNs7Field =
-                new DataField(6, "timestamptz_ns", new LocalZonedTimestampType(false, 7));
-        IcebergDataField icebergTimestampLtzNs7 = new IcebergDataField(timestampLtzNs7Field);
-        assertThat(icebergTimestampLtzNs7.type()).isEqualTo("timestamptz_ns");
-
-        // Test timestamptz_ns (precision 8)
-        DataField timestampLtzNs8Field =
-                new DataField(7, "timestamptz_ns", new LocalZonedTimestampType(false, 8));
-        IcebergDataField icebergTimestampLtzNs8 = new IcebergDataField(timestampLtzNs8Field);
-        assertThat(icebergTimestampLtzNs8.type()).isEqualTo("timestamptz_ns");
-
-        // Test timestamptz_ns (precision 9)
-        DataField timestampLtzNs9Field =
-                new DataField(8, "timestamptz_ns", new LocalZonedTimestampType(false, 9));
-        IcebergDataField icebergTimestampLtzNs9 = new IcebergDataField(timestampLtzNs9Field);
-        assertThat(icebergTimestampLtzNs9.type()).isEqualTo("timestamptz_ns");
+            DataField nanosLtzField =
+                    new DataField(
+                            4, "timestamptz_ns", new LocalZonedTimestampType(false, precision));
+            assertThat(new IcebergDataField(nanosLtzField).type()).isEqualTo("timestamptz_ns");
+        }
     }
 
     @Test
@@ -215,43 +247,40 @@ class IcebergDataFieldTest {
                 new DataField(1, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test invalid precision (<= 3)
         DataField invalidTimestampField2 =
                 new DataField(2, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField2))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test invalid local timezone timestamp precision (<= 3)
         DataField invalidTimestampLtzField =
                 new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampLtzField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 9");
 
         // Test valid precision boundaries
         DataField validTimestamp4 = new DataField(4, "timestamp", new TimestampType(false, 4));
         IcebergDataField icebergTimestamp4 = new IcebergDataField(validTimestamp4);
         assertThat(icebergTimestamp4.type()).isEqualTo("timestamp");
 
-        DataField validTimestamp9 = new DataField(5, "timestamp", new TimestampType(false, 9));
-        IcebergDataField icebergTimestamp9 = new IcebergDataField(validTimestamp9);
-        assertThat(icebergTimestamp9.type()).isEqualTo("timestamp_ns");
+        DataField validTimestamp6 = new DataField(5, "timestamp", new TimestampType(false, 6));
+        IcebergDataField icebergTimestamp6 = new IcebergDataField(validTimestamp6);
+        assertThat(icebergTimestamp6.type()).isEqualTo("timestamp");
 
         DataField validTimestampLtz4 =
                 new DataField(6, "timestamptz", new LocalZonedTimestampType(false, 4));
         IcebergDataField icebergTimestampLtz4 = new IcebergDataField(validTimestampLtz4);
         assertThat(icebergTimestampLtz4.type()).isEqualTo("timestamptz");
 
-        DataField validTimestampLtz9 =
-                new DataField(7, "timestamptz", new LocalZonedTimestampType(false, 9));
-        IcebergDataField icebergTimestampLtz9 = new IcebergDataField(validTimestampLtz9);
-        assertThat(icebergTimestampLtz9.type()).isEqualTo("timestamptz_ns");
+        DataField validTimestampLtz6 =
+                new DataField(7, "timestamptz", new LocalZonedTimestampType(false, 6));
+        IcebergDataField icebergTimestampLtz6 = new IcebergDataField(validTimestampLtz6);
+        assertThat(icebergTimestampLtz6.type()).isEqualTo("timestamptz");
     }
 
     @Test
@@ -265,6 +294,19 @@ class IcebergDataFieldTest {
         assertThat(listType.type()).isEqualTo("list");
         assertThat(listType.element()).isEqualTo("int");
         assertThat(listType.elementRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Test array element-required follows the element, not the array")
+    void testArrayElementNullabilityIndependentOfArray() {
+        DataField arrayField =
+                new DataField(1, "array", new ArrayType(true, new VariantType(false)));
+        IcebergDataField icebergArray = new IcebergDataField(arrayField);
+
+        IcebergListType listType = (IcebergListType) icebergArray.type();
+        assertThat(listType.element()).isEqualTo("variant");
+        assertThat(listType.elementRequired()).isTrue();
+        assertThat(icebergArray.dataType()).isEqualTo(new ArrayType(true, new VariantType(false)));
     }
 
     @Test
@@ -286,6 +328,26 @@ class IcebergDataFieldTest {
         assertThat(mapType.key()).isEqualTo("string");
         assertThat(mapType.value()).isEqualTo("int");
         assertThat(mapType.valueRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Test multiset type conversion")
+    void testMultisetTypeConversion() {
+        DataField multisetField =
+                new DataField(
+                        1,
+                        "multiset",
+                        new MultisetType(false, new VarCharType(false, VarCharType.MAX_LENGTH)));
+        IcebergDataField icebergMultiset = new IcebergDataField(multisetField);
+
+        assertThat(icebergMultiset.type()).isInstanceOf(IcebergMapType.class);
+        IcebergMapType mapType = (IcebergMapType) icebergMultiset.type();
+        assertThat(mapType.type()).isEqualTo("map");
+        assertThat(mapType.key()).isEqualTo("string");
+        assertThat(mapType.value()).isEqualTo("int");
+        assertThat(mapType.valueRequired()).isTrue();
+        assertThat(mapType.keyId()).isEqualTo(SpecialFields.getMapKeyFieldId(1, 1));
+        assertThat(mapType.valueId()).isEqualTo(SpecialFields.getMapValueFieldId(1, 1));
     }
 
     @Test
@@ -437,6 +499,43 @@ class IcebergDataFieldTest {
         IcebergDataField timestamptzNsField =
                 new IcebergDataField(4, "timestamptz_ns", false, "timestamptz_ns", null, "doc");
         assertThat(timestamptzNsField.dataType()).isEqualTo(new LocalZonedTimestampType(true, 9));
+    }
+
+    @Test
+    @DisplayName("Test variant type conversion")
+    void testVariantTypeConversion() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField icebergVariant = new IcebergDataField(variantField);
+
+        assertThat(icebergVariant.type()).isEqualTo("variant");
+        assertThat(icebergVariant.required()).isFalse();
+        assertThat(icebergVariant.dataType()).isEqualTo(new VariantType(true));
+    }
+
+    @Test
+    @DisplayName("Test variant type parsing")
+    void testVariantTypeParsing() {
+        IcebergDataField optionalVariant =
+                new IcebergDataField(1, "variant", false, "variant", null, "doc");
+        assertThat(optionalVariant.dataType()).isEqualTo(new VariantType(true));
+
+        IcebergDataField requiredVariant =
+                new IcebergDataField(2, "variant", true, "variant", null, "doc");
+        assertThat(requiredVariant.dataType()).isEqualTo(new VariantType(false));
+    }
+
+    @Test
+    @DisplayName("Test variant type serialization round trip")
+    void testVariantTypeSerializationRoundTrip() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField originalField = new IcebergDataField(variantField);
+
+        String json = JsonSerdeUtil.toJson(originalField);
+        IcebergDataField deserializedField = JsonSerdeUtil.fromJson(json, IcebergDataField.class);
+
+        assertThat(deserializedField.type()).isEqualTo("variant");
+        assertThat(deserializedField.dataType()).isEqualTo(new VariantType(true));
+        assertThat(deserializedField.toDatafield()).isEqualTo(variantField);
     }
 
     @Test

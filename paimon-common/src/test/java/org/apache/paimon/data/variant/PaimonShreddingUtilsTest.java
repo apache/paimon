@@ -23,18 +23,36 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnVectorUtils;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
 
+import static org.apache.paimon.data.variant.PaimonShreddingUtils.assembleVariant;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.assembleVariantStruct;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildFieldsToExtract;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.buildVariantSchema;
@@ -45,6 +63,66 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for PaimonShreddingUtils. */
 public class PaimonShreddingUtilsTest {
+
+    @Test
+    void testBuildVariantSchemaAcceptsEmptyInnerStruct() {
+        // An empty typed_value struct shreds no field, and stays a legal schema.
+        RowType physicalType = variantShreddingSchema(RowType.of(new DataType[0], new String[0]));
+        assertThat(buildVariantSchema(physicalType).objectSchema).isEmpty();
+    }
+
+    @Test
+    void testBuildVariantSchemaRejectsNonStructInnerField() {
+        RowType physicalType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.BYTES(),
+                            DataTypes.BYTES(),
+                            RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"x"})
+                        },
+                        new String[] {"metadata", "value", "typed_value"});
+        // Everything except the inner field's type is valid here, and the message is what
+        // separates the two outcomes: before, the cast below raised a bare ClassCastException.
+        assertThatThrownBy(() -> buildVariantSchema(physicalType))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Invalid variant shredding schema");
+    }
+
+    @Test
+    void testAssembleColumnarShreddedVariant() {
+        RowType shreddedType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"});
+        RowType physicalType = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(physicalType);
+        RowToColumnConverter converter = new RowToColumnConverter(physicalType);
+        WritableColumnVector[] writableVectors =
+                physicalType.getFieldTypes().stream()
+                        .map(type -> ColumnVectorUtils.createWritableColumnVector(2, type))
+                        .toArray(WritableColumnVector[]::new);
+        converter.convert(
+                castShredded(GenericVariant.fromJson("{\"a\":0}"), variantSchema), writableVectors);
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"a\":1,\"leftover\":{\"payload\":\"value\"}}");
+        converter.convert(castShredded(expected, variantSchema), writableVectors);
+
+        ColumnVector[] vectors =
+                ColumnVectorUtils.createReadableColumnVectors(
+                        physicalType.getFieldTypes(), writableVectors);
+        ColumnarRow row = new ColumnarRow(new VectorizedColumnBatch(vectors), 1);
+        ByteBuffer metadata = row.getBinaryBuffer(variantSchema.topLevelMetadataIdx);
+
+        assertThat(metadata.arrayOffset()).isGreaterThan(0);
+        assertThat(assembleVariant(row, variantSchema).toJson()).isEqualTo(expected.toJson());
+        FieldToExtract[] fields =
+                new FieldToExtract[] {
+                    buildFieldsToExtract(
+                            DataTypes.STRING(),
+                            "$.leftover.payload",
+                            new VariantCastArgs(true, ZoneOffset.UTC),
+                            variantSchema)
+                };
+        assertThat(assembleVariantStruct(row, variantSchema, fields))
+                .isEqualTo(GenericRow.of(BinaryString.fromString("value")));
+    }
 
     @Test
     void testAssembleAllTypes() {
@@ -67,28 +145,33 @@ public class PaimonShreddingUtilsTest {
         DataField f9 = new DataField(9, "decimal", DataTypes.DECIMAL(5, 2));
         DataField f10 = new DataField(10, "boolean", DataTypes.BOOLEAN());
         DataField f11 = new DataField(11, "nullField", DataTypes.INT());
-        RowType allTypes = RowType.of(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11);
+        DataField f12 = new DataField(12, "date", DataTypes.DATE());
+        DataField f13 = new DataField(13, "timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
+        DataField f14 = new DataField(14, "timestampntz", DataTypes.TIMESTAMP());
+        DataField f15 = new DataField(15, "float", DataTypes.FLOAT());
+        DataField f16 = new DataField(16, "binary", DataTypes.BYTES());
+        RowType allTypes =
+                RowType.of(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16);
 
-        String json =
-                "{\n"
-                        + "  \"object\": {\n"
-                        + "    \"name\": \"Apache Paimon\",\n"
-                        + "    \"age\": 3\n"
-                        + "  },\n"
-                        + "  \"array\": [1, 2, 3, 4, 5],\n"
-                        + "  \"string\": \"Hello, World!\",\n"
-                        + "  \"tinyint\": 1,\n"
-                        + "  \"smallint\": 3000,\n"
-                        + "  \"int\": 400000,\n"
-                        + "  \"long\": 12345678901234,\n"
-                        + "  \"double\": 1.0123456789012345678901234567890123456789,\n"
-                        + "  \"decimal\": 100.99,\n"
-                        + "  \"boolean\": true,\n"
-                        + "  \"nullField\": null\n"
-                        + "}\n";
-
-        GenericVariant v = GenericVariant.fromJson(json);
-        GenericRow expert =
+        Map<String, Object> values = new HashMap<>();
+        values.put("object", ImmutableMap.of("name", "Apache Paimon", "age", 3));
+        values.put("array", Arrays.asList(1, 2, 3, 4, 5));
+        values.put("string", "Hello, World!");
+        values.put("tinyint", (byte) 1);
+        values.put("smallint", (short) 3000);
+        values.put("int", 400000);
+        values.put("long", 12345678901234L);
+        values.put("double", 1.0123456789012345678901234567890123456789D);
+        values.put("decimal", new BigDecimal("100.99"));
+        values.put("boolean", true);
+        values.put("nullField", null);
+        values.put("date", 20000);
+        values.put("timestamp", 1_234_567_890_123_456L);
+        values.put("timestampntz", 9_876_543_210_123_456L);
+        values.put("float", 3.14f);
+        values.put("binary", "bytes".getBytes(StandardCharsets.UTF_8));
+        GenericVariant v = GenericVariantBuilderHelper.build(allTypes, values);
+        GenericRow expected =
                 GenericRow.of(
                         GenericRow.of(BinaryString.fromString("Apache Paimon"), 3),
                         new GenericArray(new Integer[] {1, 2, 3, 4, 5}),
@@ -100,63 +183,29 @@ public class PaimonShreddingUtilsTest {
                         1.0123456789012345678901234567890123456789D,
                         Decimal.fromBigDecimal(new java.math.BigDecimal("100.99"), 5, 2),
                         true,
-                        null);
+                        null,
+                        20000,
+                        Timestamp.fromMicros(1_234_567_890_123_456L),
+                        Timestamp.fromMicros(9_876_543_210_123_456L),
+                        3.14f,
+                        "bytes".getBytes(StandardCharsets.UTF_8));
 
         // shredding to real type
-        RowType shreddedType = new RowType(allTypes.getFields());
-        RowType shreddingSchema = variantShreddingSchema(shreddedType);
-        VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
-        FieldToExtract[] fields = new FieldToExtract[allTypes.getFieldCount()];
-        for (int i = 0; i < allTypes.getFields().size(); i++) {
-            fields[i] =
-                    buildFieldsToExtract(
-                            allTypes.getFields().get(i).type(),
-                            "$." + allTypes.getFields().get(i).name(),
-                            castArgs,
-                            variantSchema);
-        }
-        assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
-                .isEqualTo(expert);
+        assertVariantStructEquals(new RowType(allTypes.getFields()), allTypes, v, expected);
 
         // no shredding
-        shreddedType = RowType.of();
-        shreddingSchema = variantShreddingSchema(shreddedType);
-        variantSchema = buildVariantSchema(shreddingSchema);
-        fields = new FieldToExtract[allTypes.getFieldCount()];
-        for (int i = 0; i < allTypes.getFields().size(); i++) {
-            fields[i] =
-                    buildFieldsToExtract(
-                            allTypes.getFields().get(i).type(),
-                            "$." + allTypes.getFields().get(i).name(),
-                            castArgs,
-                            variantSchema);
-        }
-
-        assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
-                .isEqualTo(expert);
+        assertVariantStructEquals(RowType.of(), allTypes, v, expected);
 
         // shredding to string, then cast to the real type
-        shreddedType =
+        RowType shreddedType =
                 RowType.of(
                         allTypes.getFields().stream()
                                 .map(a -> a.newType(DataTypes.STRING()))
                                 .toArray(DataField[]::new));
-        shreddingSchema = variantShreddingSchema(shreddedType);
-        variantSchema = buildVariantSchema(shreddingSchema);
-        fields = new FieldToExtract[allTypes.getFieldCount()];
-        for (int i = 0; i < allTypes.getFields().size(); i++) {
-            fields[i] =
-                    buildFieldsToExtract(
-                            allTypes.getFields().get(i).type(),
-                            "$." + allTypes.getFields().get(i).name(),
-                            castArgs,
-                            variantSchema);
-        }
-        assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
-                .isEqualTo(expert);
+        assertVariantStructEquals(shreddedType, allTypes, v, expected);
 
         // shredding to real type, then cast to the string
-        expert =
+        expected =
                 GenericRow.of(
                         BinaryString.fromString("{\"age\":3,\"name\":\"Apache Paimon\"}"),
                         BinaryString.fromString("[1,2,3,4,5]"),
@@ -168,12 +217,25 @@ public class PaimonShreddingUtilsTest {
                         BinaryString.fromString("1.0123456789012346"),
                         BinaryString.fromString("100.99"),
                         BinaryString.fromString("true"),
-                        null);
+                        null,
+                        BinaryString.fromString(DateTimeUtils.formatDate(20000)),
+                        BinaryString.fromString(
+                                DateTimeUtils.formatTimestamp(
+                                        Timestamp.fromMicros(1_234_567_890_123_456L),
+                                        TimeZone.getDefault(),
+                                        6)),
+                        BinaryString.fromString(
+                                DateTimeUtils.formatTimestamp(
+                                        Timestamp.fromMicros(9_876_543_210_123_456L),
+                                        DateTimeUtils.UTC_ZONE,
+                                        6)),
+                        BinaryString.fromString("3.14"),
+                        BinaryString.fromString("bytes"));
 
         shreddedType = new RowType(allTypes.getFields());
-        shreddingSchema = variantShreddingSchema(shreddedType);
-        variantSchema = buildVariantSchema(shreddingSchema);
-        fields = new FieldToExtract[allTypes.getFieldCount()];
+        RowType shreddingSchema = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
+        FieldToExtract[] fields = new FieldToExtract[allTypes.getFieldCount()];
         for (int i = 0; i < allTypes.getFields().size(); i++) {
             fields[i] =
                     buildFieldsToExtract(
@@ -183,7 +245,7 @@ public class PaimonShreddingUtilsTest {
                             variantSchema);
         }
         assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
-                .isEqualTo(expert);
+                .isEqualTo(expected);
 
         // no shredding, then cast to the string
         shreddedType = RowType.of();
@@ -200,7 +262,7 @@ public class PaimonShreddingUtilsTest {
         }
 
         assertThat(assembleVariantStruct(castShredded(v, variantSchema), variantSchema, fields))
-                .isEqualTo(expert);
+                .isEqualTo(expected);
 
         // cast struct to map
         shreddedType = RowType.of(f1);
@@ -227,6 +289,31 @@ public class PaimonShreddingUtilsTest {
                                                         BinaryString.fromString("Apache Paimon"));
                                             }
                                         })));
+    }
+
+    private static void assertVariantStructEquals(
+            RowType shreddedType, RowType allTypes, GenericVariant v, GenericRow expected) {
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        RowType shreddingSchema = variantShreddingSchema(shreddedType);
+        VariantSchema variantSchema = buildVariantSchema(shreddingSchema);
+
+        FieldToExtract[] fieldsToExtract = new FieldToExtract[allTypes.getFieldCount()];
+        for (int i = 0; i < allTypes.getFields().size(); i++) {
+            fieldsToExtract[i] =
+                    buildFieldsToExtract(
+                            allTypes.getFields().get(i).type(),
+                            "$." + allTypes.getFields().get(i).name(),
+                            castArgs,
+                            variantSchema);
+        }
+
+        InternalRow inputRow = castShredded(v, variantSchema);
+        InternalRow outputRow = assembleVariantStruct(inputRow, variantSchema, fieldsToExtract);
+        assertThat(outputRow).isEqualTo(expected);
+
+        Variant rebuilt = assembleVariant(inputRow, variantSchema);
+        assertThat(rebuilt.toJson(castArgs.zoneId())).isEqualTo(v.toJson(castArgs.zoneId()));
     }
 
     @Test

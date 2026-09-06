@@ -29,6 +29,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -92,7 +93,7 @@ public class WriterOperatorTest {
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
         options.set("write-buffer-spillable", "false");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
 
         FileStoreTable table =
                 createFileStoreTable(
@@ -109,7 +110,7 @@ public class WriterOperatorTest {
         Options options = new Options();
         options.set("write-buffer-for-append", "true");
         options.set("write-buffer-size", "256 b");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
         options.set("write-buffer-spillable", "false");
 
         FileStoreTable table =
@@ -446,7 +447,7 @@ public class WriterOperatorTest {
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
         options.set("write-buffer-spillable", "false");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
 
         FileStoreTable fileStoreTable =
                 createFileStoreTable(
@@ -601,7 +602,7 @@ public class WriterOperatorTest {
             RowType rowType, List<String> primaryKeys, List<String> partitionKeys, Options conf)
             throws Exception {
         conf.set(CoreOptions.PATH, tablePath.toString());
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), conf);

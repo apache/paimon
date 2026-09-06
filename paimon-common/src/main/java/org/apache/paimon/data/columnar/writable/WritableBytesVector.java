@@ -20,6 +20,8 @@ package org.apache.paimon.data.columnar.writable;
 
 import org.apache.paimon.data.columnar.BytesColumnVector;
 
+import java.nio.ByteBuffer;
+
 /** Writable {@link BytesColumnVector}. */
 public interface WritableBytesVector extends WritableColumnVector, BytesColumnVector {
 
@@ -29,7 +31,36 @@ public interface WritableBytesVector extends WritableColumnVector, BytesColumnVe
      */
     void putByteArray(int rowId, byte[] value, int offset, int length);
 
+    /** Puts the bytes between the buffer's position and limit without changing its position. */
+    default void putByteBuffer(int rowId, ByteBuffer value) {
+        if (value.hasArray()) {
+            putByteArray(
+                    rowId,
+                    value.array(),
+                    value.arrayOffset() + value.position(),
+                    value.remaining());
+        } else {
+            ByteBuffer duplicate = value.duplicate();
+            byte[] bytes = new byte[duplicate.remaining()];
+            duplicate.get(bytes);
+            putByteArray(rowId, bytes, 0, bytes.length);
+        }
+    }
+
     void appendByteArray(byte[] value, int offset, int length);
+
+    /** Appends the bytes between the buffer's position and limit without changing its position. */
+    default void appendByteBuffer(ByteBuffer value) {
+        if (value.hasArray()) {
+            appendByteArray(
+                    value.array(), value.arrayOffset() + value.position(), value.remaining());
+        } else {
+            ByteBuffer duplicate = value.duplicate();
+            byte[] bytes = new byte[duplicate.remaining()];
+            duplicate.get(bytes);
+            appendByteArray(bytes, 0, bytes.length);
+        }
+    }
 
     /** Fill the column vector with the provided value. */
     void fill(byte[] value);

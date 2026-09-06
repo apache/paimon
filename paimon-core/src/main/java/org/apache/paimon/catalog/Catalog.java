@@ -27,9 +27,11 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -424,6 +426,32 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
+     * Get a page of partitions using {@code predicate} as a best-effort filter.
+     *
+     * <p>The result may be a superset — an implementation must never exclude a partition it cannot
+     * prove non-matching — so callers must evaluate {@code predicate} again. Continue pagination
+     * while {@link PagedList#getNextPageToken()} is non-empty, even if a page has no elements.
+     *
+     * @param identifier path of the table
+     * @param predicate partition predicate
+     * @param maxResults maximum page size, or {@code null}/0 to use the catalog default
+     * @param pageToken token returned by the previous page, or {@code null} for the first page
+     * @param partitionNamePattern optional SQL LIKE prefix pattern (%) for partition names,
+     *     conjunctive with {@code predicate}
+     * @return a page of candidate partitions
+     * @throws TableNotExistException if the table does not exist
+     */
+    default PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        return listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    /**
      * Get Partition list by partition names of the table.
      *
      * @param identifier path of the table to list partitions
@@ -498,7 +526,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All views will be returned if
-     *     not set or empty. Currently, only prefix matching is supported.
+     *     not set or empty. Whether full LIKE semantics or only prefix matching is supported is
+     *     catalog-specific; the default implementation ignores the pattern.
      * @return a list of the names of views with provided page size in this database and next page
      *     token, or a list of the names of all views in this database if the catalog does not
      *     {@link #supportsListObjectsPaged()}.
@@ -525,7 +554,8 @@ public interface Catalog extends AutoCloseable {
      * @param pageToken Optional parameter indicating the next page token allows list to be start
      *     from a specific point.
      * @param viewNamePattern A sql LIKE pattern (%) for view names. All view details will be
-     *     returned if not set or empty. Currently, only prefix matching is supported.
+     *     returned if not set or empty. Whether full LIKE semantics or only prefix matching is
+     *     supported is catalog-specific; the default implementation ignores the pattern.
      * @return a list of the view details with provided page size (@param maxResults) in this
      *     database and next page token, or a list of the details of all views in this database if
      *     the catalog does not {@link #supportsListObjectsPaged()}.
@@ -651,7 +681,10 @@ public interface Catalog extends AutoCloseable {
 
     /**
      * Whether this catalog supports name pattern filter when list objects paged. If not,
-     * corresponding methods will throw exception if name pattern provided.
+     * corresponding methods will throw exception if name pattern provided. This flag is a
+     * catalog-wide default consulted by the base implementations; a specific list method may still
+     * honor a pattern by overriding the method directly (in which case it need not rely on this
+     * flag).
      *
      * <ul>
      *   <li>{@link #listDatabasesPaged(Integer, String, String)}.
@@ -677,7 +710,7 @@ public interface Catalog extends AutoCloseable {
      * will throw an {@link UnsupportedOperationException}, affect the following methods:
      *
      * <ul>
-     *   <li>{@link #commitSnapshot(Identifier, String, Snapshot, List)}.
+     *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
@@ -697,6 +730,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier Path of the table
      * @param tableUuid Uuid of the table to avoid wrong commit
+     * @param baseSnapshotUuid Uuid of the snapshot on which the commit is based
      * @param snapshot Snapshot to be committed
      * @param statistics statistics information of this change
      * @return Success or not
@@ -707,6 +741,7 @@ public interface Catalog extends AutoCloseable {
     boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;
@@ -1006,21 +1041,23 @@ public interface Catalog extends AutoCloseable {
     // ==================== Partition Modifications ==========================
 
     /**
-     * Whether this catalog supports partition modification for tables.
+     * Whether committing a table through this catalog maintains that table's partitions in the
+     * catalog.
      *
-     * <p>If not, following methods will do nothing:
+     * <p>What this gates is the handler a table is given: {@link
+     * CatalogEnvironment#partitionModification()} is null for a catalog that says false, so the
+     * commits of a table loaded from it register, alter and drop nothing. It does not disable the
+     * methods themselves, which is how a Format Table with catalog-managed partitions registers
+     * what a commit wrote even though its catalog reports false here:
      *
      * <ul>
      *   <li>{@link #createPartitions(Identifier, List)}.
      *   <li>{@link #alterPartitions(Identifier, List)}.
-     * </ul>
-     *
-     * <p>If not, following method will be exactly the same as directly using {@link
-     * BatchTableCommit#truncatePartitions}:
-     *
-     * <ul>
      *   <li>{@link #dropPartitions(Identifier, List)}.
      * </ul>
+     *
+     * <p>A catalog that keeps no partitions of its own inherits defaults that match: creating and
+     * altering do nothing, and dropping is exactly {@link BatchTableCommit#truncatePartitions}.
      */
     boolean supportsPartitionModification();
 
@@ -1033,6 +1070,39 @@ public interface Catalog extends AutoCloseable {
      */
     default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {}
+
+    /**
+     * Create partitions atomically unless existing entries are ignored, with optional statistics
+     * and position-aligned options.
+     */
+    default void createPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
+            throws TableNotExistException {
+        if (partitionOptions != null) {
+            if (partitionOptions.size() != partitions.size() || partitionOptions.contains(null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must contain one non-null map per partition.");
+            }
+            if (partitionOptions.stream().anyMatch(options -> !options.isEmpty())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s does not support partition options.",
+                                getClass().getName()));
+            }
+        }
+        if (!ignoreIfExists) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Catalog %s does not support createPartitions without ignoreIfExists.",
+                            getClass().getName()));
+        }
+        createPartitions(identifier, partitions);
+    }
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.

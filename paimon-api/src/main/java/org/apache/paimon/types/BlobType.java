@@ -103,12 +103,24 @@ public final class BlobType extends DataType {
         rowType.getFields()
                 .forEach(
                         field -> {
-                            DataTypeRoot type = field.type().getTypeRoot();
-                            if (type == DataTypeRoot.BLOB
+                            if (isBlobFileField(field.type())
                                     && !descriptorFields.contains(field.name())) {
                                 result.add(field);
                             }
                         });
         return result;
+    }
+
+    public static boolean isBlobFileField(DataType type) {
+        if (type.getTypeRoot() == DataTypeRoot.BLOB) {
+            return true;
+        }
+        if (type.getTypeRoot() == DataTypeRoot.ARRAY) {
+            return ((ArrayType) type).getElementType().getTypeRoot() == DataTypeRoot.BLOB;
+        }
+        if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            return ((MapType) type).getValueType().getTypeRoot() == DataTypeRoot.BLOB;
+        }
+        return false;
     }
 }

@@ -79,7 +79,11 @@ public class LanceReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             assertNotNull(reader);
 
@@ -127,7 +131,11 @@ public class LanceReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             assertNotNull(reader);
 

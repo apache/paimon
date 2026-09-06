@@ -37,6 +37,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -55,6 +56,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -153,14 +156,12 @@ public class FileDeletionTest {
         FileStoreCommitImpl commit = store.newCommit();
         Map<String, String> partitionSpec = new HashMap<>();
         partitionSpec.put("dt", "0401");
-        commit.overwritePartition(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+        commit.overwritePartition(partitionSpec, new ManifestCommittable(commitIdentifier++));
 
         // step 3: generate snapshot 3 by cleaning partition dt=0402/hr=10
         partitionSpec.put("dt", "0402");
         partitionSpec.put("hr", "8");
-        commit.overwritePartition(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+        commit.overwritePartition(partitionSpec, new ManifestCommittable(commitIdentifier++));
         commit.close();
 
         // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0
@@ -682,7 +683,11 @@ public class FileDeletionTest {
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, store.newSnapshotDeletion(), tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        tagManager,
+                        store.options().scanManifestParallelism());
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -750,11 +755,16 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum());
+                        store.options().fileOperationThreadNum(),
+                        store.options().scanManifestParallelism());
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        store.options().scanManifestParallelism());
         snapshotDeletion.readMergedDataFilesThrowException = true;
         expireSnapshots
                 .config(
@@ -815,10 +825,15 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum());
+                        store.options().fileOperationThreadNum(),
+                        store.options().scanManifestParallelism());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        store.options().scanManifestParallelism());
         snapshotDeletion.manifestSkippingSetThrowException = true;
         expireSnapshots
                 .config(
@@ -865,7 +880,7 @@ public class FileDeletionTest {
                 throw new UnsupportedOperationException("Unsupported generator mode: " + mode);
         }
 
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(root));
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, new Path(root));
 
         TableSchema tableSchema =
                 schemaManager.createTable(
@@ -954,7 +969,8 @@ public class FileDeletionTest {
                 StatsFileHandler statsFileHandler,
                 boolean produceChangelog,
                 boolean cleanEmptyDirectories,
-                int deleteFileThreadNum) {
+                int deleteFileThreadNum,
+                @Nullable Integer scanManifestParallelism) {
             super(
                     fileIO,
                     pathFactory,
@@ -964,7 +980,8 @@ public class FileDeletionTest {
                     statsFileHandler,
                     produceChangelog,
                     cleanEmptyDirectories,
-                    deleteFileThreadNum);
+                    deleteFileThreadNum,
+                    scanManifestParallelism);
         }
 
         @Override

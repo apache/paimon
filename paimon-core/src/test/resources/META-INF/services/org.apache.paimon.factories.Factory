@@ -14,4 +14,6 @@
 # limitations under the License.
 
 org.apache.paimon.mergetree.compact.aggregate.TestCustomAggFactory
+org.apache.paimon.mergetree.compact.aggregate.TestMapOnlyAggFactory
 org.apache.paimon.rest.auth.CustomTestDLFTokenLoaderFactory
+org.apache.paimon.iceberg.RecordingIcebergMetadataCommitter$Factory

@@ -32,6 +32,8 @@ import java.util.Map;
 public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     private static final int DEFAULT_DIMENSION = 128;
+    static final String TRAIN_SAMPLE_RATIO_OPTION = "train.sample-ratio";
+    static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
@@ -39,7 +41,8 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         return new NativeVectorGlobalIndexer(
                 field.type(),
                 nativeOptions(field.type(), options, identifier, field.name()),
-                identifier);
+                identifier,
+                trainSampleRatio(options, identifier, field.name()));
     }
 
     static Map<String, String> nativeOptions(
@@ -75,7 +78,64 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         nativeOptions.put("index.type", identifier.replace('-', '_'));
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
+        nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
         return nativeOptions;
+    }
+
+    static double trainSampleRatio(Options tableOptions, String identifier, String fieldName) {
+        Map<String, String> tableOptionsMap = tableOptions.toMap();
+        String key =
+                resolveFieldOverriddenKey(
+                        tableOptionsMap, identifier, fieldName, TRAIN_SAMPLE_RATIO_OPTION);
+        if (key == null) {
+            return DEFAULT_TRAIN_SAMPLE_RATIO;
+        }
+        String value = tableOptionsMap.get(key);
+
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            if (!Double.isNaN(parsed) && !Double.isInfinite(parsed) && parsed > 0 && parsed <= 1) {
+                return parsed;
+            }
+            throw invalidTrainSampleRatio(key, value);
+        } catch (NumberFormatException e) {
+            throw invalidTrainSampleRatio(key, value);
+        }
+    }
+
+    private static IllegalArgumentException invalidTrainSampleRatio(String key, String value) {
+        return new IllegalArgumentException(
+                "Invalid value for '"
+                        + key
+                        + "': "
+                        + value
+                        + ". Must be greater than 0 and less than or equal to 1.");
+    }
+
+    /**
+     * Resolves a single option key that supports index-level ({@code <index-type>.<option>}) and
+     * field-level ({@code fields.<field-name>.<option>}) forms, where the field-level key overrides
+     * the index-level key. Returns the winning fully-qualified key, or {@code null} if neither is
+     * set.
+     *
+     * <p>This is the same index/field precedence applied in bulk by {@link #nativeOptions}; the
+     * difference is that this helper resolves a single option so it can stay local (for example
+     * {@code train.sample-ratio}) instead of being forwarded to the native writer.
+     */
+    private static String resolveFieldOverriddenKey(
+            Map<String, String> tableOptionsMap,
+            String identifier,
+            String fieldName,
+            String option) {
+        String fieldKey = "fields." + fieldName + "." + option;
+        if (tableOptionsMap.containsKey(fieldKey)) {
+            return fieldKey;
+        }
+        String indexKey = identifier + "." + option;
+        if (tableOptionsMap.containsKey(indexKey)) {
+            return indexKey;
+        }
+        return null;
     }
 
     private static String nativeOptionKey(String optionKey) {
@@ -87,14 +147,45 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             case "metric":
                 return "metric";
             case "nlist":
+            case "expected-vector-count":
             case "pq.m":
-            case "hnsw.m":
-            case "hnsw.ef-construction":
-            case "hnsw.max-level":
+            case "pq.code-ratio":
+            case "pq.bits":
+            case "rq.bits":
+            case "target-recall":
+            case "max-bytes-per-vector":
+            case "deployment-profile":
                 return optionKey;
             case "pq.use-opq":
             case "use-opq":
                 return "use-opq";
+            case "build-preset":
+            case "diskann.build-preset":
+                return "diskann.build-preset";
+            case "max-degree":
+            case "diskann.max-degree":
+                return "diskann.max-degree";
+            case "build-search-list-size":
+            case "diskann.build-search-list-size":
+                return "diskann.build-search-list-size";
+            case "alpha":
+            case "diskann.alpha":
+                return "diskann.alpha";
+            case "seed":
+            case "diskann.seed":
+                return "diskann.seed";
+            case "memory-budget-bytes":
+            case "diskann.memory-budget-bytes":
+                return "diskann.memory-budget-bytes";
+            case "storage-layout":
+            case "diskann.storage-layout":
+                return "diskann.storage-layout";
+            case "raw-vector-encoding":
+            case "diskann.raw-vector-encoding":
+                return "diskann.raw-vector-encoding";
+            case "build-distance":
+            case "diskann.build-distance":
+                return "diskann.build-distance";
             default:
                 return null;
         }

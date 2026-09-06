@@ -31,6 +31,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -153,7 +154,7 @@ public abstract class ScannerTestBase {
 
     protected FileStoreTable createFileStoreTable(
             boolean withPrimaryKeys, Options conf, Path tablePath) throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         List<String> primaryKeys = new ArrayList<>();
         if (withPrimaryKeys) {
             primaryKeys = Arrays.asList("pt", "a");

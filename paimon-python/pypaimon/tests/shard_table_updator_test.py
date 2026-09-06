@@ -651,6 +651,81 @@ class ShardTableUpdatorTest(unittest.TestCase):
             "Row-id-check commits must enable conflict detection."
         )
 
+    def test_shard_update_ignores_target_file_row_num(self):
+        """Regression: a shard maps to exactly one output file, so
+        target-file-row-num must not split it. Before the fix the
+        directly-constructed AppendOnlyDataWriter honoured the option and
+        rolled the 5-row shard into three files, failing SingleWriter.end()
+        with "Should have one file."."""
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+            ('d', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        name = self._create_unique_table_name('row_num_rolling')
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        # One 5-row file for a, b, c.
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write().with_write_type(['a', 'b', 'c'])
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict({
+            'a': [1, 2, 3, 4, 5],
+            'b': [10, 20, 30, 40, 50],
+            'c': [100, 200, 300, 400, 500],
+        }, schema=pa.schema([
+            ('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32()),
+        ])))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        # Enable row-count rolling (limit 2). The shard still covers all 5
+        # rows and must emit a single file.
+        table = table.copy({'target-file-row-num': '2'})
+
+        wb = table.new_batch_write_builder()
+        upd = wb.new_update()
+        upd.with_read_projection(['a', 'b', 'c'])
+        upd.with_update_type(['d'])
+        shard = upd.new_shard_updator(0, 1)
+        reader = shard.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            a_ = batch.column('a').to_pylist()
+            b_ = batch.column('b').to_pylist()
+            c_ = batch.column('c').to_pylist()
+            shard.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'d': [c + b - a for a, b, c in zip(a_, b_, c_)]},
+                schema=pa.schema([('d', pa.int32())]),
+            ))
+
+        # Without the fix this raises "Should have one file."
+        commit_messages = shard.prepare_commit()
+        new_file_count = sum(len(m.new_files) for m in commit_messages)
+        self.assertEqual(
+            1, new_file_count, "shard update must write exactly one file")
+
+        tc = wb.new_commit()
+        tc.commit(commit_messages)
+        tc.close()
+
+        rb = table.new_read_builder()
+        tr = rb.new_read()
+        actual = tr.to_arrow(rb.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'a': [1, 2, 3, 4, 5],
+            'b': [10, 20, 30, 40, 50],
+            'c': [100, 200, 300, 400, 500],
+            'd': [109, 218, 327, 436, 545],
+        }, schema=table_schema)
+        self.assertEqual(actual, expected)
+
 
 if __name__ == '__main__':
     unittest.main()

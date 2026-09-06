@@ -189,6 +189,48 @@ abstract class DeltaEncodingTest<T extends Number, F extends WritableColumnVecto
     }
 
     @Test
+    public void testReadCountAccumulatesAcrossCalls() throws IOException {
+        T[] data = allocDataArray(blockSize + 1);
+        for (int i = 0; i < data.length; i++) {
+            setValue(data, i, i * 32);
+        }
+        writeData(data);
+        reader = new VectorizedDeltaBinaryPackedReader();
+        reader.initFromPage(data.length, writer.getBytes().toInputStream());
+        writableColumnVector = getWritableColumnVector(data.length);
+
+        for (int i = 0; i < data.length; i++) {
+            readData(1, writableColumnVector, i);
+            assertTrue(compareValues(i * 32, readDataFromVector(writableColumnVector, i)));
+        }
+
+        ParquetDecodingException e =
+                assertThrows(
+                        ParquetDecodingException.class,
+                        () -> readData(1, writableColumnVector, data.length));
+        assertTrue(e.getMessage().startsWith("No more values to read."));
+    }
+
+    @Test
+    public void testZeroLengthReadDoesNotResetPosition() throws IOException {
+        T[] data = allocDataArray(3);
+        for (int i = 0; i < data.length; i++) {
+            setValue(data, i, i * 32);
+        }
+        writeData(data);
+        reader = new VectorizedDeltaBinaryPackedReader();
+        reader.initFromPage(data.length, writer.getBytes().toInputStream());
+        writableColumnVector = getWritableColumnVector(data.length);
+
+        readData(1, writableColumnVector, 0);
+        readData(0, writableColumnVector, 1);
+        readData(1, writableColumnVector, 1);
+
+        assertTrue(compareValues(0, readDataFromVector(writableColumnVector, 0)));
+        assertTrue(compareValues(32, readDataFromVector(writableColumnVector, 1)));
+    }
+
+    @Test
     public void testSkip() throws IOException {
         T[] data = allocDataArray(5 * blockSize + 1);
         for (int i = 0; i < data.length; i++) {

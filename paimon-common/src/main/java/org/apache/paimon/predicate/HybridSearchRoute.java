@@ -39,7 +39,7 @@ public class HybridSearchRoute implements Serializable {
     private final RouteType routeType;
     private final String fieldName;
     private final float[] vector;
-    private final FullTextQuery fullTextQuery;
+    private final String fullTextQuery;
     private final int limit;
     private final float weight;
     private final Map<String, String> options;
@@ -67,11 +67,10 @@ public class HybridSearchRoute implements Serializable {
     }
 
     public static HybridSearchRoute fullText(
-            String queryJson, int limit, float weight, Map<String, String> options) {
+            String fieldName, String query, int limit, float weight, Map<String, String> options) {
         checkFullTextOptions(options);
-        FullTextQuery query = FullTextQuery.fromJson(queryJson);
         return new HybridSearchRoute(
-                RouteType.FULL_TEXT, query.columns().get(0), null, query, limit, weight, options);
+                RouteType.FULL_TEXT, fieldName, null, query, limit, weight, options);
     }
 
     private static void checkFullTextOptions(Map<String, String> options) {
@@ -85,7 +84,7 @@ public class HybridSearchRoute implements Serializable {
             RouteType routeType,
             String fieldName,
             float[] vector,
-            FullTextQuery fullTextQuery,
+            String fullTextQuery,
             int limit,
             float weight,
             Map<String, String> options) {
@@ -145,7 +144,7 @@ public class HybridSearchRoute implements Serializable {
         return vector;
     }
 
-    public FullTextQuery fullTextQuery() {
+    public String fullTextQuery() {
         return fullTextQuery;
     }
 
@@ -166,13 +165,10 @@ public class HybridSearchRoute implements Serializable {
     }
 
     public FullTextSearch toFullTextSearch() {
-        return new FullTextSearch(fullTextQuery, limit);
+        return new FullTextSearch(fieldName, fullTextQuery, limit);
     }
 
     public Iterable<String> columns() {
-        if (isFullText()) {
-            return fullTextQuery.columns();
-        }
         return Collections.singletonList(fieldName);
     }
 
@@ -195,7 +191,7 @@ public class HybridSearchRoute implements Serializable {
 
         private String fieldName;
         private float[] vector;
-        private FullTextQuery fullTextQuery;
+        private String fullTextQuery;
         private RouteType routeType;
         private int limit;
         private float weight = 1.0f;
@@ -208,7 +204,18 @@ public class HybridSearchRoute implements Serializable {
         }
 
         public Builder field(String fieldName) {
-            return vectorColumn(fieldName);
+            this.fieldName = fieldName;
+            return this;
+        }
+
+        public Builder fullTextColumn(String fieldName) {
+            setRouteType(RouteType.FULL_TEXT);
+            this.fieldName = fieldName;
+            return this;
+        }
+
+        public Builder textColumn(String fieldName) {
+            return fullTextColumn(fieldName);
         }
 
         public Builder queryVector(float[] vector) {
@@ -221,12 +228,10 @@ public class HybridSearchRoute implements Serializable {
             return queryVector(vector);
         }
 
-        public Builder query(String queryJson) {
+        public Builder query(String query) {
             checkRouteType(RouteType.FULL_TEXT);
-            FullTextQuery fullTextQuery = FullTextQuery.fromJson(queryJson);
             this.routeType = RouteType.FULL_TEXT;
-            this.fullTextQuery = fullTextQuery;
-            this.fieldName = fullTextQuery.columns().get(0);
+            this.fullTextQuery = query;
             return this;
         }
 
@@ -269,7 +274,7 @@ public class HybridSearchRoute implements Serializable {
                 checkFullTextOptions(options);
                 return new HybridSearchRoute(
                         RouteType.FULL_TEXT,
-                        fullTextQuery.columns().get(0),
+                        fieldName,
                         null,
                         fullTextQuery,
                         limit,

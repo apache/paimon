@@ -21,9 +21,9 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FormatTableRollingFileWriter;
+import org.apache.paimon.io.FormatTableWrittenFile;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
@@ -38,12 +38,14 @@ public class FormatTableRecordWriter implements AutoCloseable {
     private final String fileCompression;
     private final FileFormat fileFormat;
     private final long targetFileSize;
+    private final long targetFileRowNum;
     private FormatTableRollingFileWriter writer;
 
     public FormatTableRecordWriter(
             FileIO fileIO,
             FileFormat fileFormat,
             long targetFileSize,
+            long targetFileRowNum,
             DataFilePathFactory pathFactory,
             RowType writeSchema,
             String fileCompression) {
@@ -53,6 +55,7 @@ public class FormatTableRecordWriter implements AutoCloseable {
         this.writeSchema = writeSchema;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
+        this.targetFileRowNum = targetFileRowNum;
     }
 
     public void write(InternalRow data) throws Exception {
@@ -62,14 +65,14 @@ public class FormatTableRecordWriter implements AutoCloseable {
         writer.write(data);
     }
 
-    public List<TwoPhaseOutputStream.Committer> closeAndGetCommitters() throws Exception {
-        List<TwoPhaseOutputStream.Committer> commits = new ArrayList<>();
+    public List<FormatTableWrittenFile> closeAndGetWrittenFiles() throws Exception {
+        List<FormatTableWrittenFile> written = new ArrayList<>();
         if (writer != null) {
             writer.close();
-            commits.addAll(writer.committers());
+            written.addAll(writer.writtenFiles());
             writer = null;
         }
-        return commits;
+        return written;
     }
 
     @Override
@@ -82,6 +85,12 @@ public class FormatTableRecordWriter implements AutoCloseable {
 
     private FormatTableRollingFileWriter createRollingRowWriter() {
         return new FormatTableRollingFileWriter(
-                fileIO, fileFormat, targetFileSize, writeSchema, pathFactory, fileCompression);
+                fileIO,
+                fileFormat,
+                targetFileSize,
+                targetFileRowNum,
+                writeSchema,
+                pathFactory,
+                fileCompression);
     }
 }

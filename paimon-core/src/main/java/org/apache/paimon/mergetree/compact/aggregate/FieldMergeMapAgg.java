@@ -36,11 +36,23 @@ public class FieldMergeMapAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
 
+    /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
+    private final boolean binaryKey;
+
     public FieldMergeMapAgg(String name, MapType dataType) {
         super(name, dataType);
 
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
+        this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
+    }
+
+    private Object hashKey(Object key) {
+        return BinaryMapKeys.hashKey(binaryKey, key);
+    }
+
+    private GenericMap toGenericMap(Map<Object, Object> map) {
+        return BinaryMapKeys.toGenericMap(binaryKey, map);
     }
 
     @Override
@@ -53,7 +65,7 @@ public class FieldMergeMapAgg extends FieldAggregator {
         putToMap(resultMap, accumulator);
         putToMap(resultMap, inputField);
 
-        return new GenericMap(resultMap);
+        return toGenericMap(resultMap);
     }
 
     private void putToMap(Map<Object, Object> map, Object data) {
@@ -62,7 +74,7 @@ public class FieldMergeMapAgg extends FieldAggregator {
         InternalArray valueArray = mapData.valueArray();
         for (int i = 0; i < keyArray.size(); i++) {
             map.put(
-                    keyGetter.getElementOrNull(keyArray, i),
+                    hashKey(keyGetter.getElementOrNull(keyArray, i)),
                     valueGetter.getElementOrNull(valueArray, i));
         }
     }
@@ -86,7 +98,7 @@ public class FieldMergeMapAgg extends FieldAggregator {
         InternalArray retractKeyArray = retract.keyArray();
         Set<Object> retractKeys = new HashSet<>();
         for (int i = 0; i < retractKeyArray.size(); i++) {
-            retractKeys.add(keyGetter.getElementOrNull(retractKeyArray, i));
+            retractKeys.add(hashKey(keyGetter.getElementOrNull(retractKeyArray, i)));
         }
 
         InternalMap acc = (InternalMap) accumulator;
@@ -94,12 +106,12 @@ public class FieldMergeMapAgg extends FieldAggregator {
         InternalArray accKeyArray = acc.keyArray();
         InternalArray accValueArray = acc.valueArray();
         for (int i = 0; i < accKeyArray.size(); i++) {
-            Object accKey = keyGetter.getElementOrNull(accKeyArray, i);
+            Object accKey = hashKey(keyGetter.getElementOrNull(accKeyArray, i));
             if (!retractKeys.contains(accKey)) {
                 resultMap.put(accKey, valueGetter.getElementOrNull(accValueArray, i));
             }
         }
 
-        return new GenericMap(resultMap);
+        return toGenericMap(resultMap);
     }
 }

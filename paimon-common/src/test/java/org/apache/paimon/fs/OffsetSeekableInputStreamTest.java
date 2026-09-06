@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -151,10 +152,69 @@ public class OffsetSeekableInputStreamTest {
     }
 
     @Test
+    public void testReadByteArrayPastEnd() throws IOException {
+        long offset = 5;
+        long length = 10;
+        try (OffsetSeekableInputStream stream =
+                new OffsetSeekableInputStream(wrapped, offset, length)) {
+            stream.seek(length + 1);
+            assertThat(stream.read(new byte[5], 0, 5)).isEqualTo(-1);
+        }
+    }
+
+    @Test
+    public void testReadZeroLength() throws IOException {
+        long offset = 5;
+        long length = 10;
+        byte[] buffer = new byte[5];
+        try (OffsetSeekableInputStream stream =
+                new OffsetSeekableInputStream(wrapped, offset, length)) {
+            assertThat(stream.read(buffer, 0, 0)).isZero();
+
+            stream.seek(length);
+            assertThat(stream.read(buffer, 0, 0)).isZero();
+
+            stream.seek(length + 1);
+            assertThat(stream.read(buffer, 0, 0)).isZero();
+        }
+    }
+
+    @Test
+    public void testInvalidReadArguments() throws IOException {
+        long offset = 5;
+        long length = 10;
+        byte[] buffer = new byte[5];
+        try (OffsetSeekableInputStream stream =
+                new OffsetSeekableInputStream(wrapped, offset, length)) {
+            stream.seek(length);
+
+            assertThatThrownBy(() -> stream.read(null, 0, 1))
+                    .isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> stream.read(buffer, -1, 1))
+                    .isInstanceOf(IndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> stream.read(buffer, 0, -1))
+                    .isInstanceOf(IndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> stream.read(buffer, buffer.length + 1, 0))
+                    .isInstanceOf(IndexOutOfBoundsException.class);
+            assertThatThrownBy(() -> stream.read(buffer, 1, buffer.length))
+                    .isInstanceOf(IndexOutOfBoundsException.class);
+        }
+    }
+
+    @Test
     public void testClose() throws IOException {
         SeekableInputStream mockStream = mock(SeekableInputStream.class);
         OffsetSeekableInputStream offsetStream = new OffsetSeekableInputStream(mockStream, 0, 10);
         offsetStream.close();
+        verify(mockStream, times(1)).close();
+    }
+
+    @Test
+    public void testConstructorSeekFailureClosesWrapped() throws IOException {
+        SeekableInputStream mockStream = mock(SeekableInputStream.class);
+        org.mockito.Mockito.doThrow(new IOException("seek failed")).when(mockStream).seek(5);
+        assertThatThrownBy(() -> new OffsetSeekableInputStream(mockStream, 5, 10))
+                .isInstanceOf(IOException.class);
         verify(mockStream, times(1)).close();
     }
 

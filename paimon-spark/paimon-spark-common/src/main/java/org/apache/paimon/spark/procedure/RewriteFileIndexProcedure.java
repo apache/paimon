@@ -190,6 +190,9 @@ public class RewriteFileIndexProcedure extends BaseProcedure {
                 BinaryRow partition = entry.partition();
                 int bucket = entry.bucket();
                 DataFileMeta indexedFile = fileIndexProcessor.process(partition, bucket, entry);
+                if (entry.file().equals(indexedFile)) {
+                    continue;
+                }
 
                 CommitMessageImpl commitMessage =
                         new CommitMessageImpl(

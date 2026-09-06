@@ -30,6 +30,7 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableRunnable;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -50,11 +51,16 @@ public interface StoreSinkWrite {
 
     void setWriteRestore(WriteRestore writeRestore);
 
+    default void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {}
+
     @Nullable
     SinkRecord write(InternalRow rowData) throws Exception;
 
     @Nullable
     SinkRecord write(InternalRow rowData, int bucket) throws Exception;
+
+    @Nullable
+    SinkRecord write(InternalRow rowData, int bucket, int totalBuckets) throws Exception;
 
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
@@ -95,6 +101,21 @@ public interface StoreSinkWrite {
                 IOManager ioManager,
                 MemoryPoolFactory memoryPoolFactory,
                 @Nullable MetricGroup metricGroup);
+    }
+
+    static Provider withBlobDescriptorReaderFactory(
+            Provider provider, @Nullable UriReaderFactory uriReaderFactory) {
+        if (uriReaderFactory == null) {
+            return provider;
+        }
+
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+            StoreSinkWrite write =
+                    provider.provide(
+                            table, commitUser, state, ioManager, memoryPoolFactory, metricGroup);
+            write.setBlobDescriptorReaderFactory(uriReaderFactory);
+            return write;
+        };
     }
 
     static StoreSinkWrite.Provider createWriteProvider(
@@ -183,6 +204,31 @@ public interface StoreSinkWrite {
                     isStreaming,
                     memoryPoolFactory,
                     metricGroup);
+        };
+    }
+
+    static StoreSinkWrite.Provider createPostponeFixedBucketWriteProvider(
+            boolean ignorePreviousFiles, boolean isStreaming, boolean hasSinkMaterializer) {
+        return (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) -> {
+            Preconditions.checkArgument(
+                    !hasSinkMaterializer,
+                    String.format(
+                            "Sink materializer must not be used with Paimon sink. "
+                                    + "Please set '%s' to '%s' in Flink's config.",
+                            ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE.key(),
+                            ExecutionConfigOptions.UpsertMaterialize.NONE.name()));
+            return new StoreSinkWriteImpl(
+                    table,
+                    commitUser,
+                    state,
+                    ioManager,
+                    ignorePreviousFiles,
+                    false,
+                    isStreaming,
+                    memoryPoolFactory,
+                    metricGroup,
+                    (t, user, writeId) ->
+                            t.newPostponeFixedBucketWriteBuilder().newWrite(user, writeId));
         };
     }
 }

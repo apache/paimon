@@ -101,6 +101,9 @@ public class RewriteFileIndexSink extends FlinkWriteSink<ManifestEntry> {
             BinaryRow partition = entry.partition();
             int bucket = entry.bucket();
             DataFileMeta indexedFile = fileIndexProcessor.process(partition, bucket, entry);
+            if (entry.file().equals(indexedFile)) {
+                return;
+            }
 
             CommitMessageImpl commitMessage =
                     new CommitMessageImpl(

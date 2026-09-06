@@ -37,12 +37,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkDataEvolutionITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9092;
+    private static int port;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -55,12 +56,12 @@ public class SparkDataEvolutionITCase {
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
@@ -77,12 +78,12 @@ public class SparkDataEvolutionITCase {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         // with hive metastore
                         .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("hive.metastore.uris", "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                         .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
+                                "thrift://localhost:" + port)
                         .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                         .config(
                                 "spark.sql.catalog.spark_catalog.warehouse",
@@ -104,9 +105,9 @@ public class SparkDataEvolutionITCase {
                         + "    `g_1_2` BIGINT COMMENT 'g_1_2',\n"
                         + "    `g_2_1` BIGINT COMMENT 'g_2_1',\n"
                         + "    `g_2_2` BIGINT COMMENT 'g_2_2'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'file.compression' = 'snappy',\n"
                         + "    'manifest.compression' = 'snappy',\n"
                         + "    'row-tracking.enabled' = 'true',\n"
@@ -123,9 +124,9 @@ public class SparkDataEvolutionITCase {
                         + "    `id` BIGINT COMMENT 'id',\n"
                         + "    `g_2_1` BIGINT COMMENT 'g_2_1',\n"
                         + "    `g_2_2` BIGINT COMMENT 'g_2_2'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'file.compression' = 'snappy',\n"
                         + "    'manifest.compression' = 'snappy',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"

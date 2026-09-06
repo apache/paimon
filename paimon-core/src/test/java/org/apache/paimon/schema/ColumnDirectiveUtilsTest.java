@@ -19,9 +19,12 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
 
@@ -139,6 +142,20 @@ public class ColumnDirectiveUtilsTest {
     }
 
     @Test
+    public void testBlobDirectiveDeduplicatesExistingOptionAndPreservesOrder() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "first,pic");
+
+        ColumnDirectiveUtils.applyAddColumnDirective(
+                "__BLOB_FIELD", "pic", DataTypes.BYTES(), opts);
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "first,pic");
+
+        ColumnDirectiveUtils.applyAddColumnDirective(
+                "__BLOB_FIELD", "last", DataTypes.BYTES(), opts);
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "first,pic,last");
+    }
+
+    @Test
     public void testBareDirectiveWithoutComment() {
         Map<String, String> opts = new HashMap<>();
         ColumnDirectiveUtils.ConvertedColumn result =
@@ -160,6 +177,43 @@ public class ColumnDirectiveUtilsTest {
         assertThat(result.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
     }
 
+    @Test
+    public void testBlobDirectiveWithArraySourceType() {
+        Map<String, String> opts = new HashMap<>();
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        new ArrayType(false, DataTypes.BYTES().copy(false)),
+                        opts);
+
+        assertThat(result).isNotNull();
+        assertThat(result.type().getTypeRoot()).isEqualTo(DataTypeRoot.ARRAY);
+        assertThat(result.type().isNullable()).isFalse();
+        BlobType elementType = (BlobType) ((ArrayType) result.type()).getElementType();
+        assertThat(elementType.isNullable()).isFalse();
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "images");
+    }
+
+    @Test
+    public void testBlobDirectiveWithMapSourceType() {
+        Map<String, String> opts = new HashMap<>();
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        new MapType(
+                                false, DataTypes.INT().copy(false), DataTypes.BYTES().copy(false)),
+                        opts);
+
+        assertThat(result).isNotNull();
+        MapType mapType = (MapType) result.type();
+        assertThat(mapType.isNullable()).isFalse();
+        assertThat(mapType.getKeyType()).isEqualTo(DataTypes.INT().copy(false));
+        assertThat(mapType.getValueType()).isEqualTo(DataTypes.BLOB().copy(false));
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "images");
+    }
+
     // -- applyAddColumnDirective error cases --
 
     @Test
@@ -169,7 +223,53 @@ public class ColumnDirectiveUtilsTest {
                                 ColumnDirectiveUtils.applyAddColumnDirective(
                                         "__BLOB_FIELD", "col", DataTypes.INT(), new HashMap<>()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+                .hasMessageContaining(
+                        "must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type");
+    }
+
+    @Test
+    public void testInlineBlobDirectivesRejectArraySourceType() {
+        assertThatThrownBy(
+                        () ->
+                                ColumnDirectiveUtils.applyAddColumnDirective(
+                                        "__BLOB_DESCRIPTOR_FIELD",
+                                        "images",
+                                        DataTypes.ARRAY(DataTypes.BYTES()),
+                                        new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ARRAY<BLOB> is only supported by 'blob-field'");
+        assertThatThrownBy(
+                        () ->
+                                ColumnDirectiveUtils.applyAddColumnDirective(
+                                        "__BLOB_VIEW_FIELD",
+                                        "images",
+                                        DataTypes.ARRAY(DataTypes.BYTES()),
+                                        new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ARRAY<BLOB> is only supported by 'blob-field'");
+    }
+
+    @Test
+    public void testMapBlobDirectiveValidation() {
+        assertThatThrownBy(
+                        () ->
+                                ColumnDirectiveUtils.applyAddColumnDirective(
+                                        "__BLOB_DESCRIPTOR_FIELD",
+                                        "images",
+                                        DataTypes.MAP(DataTypes.INT(), DataTypes.BYTES()),
+                                        new HashMap<>()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("MAP<X, BLOB> is only supported by 'blob-field'");
+
+        ColumnDirectiveUtils.ConvertedColumn result =
+                ColumnDirectiveUtils.applyAddColumnDirective(
+                        "__BLOB_FIELD",
+                        "images",
+                        DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BYTES()),
+                        new HashMap<>());
+        MapType mapType = (MapType) result.type();
+        assertThat(mapType.getKeyType()).isEqualTo(DataTypes.BOOLEAN());
+        assertThat(mapType.getValueType()).isEqualTo(DataTypes.BLOB());
     }
 
     @Test
@@ -317,7 +417,7 @@ public class ColumnDirectiveUtilsTest {
         opts.put("blob.stored-descriptor-fields", "b,legacy");
         opts.put(CoreOptions.VECTOR_FIELD.key(), "v");
 
-        ColumnDirectiveUtils.removeDroppedDirectiveOptions("b", DataTypeRoot.BLOB, opts);
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions("b", DataTypes.BLOB(), opts);
 
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "a");
         assertThat(opts).containsEntry(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "c");
@@ -327,13 +427,36 @@ public class ColumnDirectiveUtilsTest {
     }
 
     @Test
+    public void testRemoveDroppedArrayBlobOptions() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "images,other");
+
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                "images", DataTypes.ARRAY(DataTypes.BLOB()), opts);
+
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "other");
+    }
+
+    @Test
+    public void testRemoveDroppedMapBlobOptions() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "images,other");
+
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                "images", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()), opts);
+
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "other");
+    }
+
+    @Test
     public void testRemoveDroppedVectorOptions() {
         Map<String, String> opts = new HashMap<>();
         opts.put(CoreOptions.BLOB_FIELD.key(), "a");
         opts.put(CoreOptions.VECTOR_FIELD.key(), "emb,emb2");
         opts.put("field.emb.vector-dim", "128");
 
-        ColumnDirectiveUtils.removeDroppedDirectiveOptions("emb", DataTypeRoot.VECTOR, opts);
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                "emb", DataTypes.VECTOR(128, DataTypes.FLOAT()), opts);
 
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "a");
         assertThat(opts).containsEntry(CoreOptions.VECTOR_FIELD.key(), "emb2");
@@ -346,7 +469,7 @@ public class ColumnDirectiveUtilsTest {
         opts.put(CoreOptions.BLOB_FIELD.key(), "a");
         opts.put(CoreOptions.VECTOR_FIELD.key(), "v");
 
-        ColumnDirectiveUtils.removeDroppedDirectiveOptions("x", DataTypeRoot.INTEGER, opts);
+        ColumnDirectiveUtils.removeDroppedDirectiveOptions("x", DataTypes.INT(), opts);
 
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "a");
         assertThat(opts).containsEntry(CoreOptions.VECTOR_FIELD.key(), "v");

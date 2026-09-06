@@ -21,6 +21,8 @@ package org.apache.paimon.format.row;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 
+import java.nio.ByteBuffer;
+
 /** A resizable byte buffer with little-endian primitive write operations. */
 class BlockOutput {
 
@@ -90,6 +92,14 @@ class BlockOutput {
         ensureCapacity(value.length);
         System.arraycopy(value, 0, buffer, position, value.length);
         position += value.length;
+    }
+
+    void writeBytes(ByteBuffer value) {
+        int length = value.remaining();
+        writeVarInt(length);
+        ensureCapacity(length);
+        value.duplicate().get(buffer, position, length);
+        position += length;
     }
 
     void writeDecimal(Decimal value, int precision) {

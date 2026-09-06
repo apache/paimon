@@ -29,25 +29,31 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
-/** The {@link GlobalIndexSingleColumnWriter} implementation for bitmap index. */
-public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
+/**
+ * The {@link GlobalIndexSingleColumnWriter} implementation for bitmap index. Non-null keys must be
+ * written in monotonically increasing order so completed bitmaps can be streamed to the output file
+ * instead of retained until {@link #finish()}.
+ */
+public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private final GlobalIndexFileWriter fileWriter;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
     private final int dictionaryBlockSize;
     @Nullable private final BlockCompressionFactory compressionFactory;
-    private final Map<BitmapGlobalIndexFormat.SerializedKey, RoaringNavigableMap64> bitmaps;
+    private final RoaringNavigableMap64 currentBitmap;
     private final RoaringNavigableMap64 nullRows;
     private final RoaringNavigableMap64 nonNullRows;
 
+    private String fileName;
+    private PositionOutputStream outputStream;
+    private BitmapGlobalIndexFormat.StreamingWriter streamingWriter;
     private long rowCount;
     private Object firstKey;
     private Object lastKey;
@@ -62,7 +68,7 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
         this.comparator = keySerializer.createComparator();
         this.dictionaryBlockSize = dictionaryBlockSize;
         this.compressionFactory = compressionFactory;
-        this.bitmaps = new LinkedHashMap<>();
+        this.currentBitmap = new RoaringNavigableMap64();
         this.nullRows = new RoaringNavigableMap64();
         this.nonNullRows = new RoaringNavigableMap64();
     }
@@ -76,10 +82,21 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
         }
 
         nonNullRows.add(relativeRowId);
-        updateMinMax(key);
-        BitmapGlobalIndexFormat.SerializedKey serializedKey =
-                BitmapGlobalIndexFormat.SerializedKey.fromObject(keySerializer, key);
-        bitmaps.computeIfAbsent(serializedKey, k -> new RoaringNavigableMap64()).add(relativeRowId);
+        if (lastKey != null) {
+            int comparison = comparator.compare(key, lastKey);
+            if (comparison < 0) {
+                throw new IllegalArgumentException(
+                        "Bitmap index keys must be written in monotonically increasing order.");
+            }
+            if (comparison > 0) {
+                flushCurrentBitmap();
+            }
+        }
+        if (firstKey == null) {
+            firstKey = key;
+        }
+        lastKey = key;
+        currentBitmap.add(relativeRowId);
     }
 
     @Override
@@ -88,15 +105,10 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
             return Collections.emptyList();
         }
 
-        String fileName = fileWriter.newFileName(BitmapGlobalIndexerFactory.IDENTIFIER);
-        try (PositionOutputStream outputStream = fileWriter.newOutputStream(fileName)) {
-            BitmapGlobalIndexFormat.write(
-                    outputStream,
-                    nullRows,
-                    nonNullRows,
-                    bitmaps,
-                    dictionaryBlockSize,
-                    compressionFactory);
+        try {
+            flushCurrentBitmap();
+            streamingWriter().finish(nullRows, nonNullRows);
+            close();
         } catch (IOException e) {
             throw new RuntimeException("Error in closing bitmap index writer.", e);
         }
@@ -110,12 +122,39 @@ public class BitmapGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
         return Collections.singletonList(new ResultEntry(fileName, rowCount, meta));
     }
 
-    private void updateMinMax(Object key) {
-        if (firstKey == null || comparator.compare(key, firstKey) < 0) {
-            firstKey = key;
+    @Override
+    public void close() throws IOException {
+        PositionOutputStream stream = outputStream;
+        outputStream = null;
+        if (stream != null) {
+            stream.close();
         }
-        if (lastKey == null || comparator.compare(key, lastKey) > 0) {
-            lastKey = key;
+    }
+
+    private void flushCurrentBitmap() {
+        if (currentBitmap.isEmpty()) {
+            return;
         }
+        try {
+            streamingWriter()
+                    .write(
+                            BitmapGlobalIndexFormat.SerializedKey.fromObject(
+                                    keySerializer, lastKey),
+                            currentBitmap);
+            currentBitmap.clear();
+        } catch (IOException e) {
+            throw new RuntimeException("Error in writing bitmap index files.", e);
+        }
+    }
+
+    private BitmapGlobalIndexFormat.StreamingWriter streamingWriter() throws IOException {
+        if (streamingWriter == null) {
+            fileName = fileWriter.newFileName(BitmapGlobalIndexerFactory.IDENTIFIER);
+            outputStream = fileWriter.newOutputStream(fileName);
+            streamingWriter =
+                    new BitmapGlobalIndexFormat.StreamingWriter(
+                            outputStream, dictionaryBlockSize, compressionFactory);
+        }
+        return streamingWriter;
     }
 }

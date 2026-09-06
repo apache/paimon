@@ -131,7 +131,6 @@ Schema schema = Schema.newBuilder()
         .option("vector.file.format", "vortex")
         .option("row-tracking.enabled", "true")
         .option("data-evolution.enabled", "true")
-        .option("bucket", "-1")
         .build();
 ```
 
@@ -155,7 +154,6 @@ schema = Schema.from_pyarrow_schema(
         'vector.file.format': 'vortex',
         'row-tracking.enabled': 'true',
         'data-evolution.enabled': 'true',
-        'bucket': '-1',
     }
 )
 ```

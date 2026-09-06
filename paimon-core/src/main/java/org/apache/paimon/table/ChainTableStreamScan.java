@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -103,22 +104,36 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     /** Whether the starting plan (Phase 1) has been completed. */
     private boolean startingDone = false;
 
-    /** Predicates and shard for applying to local scans created in {@link #planStarting()}. */
+    /**
+     * Predicates, shard, and bucket filter for applying to local scans in {@link #planStarting()}.
+     */
     private final List<Predicate> predicates = new ArrayList<>();
 
     private int shardIndex = -1;
 
     private int shardCount = -1;
 
+    @Nullable private Filter<Integer> bucketFilter;
+
     /** Maximum number of retries when race condition is detected during position capture. */
     private static final int MAX_RACE_RETRIES = 3;
 
+    /**
+     * If true, the starting phase uses the same anchor-based chain merging plan as batch mode,
+     * allowing streaming readers to see deletions/updates that require merging historical snapshot
+     * partitions with delta partitions.
+     */
+    private final boolean mergeSnapshot;
+
     public ChainTableStreamScan(ChainGroupReadTable chainGroupReadTable) {
         this.chainGroupReadTable = chainGroupReadTable;
+        this.mergeSnapshot = chainGroupReadTable.coreOptions().chainTableStreamingMergeSnapshot();
         this.batchScan =
                 new ChainGroupReadTable.ChainTableBatchScan(
                         chainGroupReadTable.schema(), chainGroupReadTable);
         this.deltaStreamScan = (DataTableStreamScan) chainGroupReadTable.other().newStreamScan();
+
+        ChainTableUtils.validateChainTableForIncrementalRead(chainGroupReadTable);
 
         // Initialize partition projector and chain comparator using the established pattern
         // from ChainTableBatchScan.
@@ -169,8 +184,10 @@ public class ChainTableStreamScan implements StreamDataTableScan {
      * come after it. Older snapshot partitions are excluded. Each primary key appears exactly once
      * under its natural partition.
      *
-     * <p>Unlike batch full scan, anchor-based chain merging is not performed. This keeps Phase 1
-     * lightweight for long-running jobs.
+     * <p>By default anchor-based chain merging is skipped to keep Phase 1 lightweight. When {@code
+     * chain-table.streaming.merge-snapshot} is true, the latest snapshot partition per group is
+     * merged with delta partitions whose chain key is strictly greater than the snapshot chain key,
+     * allowing streaming readers to see cross-branch deletions and updates.
      */
     private TableScan.Plan planStarting() {
         FileStoreTable deltaTable = chainGroupReadTable.other();
@@ -223,13 +240,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         // 1. Read delta branch data at the pinned snapshot, grouped by partition.
         Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition;
         if (deltaLatestId != null) {
-            FileStoreTable pinnedDelta =
-                    deltaTable.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                    String.valueOf(deltaLatestId)));
+            FileStoreTable pinnedDelta = deltaTable.copy(pinnedOptions(deltaLatestId));
             DataTableScan pinnedDeltaScan = pinnedDelta.newScan();
-            applyPredicatesAndShard(pinnedDeltaScan);
+            applyPredicatesShardAndBucket(pinnedDeltaScan);
             deltaSplitsByPartition = groupByPartition(pinnedDeltaScan);
         } else {
             deltaSplitsByPartition = Collections.emptyMap();
@@ -242,11 +255,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<Object, BinaryRow> latestChainPartitionPerGroup = new HashMap<>();
         FileStoreTable pinnedSnapshot = null;
         if (snapshotLatestId != null) {
-            pinnedSnapshot =
-                    chainGroupReadTable.wrapped.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                    String.valueOf(snapshotLatestId)));
+            pinnedSnapshot = chainGroupReadTable.wrapped.copy(pinnedOptions(snapshotLatestId));
             DataTableScan partitionListingScan = pinnedSnapshot.newScan();
             for (BinaryRow partition : partitionListingScan.listPartitions()) {
                 Object groupKey = toGroupKey(partition);
@@ -268,16 +277,59 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
             DataTableScan snapshotScan = pinnedSnapshot.newScan();
             snapshotScan.withPartitionFilter(latestPartitions);
-            applyPredicatesAndShard(snapshotScan);
+            applyPredicatesShardAndBucket(snapshotScan);
             snapshotSplitsByPartition = groupByPartition(snapshotScan);
         } else {
             snapshotSplitsByPartition = Collections.emptyMap();
         }
 
         // 4. Build ChainSplits:
-        //    - Snapshot partitions are already filtered to latest per group at the pinned snapshot.
-        //    - Delta partitions: include partitions with chain key > latest snapshot chain key for
-        //      that group, or all partitions if no snapshot exists for that group.
+        //    - Lightweight mode: snapshot partitions are read directly; delta partitions are
+        //      included only if their chain key is greater than the latest snapshot chain key.
+        //    - Merge mode: for each group, merge the latest snapshot partition with delta
+        //      partitions whose chain key is strictly greater than the snapshot chain key.
+        //      This allows streaming readers to see deletions/updates that span both branches.
+        List<Split> allSplits =
+                mergeSnapshot
+                        ? buildMergedStartingSplits(
+                                snapshotBranch,
+                                deltaBranch,
+                                snapshotSplitsByPartition,
+                                deltaSplitsByPartition,
+                                latestChainPartitionPerGroup)
+                        : buildLightweightStartingSplits(
+                                snapshotBranch,
+                                deltaBranch,
+                                snapshotSplitsByPartition,
+                                deltaSplitsByPartition,
+                                latestChainPartitionPerGroup);
+
+        LOG.info(
+                "ChainTableStreamScan.planStarting [snapshot={}, delta={}]: "
+                        + "{} delta partitions, {} snapshot partitions, "
+                        + "{} latest snapshot groups, {} total splits",
+                snapshotBranch,
+                deltaBranch,
+                deltaSplitsByPartition.size(),
+                snapshotSplitsByPartition.size(),
+                latestChainPartitionPerGroup.size(),
+                allSplits.size());
+
+        startingDone = true;
+        return new DataFilePlan<>(allSplits);
+    }
+
+    /**
+     * Lightweight starting splits: read the latest snapshot partition per group directly, and only
+     * include delta partitions whose chain key is strictly greater than the latest snapshot chain
+     * key for that group.
+     */
+    private List<Split> buildLightweightStartingSplits(
+            String snapshotBranch,
+            String deltaBranch,
+            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<Object, BinaryRow> latestChainPartitionPerGroup) {
         List<Split> allSplits = new ArrayList<>();
 
         for (Map.Entry<BinaryRow, List<DataSplit>> entry : snapshotSplitsByPartition.entrySet()) {
@@ -304,19 +356,102 @@ public class ChainTableStreamScan implements StreamDataTableScan {
             }
         }
 
-        LOG.info(
-                "ChainTableStreamScan.planStarting [snapshot={}, delta={}]: "
-                        + "{} delta partitions, {} snapshot partitions, "
-                        + "{} latest snapshot groups, {} total splits",
-                snapshotBranch,
-                deltaBranch,
-                deltaSplitsByPartition.size(),
-                snapshotSplitsByPartition.size(),
-                latestChainPartitionPerGroup.size(),
-                allSplits.size());
+        return allSplits;
+    }
 
-        startingDone = true;
-        return new DataFilePlan<>(allSplits);
+    /**
+     * Merge-mode starting splits: for each group, merge the latest snapshot partition (if any) with
+     * all delta partitions whose chain key is strictly greater than the snapshot chain key. Groups
+     * without a snapshot merge all their delta partitions into the latest delta partition. This
+     * makes cross-branch deletions and updates visible in the streaming starting phase.
+     */
+    private List<Split> buildMergedStartingSplits(
+            String snapshotBranch,
+            String deltaBranch,
+            Map<BinaryRow, List<DataSplit>> snapshotSplitsByPartition,
+            Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition,
+            Map<Object, BinaryRow> latestChainPartitionPerGroup) {
+        List<Split> allSplits = new ArrayList<>();
+
+        // Pre-group delta splits and find the latest delta partition per group.
+        Map<Object, List<DataSplit>> deltaSplitsByGroup = new HashMap<>();
+        Map<Object, BinaryRow> latestDeltaPartitionPerGroup = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<DataSplit>> e : deltaSplitsByPartition.entrySet()) {
+            BinaryRow deltaPartition = e.getKey();
+            Object groupKey = toGroupKey(deltaPartition);
+            deltaSplitsByGroup
+                    .computeIfAbsent(groupKey, k -> new ArrayList<>())
+                    .addAll(e.getValue());
+
+            BinaryRow currentLatest = latestDeltaPartitionPerGroup.get(groupKey);
+            if (currentLatest == null
+                    || chainPartitionComparator.compare(
+                                    partitionProjector.extractChainPartition(deltaPartition),
+                                    partitionProjector.extractChainPartition(currentLatest))
+                            > 0) {
+                latestDeltaPartitionPerGroup.put(groupKey, deltaPartition);
+            }
+        }
+
+        // Groups that have a snapshot anchor.
+        for (Map.Entry<Object, BinaryRow> entry : latestChainPartitionPerGroup.entrySet()) {
+            Object groupKey = entry.getKey();
+            BinaryRow snapshotPartition = entry.getValue();
+            List<DataSplit> snapshotSplits =
+                    snapshotSplitsByPartition.getOrDefault(
+                            snapshotPartition, Collections.emptyList());
+
+            BinaryRow latestDeltaPartition = latestDeltaPartitionPerGroup.get(groupKey);
+            boolean hasDeltaAfterSnapshot =
+                    latestDeltaPartition != null
+                            && chainPartitionComparator.compare(
+                                            partitionProjector.extractChainPartition(
+                                                    latestDeltaPartition),
+                                            partitionProjector.extractChainPartition(
+                                                    snapshotPartition))
+                                    > 0;
+
+            List<DataSplit> selectedDeltaSplits = new ArrayList<>();
+            if (hasDeltaAfterSnapshot) {
+                for (DataSplit dataSplit : deltaSplitsByGroup.get(groupKey)) {
+                    BinaryRow deltaPartition = dataSplit.partition();
+                    if (chainPartitionComparator.compare(
+                                    partitionProjector.extractChainPartition(deltaPartition),
+                                    partitionProjector.extractChainPartition(snapshotPartition))
+                            > 0) {
+                        selectedDeltaSplits.add(dataSplit);
+                    }
+                }
+            }
+
+            BinaryRow logicalPartition =
+                    hasDeltaAfterSnapshot ? latestDeltaPartition : snapshotPartition;
+            allSplits.addAll(
+                    ChainTableUtils.buildChainSplits(
+                            logicalPartition,
+                            snapshotSplits,
+                            selectedDeltaSplits,
+                            snapshotBranch,
+                            deltaBranch));
+        }
+
+        // Delta-only groups: there is no snapshot anchor, so merge all delta partitions in the
+        // group into the latest delta partition.
+        for (Map.Entry<Object, List<DataSplit>> entry : deltaSplitsByGroup.entrySet()) {
+            Object groupKey = entry.getKey();
+            if (!latestChainPartitionPerGroup.containsKey(groupKey)) {
+                BinaryRow logicalPartition = latestDeltaPartitionPerGroup.get(groupKey);
+                allSplits.addAll(
+                        ChainTableUtils.buildChainSplits(
+                                logicalPartition,
+                                Collections.emptyList(),
+                                entry.getValue(),
+                                snapshotBranch,
+                                deltaBranch));
+            }
+        }
+
+        return allSplits;
     }
 
     /**
@@ -427,16 +562,39 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         return this;
     }
 
+    @Override
+    public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        this.bucketFilter = bucketFilter;
+        batchScan.withBucketFilter(bucketFilter);
+        deltaStreamScan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
     /**
-     * Applies all previously set predicates and shard to a newly created scan. Used for the pinned
-     * delta scan in {@link #planStarting()}.
+     * Creates options for pinning a branch table to a specific snapshot. Sets {@code
+     * scan.snapshot-id} to the given id and {@code scan.mode=from-snapshot} to ensure the table
+     * reads from the pinned snapshot rather than using its default scan mode.
      */
-    private void applyPredicatesAndShard(DataTableScan scan) {
+    private static Map<String, String> pinnedOptions(long snapshotId) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshotId));
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        return options;
+    }
+
+    /**
+     * Applies all previously set predicates, shard, and bucket filter to a newly created scan. Used
+     * for the pinned delta scan in {@link #planStarting()}.
+     */
+    private void applyPredicatesShardAndBucket(DataTableScan scan) {
         for (Predicate p : predicates) {
             scan.withFilter(p);
         }
         if (shardIndex >= 0) {
             scan.withShard(shardIndex, shardCount);
+        }
+        if (bucketFilter != null) {
+            scan.withBucketFilter(bucketFilter);
         }
     }
 

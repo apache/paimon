@@ -28,8 +28,8 @@ import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -73,7 +73,7 @@ class LineageUtilsTest {
             java.util.List<String> partitionKeys,
             java.util.List<String> primaryKeys)
             throws Exception {
-        new SchemaManager(LocalFileIO.create(), tablePath)
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
                 .createTable(
                         new Schema(
                                 RowType.of(new IntType(), new VarCharType(100), new IntType())
@@ -186,6 +186,31 @@ class LineageUtilsTest {
 
         assertThat(LineageUtils.resolveNameByMetastore(table, "paimon.db.src"))
                 .isEqualTo("paimon.db.src");
+    }
+
+    @Test
+    void testResolveNameByMetastoreUsesCatalogKeyWhenFlagEnabled() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        catalogOptions.put("lineage-use-catalog-key-as-identifier", "true");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        // With flag enabled, catalog-key overrides even when explicit name is provided
+        assertThat(LineageUtils.resolveNameByMetastore(table, "my_catalog.db.src"))
+                .isEqualTo("jdbc-warehouse." + table.fullName());
+    }
+
+    @Test
+    void testResolveNameByMetastoreKeepsCatalogNameWhenFlagDisabled() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        // With flag disabled (default), Flink catalog name is preserved
+        assertThat(LineageUtils.resolveNameByMetastore(table, "my_catalog.db.src"))
+                .isEqualTo("my_catalog.db.src");
     }
 
     @Test

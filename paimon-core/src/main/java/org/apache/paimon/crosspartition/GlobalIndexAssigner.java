@@ -28,11 +28,12 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
-import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
-import org.apache.paimon.lookup.rocksdb.RocksDBState;
-import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBValueState;
+import org.apache.paimon.lookup.BulkLoader;
+import org.apache.paimon.lookup.StateFactory;
+import org.apache.paimon.lookup.StateUtils;
+import org.apache.paimon.lookup.ValueBulkLoader;
+import org.apache.paimon.lookup.ValueState;
+import org.apache.paimon.lookup.local.LocalKvStateFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -67,11 +68,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.BLOCK_CACHE_SIZE;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -97,8 +99,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     private transient PartitionKeyExtractor<InternalRow> extractor;
     private transient PartitionKeyExtractor<InternalRow> keyPartExtractor;
     private transient File path;
-    private transient RocksDBStateFactory stateFactory;
-    private transient RocksDBValueState<InternalRow, PositiveIntInt> keyIndex;
+    private transient StateFactory stateFactory;
+    private transient ValueState<InternalRow, PositiveIntInt> keyIndex;
 
     private transient IDMapping<BinaryRow> partMapping;
     private transient BucketAssigner bucketAssigner;
@@ -112,6 +114,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     public void open(
             long offHeapMemory,
+            @Nullable ExecutorService compactionExecutor,
             IOManager ioManager,
             int numAssigners,
             int assignId,
@@ -133,31 +136,34 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         this.keyPartExtractor = new KeyPartPartitionKeyExtractor(table.schema());
 
         String tmpDir = ioManager.pickTempDir();
-        this.path = new File(tmpDir, "rocksdb-" + UUID.randomUUID());
+        this.path = new File(tmpDir, "local-kv-" + UUID.randomUUID());
         if (!this.path.mkdirs()) {
             throw new RuntimeException(
-                    "Failed to create RocksDB cache directory in temp dirs: "
+                    "Failed to create local KV cache directory in temp dirs: "
                             + Arrays.toString(ioManager.tempDirs()));
         }
 
         // state
         Options options = coreOptions.toConfiguration();
-        Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
+        Options stateOptions = Options.fromMap(new HashMap<>(options.toMap()));
         // we should avoid too small memory
-        long blockCache = Math.max(offHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
-        rocksdbOptions.set(BLOCK_CACHE_SIZE, new MemorySize(blockCache));
+        long configuredCache = coreOptions.lookupCacheMaxMemory().getBytes();
+        long cacheMemory = Math.max(offHeapMemory, configuredCache);
+        stateOptions.set(CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE, new MemorySize(cacheMemory));
         this.stateFactory =
-                new RocksDBStateFactory(
+                new LocalKvStateFactory(
                         path.toString(),
-                        rocksdbOptions,
-                        coreOptions.crossPartitionUpsertIndexTtl());
+                        stateOptions,
+                        coreOptions.crossPartitionUpsertIndexTtl(),
+                        compactionExecutor,
+                        true);
         RowType keyType = table.schema().logicalPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(
                         INDEX_NAME,
                         new RowCompactedSerializer(keyType),
                         new PositiveIntIntSerializer(),
-                        options.get(RocksDBOptions.LOOKUP_CACHE_ROWS));
+                        options.get(LOOKUP_CACHE_ROWS));
 
         this.partMapping = new IDMapping<>(BinaryRow::copy);
         this.bucketAssigner = new BucketAssigner();
@@ -167,7 +173,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
         // create bootstrap sort buffer
         this.bootstrap = true;
-        this.bootstrapKeys = RocksDBState.createBulkLoadSorter(ioManager, coreOptions);
+        this.bootstrapKeys = StateUtils.createBulkLoadSorter(ioManager, coreOptions);
         this.bootstrapRecords =
                 RowBuffer.getBuffer(
                         ioManager,
@@ -208,14 +214,14 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         bootstrap = false;
         boolean isEmpty = true;
         if (!bootstrapKeys.isEmpty()) {
-            RocksDBBulkLoader bulkLoader = keyIndex.createBulkLoader();
+            ValueBulkLoader bulkLoader = keyIndex.createBulkLoader();
             MutableObjectIterator<BinaryRow> keyIterator = bootstrapKeys.sortedIterator();
             BinaryRow row = new BinaryRow(2);
             try {
                 while ((row = keyIterator.next(row)) != null) {
                     bulkLoader.write(row.getBinary(0), row.getBinary(1));
                 }
-            } catch (RocksDBBulkLoader.WriteException e) {
+            } catch (BulkLoader.WriteException e) {
                 throw new RuntimeException(
                         "Exception in bulkLoad, the most suspicious reason is that "
                                 + "your data contains duplicates, please check your sink table. "
@@ -285,7 +291,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     // ================== End Public API ===================
 
-    /** Sort bootstrap records and assign bucket without RocksDB. */
+    /** Sort bootstrap records and assign buckets without state lookups. */
     private void bulkLoadBootstrapRecords() {
         RowType rowType = table.rowType();
         List<DataType> fields =

@@ -38,6 +38,7 @@ import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictKind;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -65,6 +66,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -122,16 +124,13 @@ public class JdbcCatalog extends AbstractCatalog {
         this.options = context.options();
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
-        this.connections =
-                new JdbcClientPool(
-                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
-                        options.get(CatalogOptions.URI.key()),
-                        options.toMap());
+        this.connections = new CachedJdbcClientPool(options, options.toMap()).get();
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
             throw new RuntimeException("Cannot initialize JDBC catalog", e);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to initialize", e);
         }
     }
@@ -379,6 +378,7 @@ public class JdbcCatalog extends AbstractCatalog {
         getDatabase(identifier.getDatabaseName());
 
         copyTableDefaultOptions(schema.options());
+        validateCreateTable(schema, false);
 
         TableType tableType = Options.fromMap(schema.options()).get(TYPE);
         switch (tableType) {
@@ -420,10 +420,65 @@ public class JdbcCatalog extends AbstractCatalog {
                 }
                 break;
             case OBJECT_TABLE:
-                throw new UnsupportedOperationException(
+                try {
+                    runWithLock(
+                            identifier,
+                            () -> {
+                                if (!validateTableNotExists(identifier, ignoreIfExists)) {
+                                    return null;
+                                }
+                                createObjectTable(identifier, schema);
+                                return null;
+                            });
+                } catch (TableAlreadyExistException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            "Failed to create table " + identifier.getFullName(), e);
+                }
+                break;
+        }
+    }
+
+    @Override
+    public void createObjectTable(Identifier identifier, Schema schema) {
+        try {
+            Path tablePath = getTableLocation(identifier);
+            schema.options().putIfAbsent(PATH.key(), tablePath.toString());
+            Schema objectSchema = buildObjectTableSchema(schema);
+            fileIO.mkdirs(tablePath);
+
+            // Write schema file via SchemaManager.commit()
+            SchemaManager schemaManager = getSchemaManager(identifier);
+            TableSchema tableSchema = TableSchema.create(0, objectSchema);
+            if (!schemaManager.commit(tableSchema)) {
+                throw new RuntimeException(
+                        "Failed to commit schema for object table " + identifier);
+            }
+
+            // Register table in JDBC catalog
+            if (!JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
+                fileIO.deleteDirectoryQuietly(tablePath);
+                throw new RuntimeException(
                         String.format(
-                                "Catalog %s cannot support object tables.",
-                                this.getClass().getName()));
+                                "Failed to create table %s in catalog %s",
+                                identifier.getFullName(), catalogKey));
+            }
+            if (syncTableProperties()) {
+                JdbcUtils.insertTableProperties(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        collectTableProperties(tableSchema));
+            }
+            LOG.debug("Successfully created object table: {}", identifier);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }
 
@@ -614,7 +669,7 @@ public class JdbcCatalog extends AbstractCatalog {
             }
 
             Path fromPath = getTableLocation(fromTable);
-            if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
+            if (!new FileSystemSchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 Path toPath = getTableLocation(toTable);
@@ -663,6 +718,16 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (Exception e) {
             throw new RuntimeException("Failed to alter table " + identifier.getFullName(), e);
         }
+    }
+
+    /**
+     * Use {@code putIfAbsent} because a JDBC catalog stores the schema file at the warehouse
+     * default path while an object table's PATH option may point to a different user-specified data
+     * directory. Overwriting would wrongly redirect the object table to the schema directory.
+     */
+    @Override
+    protected void putPathOption(TableSchema schema, Path tablePath) {
+        schema.options().putIfAbsent(PATH.key(), tablePath.toString());
     }
 
     @Override
@@ -864,7 +929,8 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        connections.close();
+        // Do not close the connection pool here — it is shared across catalog instances
+        // via CachedJdbcClientPool and will be evicted/closed by the cache when idle.
     }
 
     private boolean syncTableProperties() {
@@ -876,7 +942,9 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private void validateCustomTablePath(Map<String, String> tableOptions) {
-        if (!allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
+        TableType tableType = Options.fromMap(tableOptions).get(TYPE);
+        boolean isObjectTable = tableType == TableType.OBJECT_TABLE;
+        if (!isObjectTable && !allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
             throw new UnsupportedOperationException(
                     String.format(
                             "The current catalog %s does not support specifying the table path when creating a table.",
@@ -908,7 +976,7 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier));
+        return new FileSystemSchemaManager(fileIO, getTableLocation(identifier));
     }
 
     private Map<String, String> fetchProperties(String databaseName) {
@@ -1107,13 +1175,64 @@ public class JdbcCatalog extends AbstractCatalog {
                 databaseName);
     }
 
-    // TODO: Implement actual paging and pattern filtering
     @Override
     public PagedList<String> listViewsPaged(
             String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
             throws DatabaseNotExistException {
-        CatalogUtils.validateNamePattern(this, viewNamePattern);
-        return new PagedList<>(listViews(databaseName), null);
+        if (CatalogUtils.isSystemDatabase(databaseName)) {
+            return new PagedList<>(Collections.emptyList(), null);
+        }
+
+        // Check if database exists
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        // CatalogUtils.validateNamePattern is intentionally NOT called here: this method supports
+        // pattern filtering directly via SQL LIKE. The catalog-wide supportsListByPattern flag
+        // remains false until other list methods (tables/databases) also gain pattern support, so
+        // that callers of those methods still get an explicit UnsupportedOperationException rather
+        // than silently unfiltered results. Unlike the default implementation, this override honors
+        // the pattern even though supportsListByPattern() is false.
+
+        // Per the Catalog contract, a null OR empty pattern means "no pattern": return all views.
+        boolean hasPattern = viewNamePattern != null && !viewNamePattern.isEmpty();
+        // pageToken is the last view name returned by the previous page (opaque to callers). The
+        // empty lower bound returns every view ordered by name.
+        String cursor = pageToken == null ? "" : pageToken;
+
+        String sql;
+        String[] args;
+        if (hasPattern) {
+            sql = JdbcUtils.LIST_VIEWS_PAGED_WITH_PATTERN_SQL;
+            args = new String[] {catalogKey, databaseName, viewNamePattern, cursor};
+        } else {
+            sql = JdbcUtils.LIST_VIEWS_PAGED_SQL;
+            args = new String[] {catalogKey, databaseName, cursor};
+        }
+
+        // Per the Catalog contract, maxResults == null OR 0 means "no paging": return all matching
+        // views, ordered, with no next page.
+        if (maxResults == null || maxResults == 0) {
+            List<String> views = fetch(row -> row.getString(JdbcUtils.VIEW_NAME), sql, args);
+            return new PagedList<>(views, null);
+        }
+
+        Preconditions.checkArgument(maxResults > 0, "maxResults must be positive when provided");
+        // Fetch one extra row to detect whether another page follows, without relying on a count.
+        List<String> views =
+                fetch(
+                        row -> row.getString(JdbcUtils.VIEW_NAME),
+                        sql + " LIMIT " + (maxResults + 1),
+                        args);
+        String nextPageToken = null;
+        if (views.size() > maxResults) {
+            // More pages remain. Drop the lookahead row and use the last returned name as the
+            // cursor for the next page.
+            views = new ArrayList<>(views.subList(0, maxResults));
+            nextPageToken = views.get(maxResults - 1);
+        }
+        return new PagedList<>(views, nextPageToken);
     }
 
     @Override

@@ -24,6 +24,7 @@ import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -96,6 +97,16 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
     void write(BinaryRow partition, int bucket, T data) throws Exception;
 
     /**
+     * Write data with the total number of buckets explicitly determined at runtime.
+     *
+     * <p>This is used when a partition's bucket count is not a static table option. All writes to
+     * the same partition must use the same {@code totalBuckets}.
+     */
+    default void write(BinaryRow partition, int bucket, int totalBuckets, T data) throws Exception {
+        throw new UnsupportedOperationException("Runtime bucket counts are not supported.");
+    }
+
+    /**
      * Compact data stored in given partition and bucket. Note that compaction process is only
      * submitted and may not be completed when the method returns.
      *
@@ -150,6 +161,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
         protected final long maxSequenceNumber;
         @Nullable protected final DynamicBucketIndexMaintainer indexMaintainer;
         @Nullable protected final BucketedDvMaintainer deletionVectorsMaintainer;
+        @Nullable protected final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final CommitIncrement commitIncrement;
 
         protected State(
@@ -162,6 +174,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                 long maxSequenceNumber,
                 @Nullable DynamicBucketIndexMaintainer indexMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
@@ -172,13 +185,14 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             this.maxSequenceNumber = maxSequenceNumber;
             this.indexMaintainer = indexMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
+            this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.commitIncrement = commitIncrement;
         }
 
         @Override
         public String toString() {
             return String.format(
-                    "{%s, %d, %d, %d, %d, %s, %d, %s, %s, %s}",
+                    "{%s, %d, %d, %d, %d, %s, %d, %s, %s, %s, %s}",
                     partition,
                     bucket,
                     totalBuckets,
@@ -188,6 +202,7 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
                     maxSequenceNumber,
                     indexMaintainer,
                     deletionVectorsMaintainer,
+                    primaryKeyIndexMaintainer,
                     commitIncrement);
         }
     }

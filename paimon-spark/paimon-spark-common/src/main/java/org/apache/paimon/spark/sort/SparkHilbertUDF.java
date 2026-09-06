@@ -161,7 +161,14 @@ public class SparkHilbertUDF implements Serializable {
     private UserDefinedFunction booleanToOrderedLongUDF() {
         UserDefinedFunction udf =
                 functions
-                        .udf((Boolean value) -> value ? PRIMITIVE_EMPTY : 0, DataTypes.LongType)
+                        .udf(
+                                (Boolean value) -> {
+                                    if (value == null) {
+                                        return PRIMITIVE_EMPTY;
+                                    }
+                                    return value ? 1L : 0L;
+                                },
+                                DataTypes.LongType)
                         .withName("BOOLEAN-LEXICAL-BYTES");
         return udf;
     }

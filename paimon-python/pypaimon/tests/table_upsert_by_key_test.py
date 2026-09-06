@@ -15,10 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 
+from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -86,6 +89,43 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self._apply_commit(tc, msgs, cid)
         tc.close()
         return msgs
+
+    def _compact_all_data_files(self, table):
+        """Replace all current data files with one COMPACT output file."""
+        read_builder = table.new_read_builder().with_projection(
+            list(table.field_names) + [SpecialFields.ROW_ID.name]
+        )
+        plan = read_builder.new_scan().plan_for_write()
+        old_files = [
+            file
+            for split in plan.splits()
+            for file in split.files
+        ]
+        current = read_builder.new_read().to_arrow(plan.splits()).sort_by(
+            [(SpecialFields.ROW_ID.name, "ascending")]
+        ).select(list(table.field_names))
+
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(current)
+        messages = writer.prepare_commit()
+        self.assertEqual(1, len(messages))
+        self.assertEqual(1, len(messages[0].new_files))
+        messages[0].new_files = [
+            messages[0].new_files[0].assign_first_row_id(0)
+        ]
+        messages[0].deleted_files.extend(old_files)
+
+        commit = wb.new_commit()
+        file_store_commit = commit.file_store_commit
+        original_try_commit = file_store_commit._try_commit
+        file_store_commit._try_commit = (
+            lambda commit_kind, *args, **kwargs:
+            original_try_commit("COMPACT", *args, **kwargs)
+        )
+        commit.commit(messages)
+        writer.close()
+        commit.close()
 
     # ==================================================================
     # Basic upsert tests (non-partitioned)
@@ -358,6 +398,287 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         self.assertEqual('Carol_v2', rows[3])
         self.assertEqual('Dave',     rows[4])
         self.assertEqual('Eve',      rows[5])
+
+    def test_commit_rewrites_stale_update_after_compaction(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age', 'city'])
+        commit_identifier = self._next_commit_id()
+        messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2, 3],
+                'name': ['ignored', 'ignored'],
+                'age': [31, 36],
+                'city': ['LA2', 'Chicago2'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+        stale_paths = [
+            file.file_path
+            for message in messages
+            for file in message.new_files
+        ]
+
+        self._compact_all_data_files(table)
+
+        commit = wb.new_commit()
+        self._apply_commit(commit, messages, commit_identifier)
+        commit.close()
+
+        rows = {
+            row['id']: (row['name'], row['age'], row['city'])
+            for row in self._read_all(table).to_pylist()
+        }
+        self.assertEqual(('Bob', 31, 'LA2'), rows[2])
+        self.assertEqual(('Carol', 36, 'Chicago2'), rows[3])
+        self.assertEqual(('Dave', 40, 'Houston'), rows[4])
+        self.assertTrue(all(os.path.exists(path) for path in stale_paths))
+
+    def test_commit_rewrite_uses_checked_base_entries(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age'])
+        commit_identifier = self._next_commit_id()
+        messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [31],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+        self._compact_all_data_files(table)
+
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        original_build = TableUpdateByRowId._files_info_from_entries
+        advanced = [False]
+
+        def build_after_concurrent_compaction(
+                updater_cls, current_table, snapshot_id, entries):
+            if not advanced[0]:
+                advanced[0] = True
+                self._write_arrow(table, pa.Table.from_pydict({
+                    'id': [5],
+                    'name': ['Eve'],
+                    'age': [45],
+                    'city': ['Boston'],
+                }, schema=self.pa_schema))
+                self._compact_all_data_files(table)
+            return original_build(current_table, snapshot_id, entries)
+
+        with mock.patch.object(
+                TableUpdateByRowId,
+                '_load_existing_files_info',
+                side_effect=AssertionError("unexpected snapshot scan"),
+        ), mock.patch.object(
+                TableUpdateByRowId,
+                '_files_info_from_entries',
+                classmethod(build_after_concurrent_compaction)):
+            commit = wb.new_commit()
+            self._apply_commit(commit, messages, commit_identifier)
+            commit.close()
+
+        rows = {
+            row['id']: row['age']
+            for row in self._read_all(table).to_pylist()
+        }
+        self.assertEqual(31, rows[2])
+        self.assertEqual(45, rows[5])
+
+    def test_commit_rewrite_respects_max_size(self):
+        options = dict(self.table_options)
+        options[
+            'data-evolution.row-id-conflict-rewrite.max-size'
+        ] = '1 B'
+        table = self._create_table(options=options)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age'])
+        commit_identifier = self._next_commit_id()
+        messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [31],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+        self._compact_all_data_files(table)
+
+        commit = wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(commit, messages, commit_identifier)
+        commit.close()
+        self.assertIn('Row ID existence conflict', str(ctx.exception))
+        self.assertIn(
+            'data-evolution.row-id-conflict-rewrite.max-size',
+            str(ctx.exception),
+        )
+
+    def test_compaction_rewrite_does_not_hide_logical_update_conflict(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age'])
+        commit_identifier = self._next_commit_id()
+        stale_messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [31],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+
+        self._upsert(
+            table,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [99],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            update_cols=['age'],
+        )
+        self._compact_all_data_files(table)
+
+        commit = wb.new_commit()
+        with self.assertRaises(RuntimeError):
+            self._apply_commit(
+                commit,
+                stale_messages,
+                commit_identifier,
+            )
+        commit.close()
+
+        rows = {
+            row['id']: row['age']
+            for row in self._read_all(table).to_pylist()
+        }
+        self.assertEqual(99, rows[2])
+
+    def test_compaction_rewrite_rejects_update_after_compaction(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['Carol', 'Dave'],
+            'age': [35, 40],
+            'city': ['Chicago', 'Houston'],
+        }, schema=self.pa_schema))
+
+        wb = self._make_write_builder(table)
+        update = wb.new_update().with_update_type(['age'])
+        commit_identifier = self._next_commit_id()
+        stale_messages = self._apply_upsert(
+            update,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [31],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            commit_identifier,
+        )
+
+        self._compact_all_data_files(table)
+        self._upsert(
+            table,
+            pa.Table.from_pydict({
+                'id': [2],
+                'name': ['ignored'],
+                'age': [99],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            ['id'],
+            update_cols=['age'],
+        )
+
+        commit = wb.new_commit()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "multiple 'MERGE INTO' operations have encountered conflicts"):
+            self._apply_commit(
+                commit,
+                stale_messages,
+                commit_identifier,
+            )
+        commit.close()
+
+        rows = {
+            row['id']: row['age']
+            for row in self._read_all(table).to_pylist()
+        }
+        self.assertEqual(99, rows[2])
 
     def test_large_table_upsert(self):
         """Upsert that touches a wide selection of rows in a 200-row table."""

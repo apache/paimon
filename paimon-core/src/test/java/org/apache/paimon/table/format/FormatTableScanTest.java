@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.json.JsonOptions;
@@ -31,8 +32,11 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,12 +59,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FormatTableScan}. */
@@ -89,32 +96,6 @@ public class FormatTableScanTest {
     public static List<Object[]> parameters() {
         return Arrays.asList(
                 new Object[] {false, "/year=2023/month=2"}, new Object[] {true, "/2023/2"});
-    }
-
-    @TestTemplate
-    void testValidDataFileNames() {
-        // Test valid data file names
-        String[] fileNames = {"File.txt", "file.txt", "123file.txt", "data", "Test_file.log"};
-        for (String fileName : fileNames) {
-            assertTrue(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be valid");
-        }
-    }
-
-    @TestTemplate
-    void testInvalidDataFileNames() {
-        String[] fileNames = {".hidden", "_file.txt"};
-        for (String fileName : fileNames) {
-            assertFalse(
-                    FormatTableScan.isDataFileName(fileName),
-                    "Filename '" + fileName + "' should be invalid");
-        }
-    }
-
-    @TestTemplate
-    void testNullInput() {
-        assertFalse(FormatTableScan.isDataFileName(null), "Null input should return false");
     }
 
     @TestTemplate
@@ -739,6 +720,36 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
+    void testPositiveLimitDoesNotPruneUnknownRowCountSplits() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path headerOnlyFile = new Path(tableLocation, "00-header-only.csv");
+        Path dataFile = new Path(tableLocation, "01-data.csv");
+        fileIO.mkdirs(tableLocation);
+        fileIO.writeFile(headerOnlyFile, "id,name\n", false);
+        fileIO.writeFile(dataFile, "id,name\n42,later\n", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(FILE_FORMAT.key(), "csv");
+        options.put(CsvOptions.INCLUDE_HEADER.key(), "true");
+        options.put(SOURCE_SPLIT_TARGET_SIZE.key(), "32b");
+        options.put(SOURCE_SPLIT_OPEN_FILE_COST.key(), "32b");
+        FormatTable formatTable =
+                createFormatTableWithOptions(tableLocation, FormatTable.Format.CSV, options);
+        assertThat(formatTable.newReadBuilder().newScan().plan().splits()).hasSize(2);
+
+        ReadBuilder readBuilder = formatTable.newReadBuilder().withLimit(1);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<String> rows = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(
+                    row -> rows.add(row.getInt(0) + "," + row.getString(1).toString()));
+        }
+
+        assertThat(rows).containsExactly("42,later");
+    }
+
+    @TestTemplate
     public void testCreateSplitsWhenDefineLineDelimiter() throws IOException {
         for (String format : Arrays.asList("csv", "json")) {
             Path tableLocation = new Path(new Path(tmpPath.toUri()), format);
@@ -794,6 +805,172 @@ public class FormatTableScanTest {
         assertThat(split.files()).hasSize(1);
         assertThat(split.files().get(0).filePath()).isEqualTo(parquetFile);
         assertThat(split.files().get(0).offset()).isEqualTo(0);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsSkipsCommitterStagingFiles() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dataFile = new Path(tableLocation, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        // Committer staging trees hold files whose names look exactly like data files; only the
+        // directories above them say they are uncommitted. A recursive listing sees them all.
+        for (String staging :
+                Arrays.asList(
+                        "_temporary/0/_temporary/attempt_202607271200_0001_m_000010_15",
+                        "__magic/job-6e7f/tasks/attempt_202607271200_0001_m_000010_15/__base",
+                        "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_000010_15/__base",
+                        ".hive-staging_hive_2026-07-27_12-00-00_000_1/-ext-10000")) {
+            writeTestFile(
+                    fileIO, new Path(new Path(tableLocation, staging), "part-00010.csv"), 100);
+        }
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(
+                        tableLocation, FormatTable.Format.CSV, Collections.emptyMap());
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testStagingTreesAreNotEnumerated() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO setupFileIO = LocalFileIO.create();
+        writeTestFile(setupFileIO, new Path(tableLocation, "data.csv"), 100);
+        // A staging tree with many task attempts, which is what a large job leaves behind. A
+        // recursive listing walks all of it and then throws it away.
+        for (int attempt = 0; attempt < 20; attempt++) {
+            writeTestFile(
+                    setupFileIO,
+                    new Path(
+                            tableLocation,
+                            String.format(
+                                    "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_%06d_15"
+                                            + "/__base/part-%05d.csv",
+                                    attempt, attempt)),
+                    100);
+        }
+
+        AtomicInteger listCount = new AtomicInteger(0);
+        AtomicInteger enumerated = new AtomicInteger(0);
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        listCount.getAndIncrement();
+                        FileStatus[] statuses = super.listStatus(path);
+                        enumerated.addAndGet(statuses.length);
+                        return statuses;
+                    }
+                };
+        FormatTable formatTable =
+                FormatTable.builder()
+                        .fileIO(fileIO)
+                        .identifier(Identifier.create("test_db", "test_table"))
+                        .rowType(
+                                RowType.builder()
+                                        .field("id", DataTypes.INT())
+                                        .field("name", DataTypes.STRING())
+                                        .build())
+                        .partitionKeys(Collections.emptyList())
+                        .location(tableLocation.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(Collections.emptyMap())
+                        .build();
+
+        // What a recursive listing costs on the same tree, for comparison.
+        FileStatus[] recursive = fileIO.listFiles(tableLocation, true);
+        int recursiveListings = listCount.getAndSet(0);
+        int recursiveEntries = enumerated.getAndSet(0);
+
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        // The recursive listing walks the whole staging tree and returns all of it, leaving the
+        // caller to throw 20 of the 21 files away.
+        assertEquals(21, recursive.length);
+        // Planning skips the staging tree at its root: one listing of the table directory, and the
+        // two entries in it. The recursive baseline is only compared against, not pinned: its
+        // exact cost belongs to FileIO, which this test does not exercise.
+        assertEquals(1, listCount.get());
+        assertEquals(2, enumerated.get());
+        assertThat(recursiveListings).isGreaterThan(listCount.get());
+        assertThat(recursiveEntries).isGreaterThan(enumerated.get());
+    }
+
+    @TestTemplate
+    public void testCreateSplitsKeepsFilesUnderAStagingLikeTableLocation() throws IOException {
+        // The '_' rule applies below the listed directory only: a warehouse path with a leading
+        // underscore must not make the whole table read as empty.
+        Path tableLocation = new Path(new Path(tmpPath.toUri()), "_warehouse/db/t");
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dataFile = new Path(tableLocation, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+
+        FormatTable formatTable =
+                createFormatTableWithOptions(
+                        tableLocation, FormatTable.Format.CSV, Collections.emptyMap());
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsSkipsStagingFilesInsidePartitions() throws IOException {
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        String partition = enablePartitionValueOnly ? "2024/1" : "year=2024/month=1";
+        Path partitionPath = new Path(tableLocation, partition);
+        Path dataFile = new Path(partitionPath, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        writeTestFile(
+                fileIO,
+                new Path(
+                        partitionPath,
+                        "__magic_job-6e7f/tasks/attempt_202607271200_0001_m_000010_15"
+                                + "/__base/part-00010.csv"),
+                100);
+
+        FormatTable formatTable = createYearMonthFormatTable(LocalFileIO.create(), tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
+    }
+
+    @TestTemplate
+    public void testCreateSplitsReadsTheDefaultPartitionDirectory() throws IOException {
+        // In the value-only layout the directory of a null partition value is the default
+        // partition name, which starts with '_'. It is the listed root here, and the root is
+        // never judged, so its files are read while what is staged inside it is not.
+        Path tableLocation = new Path(tmpPath.toUri());
+        LocalFileIO fileIO = LocalFileIO.create();
+        String defaultPartName = PARTITION_DEFAULT_NAME.defaultValue();
+        String partition =
+                enablePartitionValueOnly
+                        ? "2024/" + defaultPartName
+                        : "year=2024/month=" + defaultPartName;
+        Path partitionPath = new Path(tableLocation, partition);
+        Path dataFile = new Path(partitionPath, "data.csv");
+        writeTestFile(fileIO, dataFile, 100);
+        writeTestFile(fileIO, new Path(partitionPath, "_temporary/attempt/part-00010.csv"), 100);
+
+        FormatTable formatTable = createYearMonthFormatTable(LocalFileIO.create(), tableLocation);
+        List<Split> splits = new FormatTableScan(formatTable, null, null).plan().splits();
+
+        assertThat(splits).hasSize(1);
+        assertThat(((FormatDataSplit) splits.get(0)).files())
+                .extracting(FormatDataSplit.FileMeta::filePath)
+                .containsExactly(dataFile);
     }
 
     @TestTemplate

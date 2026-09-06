@@ -75,20 +75,21 @@ public final class DataTypeJsonParser {
             return parseAtomicTypeSQLString(json.asText());
         } else if (json.isObject()) {
             String typeString = json.get("type").asText();
+            boolean isNullable = isNullable(json, typeString);
             if (typeString.startsWith("ARRAY")) {
                 DataType element = parseDataType(json.get("element"), fieldId);
-                return new ArrayType(!typeString.contains("NOT NULL"), element);
+                return new ArrayType(isNullable, element);
             } else if (typeString.startsWith("VECTOR")) {
                 DataType element = parseDataType(json.get("element"), fieldId);
                 int length = json.get("length").asInt();
-                return new VectorType(!typeString.contains("NOT NULL"), length, element);
+                return new VectorType(isNullable, length, element);
             } else if (typeString.startsWith("MULTISET")) {
                 DataType element = parseDataType(json.get("element"), fieldId);
-                return new MultisetType(!typeString.contains("NOT NULL"), element);
+                return new MultisetType(isNullable, element);
             } else if (typeString.startsWith("MAP")) {
                 DataType key = parseDataType(json.get("key"), fieldId);
                 DataType value = parseDataType(json.get("value"), fieldId);
-                return new MapType(!typeString.contains("NOT NULL"), key, value);
+                return new MapType(isNullable, key, value);
             } else if (typeString.startsWith("ROW")) {
                 JsonNode fieldArray = json.get("fields");
                 Iterator<JsonNode> iterator = fieldArray.elements();
@@ -96,11 +97,16 @@ public final class DataTypeJsonParser {
                 while (iterator.hasNext()) {
                     fields.add(parseDataField(iterator.next(), fieldId));
                 }
-                return new RowType(!typeString.contains("NOT NULL"), fields);
+                return new RowType(isNullable, fields);
             }
         }
 
         throw new IllegalArgumentException("Can not parse: " + json);
+    }
+
+    private static boolean isNullable(JsonNode json, String typeString) {
+        JsonNode nullableNode = json.get("nullable");
+        return nullableNode == null ? !typeString.endsWith(" NOT NULL") : nullableNode.asBoolean();
     }
 
     public static DataType parseAtomicTypeSQLString(String string) {
@@ -331,6 +337,8 @@ public final class DataTypeJsonParser {
         LEGACY,
         VARIANT,
         BLOB,
+        GEOMETRY,
+        GEOGRAPHY,
         NOT
     }
 
@@ -549,6 +557,10 @@ public final class DataTypeJsonParser {
                     return new VariantType();
                 case BLOB:
                     return new BlobType();
+                case GEOMETRY:
+                    return parseGeometryType();
+                case GEOGRAPHY:
+                    return parseGeographyType();
                 case VECTOR:
                     return parseVectorType();
                 default:
@@ -682,6 +694,41 @@ public final class DataTypeJsonParser {
             int length = tokenAsInt();
             nextToken(TokenType.END_SUBTYPE);
             return DataTypes.VECTOR(length, elementType);
+        }
+
+        private DataType parseGeometryType() {
+            if (!hasNextToken(TokenType.BEGIN_PARAMETER)) {
+                return DataTypes.GEOMETRY();
+            }
+            nextToken(TokenType.BEGIN_PARAMETER);
+            String crs = parseGeospatialParameter();
+            nextToken(TokenType.END_PARAMETER);
+            return DataTypes.GEOMETRY(crs);
+        }
+
+        private DataType parseGeographyType() {
+            if (!hasNextToken(TokenType.BEGIN_PARAMETER)) {
+                return DataTypes.GEOGRAPHY();
+            }
+            nextToken(TokenType.BEGIN_PARAMETER);
+            String crs = parseGeospatialParameter();
+            EdgeAlgorithm algorithm = GeographyType.DEFAULT_ALGORITHM;
+            if (hasNextToken(TokenType.LIST_SEPARATOR)) {
+                nextToken(TokenType.LIST_SEPARATOR);
+                algorithm = EdgeAlgorithm.fromName(parseGeospatialParameter());
+            }
+            nextToken(TokenType.END_PARAMETER);
+            return DataTypes.GEOGRAPHY(crs, algorithm);
+        }
+
+        private String parseGeospatialParameter() {
+            nextToken();
+            if (token().type != TokenType.IDENTIFIER
+                    && token().type != TokenType.LITERAL_STRING
+                    && token().type != TokenType.KEYWORD) {
+                throw parsingError("Geospatial type parameter expected.");
+            }
+            return token().value;
         }
     }
 }

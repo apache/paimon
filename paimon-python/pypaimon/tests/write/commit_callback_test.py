@@ -23,6 +23,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 
 
@@ -64,6 +65,22 @@ class CommitCallbackTest(unittest.TestCase):
             options=options or {})
         self.catalog.create_table(f'default.{table_name}', schema, False)
         return self.catalog.get_table(f'default.{table_name}')
+
+    def _lose_commit_response_once(self, table_commit):
+        real_commit = table_commit.file_store_commit.snapshot_commit.commit
+        attempts = []
+
+        def commit_then_lose_response(
+                base_snapshot_uuid, snapshot, statistics):
+            attempts.append(snapshot.id)
+            self.assertTrue(real_commit(
+                base_snapshot_uuid, snapshot, statistics))
+            raise TimeoutError('lost snapshot commit response')
+
+        table_commit.file_store_commit.snapshot_commit.commit = (
+            commit_then_lose_response)
+        table_commit.file_store_commit._commit_retry_wait = lambda _: None
+        return attempts
 
     def test_callback_invoked_on_commit(self):
         table = self._create_table('test_callback_invoked')
@@ -115,6 +132,77 @@ class CommitCallbackTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+    def test_callback_invoked_after_lost_commit_response(self):
+        table = self._create_table(
+            'test_callback_response_loss',
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        callback = RecordingCallback()
+        table_commit.add_commit_callback(callback)
+        attempts = self._lose_commit_response_once(table_commit)
+
+        table_write.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['a', 'b'],
+            'dt': ['p1', 'p1'],
+        }, schema=self.pa_schema))
+        messages = table_write.prepare_commit()
+        expected_paths = sorted(
+            file.file_path
+            for message in messages
+            for file in message.new_files
+        )
+        table_commit.commit(messages)
+
+        self.assertEqual([1], attempts)
+        self.assertEqual(1, len(callback.contexts))
+        self.assertEqual(1, callback.contexts[0].snapshot.id)
+        self.assertGreater(len(callback.contexts[0].commit_entries), 0)
+        for entry in callback.contexts[0].commit_entries:
+            self.assertIsNotNone(entry.file.first_row_id)
+        self.assertEqual(expected_paths, sorted(
+            entry.file.file_path
+            for entry in callback.contexts[0].commit_entries
+            if entry.kind == 0
+        ))
+        table_write.close()
+        table_commit.close()
+
+    def test_empty_overwrite_callback_after_lost_commit_response(self):
+        table = self._create_table('test_empty_overwrite_response_loss')
+        builder = table.new_batch_write_builder()
+        table_write = builder.new_write()
+        initial_commit = builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['a'],
+            'dt': ['p1'],
+        }, schema=self.pa_schema))
+        initial_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        initial_commit.close()
+
+        table_commit = table.new_batch_write_builder().new_commit()
+        callback = RecordingCallback()
+        table_commit.add_commit_callback(callback)
+        attempts = self._lose_commit_response_once(table_commit)
+        table_commit.file_store_commit.truncate_table(
+            BATCH_COMMIT_IDENTIFIER)
+
+        self.assertEqual([2], attempts)
+        self.assertEqual(1, len(callback.contexts))
+        self.assertEqual(2, callback.contexts[0].snapshot.id)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        self.assertEqual(0, read_builder.new_read().to_arrow(splits).num_rows)
+        table_commit.close()
+
     def test_multiple_callbacks(self):
         table = self._create_table('test_multi_callbacks')
         write_builder = table.new_batch_write_builder()
@@ -152,6 +240,53 @@ class CommitCallbackTest(unittest.TestCase):
         self.assertFalse(callback.closed)
         table_commit.close()
         self.assertTrue(callback.closed)
+
+    def test_callback_error_after_commit_keeps_committed_files(self):
+        table = self._create_table('test_callback_error_after_commit')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        callback_error = RuntimeError('callback failed after commit')
+
+        class FailingCallback(CommitCallback):
+
+            def call(self, context: CommitCallbackContext) -> None:
+                raise callback_error
+
+        table_commit.add_commit_callback(FailingCallback())
+        try:
+            table_write.write_arrow(pa.Table.from_pydict({
+                'id': [1],
+                'name': ['committed'],
+                'dt': ['p1'],
+            }, schema=self.pa_schema))
+            messages = table_write.prepare_commit()
+            data_paths = [
+                file.external_path or file.file_path
+                for message in messages
+                for file in message.new_files
+            ]
+
+            with self.assertRaises(RuntimeError) as context:
+                table_commit.commit(messages)
+
+            latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+            self.assertEqual(1, latest_snapshot.id)
+            self.assertTrue(all(
+                table.file_io.exists(path) for path in data_paths))
+
+            read_builder = table.new_read_builder()
+            actual = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits())
+            self.assertEqual(
+                {'id': [1], 'name': ['committed'], 'dt': ['p1']},
+                actual.to_pydict(),
+            )
+            self.assertIs(callback_error, context.exception)
+        finally:
+            table_write.close()
+            table_commit.close()
 
     def test_callback_not_invoked_when_no_data(self):
         table = self._create_table('test_callback_no_data')

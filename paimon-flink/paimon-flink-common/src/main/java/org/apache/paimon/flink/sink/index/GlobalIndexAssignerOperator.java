@@ -59,6 +59,7 @@ public class GlobalIndexAssignerOperator
         ioManager = IOManager.create(flinkIoManager.getSpillingDirectoriesPaths());
         assigner.open(
                 computeManagedMemory(this),
+                getContainingTask().getEnvironment().getAsyncOperationsThreadPool(),
                 ioManager,
                 RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
                 RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),

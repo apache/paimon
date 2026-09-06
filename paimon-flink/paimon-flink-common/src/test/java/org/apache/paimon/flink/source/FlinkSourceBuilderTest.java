@@ -41,6 +41,7 @@ import java.nio.file.Path;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -150,6 +151,27 @@ public class FlinkSourceBuilderTest {
         SourceTransformation<?, ?, ?> transformation =
                 (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
         assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testPostponeMergeOnReadRejectsContinuousSource() throws Exception {
+        Identifier identifier = Identifier.create("default", "postpone_merge_on_read");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .primaryKey("a")
+                        .option("bucket", "-2")
+                        .option("postpone.merge-on-read", "true")
+                        .build(),
+                false);
+        Table table = catalog.getTable(identifier);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        assertThatThrownBy(
+                        () -> new FlinkSourceBuilder(table).env(env).sourceBounded(false).build())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("only supported for batch reads");
     }
 
     @Test

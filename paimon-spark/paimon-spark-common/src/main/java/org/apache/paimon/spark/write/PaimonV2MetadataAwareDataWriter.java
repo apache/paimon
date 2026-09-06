@@ -19,9 +19,9 @@
 package org.apache.paimon.spark.write;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.types.StructType;
@@ -42,14 +42,14 @@ public class PaimonV2MetadataAwareDataWriter extends PaimonV2DataWriter {
             StructType dataSchema,
             StructType metadataSchema,
             CoreOptions coreOptions,
-            CatalogContext catalogContext,
+            UriReaderFactory uriReaderFactory,
             RowType paimonWriteType) {
         super(
                 writeBuilder,
                 rowTrackingWriteSchema,
                 dataSchema,
                 coreOptions,
-                catalogContext,
+                uriReaderFactory,
                 Option.empty(),
                 Option.apply(paimonWriteType),
                 Option.apply(metadataSchema),

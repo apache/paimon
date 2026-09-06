@@ -31,7 +31,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -114,6 +117,14 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("TIMESTAMP_LTZ(3)").expectType(new LocalZonedTimestampType(3)),
                 TestSpec.forString("VARIANT").expectType(new VariantType()),
                 TestSpec.forString("BLOB").expectType(new BlobType()),
+                TestSpec.forString("GEOMETRY")
+                        .expectType(new GeometryType(GeometryType.DEFAULT_CRS)),
+                TestSpec.forString("geometry(ogc:crs84) NOT NULL")
+                        .expectType(new GeometryType(false, "OGC:CRS84")),
+                TestSpec.forString("GEOGRAPHY")
+                        .expectType(new GeographyType(GeographyType.DEFAULT_CRS)),
+                TestSpec.forString("GEOGRAPHY(EPSG:4326, karney)")
+                        .expectType(new GeographyType("EPSG:4326", EdgeAlgorithm.KARNEY)),
                 TestSpec.forString("VECTOR<FLOAT, 3>")
                         .expectType(DataTypes.VECTOR(3, DataTypes.FLOAT())),
                 TestSpec.forString("VECTOR<INT, 5> NOT NULL")
@@ -125,6 +136,9 @@ public class DataTypeJsonParserTest {
                                 "{\"type\":\"VECTOR NOT NULL\",\"element\":\"TINYINT NOT NULL\",\"length\":11}")
                         .expectType(DataTypes.VECTOR(11, DataTypes.TINYINT().notNull()).notNull()),
                 TestSpec.forString(
+                                "{\"type\":\"VECTOR<INT NOT NULL, 5>\",\"element\":\"INT NOT NULL\",\"length\":5}")
+                        .expectType(DataTypes.VECTOR(5, DataTypes.INT().notNull())),
+                TestSpec.forString(
                                 "{\"type\":\"ARRAY\",\"element\":\"TIMESTAMP(3) WITH LOCAL TIME ZONE\"}")
                         .expectType(new ArrayType(new LocalZonedTimestampType(3))),
                 TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT NOT NULL\"}")
@@ -135,6 +149,9 @@ public class DataTypeJsonParserTest {
                         .expectType(new ArrayType(new IntType(false))),
                 TestSpec.forString("{\"type\":\"ARRAY NOT NULL\",\"element\":\"INT\"}")
                         .expectType(new ArrayType(false, new IntType())),
+                TestSpec.forString(
+                                "{\"type\":\"ARRAY<INT NOT NULL>\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new ArrayType(new IntType(false))),
                 TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT NOT NULL\"}")
                         .expectType(new MultisetType(new IntType(false))),
                 TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT\"}")
@@ -143,8 +160,19 @@ public class DataTypeJsonParserTest {
                         .expectType(new MultisetType(new IntType(false))),
                 TestSpec.forString("{\"type\":\"MULTISET NOT NULL\",\"element\":\"INT\"}")
                         .expectType(new MultisetType(false, new IntType())),
+                TestSpec.forString(
+                                "{\"type\":\"MULTISET<INT NOT NULL>\",\"element\":\"INT NOT NULL\"}")
+                        .expectType(new MultisetType(new IntType(false))),
                 TestSpec.forString("{\"type\":\"MAP\",\"key\":\"BIGINT\",\"value\":\"BOOLEAN\"}")
                         .expectType(new MapType(new BigIntType(), new BooleanType())),
+                TestSpec.forString(
+                                "{\"type\":\"MAP<STRING NOT NULL, BLOB>\",\"key\":\"STRING NOT NULL\",\"value\":\"BLOB\",\"nullable\":true}")
+                        .expectType(
+                                new MapType(true, DataTypes.STRING().notNull(), new BlobType())),
+                TestSpec.forString(
+                                "{\"type\":\"MAP<STRING NOT NULL, BLOB>\",\"key\":\"STRING NOT NULL\",\"value\":\"BLOB\",\"nullable\":false}")
+                        .expectType(
+                                new MapType(false, DataTypes.STRING().notNull(), new BlobType())),
                 TestSpec.forString(
                                 "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
                         .expectType(
@@ -152,6 +180,12 @@ public class DataTypeJsonParserTest {
                                         Arrays.asList(
                                                 new DataField(0, "f0", new IntType(false)),
                                                 new DataField(1, "f1", new BooleanType())))),
+                TestSpec.forString(
+                                "{\"type\":\"ROW<f0 INT NOT NULL>\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"}]}")
+                        .expectType(
+                                new RowType(
+                                        Collections.singletonList(
+                                                new DataField(0, "f0", new IntType(false))))),
                 TestSpec.forString(
                                 "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
                         .expectType(
@@ -198,7 +232,9 @@ public class DataTypeJsonParserTest {
 
                 TestSpec.forString("VARCHAR(test)").expectErrorMessage("<LITERAL_INT> expected"),
                 TestSpec.forString("VARCHAR(33333333333)")
-                        .expectErrorMessage("Invalid integer value"));
+                        .expectErrorMessage("Invalid integer value"),
+                TestSpec.forString("GEOGRAPHY(OGC:CRS84, rhumb)")
+                        .expectErrorMessage("Invalid edge interpolation algorithm"));
     }
 
     @ParameterizedTest(name = "{index}: [From: {0}, To: {1}]")

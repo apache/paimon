@@ -31,6 +31,8 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -49,7 +51,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int fileOperationThreadNum) {
+            int fileOperationThreadNum,
+            @Nullable Integer manifestReadParallelism) {
         super(
                 fileIO,
                 pathFactory,
@@ -58,7 +61,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                fileOperationThreadNum);
+                fileOperationThreadNum,
+                manifestReadParallelism);
     }
 
     @Override

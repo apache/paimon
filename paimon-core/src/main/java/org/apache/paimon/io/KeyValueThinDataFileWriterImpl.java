@@ -33,6 +33,7 @@ import org.apache.paimon.utils.Pair;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -55,7 +56,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            Set<String> managedBlobFields) {
         super(
                 fileIO,
                 context,
@@ -69,7 +71,8 @@ public class KeyValueThinDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions,
-                isExternalPath);
+                isExternalPath,
+                managedBlobFields);
         Map<Integer, Integer> idToIndex = new HashMap<>(valueType.getFieldCount());
         for (int i = 0; i < valueType.getFieldCount(); i++) {
             idToIndex.put(valueType.getFields().get(i).id(), i);

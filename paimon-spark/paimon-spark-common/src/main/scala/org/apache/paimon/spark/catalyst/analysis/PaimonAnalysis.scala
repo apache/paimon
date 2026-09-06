@@ -23,7 +23,9 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsCommand, PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.format.PaimonFormatTable
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
@@ -78,6 +80,16 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
         d
 
+      case SetTableLocation(ResolvedTable(_, _, _: SparkTable, _), _, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
+      // Only the table-level form. Spark's own analyzer already rejects the partition form with a
+      // structured AnalysisException, and replacing it here would be a worse error.
+      case SetTableLocation(ResolvedTable(_, _, _: PaimonFormatTable, _), None, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
       case r: ReplaceColumns if r.resolved && isPaimonTable(r.table) =>
         // Spark rewrites REPLACE COLUMNS into a batch that drops every existing column and re-adds
         // the new set. Re-adding columns assigns brand-new field ids while existing data files keep
@@ -105,8 +117,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
     val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
-      case Some(dynamicPartitionColumns) if !v2WriteCommand.isByName =>
+      case Some(dynamicPartitionColumns)
+          if hiveStyleDynamicPartitionEnabled && !v2WriteCommand.isByName =>
         resolveDynamicPartitionWrite(
           query,
           table,
@@ -115,7 +129,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           mergeSchemaEnabled)
       case _ =>
         v2WriteCommand match {
-          case o: OverwritePartitionsDynamic if !o.isByName =>
+          case o: OverwritePartitionsDynamic if hiveStyleDynamicPartitionEnabled && !o.isByName =>
             resolveDynamicPartitionWrite(
               query,
               table,
@@ -275,6 +289,15 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
     }
 
     withoutHiveDynamicPartitionMarkers match {
+      // Spark rejects ANALYZE TABLE for every v2 table, so intercept before it does. Unlike a
+      // Paimon table, a Format Table has no snapshot to carry statistics and no column statistics
+      // to compute: analyzing it measures its partitions, for which PARTITION(...) and NOSCAN both
+      // mean something. Tables using filesystem partition discovery have no catalog to write to
+      // and fall through to the upstream rejection.
+      case a @ AnalyzeTable(ResolvedTable(_, _, table: PaimonFormatTable, _), partitionSpec, noScan)
+          if a.resolved && table.hasCatalogManagedPartitions =>
+        PaimonAnalyzeFormatTablePartitionsCommand(table, partitionSpec, noScan)
+
       case a @ AnalyzeTable(
             ResolvedTable(catalog, identifier, table: SparkTable, _),
             partitionSpec,

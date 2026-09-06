@@ -23,8 +23,9 @@ import re
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
                                       CreateBranchRequest, CreateDatabaseRequest,
-                                      CreateFunctionRequest, CreateTableRequest,
-                                      CreateTagRequest, ForwardBranchRequest,
+                                      CreateFunctionRequest, CreatePartitionsRequest,
+                                      CreateTableRequest, CreateTagRequest,
+                                      ForwardBranchRequest,
                                       RenameBranchRequest, RenameTableRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -36,11 +37,14 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
+                                       CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
                                        PagedList,
                                        PagedResponse, GetTableSnapshotResponse,
-                                       Partition)
+                                       Partition,
+                                       AuthTableQueryRequest,
+                                       AuthTableQueryResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -56,6 +60,7 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
 class RESTApi:
     HEADER_PREFIX = "header."
+    READ_VIA_HEADER = "X-Paimon-Read-Via"
     MAX_RESULTS = "maxResults"
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
@@ -343,6 +348,7 @@ class RESTApi:
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -352,6 +358,7 @@ class RESTApi:
         Args:
             identifier: Database name and table name
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot for committing
             statistics: Statistics for this snapshot incremental
 
@@ -368,7 +375,12 @@ class RESTApi:
         if statistics is None:
             raise ValueError("Statistics cannot be None")
 
-        request = CommitTableRequest(table_uuid, snapshot, statistics)
+        request = CommitTableRequest(
+            table_id=table_uuid,
+            snapshot=snapshot,
+            statistics=statistics,
+            base_snapshot_uuid=base_snapshot_uuid,
+        )
         response = self.client.post_with_response_type(
             self.resource_paths.commit_table(
                 database_name, table_name),
@@ -440,6 +452,24 @@ class RESTApi:
 
         partitions = response.data() or []
         return PagedList(partitions, response.get_next_page_token())
+
+    def create_partitions(
+            self,
+            identifier: Identifier,
+            partitions: List[Dict[str, str]],
+            ignore_if_exists: bool = True,
+    ) -> CreatePartitionsResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = CreatePartitionsRequest(
+            partition_specs=partitions,
+            ignore_if_exists=ignore_if_exists,
+        )
+        return self.client.post_with_response_type(
+            self.resource_paths.partitions(database_name, table_name),
+            request,
+            CreatePartitionsResponse,
+            self.rest_auth_function,
+        )
 
     # Tag CRUD wrappers — mirror Java RESTApi tag methods.
     def create_tag(
@@ -685,6 +715,16 @@ class RESTApi:
             self.resource_paths.function(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
+            self.rest_auth_function,
+        )
+
+    def auth_table_query(self, identifier: Identifier, select: Optional[List[str]]) -> AuthTableQueryResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = AuthTableQueryRequest(select=select)
+        return self.client.post_with_response_type(
+            self.resource_paths.auth_table(database_name, table_name),
+            request,
+            AuthTableQueryResponse,
             self.rest_auth_function,
         )
 

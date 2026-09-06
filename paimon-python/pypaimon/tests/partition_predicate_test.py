@@ -118,14 +118,83 @@ class TestFileScannerPartitionPredicate(unittest.TestCase):
             predicate=predicate, partition_predicate=partition_predicate,
         )
 
-    def test_partition_predicate_used_directly(self, *_):
+    def test_partition_predicate_already_partition_layout_is_idempotent(self, *_):
+        # Already partition-layout: rebind is a no-op on the index.
         pred = _partition_builder.equal('dt', '2024-01-15')
         scanner = self._scanner(partition_predicate=pred)
 
-        self.assertIs(scanner.partition_key_predicate, pred)
+        self.assertEqual(scanner.partition_key_predicate.field, 'dt')
+        self.assertEqual(scanner.partition_key_predicate.index, 0)
         self.assertIsNone(scanner.predicate)
         self.assertIsNone(scanner.predicate_for_stats)
         self.assertIsNone(scanner.primary_key_predicate)
+
+    def test_full_schema_partition_predicate_rewritten_to_partition_index(self, *_):
+        # Full-schema 'region' index is 3; partition row [dt, region] needs 1.
+        full_pred = PredicateBuilder(TABLE_FIELDS).equal('region', 'us-east-1')
+        self.assertEqual(full_pred.index, 3)
+        scanner = self._scanner(partition_predicate=full_pred)
+        self.assertEqual(scanner.partition_key_predicate.index, 1)
+
+        self.assertTrue(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-east-1'])))
+        self.assertFalse(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-west-2'])))
+        self.assertTrue(scanner._filter_manifest_file(
+            _manifest_file_meta(['2024-01-15', 'us-east-1'], ['2024-01-15', 'us-east-1'])))
+        self.assertFalse(scanner._filter_manifest_file(
+            _manifest_file_meta(['2024-01-15', 'us-west-2'], ['2024-01-15', 'us-west-2'])))
+
+    def test_partition_predicate_drops_non_partition_leaves(self, *_):
+        # Mixed filter: keep+rebind the partition leaf ('region'), drop the
+        # non-partition leaf ('name') instead of raising.
+        builder = PredicateBuilder(TABLE_FIELDS)
+        mixed = builder.and_predicates([
+            builder.equal('region', 'us-east-1'),
+            builder.equal('name', 'foo'),
+        ])
+        scanner = self._scanner(partition_predicate=mixed)
+        self.assertEqual(scanner.partition_key_predicate.field, 'region')
+        self.assertEqual(scanner.partition_key_predicate.index, 1)
+        self.assertTrue(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-east-1'])))
+        self.assertFalse(scanner._filter_manifest_entry(
+            _manifest_entry(['2024-01-15', 'us-west-2'])))
+
+    def test_reordered_partition_keys_keep_matching_partition(self, *_):
+        # Partition keys reordered vs schema: 'region' is schema field 0 but
+        # partition-row field 1. Full-schema index 0 would silently test 'dt'
+        # (in-range wrong field) and DROP matching rows -> data loss. Rebind fixes it.
+        table_fields = [
+            DataField(0, 'region', AtomicType('STRING')),
+            DataField(1, 'dt', AtomicType('STRING')),
+            DataField(2, 'id', AtomicType('INT')),
+        ]
+        partition_fields = [
+            DataField(0, 'dt', AtomicType('STRING')),
+            DataField(1, 'region', AtomicType('STRING')),
+        ]
+        table = _mock_scanner_table()
+        table.field_names = ['region', 'dt', 'id']
+        table.fields = table_fields
+        table.partition_keys = ['dt', 'region']
+        table.partition_keys_fields = partition_fields
+        table.table_schema = Mock(id=0, fields=table_fields)
+
+        full_pred = PredicateBuilder(table_fields).equal('region', 'us-east-1')
+        self.assertEqual(full_pred.index, 0)
+        scanner = FileScanner(table, lambda: ([], None),
+                              predicate=None, partition_predicate=full_pred)
+        self.assertEqual(scanner.partition_key_predicate.index, 1)
+
+        def entry(vals):
+            return ManifestEntry(kind=0, partition=GenericRow(vals, partition_fields),
+                                 bucket=0, total_buckets=1, file=Mock())
+
+        # region matches -> MUST keep (guards against the silent drop)
+        self.assertTrue(scanner._filter_manifest_entry(entry(['2024-01-15', 'us-east-1'])))
+        # region differs (but dt equals the literal) -> MUST drop
+        self.assertFalse(scanner._filter_manifest_entry(entry(['us-east-1', 'us-west-2'])))
 
     def test_no_partition_predicate_derives_from_predicate(self, *_):
         full_pred = PredicateBuilder(TABLE_FIELDS).equal('dt', '2024-01-15')

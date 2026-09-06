@@ -54,6 +54,46 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
 
     // ----------------------- Non-sort Compact -----------------------
     @Test
+    public void testCompactSpecifiedBucketRanges() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " PRIMARY KEY (k) NOT ENFORCED"
+                        + ") WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '4'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+
+        sql(
+                "INSERT INTO T VALUES "
+                        + IntStream.range(0, 40)
+                                .mapToObj(i -> String.format("(%d, 1)", i))
+                                .collect(Collectors.joining(",")));
+        sql(
+                "INSERT INTO T VALUES "
+                        + IntStream.range(40, 80)
+                                .mapToObj(i -> String.format("(%d, 2)", i))
+                                .collect(Collectors.joining(",")));
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'full', "
+                        + "`buckets` => '0-1')");
+
+        Map<Integer, Integer> filesPerBucket =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        DataSplit::bucket, split -> split.dataFiles().size()));
+        assertThat(filesPerBucket.get(0)).isEqualTo(1);
+        assertThat(filesPerBucket.get(1)).isEqualTo(1);
+        assertThat(filesPerBucket.get(2)).isEqualTo(2);
+        assertThat(filesPerBucket.get(3)).isEqualTo(2);
+    }
+
+    @Test
     public void testBatchCompact() throws Exception {
         sql(
                 "CREATE TABLE T ("

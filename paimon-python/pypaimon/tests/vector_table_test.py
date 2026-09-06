@@ -349,6 +349,7 @@ class VectorTableWriteReadTest(unittest.TestCase):
         opts = {
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
+            'data-evolution.write-cols-optimization.enabled': 'true',
             'vector.file.format': 'parquet',
         }
         s = Schema.from_pyarrow_schema(vector_schema, options=opts)
@@ -366,7 +367,21 @@ class VectorTableWriteReadTest(unittest.TestCase):
             },
             schema=vector_schema,
         ))
-        wb.new_commit().commit(w.prepare_commit())
+        initial_messages = w.prepare_commit()
+        initial_files = [
+            file for message in initial_messages for file in message.new_files
+        ]
+        normal_file = next(
+            file for file in initial_files
+            if not DataFileMeta.is_vector_file(file.file_name)
+        )
+        vector_file = next(
+            file for file in initial_files
+            if DataFileMeta.is_vector_file(file.file_name)
+        )
+        self.assertIsNone(normal_file.write_cols)
+        self.assertEqual(['embedding'], vector_file.write_cols)
+        wb.new_commit().commit(initial_messages)
         w.close()
 
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
@@ -393,6 +408,101 @@ class VectorTableWriteReadTest(unittest.TestCase):
         splits = rb.new_scan().plan().splits()
         result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
         self.assertEqual(result['name'], ['updated', 'updated'])
+
+    def test_backfill_vector_column_added_after_existing_rows(self):
+        from pypaimon.schema.data_types import AtomicType, VectorType
+        from pypaimon.schema.schema_change import SchemaChange
+        from pypaimon.utils.range import Range
+
+        table_name = 'test_db.vector_backfill_added_column'
+        base_schema = pa.schema([
+            ('id', pa.int64()),
+            ('image', pa.large_binary()),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'parquet',
+        }
+        self.catalog.create_table(
+            table_name,
+            Schema.from_pyarrow_schema(base_schema, options=opts),
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int64()),
+            'image': pa.array([b'a', b'b', b'c'], type=pa.large_binary()),
+        }))
+        commit = wb.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        self.catalog.alter_table(
+            table_name,
+            [SchemaChange.add_column(
+                'embedding', VectorType(True, AtomicType('FLOAT'), 2))],
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder().with_projection(
+            ['image', 'embedding', '_ROW_ID'])
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().is_null('embedding'))
+        splits = (
+            read_builder.new_scan()
+            .with_row_ranges([Range(0, 2)])
+            .plan()
+            .splits()
+        )
+        pending = read_builder.new_read().to_arrow(splits).sort_by('_ROW_ID')
+        self.assertEqual([0, 1, 2], pending['_ROW_ID'].to_pylist())
+        self.assertEqual([b'a', b'b', b'c'], pending['image'].to_pylist())
+
+        updates = pa.table({
+            '_ROW_ID': pending['_ROW_ID'],
+            'embedding': pa.array(
+                [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+                type=pa.list_(pa.float32(), 2),
+            ),
+        })
+        wb = table.new_batch_write_builder()
+        messages = (
+            wb.new_update()
+            .with_update_type(['embedding'])
+            .update_by_arrow_with_row_id(updates)
+        )
+        commit = wb.new_commit()
+        commit.commit(messages)
+        commit.close()
+
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder().with_projection(
+            ['id', 'embedding'])
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(
+            [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+            result['embedding'].to_pylist(),
+        )
+
+        retry_builder = table.new_read_builder().with_projection(
+            ['embedding', '_ROW_ID'])
+        retry_builder.with_filter(
+            retry_builder.new_predicate_builder().is_null('embedding'))
+        retry_splits = (
+            retry_builder.new_scan()
+            .with_row_ranges([Range(0, 2)])
+            .plan()
+            .splits()
+        )
+        self.assertEqual(
+            0,
+            retry_builder.new_read().to_arrow(retry_splits).num_rows,
+        )
 
     def test_vector_table_partial_update_non_vector_column_with_rolling_files(self):
         from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER

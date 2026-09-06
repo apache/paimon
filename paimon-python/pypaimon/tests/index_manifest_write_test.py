@@ -55,7 +55,7 @@ class IndexManifestWriteTest(unittest.TestCase):
         self.catalog.create_table(name, s, False)
         return self.catalog.get_table(name)
 
-    def _entry(self, file_name, field_id, meta=b'm'):
+    def _entry(self, file_name, field_id, meta=b'm', source_meta=None):
         partition = GenericRow([], [])
         index_file = IndexFileMeta(
             index_type='BTREE',
@@ -68,6 +68,7 @@ class IndexManifestWriteTest(unittest.TestCase):
                 index_field_id=field_id,
                 extra_field_ids=[field_id + 1],
                 index_meta=meta,
+                source_meta=source_meta,
             ),
         )
         return IndexManifestEntry(kind=0, partition=partition, bucket=0, index_file=index_file)
@@ -89,6 +90,15 @@ class IndexManifestWriteTest(unittest.TestCase):
         self.assertEqual(10, gim.row_range_end)
         self.assertEqual([2], gim.extra_field_ids)
         self.assertEqual(b'm', bytes(gim.index_meta))
+
+    def test_write_read_primary_key_source_meta(self):
+        source_meta = b'primary-key-source-meta'
+        imf = IndexManifestFile(self._table())
+        name = imf.write([self._entry('idx-pk', 1, source_meta=source_meta)])
+
+        result = imf.read(name)[0].index_file.global_index_meta
+
+        self.assertEqual(source_meta, bytes(result.source_meta))
 
     def test_combine_drops_named_files(self):
         imf = IndexManifestFile(self._table())

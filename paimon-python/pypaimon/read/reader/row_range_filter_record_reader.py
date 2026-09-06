@@ -32,8 +32,7 @@ class RowIdFilterRecordBatchReader(RecordBatchReader):
         self.reader = reader
         self.current_row_id = first_row_id
         self.row_id_ranges = row_id_ranges
-        self.file_io = reader.file_io
-        self.blob_field_indices = reader.blob_field_indices
+        self._adopt_metadata(reader)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         while True:

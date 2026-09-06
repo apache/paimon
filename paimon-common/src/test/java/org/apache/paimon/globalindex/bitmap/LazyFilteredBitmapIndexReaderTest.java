@@ -35,6 +35,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
@@ -42,6 +43,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,9 +53,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link LazyFilteredBitmapReader}. */
 public class LazyFilteredBitmapIndexReaderTest {
@@ -106,7 +110,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        6,
+                        newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("A")).join(), 0L, 5L);
             assertRows(reader.visitEqual(fieldRef, null).join());
             assertRows(reader.visitEqual(fieldRef, str("missing")).join());
@@ -134,6 +141,137 @@ public class LazyFilteredBitmapIndexReaderTest {
     }
 
     @Test
+    public void testTotalRowCountComplementAvoidsOpeningAllBitmapFiles() throws Exception {
+        List<GlobalIndexIOMeta> written = new ArrayList<>();
+        written.add(writeData(Collections.singletonList(Pair.of(null, 0L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("A"), 1L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("M"), 2L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("Z"), 3L))));
+
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader, written, 4, newDirectExecutorService())) {
+            assertRows(reader.visitNotEqual(fieldRef, null).join());
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), null)).join());
+            assertThat(countingReader.openCount()).isZero();
+
+            assertRows(reader.visitNotEqual(fieldRef, str("M")).join(), 1L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(2);
+
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), str("Z"))).join(), 1L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
+
+            assertRows(reader.visitIsNotNull(fieldRef).join(), 1L, 2L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testComplementsEmptyRowDomain() throws Exception {
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader, Collections.emptyList(), 0, newDirectExecutorService())) {
+            assertRows(reader.visitIsNotNull(fieldRef).join());
+            assertRows(reader.visitNotEqual(fieldRef, str("A")).join());
+            assertRows(reader.visitNotIn(fieldRef, Collections.singletonList(str("A"))).join());
+        }
+    }
+
+    @Test
+    public void testFlushesCompletedBitmapBeforeFinish() throws Exception {
+        AtomicReference<ByteArrayPositionOutputStream> output = new AtomicReference<>();
+        GlobalIndexFileWriter streamingFileWriter =
+                new GlobalIndexFileWriter() {
+                    @Override
+                    public String newFileName(String prefix) {
+                        return prefix + ".index";
+                    }
+
+                    @Override
+                    public PositionOutputStream newOutputStream(String fileName) {
+                        ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
+                        output.set(stream);
+                        return stream;
+                    }
+                };
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
+
+        writer.write(str("A"), 0);
+        writer.write(str("B"), 1);
+
+        assertThat(output.get()).isNotNull();
+        assertThat(output.get().getPos()).isPositive();
+        writer.finish();
+    }
+
+    @Test
+    public void testClosesWriterAfterWriteFailure() throws Exception {
+        AtomicReference<ByteArrayPositionOutputStream> output = new AtomicReference<>();
+        GlobalIndexFileWriter streamingFileWriter =
+                new GlobalIndexFileWriter() {
+                    @Override
+                    public String newFileName(String prefix) {
+                        return prefix + ".index";
+                    }
+
+                    @Override
+                    public PositionOutputStream newOutputStream(String fileName) {
+                        ByteArrayPositionOutputStream stream = new ByteArrayPositionOutputStream();
+                        output.set(stream);
+                        return stream;
+                    }
+                };
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(streamingFileWriter);
+        writer.write(str("A"), 0);
+        writer.write(str("B"), 1);
+
+        assertThatThrownBy(() -> writer.write(str("A"), 2))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(writer).isInstanceOf(AutoCloseable.class);
+        ((AutoCloseable) writer).close();
+
+        assertThat(output.get().closed).isTrue();
+    }
+
+    @Test
+    public void testRejectsUnsortedKeys() throws Exception {
+        GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
+        writer.write(str("B"), 0);
+
+        assertThatThrownBy(() -> writer.write(str("A"), 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("monotonically increasing");
+    }
+
+    @Test
+    public void testLogicalOrderForNumericKeys() throws Exception {
+        DataField intField = new DataField(2, "number", DataTypes.INT());
+        FieldRef intFieldRef = new FieldRef(2, "number", DataTypes.INT());
+        Options options = new Options();
+        options.set(
+                BitmapGlobalIndexOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE,
+                org.apache.paimon.options.MemorySize.ofBytes(1));
+        BitmapGlobalIndexer intIndexer = new BitmapGlobalIndexer(intField, options);
+        GlobalIndexSingleColumnWriter writer = intIndexer.createWriter(fileWriter);
+        writer.write(-1, 0);
+        writer.write(0, 1);
+        ResultEntry result = writer.finish().get(0);
+        Path filePath = new Path(basePath, result.fileName());
+        GlobalIndexIOMeta meta =
+                new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta());
+
+        try (GlobalIndexReader reader =
+                intIndexer.createReader(
+                        fileReader,
+                        Collections.singletonList(meta),
+                        2,
+                        newDirectExecutorService())) {
+            assertRows(reader.visitEqual(intFieldRef, 0).join(), 1L);
+        }
+    }
+
+    @Test
     public void testFallbackScanPredicates() throws Exception {
         GlobalIndexIOMeta meta =
                 writeData(
@@ -146,7 +284,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        5,
+                        newDirectExecutorService())) {
             assertRows(reader.visitEndsWith(fieldRef, str("ta")).join(), 1L, 3L);
             assertRows(reader.visitContains(fieldRef, str("ph")).join(), 0L, 2L);
             assertRows(reader.visitLike(fieldRef, str("%ha%")).join(), 0L, 2L);
@@ -189,6 +330,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         fileReader,
                         Collections.singletonList(compressed),
+                        300,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str(prefix + "00123")).join(), 123L);
             assertRows(
@@ -219,7 +361,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        2,
+                        newDirectExecutorService())) {
             assertThat(reader.visitEndsWith(fieldRef, str("ta")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("ph")).join()).isEmpty();
             assertThat(reader.visitLike(fieldRef, str("%ha%")).join()).isEmpty();
@@ -243,7 +388,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Arrays.asList(first, second), newDirectExecutorService())) {
+                        fileReader, Arrays.asList(first, second), 6, newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("B")).join(), 1L, 3L);
             assertRows(reader.visitNotEqual(fieldRef, str("A")).join(), 1L, 3L, 4L);
             assertRows(
@@ -267,6 +412,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Arrays.asList(first, second),
+                        4,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("Z")).join(), 3L);
 
@@ -301,7 +447,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Arrays.asList(first, second), newDirectExecutorService())) {
+                        fileReader, Arrays.asList(first, second), 4, newDirectExecutorService())) {
             assertRows(reader.visitGreaterOrEqual(fieldRef, str("Y")).join(), 2L, 3L);
             assertThat(reader.visitContains(fieldRef, str("Z")).join()).isEmpty();
         }
@@ -326,7 +472,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        6,
+                        newDirectExecutorService())) {
             assertRows(reader.visitStartsWith(fieldRef, str("tag-")).join(), 2L, 3L);
         }
     }
@@ -356,6 +505,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        250,
                         newDirectExecutorService())) {
             assertRows(reader.visitStartsWith(fieldRef, str("tag-match")).join(), 100L, 101L, 102L);
 
@@ -384,6 +534,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        100,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("tag-050")).join(), 50L);
 
@@ -405,6 +556,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        3,
                         newDirectExecutorService())) {
             assertRows(reader.visitIsNull(fieldRef).join(), 2L);
 
@@ -416,7 +568,15 @@ public class LazyFilteredBitmapIndexReaderTest {
 
     private GlobalIndexIOMeta writeData(List<Pair<BinaryString, Long>> data) throws IOException {
         GlobalIndexSingleColumnWriter writer = globalIndexer.createWriter(fileWriter);
-        for (Pair<BinaryString, Long> pair : data) {
+        List<Pair<BinaryString, Long>> sortedData = new ArrayList<>(data);
+        sortedData.sort(
+                (left, right) -> {
+                    if (left.getKey() == null) {
+                        return right.getKey() == null ? 0 : -1;
+                    }
+                    return right.getKey() == null ? 1 : left.getKey().compareTo(right.getKey());
+                });
+        for (Pair<BinaryString, Long> pair : sortedData) {
             writer.write(pair.getKey(), pair.getValue());
         }
 
@@ -485,6 +645,43 @@ public class LazyFilteredBitmapIndexReaderTest {
                 seekCount.incrementAndGet();
             }
             super.seek(desired);
+        }
+    }
+
+    private static class ByteArrayPositionOutputStream extends PositionOutputStream {
+
+        private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private boolean closed;
+
+        @Override
+        public long getPos() {
+            return output.size();
+        }
+
+        @Override
+        public void write(int b) {
+            output.write(b);
+        }
+
+        @Override
+        public void write(byte[] bytes) throws IOException {
+            output.write(bytes);
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) {
+            output.write(bytes, offset, length);
+        }
+
+        @Override
+        public void flush() throws IOException {
+            output.flush();
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            output.close();
         }
     }
 }

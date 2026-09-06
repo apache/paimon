@@ -140,11 +140,12 @@ public class HadoopUtils {
                     String newKey = key.substring(prefix.length());
                     String value = options.getString(key, null);
                     result.set(newKey, value);
+                    // Redact value: sensitive keys are masked, others printed as-is.
                     LOG.debug(
                             "Adding Paimon config entry for {} as {}={} to Hadoop config",
                             key,
                             newKey,
-                            value);
+                            SensitiveConfigUtils.redactValue(newKey, value));
                     foundHadoopConfiguration = true;
                 }
             }

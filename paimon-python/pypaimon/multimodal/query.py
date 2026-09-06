@@ -15,12 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
+from pypaimon.multimodal.blob_read import fetch_blob_bodies
+from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
 from pypaimon.table.special_fields import SpecialFields
+
+
+def _select_arrow_columns(batch, columns):
+    return batch.select(columns)
 
 
 class ScanQuery:
@@ -66,8 +72,23 @@ class ScanQuery:
         plan = scan.plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
-    def _configured_read_builder(self):
-        read_builder = self._table.new_read_builder()
+    def to_arrow_batch_reader(self, *, blob_parallelism=None):
+        """Stream this scan as Arrow batches without collecting a table."""
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_arrow_batch_reader is only supported on scan(), "
+                "not search queries."
+            )
+
+        read_builder = self._configured_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read()._to_managed_arrow_batch_reader(
+            splits, blob_parallelism=blob_parallelism)
+
+    def _configured_read_builder(self, table=None):
+        read_builder = (
+            self._table if table is None else table
+        ).new_read_builder()
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
         projection = self._effective_projection()
@@ -100,16 +121,93 @@ class ScanQuery:
     def to_list(self) -> List[dict]:
         return self.to_arrow().to_pylist()
 
+    def to_torch(
+            self,
+            streaming: bool = True,
+            prefetch_concurrency: int = 1,
+            *,
+            batch_format: str = "row",
+            batch_size: Optional[int] = None,
+            to_tensor_fn: Optional[Callable] = None,
+            shuffle: bool = False,
+            seed: int = 0,
+            buffer_size: int = 1000,
+            max_buffer_input_splits: int = 10):
+        """Read this scan as a PyTorch Dataset.
+
+        BLOB columns stay as serialized descriptors so DataLoader workers can
+        open and decode the referenced payload without materialising it in the
+        planning process. Use :class:`VideoFrameCollator` as ``collate_fn`` to
+        reuse one decoder session across rows that reference the same video.
+        """
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_torch is only supported on scan(), not search queries."
+            )
+
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = self._configured_read_builder(read_table)
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read().to_torch(
+            splits,
+            streaming=streaming,
+            prefetch_concurrency=prefetch_concurrency,
+            batch_format=batch_format,
+            batch_size=batch_size,
+            to_tensor_fn=to_tensor_fn,
+            shuffle=shuffle,
+            seed=seed,
+            buffer_size=buffer_size,
+            max_buffer_input_splits=max_buffer_input_splits,
+        )
+
+    def to_ray(
+            self,
+            *,
+            ray_remote_args: Optional[Dict[str, Any]] = None,
+            concurrency: Optional[int] = None,
+            override_num_blocks: Optional[int] = None,
+            **read_args):
+        """Read this scan as a Ray Dataset.
+
+        BLOB columns are read as serialized descriptors. Use
+        ``table.map_with_blobs(...)`` to fetch payload bytes on Ray workers.
+        """
+        if self._result_factory is not None:
+            raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+        read_builder, file_io, visible_columns = self._blob_descriptor_query_read_builder()
+        plan = read_builder.new_scan().plan()
+        ds = read_builder.new_read().to_ray(
+            plan.splits(),
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args)
+        if visible_columns is not None:
+            ds = ds.map_batches(
+                _select_arrow_columns,
+                fn_kwargs={"columns": visible_columns},
+                batch_format="pyarrow")
+        setattr(ds, "_paimon_blob_file_io", file_io)
+        setattr(ds, "_paimon_blob_columns", self._all_blob_columns())
+        return ds
+
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
-    ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
-        """Materialise BLOB column(s) for the filtered rows with concurrent,
+    ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
+        """Materialise BLOB or MAP BLOB column(s) for the filtered rows with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
         row-by-row blob resolution on multi-group data-evolution splits.
 
         ``columns`` picks the BLOB column(s) (default: all, intersected with
-        ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
-        row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; MAP BLOB rows
+        are ``None`` or key-value pairs with ``bytes|None`` values. Returns a
+        row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
+        :meth:`stream_blobs` for a memory-bounded read.
 
         Unresolved blob-view columns are not supported and raise ``ValueError``.
         """
@@ -117,15 +215,16 @@ class ScanQuery:
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         bodies = self._fetch_bodies(
-            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, parallelism)
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
+            parallelism, map_blob_cols)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
     def stream_blobs(self, columns=None, *, parallelism: int = 64):
-        """Memory-bounded streaming variant of :meth:`read_blobs`: yield
-        ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
-        is one batch rather than the whole result.
+        """Memory-bounded streaming variant of :meth:`read_blobs`, with the same
+        return shape per Arrow batch and one-batch peak memory.
         """
         # Validate eagerly so a bad column raises here, not on the first next().
         blob_cols = self._resolve_blob_columns(columns)
@@ -135,16 +234,48 @@ class ScanQuery:
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
         reader = read_builder.new_read().to_arrow_batch_reader(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         try:
             for batch in reader:
                 bodies = self._fetch_bodies(
-                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols,
+                    parallelism, map_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
         finally:
             # Close the reader even if the caller breaks out early.
             if hasattr(reader, "close"):
                 reader.close()
+
+    def _blob_descriptor_query_read_builder(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = read_table.new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._effective_projection()
+        if projection is not None:
+            internal_projection = list(projection)
+            for name in self._predicate_fields():
+                if name not in internal_projection:
+                    internal_projection.append(name)
+            read_builder = read_builder.with_projection(internal_projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        if projection is None:
+            return read_builder, read_table.file_io, None
+        internal_column_names = [field.name for field in read_builder.read_type()]
+        visible_columns = self._projected_output_columns(read_table, projection)
+        if visible_columns == internal_column_names:
+            visible_columns = None
+        return read_builder, read_table.file_io, visible_columns
+
+    @staticmethod
+    def _projected_output_columns(table, projection):
+        builder = table.new_read_builder().with_projection(projection)
+        return [field.name for field in builder.read_type()]
 
     def _blob_descriptor_read_builder(self, blob_cols: List[str]):
         """Blob-as-descriptor read builder with this query's filter/projection/limit;
@@ -164,7 +295,8 @@ class ScanQuery:
         return read_builder, read_table.file_io
 
     @staticmethod
-    def _fetch_bodies(file_io, data, blob_cols, parallelism):
+    def _fetch_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols=()):
         # Decode each descriptor to a (uri, offset, length) range and read them all in
         # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
         # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
@@ -172,46 +304,23 @@ class ScanQuery:
         # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
-        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
-        ranges = []
-        inline = {}  # cell index -> blob stored inline (returned as-is, no ranged read)
-        i = 0
-        for col in blob_cols:
-            for value in data[col]:
-                if value is None:
-                    ranges.append(None)
-                else:
-                    raw = bytes(value)
-                    if BlobViewStruct.is_blob_view_struct(raw):
-                        raise ValueError(
-                            "read_blobs does not support unresolved blob-view columns; "
-                            "read such a column on its own, or enable blob-view resolution.")
-                    if BlobDescriptor.is_blob_descriptor(raw):
-                        d = BlobDescriptor.deserialize(raw)
-                        ranges.append((d.uri, d.offset, d.length))
-                    else:  # blob stored inline: the bytes are the payload
-                        ranges.append(None)
-                        inline[i] = raw
-                i += 1
-        fetched = file_io.read_ranges_coalesced(ranges, parallelism)
-        for idx, raw in inline.items():
-            fetched[idx] = raw
-        bodies = {}
-        offset = 0
-        for col in blob_cols:
-            n = len(data[col])
-            bodies[col] = fetched[offset:offset + n]
-            offset += n
-        return bodies
+        return fetch_blob_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols)
 
     def _all_blob_columns(self) -> List[str]:
         return [
             field.name for field in self._table.fields
-            if getattr(field.type, "type", None) == "BLOB"
+            if is_blob_type(field.type)
+        ]
+
+    def _readable_blob_columns(self) -> List[str]:
+        return [
+            field.name for field in self._table.fields
+            if is_blob_type(field.type) or is_map_blob_type(field.type)
         ]
 
     def _resolve_blob_columns(self, columns) -> List[str]:
-        all_blob = self._all_blob_columns()
+        all_blob = self._readable_blob_columns()
         if columns is None:
             selected = all_blob
             if self._projection is not None:
@@ -232,7 +341,7 @@ class ScanQuery:
         # descriptors, then append the requested BLOB columns and every predicate
         # column -- including predicate columns that are themselves BLOB (read as
         # descriptor) -- so SplitRead keeps the row-level filter for where().
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             base = [f.name for f in self._table.fields if f.name not in blob_set]
@@ -247,7 +356,7 @@ class ScanQuery:
         # Non-BLOB columns to expose, based on _effective_projection() so
         # with_row_id() is honoured; drop BLOBs and predicate-only helpers, and
         # skip unknown projected names to match to_arrow()'s silent drop.
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             return [name for name in available if name not in blob_set]
@@ -300,6 +409,15 @@ class _PreFilterQuery(ScanQuery):
     def stream_blobs(self, *args, **kwargs):
         raise TypeError("stream_blobs is only supported on scan(), not search queries.")
 
+    def to_ray(self, *args, **kwargs):
+        raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+    def to_arrow_batch_reader(self, *args, **kwargs):
+        raise TypeError(
+            "to_arrow_batch_reader is only supported on scan(), "
+            "not search queries."
+        )
+
 
 class VectorQuery(_PreFilterQuery):
     """Chainable query wrapper for vector global-index search."""
@@ -343,7 +461,7 @@ class TextQuery(_PreFilterQuery):
         limit = query._limit if query._limit is not None else 10
         builder = (
             self._table.new_full_text_search_builder()
-            .with_query(self._text_query)
+            .with_query(self._text_query["column"], self._text_query["query"])
             .with_limit(limit)
         )
         if query._pre_filter is not None:
@@ -391,7 +509,8 @@ class HybridQuery(_PreFilterQuery):
             )
         for route in self._text_routes:
             builder = builder.add_full_text_route(
-                route["query"].to_json(),
+                route["column"],
+                route["query"],
                 limit=route.get("limit") or route_limit,
                 weight=route["weight"],
                 options=route["options"],

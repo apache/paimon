@@ -18,7 +18,10 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.Path;
@@ -33,7 +36,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
-import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
@@ -120,6 +122,29 @@ class ParquetCaseInsensitiveReadTest {
     }
 
     @Test
+    void testArrayCaseInsensitiveColumnMatching() throws Exception {
+        Path path = writeArrayMixedCaseParquet();
+
+        // Lowercase name for a column the file spells "Tags" + caseSensitive=false.
+        RowType readType =
+                RowType.builder().field("tags", DataTypes.ARRAY(DataTypes.STRING())).build();
+
+        List<InternalRow> rows = read(path, readType, false);
+
+        assertThat(rows).hasSize(2);
+        InternalArray first = rows.get(0).getArray(0);
+        assertThat(first.size()).isEqualTo(2);
+        assertThat(first.getString(0).toString()).isEqualTo("a");
+        assertThat(first.getString(1).toString()).isEqualTo("b");
+        // A second row of a different length, so a wrong offset and a wrong length differ.
+        InternalArray second = rows.get(1).getArray(0);
+        assertThat(second.size()).isEqualTo(3);
+        assertThat(second.getString(0).toString()).isEqualTo("c");
+        assertThat(second.getString(1).toString()).isEqualTo("d");
+        assertThat(second.getString(2).toString()).isEqualTo("e");
+    }
+
+    @Test
     void testAmbiguousCaseInsensitiveMatchFails() throws Exception {
         Path path = writeDuplicateCaseParquet();
 
@@ -134,13 +159,13 @@ class ParquetCaseInsensitiveReadTest {
             throws Exception {
         Options options = new Options();
         options.set(CatalogOptions.CASE_SENSITIVE, caseSensitive);
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(options, readType, 1024, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(options, readType, 1024, null);
         LocalFileIO fileIO = new LocalFileIO();
         List<InternalRow> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             // Materialize a copy because InternalRow instances are reused across iterations.
             reader.forEachRemaining(row -> rows.add(copy(row, readType)));
         }
@@ -164,6 +189,14 @@ class ParquetCaseInsensitiveReadTest {
                 case ROW:
                     RowType child = (RowType) rowType.getTypeAt(i);
                     values[i] = copy(row.getRow(i, child.getFieldCount()), child);
+                    break;
+                case ARRAY:
+                    InternalArray array = row.getArray(i);
+                    BinaryString[] strings = new BinaryString[array.size()];
+                    for (int j = 0; j < array.size(); j++) {
+                        strings[j] = array.isNullAt(j) ? null : array.getString(j).copy();
+                    }
+                    values[i] = new GenericArray(strings);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -241,6 +274,33 @@ class ParquetCaseInsensitiveReadTest {
                 factory ->
                         Collections.singletonList(
                                 factory.newGroup().append("col", "a").append("COL", "b")));
+    }
+
+    private Path writeArrayMixedCaseParquet() throws Exception {
+        MessageType schema =
+                MessageTypeParser.parseMessageType(
+                        "message root {\n"
+                                + "  optional group Tags (LIST) {\n"
+                                + "    repeated group list {\n"
+                                + "      optional binary element (UTF8);\n"
+                                + "    }\n"
+                                + "  }\n"
+                                + "}");
+
+        return write(
+                schema,
+                factory -> {
+                    List<Group> groups = new ArrayList<>();
+                    for (String[] pair : new String[][] {{"a", "b"}, {"c", "d", "e"}}) {
+                        Group g = factory.newGroup();
+                        Group tags = g.addGroup("Tags");
+                        for (String v : pair) {
+                            tags.addGroup("list").append("element", v);
+                        }
+                        groups.add(g);
+                    }
+                    return groups;
+                });
     }
 
     private interface GroupSupplier {

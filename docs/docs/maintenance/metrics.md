@@ -33,11 +33,11 @@ There are three types of metrics provided in the Paimon metric system, `Gauge`, 
 - `Counter`: Used to count values by incrementing and decrementing.
 - `Histogram`: Measure the statistical distribution of a set of values including the min, max, mean, standard deviation and percentile.
 
-Paimon has supported built-in metrics to measure operations of **commits**, **scans**, **writes** and **compactions**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
+Paimon has supported built-in metrics to measure operations of **commits**, **scans**, **writes**, **compactions** and **lookups**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
 
 ## Metrics List
 
-Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics and compaction metrics.
+Below is lists of Paimon built-in metrics. They are summarized into types of scan metrics, commit metrics, write metrics, write buffer metrics, blob fetch metrics, compaction metrics and lookup metrics.
 
 ### Scan Metrics
 
@@ -79,6 +79,32 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>lastScanResultedTableFiles</td>
             <td>Gauge</td>
             <td>Resulted table files in the last scan.</td>
+        </tr>
+    </tbody>
+</table>
+
+### Lookup Metrics
+
+Lookup metrics are available for local partial lookup. They are reported at lookup invocation granularity. <code>partialLookupRemoteAccessCount</code> counts a lookup invocation once when at least one lookup file must be created from table storage because it is not available in the local cache. It counts lookup invocations, not individual OSS or table-storage I/O operations.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>partialLookupCount</td>
+            <td>Counter</td>
+            <td>Total number of partial lookup invocations.</td>
+        </tr>
+        <tr>
+            <td>partialLookupRemoteAccessCount</td>
+            <td>Counter</td>
+            <td>Number of partial lookup invocations that created at least one lookup file from table storage because it was not available in the local cache. This is not an individual I/O count.</td>
         </tr>
     </tbody>
 </table>
@@ -226,6 +252,85 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </tbody>
 </table>
 
+### Blob Fetch Metrics
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>blobFetchTotal</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch outcomes handled during write, including successful fetches, failures, and missing resources written as NULL.</td>
+        </tr>
+        <tr>
+            <td>blobFetchSuccess</td>
+            <td>Counter</td>
+            <td>Total number of blob fetches that completed successfully.</td>
+        </tr>
+        <tr>
+            <td>blobFetchSuccessBytes</td>
+            <td>Counter</td>
+            <td>Total bytes written by successful blob fetches.</td>
+        </tr>
+        <tr>
+            <td>blobFetchNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because a blob resource was missing or failed to fetch.</td>
+        </tr>
+        <tr>
+            <td>blobFetchMissingFileNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because <code>blob-write-null-on-missing-file</code> handled a missing blob resource.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailureNullWritten</td>
+            <td>Counter</td>
+            <td>Total number of NULL values written because <code>blob-write-null-on-fetch-failure</code> handled a non-404 blob fetch failure.</td>
+        </tr>
+        <tr>
+            <td>blobFetchFailure</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures that were not written as NULL.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpNotFound</td>
+            <td>Counter</td>
+            <td>Total number of HTTP 404 blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpClientError</td>
+            <td>Counter</td>
+            <td>Total number of non-404 HTTP 4xx blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpServerError</td>
+            <td>Counter</td>
+            <td>Total number of HTTP 5xx blob fetch failures.</td>
+        </tr>
+        <tr>
+            <td>blobFetchHttpOtherError</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures with HTTP status codes outside 4xx and 5xx.</td>
+        </tr>
+        <tr>
+            <td>blobFetchInvalidUri</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures caused by invalid URIs.</td>
+        </tr>
+        <tr>
+            <td>blobFetchOtherError</td>
+            <td>Counter</td>
+            <td>Total number of blob fetch failures that are not classified as HTTP status or invalid URI failures.</td>
+        </tr>
+    </tbody>
+</table>
+
 ### Compaction Metrics
 
 <table class="table table-bordered">
@@ -303,6 +408,21 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>The average total file size of all active (currently being written) buckets.</td>
         </tr>
         <tr>
+            <td>maxTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The maximum total file count of an active (currently being written) bucket.</td>
+        </tr>
+        <tr>
+            <td>avgTotalFileCount</td>
+            <td>Gauge</td>
+            <td>The average total file count of all active (currently being written) buckets.</td>
+        </tr>
+        <tr>
+            <td>minAvgFileSize</td>
+            <td>Gauge</td>
+            <td>The minimum average file size across all active buckets, computed as total file size divided by total file count per bucket. Directly indicates if any bucket has a small file problem. Only reported for primary-key tables.</td>
+        </tr>
+        <tr>
             <td>maxSortBufferUsedBytes</td>
             <td>Gauge</td>
             <td>The maximum sort buffer memory currently used across all active compaction buckets, in bytes. High values relative to <code>maxSortBufferTotalBytes</code> indicate memory pressure during compaction; consider lowering <code>sort-spill-threshold</code> or reducing <code>sort-spill-buffer-size</code>.</td>
@@ -361,6 +481,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
             <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
         </tr>
         <tr>
+            <td>Lookup Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;lookup_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.lookup</td>
+        </tr>
+        <tr>
             <td>Commit Metrics</td>
             <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
             <td>paimon.table.&lt;table_name&gt;.commit</td>
@@ -374,6 +499,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
             <td>Write Buffer Metrics</td>
             <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
             <td>paimon.table.&lt;table_name&gt;.writeBuffer</td>
+        </tr>
+        <tr>
+            <td>Blob Fetch Metrics</td>
+            <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;writer_operator_name&gt;.&lt;subtask_index&gt;</td>
+            <td>paimon.table.&lt;table_name&gt;.blobFetch</td>
         </tr>
         <tr>
             <td>Compaction Metrics</td>

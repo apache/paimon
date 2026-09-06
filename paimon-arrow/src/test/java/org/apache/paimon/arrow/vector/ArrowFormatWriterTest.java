@@ -29,12 +29,22 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantCastArgs;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
@@ -49,6 +59,8 @@ import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.TimeMicroVector;
 import org.apache.arrow.vector.TimeNanoVector;
 import org.apache.arrow.vector.TimeSecVector;
+import org.apache.arrow.vector.TimeStampNanoTZVector;
+import org.apache.arrow.vector.TimeStampNanoVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -62,6 +74,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -72,6 +86,7 @@ import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link org.apache.paimon.arrow.vector.ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
@@ -145,6 +160,132 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testMissingMapColumnVectorizedRoundTrip() {
+        RowType inputRowType = RowType.builder().field("id", DataTypes.INT()).build();
+        RowType projectedRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("map", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+
+        try (ArrowFormatWriter inputWriter = new ArrowFormatWriter(inputRowType, 3, true);
+                ArrowFormatWriter outputWriter = new ArrowFormatWriter(projectedRowType, 3, true)) {
+            inputWriter.write(GenericRow.of(1));
+            inputWriter.write(GenericRow.of(2));
+            inputWriter.write(GenericRow.of(3));
+            inputWriter.flush();
+
+            ArrowBatchReader reader = new ArrowBatchReader(projectedRowType, true);
+            ColumnarRow row =
+                    (ColumnarRow)
+                            reader.readBatch(inputWriter.getVectorSchemaRoot()).iterator().next();
+            assertThat(row.batch().columns[1]).isSameAs(AllNullColumnVector.INSTANCE);
+
+            outputWriter.write(row.batch().columns, null, 0, 3);
+            outputWriter.flush();
+
+            VectorSchemaRoot output = outputWriter.getVectorSchemaRoot();
+            assertThat(output.getRowCount()).isEqualTo(3);
+            IntVector idVector = (IntVector) output.getVector("id");
+            assertThat(idVector.get(0)).isEqualTo(1);
+            assertThat(idVector.get(1)).isEqualTo(2);
+            assertThat(idVector.get(2)).isEqualTo(3);
+
+            MapVector mapVector = (MapVector) output.getVector("map");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+            assertThat(mapVector.isNull(2)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullArrayColumn() {
+        // the array column is NOT NULL, but its element type is nullable
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(new GenericArray(new Object[] {1, null, 3})));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalArray array = row.getArray(0);
+            assertThat(array.size()).isEqualTo(3);
+            assertThat(array.isNullAt(0)).isFalse();
+            assertThat(array.getInt(0)).isEqualTo(1);
+            assertThat(array.isNullAt(1)).isTrue();
+            assertThat(array.isNullAt(2)).isFalse();
+            assertThat(array.getInt(2)).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullElementArrayColumn() {
+        // the array column is nullable, but its element type is NOT NULL
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT().notNull()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(new GenericArray(new Object[] {1, null}));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullValueInNotNullMapColumn() {
+        // the map column is NOT NULL, but its value type is nullable
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(1, null);
+            writer.write(GenericRow.of(new GenericMap(map)));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalMap actualMap = row.getMap(0);
+            assertThat(actualMap.size()).isEqualTo(1);
+            assertThat(actualMap.keyArray().getInt(0)).isEqualTo(1);
+            assertThat(actualMap.valueArray().isNullAt(0)).isTrue();
+        }
+    }
+
+    @Test
+    public void testWriteNullKeyInMapColumnFailsLoud() {
+        // the map key type is nullable, but the Arrow map key is always NOT NULL by spec, so a null
+        // key must fail loud rather than be written into a schema that forbids it
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(null, 1);
+            InternalRow row = GenericRow.of(new GenericMap(map));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullFieldInNotNullNestedRowField() {
+        // the row column is nullable, but its nested field is NOT NULL
+        RowType rowType =
+                RowType.of(DataTypes.ROW(DataTypes.FIELD(0, "a", DataTypes.INT().notNull())));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(GenericRow.of((Object) null));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
         }
     }
 
@@ -232,7 +373,8 @@ public class ArrowFormatWriterTest {
     @Test
     public void testWriteVariant() {
         RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
-        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        Variant variant = new BufferOnlyVariant(expected);
         try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
             writer.write(GenericRow.of(variant));
             writer.flush();
@@ -242,8 +384,156 @@ public class ArrowFormatWriterTest {
             VarBinaryVector valueVector = (VarBinaryVector) variantVector.getChild(Variant.VALUE);
             VarBinaryVector metadataVector =
                     (VarBinaryVector) variantVector.getChild(Variant.METADATA);
-            assertThat(valueVector.getObject(0)).isEqualTo(variant.value());
-            assertThat(metadataVector.getObject(0)).isEqualTo(variant.metadata());
+            assertThat(valueVector.getObject(0)).isEqualTo(expected.value());
+            assertThat(metadataVector.getObject(0)).isEqualTo(expected.metadata());
+        }
+    }
+
+    @Test
+    public void testReadVariantUsesArrowBuffers() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant prefix = GenericVariant.fromJson("null");
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(prefix));
+            writer.write(GenericRow.of(expected));
+            writer.flush();
+
+            Iterator<InternalRow> rows =
+                    new ArrowBatchReader(rowType, true)
+                            .readBatch(writer.getVectorSchemaRoot())
+                            .iterator();
+            rows.next();
+            Variant actual = rows.next().getVariant(0);
+
+            assertThat(actual).isInstanceOf(GenericVariant.class);
+            assertThat(actual.valueBuffer().isDirect()).isTrue();
+            assertThat(actual.metadataBuffer().isDirect()).isTrue();
+            assertThat(actual.value()).isEqualTo(expected.value());
+            assertThat(actual.metadata()).isEqualTo(expected.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteColumnarInput() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant prefix = GenericVariant.fromJson("null");
+        HeapBytesVector values = new HeapBytesVector(2);
+        values.appendByteArray(prefix.value(), 0, prefix.value().length);
+        values.appendByteArray(variant.value(), 0, variant.value().length);
+        HeapBytesVector metadata = new HeapBytesVector(2);
+        metadata.appendByteArray(prefix.metadata(), 0, prefix.metadata().length);
+        metadata.appendByteArray(variant.metadata(), 0, variant.metadata().length);
+        HeapRowVector columnarVariant = new HeapRowVector(2, values, metadata);
+        columnarVariant.appendRow();
+        columnarVariant.appendRow();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {columnarVariant}, null, 1, 1);
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            assertThat(((VarBinaryVector) variantVector.getChild(Variant.VALUE)).getObject(0))
+                    .isEqualTo(variant.value());
+            assertThat(((VarBinaryVector) variantVector.getChild(Variant.METADATA)).getObject(0))
+                    .isEqualTo(variant.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteColumnarInputWithTwoFieldShreddingSchema() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        RowType shreddingSchemas =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0,
+                                        "v",
+                                        PaimonShreddingUtils.variantShreddingSchema(
+                                                DataTypes.VARIANT()))));
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        HeapBytesVector values = new HeapBytesVector(1);
+        values.appendByteArray(expected.value(), 0, expected.value().length);
+        HeapBytesVector metadata = new HeapBytesVector(1);
+        metadata.appendByteArray(expected.metadata(), 0, expected.metadata().length);
+        HeapRowVector columnarVariant = new HeapRowVector(1, values, metadata);
+        columnarVariant.appendRow();
+
+        try (ArrowFormatWriter writer =
+                new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
+            writer.write(new ColumnVector[] {columnarVariant}, null, 0, 1);
+            writer.flush();
+
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            Iterator<InternalRow> physicalRows =
+                    new ArrowBatchReader(shreddingSchemas, true)
+                            .readBatch(writer.getVectorSchemaRoot())
+                            .iterator();
+            Variant actual =
+                    PaimonShreddingUtils.assembleVariant(
+                            physicalRows.next().getRow(0, physicalVariantType.getFieldCount()),
+                            variantSchema);
+            assertThat(actual.toJson()).isEqualTo(expected.toJson());
+
+            assertThatThrownBy(
+                            () ->
+                                    new ArrowBatchReader(rowType, true)
+                                            .readBatch(writer.getVectorSchemaRoot()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("raw Variant Arrow layout");
+        }
+    }
+
+    private static class BufferOnlyVariant implements Variant {
+
+        private final GenericVariant delegate;
+
+        private BufferOnlyVariant(GenericVariant delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public byte[] metadata() {
+            throw new AssertionError("Arrow writer should consume metadataBuffer");
+        }
+
+        @Override
+        public ByteBuffer metadataBuffer() {
+            return delegate.metadataBuffer();
+        }
+
+        @Override
+        public byte[] value() {
+            throw new AssertionError("Arrow writer should consume valueBuffer");
+        }
+
+        @Override
+        public ByteBuffer valueBuffer() {
+            return delegate.valueBuffer();
+        }
+
+        @Override
+        public String toJson(ZoneId zoneId) {
+            return delegate.toJson(zoneId);
+        }
+
+        @Override
+        public Object variantGet(String path, DataType dataType, VariantCastArgs castArgs) {
+            return delegate.variantGet(path, dataType, castArgs);
+        }
+
+        @Override
+        public long sizeInBytes() {
+            return delegate.sizeInBytes();
+        }
+
+        @Override
+        public Variant copy() {
+            return delegate.copy();
         }
     }
 
@@ -262,17 +552,50 @@ public class ArrowFormatWriterTest {
                                         "v",
                                         PaimonShreddingUtils.variantShreddingSchema(
                                                 expectedSchema))));
-        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant mixed = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\",\"c\":3}");
+        GenericVariant fullyTyped = GenericVariant.fromJson("{\"a\":2,\"b\":\"y\"}");
 
         try (ArrowFormatWriter writer =
                 new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
-            writer.write(GenericRow.of(variant));
+            writer.write(GenericRow.of(new BufferOnlyVariant(mixed)));
+            writer.write(GenericRow.of(new BufferOnlyVariant(fullyTyped)));
             writer.flush();
 
             StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
             assertThat(variantVector.isNull(0)).isFalse();
             assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
                     .isNotNull();
+
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            ArrowBatchReader reader = new ArrowBatchReader(shreddingSchemas, true);
+            Iterator<InternalRow> rows = reader.readBatch(writer.getVectorSchemaRoot()).iterator();
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(mixed.toJson());
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(fullyTyped.toJson());
+
+            ArrowBatchReader readerWithoutShreddingSchema = new ArrowBatchReader(rowType, true);
+            assertThatThrownBy(
+                            () ->
+                                    readerWithoutShreddingSchema
+                                            .readBatch(writer.getVectorSchemaRoot())
+                                            .iterator()
+                                            .next()
+                                            .getVariant(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("shredding read plan");
         }
     }
 
@@ -457,6 +780,43 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
+    public void testArrowBundleRecordsWithPreEpochNanoTimestamps() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "ts_nano", DataTypes.TIMESTAMP(9)),
+                        new DataField(
+                                1, "ts_ltz_nano", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9)));
+
+        // 1969-12-31T23:59:59.999999999, i.e. one nanosecond before the epoch
+        long nanos = -1L;
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            TimeStampNanoVector tsVector = new TimeStampNanoVector("ts_nano", allocator);
+            tsVector.allocateNew(1);
+            tsVector.setSafe(0, nanos);
+            tsVector.setValueCount(1);
+
+            TimeStampNanoTZVector tsLtzVector =
+                    new TimeStampNanoTZVector("ts_ltz_nano", allocator, "UTC");
+            tsLtzVector.allocateNew(1);
+            tsLtzVector.setSafe(0, nanos);
+            tsLtzVector.setValueCount(1);
+
+            List<FieldVector> vectors = Arrays.asList(tsVector, tsLtzVector);
+            try (VectorSchemaRoot vectorSchemaRoot = new VectorSchemaRoot(vectors)) {
+                vectorSchemaRoot.setRowCount(1);
+
+                Iterator<InternalRow> iterator =
+                        new ArrowBundleRecords(vectorSchemaRoot, rowType, true).iterator();
+                InternalRow row = iterator.next();
+                Timestamp expected = Timestamp.fromEpochMillis(-1, 999_999);
+                assertThat(row.getTimestamp(0, 9)).isEqualTo(expected);
+                assertThat(row.getTimestamp(1, 9)).isEqualTo(expected);
+            }
+        }
+    }
+
+    @Test
     public void testCWriter() {
         try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
             writeAndCheck(writer);
@@ -489,6 +849,35 @@ public class ArrowFormatWriterTest {
             assertThat(allocator.closeCount()).isZero();
         } finally {
             allocator.close();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityIgnoresFieldDescription() {
+        RowType writerType = RowType.builder().field("value", DataTypes.INT()).build();
+        RowType bundleType =
+                RowType.builder().field("value", DataTypes.INT(), "different description").build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityRequiresLogicalType() {
+        RowType writerType = RowType.builder().field("value", DataTypes.VARCHAR(10)).build();
+        RowType bundleType = RowType.builder().field("value", DataTypes.CHAR(10)).build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isFalse();
         }
     }
 

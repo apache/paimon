@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 
 import java.io.IOException;
 import java.lang.reflect.Array;
@@ -66,6 +67,8 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
             return copyGenericArray((GenericArray) from);
         } else if (from instanceof BinaryArray) {
             return ((BinaryArray) from).copy();
+        } else if (eleType.getTypeRoot() == DataTypeRoot.BLOB) {
+            return copyObjectArray(from);
         } else {
             return toBinaryArray(from).copy();
         }
@@ -102,6 +105,17 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
             }
             return new GenericArray(newArray);
         }
+    }
+
+    private GenericArray copyObjectArray(InternalArray array) {
+        Object[] newArray =
+                (Object[]) Array.newInstance(InternalRow.getDataClass(eleType), array.size());
+        for (int i = 0; i < array.size(); i++) {
+            if (!array.isNullAt(i)) {
+                newArray[i] = eleSer.copy(elementGetter.getElementOrNull(array, i));
+            }
+        }
+        return new GenericArray(newArray);
     }
 
     @Override

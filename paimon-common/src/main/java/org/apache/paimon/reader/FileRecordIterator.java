@@ -69,6 +69,11 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
             }
 
             @Override
+            public boolean skip() throws IOException {
+                return thisIterator.skip();
+            }
+
+            @Override
             public void releaseBatch() {
                 thisIterator.releaseBatch();
             }
@@ -142,6 +147,21 @@ public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
                     }
                     if (nextExpected == returnedPosition()) {
                         return next;
+                    }
+                }
+            }
+
+            @Override
+            public boolean skip() throws IOException {
+                while (true) {
+                    if (nextExpected == -1 || !thisIterator.skip()) {
+                        return false;
+                    }
+                    while (nextExpected != -1 && nextExpected < returnedPosition()) {
+                        nextExpected = selects.hasNext() ? selects.next() : -1;
+                    }
+                    if (nextExpected == returnedPosition()) {
+                        return true;
                     }
                 }
             }

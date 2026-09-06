@@ -187,6 +187,7 @@ public class IntervalPartitionTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 

@@ -18,11 +18,17 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobViewStruct;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -32,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.OutputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -771,5 +778,367 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sql("INSERT INTO seq_default_agg VALUES (0, 2, 2)");
 
         assertThat(sql("SELECT * FROM seq_default_agg")).containsExactly(Row.of(0, 2, 3));
+    }
+
+    @Test
+    public void testBlobDescriptorPartialUpdate() throws Exception {
+        byte[] first = "video-v1".getBytes();
+        byte[] second = "video-v2".getBytes();
+        String firstUri = writeExternalBlob("pu_blob_v1", first);
+        String secondUri = writeExternalBlob("pu_blob_v2", second);
+
+        sql(
+                "CREATE TABLE pu_blob ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " name STRING,"
+                        + " payload BYTES"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-descriptor-field'='payload',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+
+        sql("INSERT INTO pu_blob VALUES (1, 'a', sys.path_to_descriptor('" + firstUri + "'))");
+        sql("INSERT INTO pu_blob VALUES (1, 'b', CAST(NULL AS BYTES))");
+        assertThat(sql("SELECT id, name, payload FROM pu_blob"))
+                .containsExactly(Row.of(1, "b", first));
+
+        sql(
+                "INSERT INTO pu_blob VALUES (1, CAST(NULL AS STRING), sys.path_to_descriptor('"
+                        + secondUri
+                        + "'))");
+        assertThat(sql("SELECT id, name, payload FROM pu_blob"))
+                .containsExactly(Row.of(1, "b", second));
+
+        assertThat((long) sql("SELECT COUNT(*) FROM `pu_blob$files`").get(0).getField(0))
+                .isGreaterThan(1);
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.pu_blob', compact_strategy => 'full')");
+        Snapshot snapshot = findLatestSnapshot("pu_blob");
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(sql("SELECT COUNT(*) FROM `pu_blob$files`")).containsExactly(Row.of(1L));
+        assertThat(sql("SELECT id, name, payload FROM pu_blob"))
+                .containsExactly(Row.of(1, "b", second));
+
+        sql("ALTER TABLE pu_blob SET ('blob-as-descriptor'='true')");
+        byte[] descriptorBytes = (byte[]) sql("SELECT payload FROM pu_blob").get(0).getField(0);
+        BlobDescriptor descriptor = BlobDescriptor.deserialize(descriptorBytes);
+        assertThat(descriptor.uri()).isEqualTo(secondUri);
+        assertThat(descriptor.offset()).isEqualTo(0);
+        // path_to_descriptor may encode whole-file length as -1.
+        assertThat(descriptor.length()).isIn(-1L, (long) second.length);
+    }
+
+    @Test
+    public void testBlobDescriptorPartialUpdateSequenceGroup() throws Exception {
+        byte[] first = "seq-v1".getBytes();
+        byte[] second = "seq-v2".getBytes();
+        String firstUri = writeExternalBlob("pu_blob_seq_v1", first);
+        String secondUri = writeExternalBlob("pu_blob_seq_v2", second);
+
+        sql(
+                "CREATE TABLE pu_blob_seq ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " name STRING,"
+                        + " payload BYTES,"
+                        + " ts INT"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-descriptor-field'='payload',"
+                        + " 'fields.ts.sequence-group'='name,payload',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+
+        sql(
+                "INSERT INTO pu_blob_seq VALUES (1, 'a', sys.path_to_descriptor('"
+                        + firstUri
+                        + "'), 1)");
+        // null sequence should not overwrite name/payload
+        sql(
+                "INSERT INTO pu_blob_seq VALUES (1, 'b', sys.path_to_descriptor('"
+                        + secondUri
+                        + "'), CAST(NULL AS INT))");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_blob_seq"))
+                .containsExactly(Row.of(1, "a", first, 1));
+
+        sql(
+                "INSERT INTO pu_blob_seq VALUES (1, 'c', sys.path_to_descriptor('"
+                        + secondUri
+                        + "'), 2)");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_blob_seq"))
+                .containsExactly(Row.of(1, "c", second, 2));
+
+        // equal sequence overwrites the entire group, including with null
+        sql("INSERT INTO pu_blob_seq VALUES " + "(1, 'd', CAST(NULL AS BYTES), 2)");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_blob_seq"))
+                .containsExactly(Row.of(1, "d", null, 2));
+
+        // older sequence must not overwrite
+        sql(
+                "INSERT INTO pu_blob_seq VALUES (1, 'e', sys.path_to_descriptor('"
+                        + secondUri
+                        + "'), 1)");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_blob_seq"))
+                .containsExactly(Row.of(1, "d", null, 2));
+
+        assertThat((long) sql("SELECT COUNT(*) FROM `pu_blob_seq$files`").get(0).getField(0))
+                .isGreaterThan(1);
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.pu_blob_seq', compact_strategy => 'full')");
+        Snapshot snapshot = findLatestSnapshot("pu_blob_seq");
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(sql("SELECT COUNT(*) FROM `pu_blob_seq$files`")).containsExactly(Row.of(1L));
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_blob_seq"))
+                .containsExactly(Row.of(1, "d", null, 2));
+
+        sql("ALTER TABLE pu_blob_seq SET ('blob-as-descriptor'='true')");
+        assertThat(sql("SELECT payload FROM pu_blob_seq")).containsExactly(Row.of((Object) null));
+    }
+
+    @Test
+    public void testManagedBlobPartialUpdate() throws Exception {
+        byte[] first = "blob-v1".getBytes();
+        byte[] second = "blob-v2".getBytes();
+
+        sql(
+                "CREATE TABLE pu_managed_blob ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " name STRING,"
+                        + " payload BYTES"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-field'='payload',"
+                        + " 'changelog-producer'='none',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+
+        sql("INSERT INTO pu_managed_blob VALUES (1, 'a', " + toHexLiteral(first) + ")");
+        sql("INSERT INTO pu_managed_blob VALUES (1, 'b', CAST(NULL AS BYTES))");
+        assertThat(sql("SELECT id, name, payload FROM pu_managed_blob"))
+                .containsExactly(Row.of(1, "b", first));
+
+        sql(
+                "INSERT INTO pu_managed_blob VALUES (1, CAST(NULL AS STRING), "
+                        + toHexLiteral(second)
+                        + ")");
+        assertThat(sql("SELECT id, name, payload FROM pu_managed_blob"))
+                .containsExactly(Row.of(1, "b", second));
+
+        assertThat((long) sql("SELECT COUNT(*) FROM `pu_managed_blob$files`").get(0).getField(0))
+                .isGreaterThan(1);
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.pu_managed_blob', compact_strategy => 'full')");
+        Snapshot snapshot = findLatestSnapshot("pu_managed_blob");
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(sql("SELECT COUNT(*) FROM `pu_managed_blob$files`")).containsExactly(Row.of(1L));
+        assertThat(sql("SELECT id, name, payload FROM pu_managed_blob"))
+                .containsExactly(Row.of(1, "b", second));
+    }
+
+    @Test
+    public void testManagedBlobPartialUpdateSequenceGroup() throws Exception {
+        byte[] first = "blob-seq-v1".getBytes();
+        byte[] second = "blob-seq-v2".getBytes();
+        sql(
+                "CREATE TABLE pu_managed_blob_seq ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " name STRING,"
+                        + " payload BYTES,"
+                        + " ts INT"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-field'='payload',"
+                        + " 'changelog-producer'='none',"
+                        + " 'fields.ts.sequence-group'='name,payload',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+
+        sql("INSERT INTO pu_managed_blob_seq VALUES (1, 'first', " + toHexLiteral(first) + ", 2)");
+        sql("INSERT INTO pu_managed_blob_seq VALUES (1, 'older', " + toHexLiteral(second) + ", 1)");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_managed_blob_seq"))
+                .containsExactly(Row.of(1, "first", first, 2));
+
+        sql("INSERT INTO pu_managed_blob_seq VALUES (1, 'cleared', CAST(NULL AS BYTES), 3)");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_managed_blob_seq"))
+                .containsExactly(Row.of(1, "cleared", null, 3));
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact("
+                        + "`table` => 'default.pu_managed_blob_seq', "
+                        + "compact_strategy => 'full')");
+        assertThat(sql("SELECT id, name, payload, ts FROM pu_managed_blob_seq"))
+                .containsExactly(Row.of(1, "cleared", null, 3));
+    }
+
+    @Test
+    public void testBlobViewPartialUpdate() throws Exception {
+        createBlobViewPartialUpdateTables();
+
+        assertThat(sql("SELECT id, label, image_ref FROM pu_blob_view ORDER BY id"))
+                .containsExactly(Row.of(1, "row1", new byte[] {72, 101, 108, 108, 111}));
+
+        sql("INSERT INTO pu_blob_view VALUES (1, 'updated', CAST(NULL AS BYTES))");
+        assertThat(sql("SELECT id, label, image_ref FROM pu_blob_view"))
+                .containsExactly(Row.of(1, "updated", new byte[] {72, 101, 108, 108, 111}));
+
+        assertThat((long) sql("SELECT COUNT(*) FROM `pu_blob_view$files`").get(0).getField(0))
+                .isGreaterThan(1);
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql("CALL sys.compact(`table` => 'default.pu_blob_view', compact_strategy => 'full')");
+        Snapshot snapshot = findLatestSnapshot("pu_blob_view");
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(sql("SELECT COUNT(*) FROM `pu_blob_view$files`")).containsExactly(Row.of(1L));
+        assertThat(sql("SELECT id, label, image_ref FROM pu_blob_view"))
+                .containsExactly(Row.of(1, "updated", new byte[] {72, 101, 108, 108, 111}));
+    }
+
+    @Test
+    public void testBlobViewPartialUpdateForwardReference() throws Exception {
+        String fullTableName = createBlobViewPartialUpdateTables();
+        sql("INSERT INTO pu_blob_view VALUES (1, 'updated', CAST(NULL AS BYTES))");
+        sql(
+                "CREATE TABLE pu_blob_view_forward ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " label STRING,"
+                        + " image_ref BYTES"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-view-field'='image_ref'"
+                        + ")");
+        sql(
+                "INSERT INTO pu_blob_view_forward"
+                        + " SELECT id, label, image_ref"
+                        + " FROM pu_blob_view"
+                        + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */");
+
+        assertThat(sql("SELECT id, label, image_ref FROM pu_blob_view_forward"))
+                .containsExactly(Row.of(1, "updated", new byte[] {72, 101, 108, 108, 111}));
+
+        byte[] originalReference =
+                (byte[])
+                        sql("SELECT image_ref FROM pu_blob_view"
+                                        + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */")
+                                .get(0)
+                                .getField(0);
+        byte[] forwardedReference =
+                (byte[])
+                        sql("SELECT image_ref FROM pu_blob_view_forward"
+                                        + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */")
+                                .get(0)
+                                .getField(0);
+        assertThat(forwardedReference).isEqualTo(originalReference);
+        assertThat(BlobViewStruct.deserialize(forwardedReference).identifier().getFullName())
+                .isEqualTo(fullTableName);
+    }
+
+    @Test
+    public void testBlobViewPartialUpdateSequenceGroup() throws Exception {
+        String fullTableName = createBlobViewUpstream();
+        sql(
+                "CREATE TABLE pu_blob_view_seq ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " label STRING,"
+                        + " image_ref BYTES,"
+                        + " ts INT"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-view-field'='image_ref',"
+                        + " 'fields.ts.sequence-group'='label,image_ref',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+        sql(
+                String.format(
+                        "INSERT INTO pu_blob_view_seq"
+                                + " SELECT id, name, sys.blob_view('%s', 'picture', _ROW_ID), 2"
+                                + " FROM `pu_upstream_blob$row_tracking`",
+                        fullTableName));
+
+        sql("INSERT INTO pu_blob_view_seq VALUES (1, 'older', CAST(NULL AS BYTES), 1)");
+        assertThat(sql("SELECT id, label, image_ref, ts FROM pu_blob_view_seq"))
+                .containsExactly(Row.of(1, "row1", new byte[] {72, 101, 108, 108, 111}, 2));
+
+        sql("INSERT INTO pu_blob_view_seq VALUES (1, 'cleared', CAST(NULL AS BYTES), 3)");
+        assertThat(sql("SELECT id, label, image_ref, ts FROM pu_blob_view_seq"))
+                .containsExactly(Row.of(1, "cleared", null, 3));
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact("
+                        + "`table` => 'default.pu_blob_view_seq', "
+                        + "compact_strategy => 'full')");
+        assertThat(sql("SELECT id, label, image_ref, ts FROM pu_blob_view_seq"))
+                .containsExactly(Row.of(1, "cleared", null, 3));
+    }
+
+    private String createBlobViewPartialUpdateTables() {
+        String fullTableName = createBlobViewUpstream();
+        sql(
+                "CREATE TABLE pu_blob_view ("
+                        + " id INT PRIMARY KEY NOT ENFORCED,"
+                        + " label STRING,"
+                        + " image_ref BYTES"
+                        + ") WITH ("
+                        + " 'merge-engine'='partial-update',"
+                        + " 'blob-view-field'='image_ref',"
+                        + " 'bucket'='1',"
+                        + " 'write-only'='true',"
+                        + " 'num-sorted-run.compaction-trigger'='100'"
+                        + ")");
+        sql(
+                String.format(
+                        "INSERT INTO pu_blob_view"
+                                + " SELECT id, name, sys.blob_view('%s', 'picture', _ROW_ID)"
+                                + " FROM `pu_upstream_blob$row_tracking`",
+                        fullTableName));
+        return fullTableName;
+    }
+
+    private String createBlobViewUpstream() {
+        sql(
+                "CREATE TABLE pu_upstream_blob ("
+                        + " id INT, name STRING, picture BYTES"
+                        + ") WITH ("
+                        + " 'row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture'"
+                        + ")");
+        sql("INSERT INTO pu_upstream_blob VALUES (1, 'row1', X'48656C6C6F')");
+
+        String fullTableName = tEnv.getCurrentDatabase() + ".pu_upstream_blob";
+        return fullTableName;
+    }
+
+    private static String toHexLiteral(byte[] data) {
+        StringBuilder builder = new StringBuilder("X'");
+        for (byte value : data) {
+            builder.append(String.format("%02X", value));
+        }
+        builder.append("'");
+        return builder.toString();
+    }
+
+    private String writeExternalBlob(String name, byte[] data) throws Exception {
+        FileIO fileIO = new LocalFileIO();
+        String uri = "file://" + path + "/" + name;
+        try (OutputStream outputStream =
+                fileIO.newOutputStream(new org.apache.paimon.fs.Path(uri), true)) {
+            outputStream.write(data);
+        }
+        return uri;
     }
 }

@@ -18,30 +18,29 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.format.blob.VideoFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
-import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
-import javax.annotation.Nullable;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
@@ -62,36 +61,65 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             long targetFileSize,
-            @Nullable BlobConsumer blobConsumer,
-            Set<String> blobInlineFields) {
-        RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
+            BlobFileContext context) {
+        RowType blobRowType =
+                new RowType(fieldsInBlobFile(writeSchema, context.blobInlineFields()));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            BlobFileFormat blobFileFormat = new BlobFileFormat();
-            blobFileFormat.setWriteConsumer(blobConsumer);
+            boolean video = context.videoFrameFields().contains(blobFieldName);
+            FileFormat blobFileFormat;
+            if (video) {
+                if (context.blobConsumer() != null) {
+                    throw new IllegalArgumentException(
+                            "BlobConsumer is not supported for video frame field '"
+                                    + blobFieldName
+                                    + "'.");
+                }
+                VideoFileFormat format = new VideoFileFormat(context.copyBufferSize());
+                format.setWriteNullOnMissingFile(context.writeNullOnMissingFile());
+                format.setWriteNullOnFetchFailure(context.writeNullOnFetchFailure());
+                format.setBlobFetchMetricReporter(context.blobFetchMetricReporter());
+                blobFileFormat = format;
+            } else {
+                BlobFileFormat format = new BlobFileFormat(false, context.copyBufferSize());
+                format.setWriteConsumer(context.blobConsumer());
+                format.setWriteNullOnMissingFile(context.writeNullOnMissingFile());
+                format.setWriteNullOnFetchFailure(context.writeNullOnFetchFailure());
+                format.setBlobFetchMetricReporter(context.blobFetchMetricReporter());
+                blobFileFormat = format;
+            }
+            RowType fieldType = writeSchema.project(blobFieldName);
+            Supplier<RowDataFileWriter> writerFactory =
+                    () ->
+                            new RowDataFileWriter(
+                                    fileIO,
+                                    RollingFileWriter.createFileWriterContext(
+                                            blobFileFormat,
+                                            fieldType,
+                                            new SimpleColStatsCollector.Factory[] {
+                                                NoneSimpleColStatsCollector::new
+                                            },
+                                            "none"),
+                                    video ? pathFactory.newVideoPath() : pathFactory.newBlobPath(),
+                                    fieldType,
+                                    schemaId,
+                                    seqNumCounterSupplier,
+                                    new FileIndexOptions(),
+                                    fileSource,
+                                    asyncFileWrite,
+                                    statsDenseStore,
+                                    pathFactory.isExternalPath(),
+                                    singletonList(blobFieldName),
+                                    null,
+                                    null);
+            RollingFileWriterImpl<InternalRow, DataFileMeta> rollingWriter =
+                    video
+                            ? new VideoRollingFileWriter<>(writerFactory, targetFileSize)
+                            : new RollingFileWriterImpl<>(
+                                    writerFactory, targetFileSize, Long.MAX_VALUE);
             blobWriters.add(
                     new BlobProjectedFileWriter(
-                            () ->
-                                    new RowDataFileWriter(
-                                            fileIO,
-                                            RollingFileWriter.createFileWriterContext(
-                                                    blobFileFormat,
-                                                    writeSchema.project(blobFieldName),
-                                                    new SimpleColStatsCollector.Factory[] {
-                                                        NoneSimpleColStatsCollector::new
-                                                    },
-                                                    "none"),
-                                            pathFactory.newBlobPath(),
-                                            writeSchema.project(blobFieldName),
-                                            schemaId,
-                                            seqNumCounterSupplier,
-                                            new FileIndexOptions(),
-                                            fileSource,
-                                            asyncFileWrite,
-                                            statsDenseStore,
-                                            pathFactory.isExternalPath(),
-                                            singletonList(blobFieldName)),
-                            targetFileSize,
+                            rollingWriter,
                             writeSchema.projectIndexes(singletonList(blobFieldName))));
         }
     }
@@ -123,14 +151,24 @@ public class MultipleBlobFileWriter implements Closeable {
         return results;
     }
 
+    List<FileWriterAbortExecutor> drainAbortExecutors() {
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>();
+        for (BlobProjectedFileWriter blobWriter : blobWriters) {
+            abortExecutors.addAll(blobWriter.drainAbortExecutors());
+        }
+        return abortExecutors;
+    }
+
     private static class BlobProjectedFileWriter
             extends ProjectedFileWriter<
                     RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>> {
         public BlobProjectedFileWriter(
-                Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> writerFactory,
-                long targetFileSize,
-                int[] projection) {
-            super(new RollingFileWriterImpl<>(writerFactory, targetFileSize), projection);
+                RollingFileWriterImpl<InternalRow, DataFileMeta> writer, int[] projection) {
+            super(writer, projection);
+        }
+
+        private List<FileWriterAbortExecutor> drainAbortExecutors() {
+            return writer().drainAbortExecutors();
         }
     }
 }

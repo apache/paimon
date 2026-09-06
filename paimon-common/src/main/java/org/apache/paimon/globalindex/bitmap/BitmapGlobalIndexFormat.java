@@ -41,14 +41,12 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
 
 /** Shared file format helpers for bitmap global index. */
-class BitmapGlobalIndexFormat {
+public final class BitmapGlobalIndexFormat {
 
     private static final int MAGIC = 0x42474958;
     private static final int VERSION = 1;
@@ -56,69 +54,82 @@ class BitmapGlobalIndexFormat {
 
     private BitmapGlobalIndexFormat() {}
 
-    static void write(
-            PositionOutputStream outputStream,
-            RoaringNavigableMap64 nullRows,
-            RoaringNavigableMap64 nonNullRows,
-            Map<SerializedKey, RoaringNavigableMap64> bitmaps,
-            int dictionaryBlockSize,
-            @Nullable BlockCompressionFactory compressionFactory)
+    /** Streaming writer for encoded bitmap dictionary entries. */
+    public static final class StreamingWriter {
+
+        private final PositionOutputStream outputStream;
+        private final DataOutputStream out;
+        private final int dictionaryBlockSize;
+        @Nullable private final BlockCompressionFactory compressionFactory;
+        private final List<DictionaryBlockMeta> dictionaryBlockMetas = new ArrayList<>();
+
+        private DictionaryBlockBuilder currentDictionaryBlock = new DictionaryBlockBuilder();
+        private int valueCount;
+
+        public StreamingWriter(
+                PositionOutputStream outputStream,
+                int dictionaryBlockSize,
+                @Nullable BlockCompressionFactory compressionFactory) {
+            Preconditions.checkArgument(
+                    dictionaryBlockSize > 0,
+                    "Bitmap dictionary block size must be greater than 0.");
+            this.outputStream = outputStream;
+            this.out = new DataOutputStream(outputStream);
+            this.dictionaryBlockSize = dictionaryBlockSize;
+            this.compressionFactory = compressionFactory;
+        }
+
+        public void write(SerializedKey key, RoaringNavigableMap64 bitmap) throws IOException {
+            BlockInfo bitmapBlock = writeBitmapBlock(outputStream, out, bitmap);
+            DictionaryEntry dictionaryEntry = new DictionaryEntry(key, bitmapBlock);
+            if (currentDictionaryBlock.hasEntries()
+                    && currentDictionaryBlock.estimatedSizeAfter(dictionaryEntry)
+                            > dictionaryBlockSize) {
+                flushDictionaryBlock();
+            }
+            currentDictionaryBlock.add(dictionaryEntry);
+            valueCount++;
+        }
+
+        public void finish(RoaringNavigableMap64 nullRows, RoaringNavigableMap64 nonNullRows)
+                throws IOException {
+            flushDictionaryBlock();
+            BlockInfo nullRowsBlock = writeBitmapBlock(outputStream, out, nullRows);
+            BlockInfo nonNullRowsBlock = writeBitmapBlock(outputStream, out, nonNullRows);
+            BlockInfo indexBlock =
+                    writeIndexBlock(outputStream, out, dictionaryBlockMetas, compressionFactory);
+
+            writeFooter(out, nullRowsBlock, nonNullRowsBlock, indexBlock, valueCount);
+        }
+
+        private void flushDictionaryBlock() throws IOException {
+            if (!currentDictionaryBlock.hasEntries()) {
+                return;
+            }
+            dictionaryBlockMetas.add(
+                    writeDictionaryBlock(
+                            outputStream, out, currentDictionaryBlock, compressionFactory));
+            currentDictionaryBlock = new DictionaryBlockBuilder();
+        }
+    }
+
+    private static void writeFooter(
+            DataOutputStream out,
+            BlockInfo nullRowsBlock,
+            BlockInfo nonNullRowsBlock,
+            BlockInfo indexBlock,
+            int valueCount)
             throws IOException {
-        Preconditions.checkArgument(
-                dictionaryBlockSize > 0, "Bitmap dictionary block size must be greater than 0.");
-
-        DataOutputStream out = new DataOutputStream(outputStream);
-        BlockInfo nullRowsBlock = writeBitmapBlock(outputStream, out, nullRows);
-        BlockInfo nonNullRowsBlock = writeBitmapBlock(outputStream, out, nonNullRows);
-        DictionaryBlocks dictionaryBlocks =
-                writeDictionaryAndBitmapBlocks(
-                        outputStream, out, bitmaps, dictionaryBlockSize, compressionFactory);
-        BlockInfo indexBlock =
-                writeIndexBlock(outputStream, out, dictionaryBlocks.blocks, compressionFactory);
-
         out.writeLong(nullRowsBlock.offset);
         out.writeInt(nullRowsBlock.length);
         out.writeLong(nonNullRowsBlock.offset);
         out.writeInt(nonNullRowsBlock.length);
         out.writeLong(indexBlock.offset);
         out.writeInt(indexBlock.length);
-        out.writeInt(dictionaryBlocks.valueCount);
+        out.writeInt(valueCount);
         out.writeInt(VERSION);
         out.writeInt(MAGIC);
         out.flush();
-    }
-
-    private static DictionaryBlocks writeDictionaryAndBitmapBlocks(
-            PositionOutputStream outputStream,
-            DataOutputStream out,
-            Map<SerializedKey, RoaringNavigableMap64> bitmaps,
-            int dictionaryBlockSize,
-            @Nullable BlockCompressionFactory compressionFactory)
-            throws IOException {
-        List<Map.Entry<SerializedKey, RoaringNavigableMap64>> entries =
-                new ArrayList<>(bitmaps.entrySet());
-        Collections.sort(entries, (o1, o2) -> o1.getKey().compareTo(o2.getKey()));
-
-        List<DictionaryBlockMeta> dictionaryBlockMetas = new ArrayList<>();
-        DictionaryBlockBuilder current = new DictionaryBlockBuilder();
-        int valueCount = 0;
-        for (Map.Entry<SerializedKey, RoaringNavigableMap64> entry : entries) {
-            BlockInfo bitmapBlock = writeBitmapBlock(outputStream, out, entry.getValue());
-            DictionaryEntry dictionaryEntry = new DictionaryEntry(entry.getKey(), bitmapBlock);
-            if (current.hasEntries()
-                    && current.estimatedSizeAfter(dictionaryEntry) > dictionaryBlockSize) {
-                dictionaryBlockMetas.add(
-                        writeDictionaryBlock(outputStream, out, current, compressionFactory));
-                current = new DictionaryBlockBuilder();
-            }
-            current.add(dictionaryEntry);
-            valueCount++;
-        }
-        if (current.hasEntries()) {
-            dictionaryBlockMetas.add(
-                    writeDictionaryBlock(outputStream, out, current, compressionFactory));
-        }
-        return new DictionaryBlocks(dictionaryBlockMetas, valueCount);
     }
 
     private static BlockInfo writeBitmapBlock(
@@ -170,7 +181,7 @@ class BitmapGlobalIndexFormat {
         return writeCompressibleBlock(outputStream, out, bytes.toByteArray(), compressionFactory);
     }
 
-    static Footer readFooter(SeekableReader reader, long fileSize) throws IOException {
+    public static Footer readFooter(SeekableReader reader, long fileSize) throws IOException {
         Preconditions.checkState(
                 fileSize >= FOOTER_LENGTH, "Invalid bitmap global index file size.");
         byte[] bytes = reader.read(fileSize - FOOTER_LENGTH, FOOTER_LENGTH);
@@ -189,7 +200,7 @@ class BitmapGlobalIndexFormat {
         return new Footer(nullRowsBlock, nonNullRowsBlock, indexBlock);
     }
 
-    private static List<DictionaryBlockMeta> readIndexBlock(
+    public static List<DictionaryBlockMeta> readIndexBlock(
             SeekableReader reader, BlockInfo indexBlock) throws IOException {
         DataInputStream input =
                 new DataInputStream(
@@ -206,12 +217,11 @@ class BitmapGlobalIndexFormat {
             int length = readVarLenInt(input);
             blocks.add(new DictionaryBlockMeta(new SerializedKey(keyBytes), offset, length));
         }
-        Collections.sort(blocks, (o1, o2) -> o1.firstKey.compareTo(o2.firstKey));
         return blocks;
     }
 
-    static DictionaryBlock readDictionaryBlock(SeekableReader reader, DictionaryBlockMeta block)
-            throws IOException {
+    public static DictionaryBlock readDictionaryBlock(
+            SeekableReader reader, DictionaryBlockMeta block) throws IOException {
         DataInputStream input =
                 new DataInputStream(new ByteArrayInputStream(readCompressibleBlock(reader, block)));
         int entryCount = readVarLenInt(input);
@@ -232,7 +242,7 @@ class BitmapGlobalIndexFormat {
         return new DictionaryBlock(entries);
     }
 
-    static RoaringNavigableMap64 readBitmap(SeekableReader reader, BlockInfo block)
+    public static RoaringNavigableMap64 readBitmap(SeekableReader reader, BlockInfo block)
             throws IOException {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         bitmap.deserialize(reader.read(block));
@@ -390,19 +400,20 @@ class BitmapGlobalIndexFormat {
         return size;
     }
 
-    static class SerializedKey implements Comparable<SerializedKey> {
+    /** Serialized bitmap dictionary key. */
+    public static final class SerializedKey implements Comparable<SerializedKey> {
 
         private final byte[] bytes;
 
-        SerializedKey(byte[] bytes) {
+        public SerializedKey(byte[] bytes) {
             this.bytes = bytes;
         }
 
-        byte[] bytes() {
+        public byte[] bytes() {
             return bytes;
         }
 
-        static SerializedKey fromObject(KeySerializer serializer, Object key) {
+        public static SerializedKey fromObject(KeySerializer serializer, Object key) {
             return new SerializedKey(serializer.serialize(key));
         }
 
@@ -436,7 +447,8 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    interface SeekableReader {
+    /** Minimal random-access reader used by bitmap index format decoders. */
+    public interface SeekableReader {
 
         byte[] read(long offset, int length) throws IOException;
 
@@ -445,7 +457,8 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    static class BlockInfo {
+    /** Encoded block location within a bitmap index file. */
+    public static class BlockInfo {
 
         final long offset;
         final int length;
@@ -458,7 +471,8 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    static class DictionaryBlockMeta extends BlockInfo {
+    /** Dictionary block metadata read from the block index. */
+    public static final class DictionaryBlockMeta extends BlockInfo {
 
         final SerializedKey firstKey;
 
@@ -468,16 +482,22 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    static class DictionaryBlock {
+    /** Decoded dictionary block. */
+    public static final class DictionaryBlock {
 
         final List<DictionaryEntry> entries;
 
         DictionaryBlock(List<DictionaryEntry> entries) {
             this.entries = entries;
         }
+
+        public List<DictionaryEntry> entries() {
+            return entries;
+        }
     }
 
-    static class DictionaryEntry {
+    /** One encoded dictionary key and its bitmap block. */
+    public static final class DictionaryEntry {
 
         final SerializedKey key;
         final BlockInfo bitmapBlock;
@@ -485,6 +505,14 @@ class BitmapGlobalIndexFormat {
         DictionaryEntry(SerializedKey key, BlockInfo bitmapBlock) {
             this.key = key;
             this.bitmapBlock = bitmapBlock;
+        }
+
+        public SerializedKey key() {
+            return key;
+        }
+
+        public BlockInfo bitmapBlock() {
+            return bitmapBlock;
         }
 
         int estimatedSize() {
@@ -522,17 +550,6 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    private static class DictionaryBlocks {
-
-        private final List<DictionaryBlockMeta> blocks;
-        private final int valueCount;
-
-        private DictionaryBlocks(List<DictionaryBlockMeta> blocks, int valueCount) {
-            this.blocks = blocks;
-            this.valueCount = valueCount;
-        }
-    }
-
     private static class BlockEncoding {
 
         private final byte[] bytes;
@@ -546,7 +563,8 @@ class BitmapGlobalIndexFormat {
         }
     }
 
-    static class Footer {
+    /** Bitmap index footer block references. */
+    public static final class Footer {
 
         final BlockInfo nullRowsBlock;
         final BlockInfo nonNullRowsBlock;
@@ -556,6 +574,18 @@ class BitmapGlobalIndexFormat {
             this.nullRowsBlock = nullRowsBlock;
             this.nonNullRowsBlock = nonNullRowsBlock;
             this.indexBlock = indexBlock;
+        }
+
+        public BlockInfo nullRowsBlock() {
+            return nullRowsBlock;
+        }
+
+        public BlockInfo nonNullRowsBlock() {
+            return nonNullRowsBlock;
+        }
+
+        public BlockInfo indexBlock() {
+            return indexBlock;
         }
     }
 }

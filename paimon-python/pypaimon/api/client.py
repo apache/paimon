@@ -154,16 +154,23 @@ class ExponentialRetry:
 
     @staticmethod
     def __create_retry_strategy(max_retries: int) -> Retry:
-        # Single retry budget shared across read and status (429 / 5xx)
-        # errors. Connect failures are intentionally non-retriable: a
-        # connect error usually means the host is wrong or the listener
-        # is down, and burning the budget on it just delays the failure.
+        # Aligned with the Java client's retry triggers:
+        # - only 429 / 503 responses are retried; 502 / 504 are not,
+        #   because by then the gateway has consumed the request's
+        #   signature nonce, and retrying with the same signed headers is
+        #   rejected with "Specified signature nonce was used already"
+        # - read errors (including read timeouts) are not retried for the
+        #   same reason: the request has likely reached the server
+        # - connect failures are intentionally non-retriable: a connect
+        #   error usually means the host is wrong or the listener is down,
+        #   and burning the budget on it just delays the failure.
         retry_kwargs = {
             'total': max_retries,
-            'read': max_retries,
+            'read': 0,
             'connect': 0,
+            'status': max_retries,
             'backoff_factor': 1,
-            'status_forcelist': [429, 502, 503, 504],
+            'status_forcelist': [429, 503],
             'raise_on_status': False,
             'raise_on_redirect': False,
         }

@@ -111,7 +111,7 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
         }
     }
 
-    private void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
+    protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         prepareCommit(waitCompaction, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }

@@ -39,6 +39,15 @@ class IcebergHiveMetadataCommitterTest {
         assertThat(IcebergHiveMetadataCommitter.normalizeColumnComment(longComment))
                 .hasSize(255)
                 .isEqualTo(repeat('b', 252) + "...");
+
+        assertThat(IcebergHiveMetadataCommitter.normalizeColumnComment("line1\nline2\r\nline3"))
+                .isEqualTo("line1 line2  line3");
+
+        assertThat(
+                        IcebergHiveMetadataCommitter.normalizeColumnComment(
+                                "first\n" + repeat('c', 253)))
+                .hasSize(255)
+                .endsWith("...");
     }
 
     private static String repeat(char c, int count) {

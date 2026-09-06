@@ -18,14 +18,17 @@
 
 package org.apache.spark.sql.catalyst.parser.extensions
 
-import org.apache.paimon.spark.catalog.SupportView
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, ResolvedIdentifier}
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
+import org.apache.paimon.spark.format.PaimonFormatTable
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.UnresolvedIdentifier
+import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, UnresolvedTable}
 import org.apache.spark.sql.catalyst.plans.logical.{DropPartitions, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.{CatalogManager, LookupCatalog}
+import org.apache.spark.sql.connector.catalog.{CatalogManager, LookupCatalog, TableCatalog}
+
+import scala.util.Try
 
 case class RewriteSparkDDLCommands(spark: SparkSession)
   extends Rule[LogicalPlan]
@@ -35,10 +38,27 @@ case class RewriteSparkDDLCommands(spark: SparkSession)
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsUp {
 
-    // A new member was added to CreatePaimonView since spark4.0,
-    // unapply pattern matching is not used here to ensure compatibility across multiple spark versions.
-    case DropPartitions(UnresolvedPaimonRelation(aliasedTable), parts, ifExists, purge) =>
-      PaimonDropPartitions(aliasedTable, parts, ifExists, purge)
+    // Rewrite before Spark resolves the partition specs so both Paimon data tables and Format
+    // Tables with catalog-managed partitions can handle partial DROP specs themselves. Format
+    // Tables using filesystem partition discovery are not matched and keep Spark's own resolution
+    // plus the explicit unsupported error at execution. Classification loads the table once through
+    // this rule's own catalog manager (not SparkSession.active), so it resolves against the session
+    // the command actually runs in.
+    case DropPartitions(table, parts, ifExists, purge) if isPaimonDropTarget(table) =>
+      PaimonDropPartitions(table, parts, ifExists, purge)
+  }
 
+  private def isPaimonDropTarget(plan: LogicalPlan): Boolean = {
+    EliminateSubqueryAliases(plan) match {
+      case UnresolvedTable(CatalogAndIdentifier(catalog: TableCatalog, ident), _, _) =>
+        Try(catalog.loadTable(ident))
+          .map {
+            case _: SparkTable => true
+            case formatTable: PaimonFormatTable => formatTable.hasCatalogManagedPartitions
+            case _ => false
+          }
+          .getOrElse(false)
+      case _ => false
+    }
   }
 }

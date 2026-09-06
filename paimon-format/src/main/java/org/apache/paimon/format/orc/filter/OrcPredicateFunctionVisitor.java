@@ -61,6 +61,13 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitIsNaN(FieldRef fieldRef) {
+        // ORC SearchArgument has no isNaN leaf, so skip push-down and let the engine
+        // evaluate the filter (consistent with the Parquet path).
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitStartsWith(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
@@ -72,6 +79,23 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArrayContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
         return Optional.empty();
     }
 
@@ -223,6 +247,7 @@ public class OrcPredicateFunctionVisitor
             case SMALLINT:
             case INTEGER:
             case BIGINT:
+            case TIME_WITHOUT_TIME_ZONE:
                 return PredicateLeaf.Type.LONG;
             case FLOAT:
             case DOUBLE:

@@ -115,6 +115,7 @@ public class ClusteringCompactManagerFactory implements KvCompactionManagerFacto
                 restoreFiles,
                 options.targetFileSize(true),
                 options.sortSpillBufferSize(),
+                options.localKvDbBlockSize(),
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),
                 options.sortSpillThreshold(),

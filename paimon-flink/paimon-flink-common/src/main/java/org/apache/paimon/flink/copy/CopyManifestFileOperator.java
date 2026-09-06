@@ -24,9 +24,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFile.ManifestEntryWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -158,10 +158,9 @@ public class CopyManifestFileOperator extends AbstractStreamOperator<CopyFileInf
                                     manifestEntry.file().newExternalPath(null));
                     targetManifestEntries.add(newManifestEntry);
                 }
-                ManifestEntryWriter manifestEntryWriter =
-                        manifestFile.createManifestEntryWriter(targetPath);
-                manifestEntryWriter.write(targetManifestEntries);
-                manifestEntryWriter.close();
+                ManifestAvroWriter writer = manifestFile.createAvroWriter(targetPath);
+                writer.write(targetManifestEntries);
+                writer.close();
             } else {
                 // copy it
                 IOUtils.copyBytes(

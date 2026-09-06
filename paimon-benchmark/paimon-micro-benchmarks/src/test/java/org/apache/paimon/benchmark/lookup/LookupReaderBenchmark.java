@@ -42,7 +42,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Benchmark for measuring the throughput of writing for lookup. */
+/** Benchmark for measuring the throughput of reading for lookup. */
 @ExtendWith(ParameterizedTestExtension.class)
 public class LookupReaderBenchmark extends AbstractLookupBenchmark {
     private static final int QUERY_KEY_COUNT = 10000;

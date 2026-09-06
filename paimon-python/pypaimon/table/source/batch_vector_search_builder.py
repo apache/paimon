@@ -23,9 +23,9 @@ from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
 from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchRead,
     BatchVectorSearchReadImpl,
 )
+from pypaimon.table.source.vector_search_read import BatchVectorSearchRead  # noqa: F401
 
 
 class BatchVectorSearchBuilder(ABC):

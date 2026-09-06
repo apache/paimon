@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SnapshotManager;
@@ -28,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -106,13 +106,11 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         // tag-2 as the base older_than time.
         // tag-1 expired by its file creation time.
         LocalDateTime olderThanTime1 = table.tagManager().getOrThrow("tag-2").getTagCreateTime();
-        java.sql.Timestamp timestamp1 =
-                new java.sql.Timestamp(
-                        Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond());
+        String timestamp1 = WALL_CLOCK.format(olderThanTime1);
         assertThat(
                         sql(
                                 "CALL sys.expire_tags(`table` => 'default.T', older_than => '"
-                                        + timestamp1.toString()
+                                        + timestamp1
                                         + "')"))
                 .containsExactlyInAnyOrder(Row.of("tag-1"));
 
@@ -123,18 +121,20 @@ public class ExpireTagsProcedureITCase extends CatalogITCaseBase {
         // tag-4 as the base older_than time.
         // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
         LocalDateTime olderThanTime2 = table.tagManager().getOrThrow("tag-4").getTagCreateTime();
-        java.sql.Timestamp timestamp2 =
-                new java.sql.Timestamp(
-                        Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond());
+        String timestamp2 = WALL_CLOCK.format(olderThanTime2);
         assertThat(
                         sql(
                                 "CALL sys.expire_tags(`table` => 'default.T', older_than => '"
-                                        + timestamp2.toString()
+                                        + timestamp2
                                         + "')"))
                 .containsExactlyInAnyOrder(Row.of("tag-2"), Row.of("tag-3"), Row.of("tag-5"));
 
         assertThat(sql("select tag_name from `T$tags`")).containsExactly(Row.of("tag-4"));
     }
+
+    /** The plain wall clock a user types, as the documented example does. */
+    private static final DateTimeFormatter WALL_CLOCK =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     private void checkSnapshots(SnapshotManager sm, int earliest, int latest) throws IOException {
         assertThat(sm.snapshotCount()).isEqualTo(latest - earliest + 1);

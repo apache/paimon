@@ -23,6 +23,7 @@ from io import StringIO
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
@@ -1499,6 +1500,7 @@ class CliTableTest(unittest.TestCase):
                 # The per-split bullet uses "[0] partition=" as a prefix
                 self.assertIn('[0] partition=', output)
 
+    @pytest.mark.python_plan
     def test_cli_table_explain_where_partition_pruning(self):
         """A partition predicate fires the partition-pruning funnel."""
         self._create_partitioned_table()

@@ -32,46 +32,102 @@ import java.util.Iterator;
 /** Metadata of blob file. */
 public class BlobFileMeta {
 
+    private static final int FILE_FOOTER_LENGTH = Integer.BYTES + Byte.BYTES;
+    private static final int MIN_RECORD_LENGTH = Integer.BYTES + Long.BYTES + Integer.BYTES;
+
     private final long[] blobLengths;
     private final long[] blobOffsets;
     private final @Nullable int[] returnedPositions;
 
     public BlobFileMeta(SeekableInputStream in, long fileSize, @Nullable RoaringBitmap32 selection)
             throws IOException {
-        in.seek(fileSize - 5);
-        byte[] header = new byte[5];
+        if (fileSize < FILE_FOOTER_LENGTH) {
+            throw new IOException(
+                    String.format(
+                            "Corrupt blob file: file size %s is smaller than footer size %s.",
+                            fileSize, FILE_FOOTER_LENGTH));
+        }
+
+        in.seek(fileSize - FILE_FOOTER_LENGTH);
+        byte[] header = new byte[FILE_FOOTER_LENGTH];
         IOUtils.readFully(in, header);
-        byte version = header[4];
-        if (version != 1) {
+        byte version = header[Integer.BYTES];
+        if (version != BlobFormatWriter.VERSION) {
             throw new IOException("Unsupported version: " + version);
         }
         int indexLength = BytesUtils.getInt(header, 0);
+        long maximumIndexLength = fileSize - FILE_FOOTER_LENGTH;
+        if (indexLength < 0 || indexLength > maximumIndexLength) {
+            throw new IOException(
+                    String.format(
+                            "Corrupt blob file: invalid index length %s for file size %s.",
+                            indexLength, fileSize));
+        }
 
-        in.seek(fileSize - 5 - indexLength);
+        long indexStart = maximumIndexLength - indexLength;
+        in.seek(indexStart);
         byte[] indexBytes = new byte[indexLength];
         IOUtils.readFully(in, indexBytes);
 
-        long[] blobLengths = DeltaVarintCompressor.decompress(indexBytes);
+        long[] blobLengths;
+        try {
+            blobLengths = DeltaVarintCompressor.decompress(indexBytes);
+        } catch (RuntimeException e) {
+            throw new IOException("Corrupt blob file: invalid index.", e);
+        }
         long[] blobOffsets = new long[blobLengths.length];
         long offset = 0;
         for (int i = 0; i < blobLengths.length; i++) {
-            if (blobLengths[i] < 0) {
+            long blobLength = blobLengths[i];
+            if (blobLength == BlobFormatWriter.NULL_LENGTH
+                    || blobLength == BlobFormatWriter.PLACE_HOLDER_LENGTH) {
                 blobOffsets[i] = -1;
             } else {
+                if (blobLength < MIN_RECORD_LENGTH) {
+                    throw new IOException(
+                            String.format(
+                                    "Corrupt blob file: invalid record length %s at position %s.",
+                                    blobLength, i));
+                }
+                if (blobLength > indexStart - offset) {
+                    throw new IOException(
+                            String.format(
+                                    "Corrupt blob file: record length %s at position %s exceeds the data region.",
+                                    blobLength, i));
+                }
                 blobOffsets[i] = offset;
-                offset += blobLengths[i];
+                offset += blobLength;
             }
+        }
+        if (offset != indexStart) {
+            throw new IOException(
+                    String.format(
+                            "Corrupt blob file: indexed records use %s bytes, but data region contains %s bytes.",
+                            offset, indexStart));
         }
 
         int[] returnedPositions = null;
         if (selection != null) {
-            int cardinality = (int) selection.getCardinality();
+            long selectionCardinality = selection.getCardinality();
+            if (selectionCardinality > blobLengths.length) {
+                throw new IOException(
+                        String.format(
+                                "Invalid blob selection: cardinality %s exceeds record count %s.",
+                                selectionCardinality, blobLengths.length));
+            }
+            int cardinality = (int) selectionCardinality;
             returnedPositions = new int[cardinality];
             long[] newLengths = new long[cardinality];
             long[] newOffsets = new long[cardinality];
             Iterator<Integer> iterator = selection.iterator();
             for (int i = 0; i < cardinality; i++) {
                 Integer next = iterator.next();
+                if (next < 0 || next >= blobLengths.length) {
+                    throw new IOException(
+                            String.format(
+                                    "Invalid blob selection: position %s is outside record count %s.",
+                                    next, blobLengths.length));
+                }
                 newLengths[i] = blobLengths[next];
                 newOffsets[i] = blobOffsets[next];
                 returnedPositions[i] = next;

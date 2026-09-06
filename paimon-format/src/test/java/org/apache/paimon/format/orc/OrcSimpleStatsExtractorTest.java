@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SimpleColStatsExtractorTest;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.options.Options;
@@ -27,6 +28,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -78,6 +80,16 @@ public class OrcSimpleStatsExtractorTest extends SimpleColStatsExtractorTest {
                         new MapType(new VarCharType(8), new VarCharType(8)),
                         new MultisetType(new VarCharType(8)))
                 .build();
+    }
+
+    @Override
+    protected SimpleColStats regenerate(SimpleColStats stats, DataType type) {
+        switch (type.getTypeRoot()) {
+            case BINARY:
+            case VARBINARY:
+                return new SimpleColStats(null, null, stats.nullCount());
+        }
+        return stats;
     }
 
     @Override

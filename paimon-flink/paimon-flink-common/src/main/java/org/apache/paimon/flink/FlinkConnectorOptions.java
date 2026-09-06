@@ -84,6 +84,16 @@ public class FlinkConnectorOptions {
                                     + "This eliminates data transfer overhead when the source already "
                                     + "provides suitable data distribution (e.g., Kafka partitions).");
 
+    public static final ConfigOption<CompactionBucketDistributionStrategy>
+            COMPACTION_BUCKET_DISTRIBUTION_STRATEGY =
+                    ConfigOptions.key("compaction.bucket-distribution-strategy")
+                            .enumType(CompactionBucketDistributionStrategy.class)
+                            .defaultValue(CompactionBucketDistributionStrategy.LINEAR)
+                            .withDescription(
+                                    "Defines how dedicated bucket compaction jobs distribute compact buckets to writers. "
+                                            + "'linear' uses the existing stable partition-plus-bucket mapping. "
+                                            + "'size-aware-batch' assigns bounded full-compaction bucket splits by total data file size and forwards them to writers to reduce compaction long tail.");
+
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()
@@ -214,7 +224,7 @@ public class FlinkConnectorOptions {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(256))
                     .withDescription(
-                            "Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size "
+                            "Weight of managed memory for the local key-value index in cross-partition update, Flink will compute the memory size "
                                     + "according to the weight, the actual memory used depends on the running environment.");
 
     public static final ConfigOption<Boolean> SOURCE_CHECKPOINT_ALIGN_ENABLED =
@@ -486,12 +496,37 @@ public class FlinkConnectorOptions {
                             "Commit listener will be called after a successful commit. This option list custom commit "
                                     + "listener identifiers separated by comma.");
 
+    public static final ConfigOption<Boolean> SINK_COORDINATOR_COMMIT_ENABLED =
+            key("sink.coordinator-commit.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, run the Paimon committer inside the Flink JobManager via an "
+                                    + "OperatorCoordinator. This decouples commit from any single TaskManager "
+                                    + "subtask so that region failover does not have to restart the whole pipeline. "
+                                    + "Only supports unaware-bucket append tables in streaming mode with "
+                                    + "checkpointing enabled; unsupported configurations fail during sink planning.");
+
     public static final ConfigOption<Boolean> SINK_WRITER_COORDINATOR_ENABLED =
             key("sink.writer-coordinator.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Enable sink writer coordinator to plan data files in Job Manager.");
+
+    public static final ConfigOption<Boolean> SINK_KEY_ONLY_DELETES_ENABLED =
+            key("sink.key-only-deletes.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a primary-key table sink advertises the key-only (partial) "
+                                    + "deletes capability, allowing the Flink planner to drop the "
+                                    + "upstream ChangelogNormalize node when the source produces "
+                                    + "deletes by key. Requires Flink 2.1+; no effect on Flink 1.x or 2.0. "
+                                    + "Does not apply when the table has no primary key, when "
+                                    + "'changelog-producer' is 'input', or when 'merge-engine' is "
+                                    + "'aggregation' or 'partial-update' with aggregation functions; "
+                                    + "in those cases a warning is logged. Disabled by default.");
 
     public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
             key("sink.writer-coordinator.cache-memory")
@@ -604,6 +639,34 @@ public class FlinkConnectorOptions {
         private final String description;
 
         WatermarkEmitStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Bucket distribution strategy for dedicated compaction jobs. */
+    public enum CompactionBucketDistributionStrategy implements DescribedEnum {
+        LINEAR(
+                "linear",
+                "Distribute compact buckets by the existing stable partition-plus-bucket channel mapping."),
+        SIZE_AWARE_BATCH(
+                "size-aware-batch",
+                "For bounded full compaction, assign compact bucket splits by total data file size and forward them to writers to reduce long-tail compaction tasks.");
+
+        private final String value;
+        private final String description;
+
+        CompactionBucketDistributionStrategy(String value, String description) {
             this.value = value;
             this.description = description;
         }

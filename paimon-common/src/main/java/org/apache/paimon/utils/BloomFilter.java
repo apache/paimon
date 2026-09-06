@@ -19,18 +19,32 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.sst.BloomFilterHandle;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bloom filter based on one memory segment. */
 public class BloomFilter {
 
+    private static final Logger LOG = LoggerFactory.getLogger(BloomFilter.class);
+
     private final BitSet bitSet;
     private final int numHashFunctions;
+    private final long expectedEntries;
 
     public BloomFilter(long expectedEntries, int byteSize) {
         checkArgument(expectedEntries > 0, "expectedEntries should be > 0");
+        this.expectedEntries = expectedEntries;
         this.numHashFunctions = optimalNumOfHashFunctions(expectedEntries, (long) byteSize << 3);
         this.bitSet = new BitSet(byteSize);
     }
@@ -50,6 +64,19 @@ public class BloomFilter {
 
     public MemorySegment getMemorySegment() {
         return this.bitSet.getMemorySegment();
+    }
+
+    public long expectedEntries() {
+        return expectedEntries;
+    }
+
+    public BloomFilterHandle write(PositionOutputStream out) throws IOException {
+        MemorySlice slice = bitSet.getMemorySlice();
+        BloomFilterHandle handle =
+                new BloomFilterHandle(out.getPos(), slice.length(), expectedEntries);
+        out.write(slice.getHeapMemory(), slice.offset(), slice.length());
+        LOG.info("Bloom filter size: {} bytes", slice.length());
+        return handle;
     }
 
     /**
@@ -111,49 +138,20 @@ public class BloomFilter {
         return "BloomFilter:\n" + "\thash function number:" + numHashFunctions + "\n" + bitSet;
     }
 
-    public static Builder builder(long expectedRow, double fpp) {
-        int numBytes = (int) Math.ceil(BloomFilter.optimalNumOfBits(expectedRow, fpp) / 8D);
-        Preconditions.checkArgument(
-                numBytes > 0,
-                "The optimal bits should > 0. expectedRow: %s, fpp: %s",
-                expectedRow,
-                fpp);
-        return new Builder(MemorySegment.wrap(new byte[numBytes]), expectedRow);
+    public static Builder fixedBuilder(long expectedEntries, double fpp) {
+        return new FixedBloomFilterBuilder(expectedEntries, fpp);
     }
 
-    /** Bloom filter based on one memory segment. */
-    public static class Builder {
+    public static Builder dynamicBuilder(double fpp) {
+        return new DynamicBloomFilterBuilder(fpp);
+    }
 
-        private final MemorySegment buffer;
-        private final BloomFilter filter;
-        private final long expectedEntries;
+    /** Builder for collecting hashes and constructing an in-memory Bloom filter. */
+    public interface Builder {
 
-        Builder(MemorySegment buffer, long expectedEntries) {
-            this.buffer = buffer;
-            this.filter = new BloomFilter(expectedEntries, buffer.size());
-            filter.setMemorySegment(buffer, 0);
-            this.expectedEntries = expectedEntries;
-        }
+        void addHash(int hash);
 
-        public boolean testHash(int hash) {
-            return filter.testHash(hash);
-        }
-
-        public void addHash(int hash) {
-            filter.addHash(hash);
-        }
-
-        public MemorySegment getBuffer() {
-            return buffer;
-        }
-
-        public long expectedEntries() {
-            return expectedEntries;
-        }
-
-        @VisibleForTesting
-        public BloomFilter getFilter() {
-            return filter;
-        }
+        @Nullable
+        BloomFilter build();
     }
 }

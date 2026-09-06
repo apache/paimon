@@ -23,8 +23,8 @@ import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
@@ -175,7 +175,8 @@ public class FlinkEndInputWatermarkITCase extends CatalogITCaseBase {
                         "");
         return retryArtificialException(
                 () -> {
-                    new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+                    new FileSystemSchemaManager(LocalFileIO.create(), tablePath)
+                            .createTable(schema);
                     return FileStoreTableFactory.create(LocalFileIO.create(), options);
                 });
     }

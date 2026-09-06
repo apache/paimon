@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -40,6 +41,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
@@ -96,7 +98,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     protected final List<DataField> specialFields;
 
     public AuditLogTable(FileStoreTable wrapped) {
-        this.wrapped = wrapped;
         this.specialFields = new ArrayList<>();
         specialFields.add(SpecialFields.ROW_KIND);
 
@@ -104,9 +105,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 CoreOptions.fromMap(wrapped.options()).tableReadSequenceNumberEnabled();
 
         if (includeSequenceNumber) {
-            this.wrapped.options().put(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true");
+            wrapped =
+                    wrapped.copyWithoutTimeTravel(
+                            Collections.singletonMap(
+                                    CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true"));
             specialFields.add(SpecialFields.SEQUENCE_NUMBER);
         }
+        this.wrapped = wrapped;
     }
 
     /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */
@@ -184,12 +189,20 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        return new AuditLogDataReader(wrapped.newSnapshotReader());
+        return newSnapshotReader(wrapped);
+    }
+
+    private SnapshotReader newSnapshotReader(FileStoreTable table) {
+        return new AuditLogDataReader(table.newSnapshotReader());
     }
 
     @Override
     public DataTableScan newScan() {
-        return new AuditLogBatchScan(wrapped.newScan());
+        return new AuditLogBatchScan(wrapped.newScan(this::newScanSnapshotReader));
+    }
+
+    private SnapshotReader newScanSnapshotReader(FileStoreTable table) {
+        return new AuditLogDataReader(table.newSnapshotReader(), false);
     }
 
     @Override
@@ -280,9 +293,15 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     private class AuditLogDataReader implements SnapshotReader {
 
         private final SnapshotReader wrapped;
+        private final boolean convertFilter;
 
         private AuditLogDataReader(SnapshotReader wrapped) {
+            this(wrapped, true);
+        }
+
+        private AuditLogDataReader(SnapshotReader wrapped, boolean convertFilter) {
             this.wrapped = wrapped;
+            this.convertFilter = convertFilter;
         }
 
         @Override
@@ -325,6 +344,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return wrapped.pathFactory();
         }
 
+        @Override
+        @Nullable
+        public IndexFileHandler indexFileHandler() {
+            return null;
+        }
+
         public SnapshotReader withSnapshot(long snapshotId) {
             wrapped.withSnapshot(snapshotId);
             return this;
@@ -336,7 +361,25 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         public SnapshotReader withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(wrapped::withFilter);
+            if (convertFilter) {
+                convert(predicate).ifPresent(wrapped::withFilter);
+            } else {
+                wrapped.withFilter(predicate);
+            }
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withFilter(Predicate predicate, Predicate pushdownPredicate) {
+            if (!convertFilter) {
+                wrapped.withFilter(predicate, pushdownPredicate);
+                return this;
+            }
+            Optional<Predicate> converted = convert(predicate);
+            Optional<Predicate> convertedPushdown = convert(pushdownPredicate);
+            if (converted.isPresent()) {
+                wrapped.withFilter(converted.get(), convertedPushdown.orElse(null));
+            }
             return this;
         }
 
@@ -740,6 +783,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public TableRead withIOManager(IOManager ioManager) {
             this.dataRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            // System-table wrappers must preserve memory control on the physical data read.
+            dataRead.withReadBatchSizer(sizer);
             return this;
         }
 

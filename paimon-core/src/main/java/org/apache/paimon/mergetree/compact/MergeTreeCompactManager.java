@@ -221,7 +221,12 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         if (unit.fileRewrite()) {
             task =
                     new FileRewriteCompactTask(
-                            rewriter, unit, dropDelete, metricsReporter, bucketInfo);
+                            rewriter,
+                            unit,
+                            dropDelete,
+                            metricsReporter,
+                            compactDfSupplier,
+                            bucketInfo);
         } else {
             task =
                     new MergeTreeCompactTask(
@@ -293,6 +298,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         if (metricsReporter != null) {
             metricsReporter.reportLevel0FileCount(levels.level0().size());
             metricsReporter.reportTotalFileSize(levels.totalFileSize());
+            metricsReporter.reportTotalFileCount(levels.totalFileCount());
         }
     }
 

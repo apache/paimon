@@ -43,11 +43,12 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9085;
+    private static int port;
 
     @BeforeEach
     public void beforeEach() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterEach
@@ -84,7 +85,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -122,7 +123,7 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");

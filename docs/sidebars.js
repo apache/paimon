@@ -31,7 +31,8 @@ const sidebars = {
           "concepts/rest/dlf",
           "concepts/rest/tables",
           "concepts/rest/pvfs",
-          "concepts/rest/rest-api"
+          "concepts/rest/rest-api",
+          "concepts/rest/management-api"
         ]
       },
       {
@@ -84,8 +85,10 @@ const sidebars = {
       "primary-key-table/sequence-rowkind",
       "primary-key-table/compaction",
       "primary-key-table/query-performance",
+      "primary-key-table/global-index",
       "primary-key-table/chain-table",
       "primary-key-table/pk-clustering-override",
+      "primary-key-table/blob-storage",
       {
         type: "category",
         "label": "Merge Engine",
@@ -112,6 +115,7 @@ const sidebars = {
     },
     "items": [
       "multimodal-table/data-evolution",
+      "multimodal-table/variant",
       "multimodal-table/blob",
       "multimodal-table/vector",
       {
@@ -125,6 +129,8 @@ const sidebars = {
         "items": [
           "multimodal-table/global-index/btree",
           "multimodal-table/global-index/bitmap",
+          "multimodal-table/global-index/multivalue",
+          "multimodal-table/global-index/fm",
           "multimodal-table/global-index/vector",
           "multimodal-table/global-index/full-text",
           "multimodal-table/global-index/hybrid-search"
@@ -151,7 +157,8 @@ const sidebars = {
       "flink/default-value",
       "flink/procedures",
       "flink/action-jars",
-      "flink/savepoint"
+      "flink/savepoint",
+      "flink/lineage"
     ]
   },
   {
@@ -172,7 +179,6 @@ const sidebars = {
       "spark/auxiliary",
       "spark/default-value",
       "spark/dataframe",
-      "spark/sql-upsert",
       "spark/structured-streaming",
       "spark/procedures"
     ]
@@ -249,7 +255,6 @@ const sidebars = {
       "maintenance/rescale-bucket",
       "maintenance/manage-tags",
       "maintenance/metrics",
-      "maintenance/manage-privileges",
       "maintenance/manage-branches",
       "maintenance/manage-partitions",
       "maintenance/configurations"
@@ -315,6 +320,8 @@ const sidebars = {
     },
     "items": [
       "project/download",
+      "project/creating-a-release",
+      "project/verifying-a-release-candidate",
       "project/contributing",
       "project/committer",
       "project/security"

@@ -20,11 +20,18 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.DataPolicy;
+import org.apache.paimon.management.ListPermissionsRequest;
+import org.apache.paimon.management.ListPoliciesRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -42,22 +49,31 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GrantPermissionRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -74,6 +90,8 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
+import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -113,6 +131,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * REST API for REST Catalog.
@@ -145,6 +164,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RESTApi {
 
     public static final String HEADER_PREFIX = "header.";
+    /**
+     * Optional header carrying the URL-encoded {@link Identifier} JSON of the table which initiated
+     * a dependency read.
+     *
+     * <p>This header only provides request context. Servers must not treat it as authorization
+     * proof.
+     */
+    public static final String READ_VIA_HEADER = "X-Paimon-Read-Via";
+
     public static final String MAX_RESULTS = "maxResults";
     public static final String PAGE_TOKEN = "pageToken";
 
@@ -194,7 +222,7 @@ public class RESTApi {
             String warehouse = options.get(WAREHOUSE);
             Map<String, String> queryParams =
                     StringUtils.isNotEmpty(warehouse)
-                            ? ImmutableMap.of(WAREHOUSE.key(), RESTUtil.encodeString(warehouse))
+                            ? ImmutableMap.of(WAREHOUSE.key(), warehouse)
                             : ImmutableMap.of();
             options =
                     new Options(
@@ -655,6 +683,7 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param tableUuid Uuid of the table to avoid wrong commit
+     * @param baseSnapshotUuid Uuid of the snapshot on which the commit is based
      * @param snapshot snapshot for committing
      * @param statistics statistics for this snapshot incremental
      * @return true if commit success
@@ -665,9 +694,11 @@ public class RESTApi {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics) {
-        CommitTableRequest request = new CommitTableRequest(tableUuid, snapshot, statistics);
+        CommitTableRequest request =
+                new CommitTableRequest(tableUuid, baseSnapshotUuid, snapshot, statistics);
         CommitTableResponse response =
                 client.post(
                         resourcePaths.commitTable(
@@ -816,6 +847,97 @@ public class RESTApi {
                 restAuthFunction);
     }
 
+    /** Lists permissions on an exact resource in the configured REST catalog. */
+    @Experimental
+    public ListPermissionsResponse listPermissions(ListPermissionsRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        putQueryParameter(queryParams, "resourceType", request.getResourceType().name());
+        putQueryParameter(queryParams, "database", request.getDatabase());
+        putQueryParameter(queryParams, "table", request.getTable());
+        putQueryParameter(queryParams, "function", request.getFunction());
+        putQueryParameter(queryParams, "view", request.getView());
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "access", request.getAccess());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.permissions(),
+                queryParams,
+                ListPermissionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Grants a permission for the configured REST catalog. */
+    @Experimental
+    public void grantPermission(PermissionAssignment assignment) {
+        client.post(
+                resourcePaths.grantPermission(),
+                new GrantPermissionRequest(assignment),
+                restAuthFunction);
+    }
+
+    /** Revokes a permission for the configured REST catalog. */
+    @Experimental
+    public void revokePermission(PermissionResource resource, String access, String principal) {
+        client.post(
+                resourcePaths.revokePermission(),
+                new RevokePermissionRequest(resource, access, principal),
+                restAuthFunction);
+    }
+
+    /** Lists policies attached to an exact table resource. */
+    @Experimental
+    public ListPoliciesResponse listPolicies(ListPoliciesRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (request.getType() != null) {
+            putQueryParameter(queryParams, "type", request.getType().name());
+        }
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "column", request.getColumn());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.policies(request.getResource()),
+                queryParams,
+                ListPoliciesResponse.class,
+                restAuthFunction);
+    }
+
+    /** Creates a principal policy on its attachment resource. */
+    @Experimental
+    public void createPolicy(DataPolicy policy) {
+        client.post(
+                resourcePaths.policies(policy.getResource()),
+                new PolicyRequest(policy),
+                restAuthFunction);
+    }
+
+    /** Drops a principal policy from its exact attachment resource. */
+    @Experimental
+    public void dropPolicy(
+            PermissionResource resource,
+            PolicyType type,
+            String principal,
+            @Nullable String column,
+            boolean ignoreIfNotExists) {
+        checkNotNull(resource, "resource cannot be null").validatePolicyAttachment();
+        try {
+            client.post(
+                    resourcePaths.dropPolicy(resource),
+                    new DropPolicyRequest(type, principal, column),
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists
+                    || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())) {
+                throw e;
+            }
+        }
+    }
+
     /**
      * Drop table.
      *
@@ -852,6 +974,63 @@ public class RESTApi {
                 resourcePaths.markDonePartitions(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
+                restAuthFunction);
+    }
+
+    /**
+     * Create partitions for table, optionally reporting their statistics in the same request, so
+     * that a partition is never registered by a request whose statistics failed on their own. A
+     * server that stores no statistics still registers the partitions.
+     *
+     * <p>How a report combines with the stored values is per field. Replacing overwrites all four
+     * of recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three
+     * counts and keeps the later creation time, since two timestamps do not add. A field reported
+     * as unknown leaves the stored one alone either way, and a report never creates or removes a
+     * partition row.
+     *
+     * @param identifier database name and table name
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch
+     * @param statistics statistics to report, matched to {@code partitions} by {@link
+     *     PartitionStatistics#spec()} rather than by position, or null to report none
+     * @param replaceStatistics whether the report replaces the stored values rather than adding to
+     *     them; ignored when {@code statistics} is null, and not sent at all in that case
+     * @param partitionOptions options aligned with {@code partitions} by position, or null
+     * @return the partitions the server created and the ones it already held
+     */
+    public CreatePartitionsResponse createPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions) {
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        partitions,
+                        ignoreIfExists,
+                        statistics,
+                        statistics == null ? null : replaceStatistics,
+                        partitionOptions);
+        return client.post(
+                resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                CreatePartitionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Drop (unregister) partitions for table; the server never deletes data files. */
+    public DropPartitionsResponse dropPartitions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfNotExists) {
+        DropPartitionsRequest request = new DropPartitionsRequest(partitions, ignoreIfNotExists);
+        return client.post(
+                resourcePaths.dropPartitions(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                DropPartitionsResponse.class,
                 restAuthFunction);
     }
 
@@ -946,6 +1125,48 @@ public class RESTApi {
             return emptyList();
         }
         return partitions;
+    }
+
+    /**
+     * List a page of partitions using a serialized partition predicate.
+     *
+     * <p>{@code filterJson} is the JSON serialization of a Paimon {@code Predicate}. The result may
+     * be a superset, so callers must re-evaluate the predicate. A non-empty next page token must be
+     * followed even when the current page is empty.
+     *
+     * @param identifier database name and table name
+     * @param filterJson JSON serialization of the partition predicate
+     * @param maxResults maximum page size, or {@code null}/0 to use the server default
+     * @param pageToken token returned by the previous page, or {@code null} for the first page
+     * @param partitionNamePattern optional SQL LIKE prefix pattern (%) for partition names,
+     *     conjunctive with the predicate
+     * @return {@link PagedList}: elements and nextPageToken
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists, or
+     *     the server does not provide this endpoint
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            String filterJson,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern) {
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest(
+                        filterJson, partitionNamePattern, maxResults, pageToken);
+        ListPartitionsResponse response =
+                client.post(
+                        resourcePaths.listPartitionsByFilter(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        ListPartitionsResponse.class,
+                        restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return new PagedList<>(emptyList(), response.getNextPageToken());
+        }
+        return new PagedList<>(partitions, response.getNextPageToken());
     }
 
     /**
@@ -1269,7 +1490,8 @@ public class RESTApi {
             throw new NoSuchResourceException(
                     ErrorResponse.RESOURCE_TYPE_FUNCTION,
                     identifier.getObjectName(),
-                    "Invalid function name: " + identifier.getObjectName());
+                    "Invalid function name: %s",
+                    identifier.getObjectName());
         }
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),
@@ -1613,5 +1835,12 @@ public class RESTApi {
     @VisibleForTesting
     RESTAuthFunction authFunction() {
         return restAuthFunction;
+    }
+
+    private static void putQueryParameter(
+            Map<String, String> queryParams, String name, @Nullable String value) {
+        if (StringUtils.isNotEmpty(value)) {
+            queryParams.put(name, value);
+        }
     }
 }

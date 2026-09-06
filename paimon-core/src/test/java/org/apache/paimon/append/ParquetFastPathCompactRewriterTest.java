@@ -45,8 +45,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsMerger;
@@ -557,7 +557,7 @@ public class ParquetFastPathCompactRewriterTest {
         schemaBuilder.option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         extraOptions.forEach(schemaBuilder::option);
         TableSchema tableSchema =
-                new SchemaManager(fileIO, path).createTable(schemaBuilder.build());
+                new FileSystemSchemaManager(fileIO, path).createTable(schemaBuilder.build());
         FileStoreTable table = FileStoreTableFactory.create(fileIO, path, tableSchema);
 
         String commitUser = UUID.randomUUID().toString();
@@ -723,7 +723,7 @@ public class ParquetFastPathCompactRewriterTest {
             Path path = pathFactory.toPath(file);
             try (FileRecordReader<InternalRow> reader =
                     readerFactory.createReader(
-                            new FormatReaderContext(fileIO, path, file.fileSize()))) {
+                            new FormatReaderContext(fileIO, path, file.fileSize(), null, null))) {
                 RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
                 while (iterator != null) {
                     InternalRow row;

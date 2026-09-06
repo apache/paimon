@@ -117,6 +117,6 @@ public abstract class FileFormat {
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {
-        return FileFormat.fromIdentifier(options.manifestFormatString(), options.toConfiguration());
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, options.toConfiguration());
     }
 }

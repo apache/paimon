@@ -29,6 +29,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RoaringNavigableMap64Test {
 
     @Test
+    public void testIntersectsHalfOpenRange() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.add(2);
+        bitmap.add(7);
+        bitmap.add(Long.MAX_VALUE - 1);
+
+        assertThat(bitmap.intersects(0, 2)).isFalse();
+        assertThat(bitmap.intersects(2, 3)).isTrue();
+        assertThat(bitmap.intersects(3, 7)).isFalse();
+        assertThat(bitmap.intersects(3, 8)).isTrue();
+        assertThat(bitmap.intersects(Long.MAX_VALUE - 1, Long.MAX_VALUE)).isTrue();
+        assertThat(bitmap.intersects(8, Long.MAX_VALUE - 1)).isFalse();
+        assertThat(bitmap.intersects(7, 7)).isFalse();
+    }
+
+    @Test
     public void testAddRangeBasic() {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         bitmap.addRange(new Range(5, 10));
@@ -107,5 +123,35 @@ public class RoaringNavigableMap64Test {
         assertThat(values).hasSize(101);
         assertThat(values.get(0)).isEqualTo(start);
         assertThat(values.get(100)).isEqualTo(end);
+    }
+
+    @Test
+    public void testToRangeListAcrossHighBitmapBoundary() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        long start = (1L << 32) - 2;
+        long end = (1L << 32) + 2;
+        bitmap.addRange(new Range(start, end));
+
+        assertThat(bitmap.toRangeList()).containsExactly(new Range(start, end));
+    }
+
+    @Test
+    public void testToRangeListForLargeContiguousRange() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(new Range(0, 9999));
+
+        assertThat(bitmap.toRangeList()).containsExactly(new Range(0, 9999));
+    }
+
+    @Test
+    public void testToRangeListDoesNotMergeUnsignedWrapAround() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.add(Long.MAX_VALUE);
+        bitmap.add(Long.MIN_VALUE);
+
+        assertThat(bitmap.toRangeList())
+                .containsExactly(
+                        new Range(Long.MAX_VALUE, Long.MAX_VALUE),
+                        new Range(Long.MIN_VALUE, Long.MIN_VALUE));
     }
 }

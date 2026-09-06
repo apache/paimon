@@ -20,44 +20,35 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.TableQueryAuthResult;
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobView;
-import org.apache.paimon.data.BlobViewResolver;
-import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
 import org.apache.paimon.table.source.splitread.SplitReadProvider;
-import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BlobViewLookup;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** A {@link TableRead} for data-evolution enabled append-only tables. */
 public class DataEvolutionTableRead extends AppendTableRead {
 
+    private final CoreOptions options;
     @Nullable private final CatalogContext catalogContext;
     @Nullable private final Supplier<InnerTableRead> readFactory;
 
     public DataEvolutionTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
             TableSchema schema,
+            CoreOptions options,
             @Nullable CatalogContext catalogContext,
             @Nullable Supplier<InnerTableRead> readFactory) {
         super(providerFactories, schema);
+        this.options = options;
         this.catalogContext = catalogContext;
         this.readFactory = readFactory;
     }
@@ -65,91 +56,37 @@ public class DataEvolutionTableRead extends AppendTableRead {
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
-        if (catalogContext != null) {
-            int[] blobViewFields = blobViewFields(currentReadType());
-            if (blobViewFields.length > 0) {
-                if (readFactory == null) {
-                    throw new IllegalStateException(
-                            "Cannot read blob-view-field fields without a readFactory.");
-                }
-                return createBlobViewReader(
-                        queryAuthContext.split(), queryAuthContext.authResult(), blobViewFields);
+        int[] blobViewFields =
+                BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
+        ReadBatchSizer sizer = readBatchSizer();
+        if (catalogContext != null && blobViewFields.length > 0) {
+            if (readFactory == null) {
+                throw new IllegalStateException(
+                        "Cannot read blob-view-field fields without a readFactory.");
             }
+            return BlobViewTableReadSupport.createBlobViewReader(
+                    catalogContext,
+                    queryAuthContext.split(),
+                    queryAuthContext.authResult(),
+                    blobViewFields,
+                    currentReadType(),
+                    predicate(),
+                    topN,
+                    limit,
+                    executeFilter,
+                    () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
+                    () -> {
+                        InnerTableRead prescanRead = readFactory.get();
+                        if (sizer != null) {
+                            // Blob-view prescan is a separate physical read under the same budget.
+                            prescanRead.withReadBatchSizer(sizer);
+                        }
+                        if (executeFilter) {
+                            prescanRead.executeFilter();
+                        }
+                        return prescanRead;
+                    });
         }
         return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
-    }
-
-    private int[] blobViewFields(RowType rowType) {
-        CoreOptions options = CoreOptions.fromMap(schema().options());
-        if (!options.blobViewResolveEnabled()) {
-            return new int[0];
-        }
-
-        Set<String> blobViewFieldNames = options.blobViewField();
-        if (blobViewFieldNames.isEmpty()) {
-            return new int[0];
-        }
-
-        return rowType.getFields().stream()
-                .filter(
-                        field ->
-                                field.type().is(DataTypeRoot.BLOB)
-                                        && blobViewFieldNames.contains(field.name()))
-                .mapToInt(field -> rowType.getFieldIndex(field.name()))
-                .toArray();
-    }
-
-    private RecordReader<InternalRow> createBlobViewReader(
-            Split split, @Nullable TableQueryAuthResult authResult, int[] blobViewFields)
-            throws IOException {
-        RowType blobViewOnlyType = currentReadType().project(blobViewFields);
-        InnerTableRead prescanRead = readFactory.get();
-        prescanRead.withReadType(blobViewOnlyType);
-        Predicate predicate = predicate();
-        if (predicate != null) {
-            prescanRead.withFilter(predicate);
-        }
-        configureBlobViewPrescanRead(prescanRead);
-        Split prescanSplit = authResult != null ? new QueryAuthSplit(split, authResult) : split;
-        LinkedHashSet<BlobViewStruct> viewStructs = new LinkedHashSet<>();
-        RecordReader<InternalRow> prescanReader = prescanRead.createReader(prescanSplit);
-        try {
-            prescanReader.forEachRemaining(
-                    row -> {
-                        for (int i = 0; i < blobViewFields.length; i++) {
-                            if (row.isNullAt(i)) {
-                                continue;
-                            }
-                            Blob blob = row.getBlob(i);
-                            if (!(blob instanceof BlobView)) {
-                                throw new IllegalArgumentException(
-                                        "blob-view-field requires blob field value to be a "
-                                                + "serialized BlobViewStruct.");
-                            }
-                            viewStructs.add(((BlobView) blob).viewStruct());
-                        }
-                    });
-        } finally {
-            prescanReader.close();
-        }
-
-        BlobViewResolver resolver =
-                BlobViewLookup.createResolver(catalogContext, new ArrayList<>(viewStructs));
-
-        RecordReader<InternalRow> reader = createDataReader(split, authResult);
-        Set<Integer> blobViewFieldSet = new HashSet<>();
-        for (int field : blobViewFields) {
-            blobViewFieldSet.add(field);
-        }
-        return reader.transform(row -> new BlobViewResolvingRow(row, blobViewFieldSet, resolver));
-    }
-
-    private void configureBlobViewPrescanRead(InnerTableRead prescanRead) {
-        if (topN != null) {
-            prescanRead.withTopN(topN);
-        }
-        if (limit != null) {
-            prescanRead.withLimit(limit);
-        }
     }
 }

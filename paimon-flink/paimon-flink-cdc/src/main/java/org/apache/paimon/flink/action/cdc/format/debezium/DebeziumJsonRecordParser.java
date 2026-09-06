@@ -219,6 +219,45 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
     }
 
     @Override
+    protected List<String> extractPrimaryKeys() {
+        List<String> primaryKeys = super.extractPrimaryKeys();
+        if (!primaryKeys.isEmpty()) {
+            return primaryKeys;
+        }
+
+        Object key = currentRecord.getKey();
+        if (!(key instanceof JsonNode)) {
+            return Collections.emptyList();
+        }
+
+        JsonNode keyNode = (JsonNode) key;
+        JsonNode keySchema = keyNode.get(FIELD_SCHEMA);
+        if (!isNull(keySchema)
+                && keySchema.isObject()
+                && keySchema.has("fields")
+                && keySchema.get("fields").isArray()
+                && keyNode.has(FIELD_PAYLOAD)) {
+            ArrayNode fields = getNodeAs(keySchema, "fields", ArrayNode.class);
+            List<String> fieldNames = new ArrayList<>(fields.size());
+            for (JsonNode field : fields) {
+                String fieldName = getString(field, "field");
+                if (fieldName != null) {
+                    fieldNames.add(fieldName);
+                }
+            }
+            return fieldNames;
+        }
+
+        if (!keyNode.isObject()) {
+            return Collections.emptyList();
+        }
+
+        List<String> fieldNames = new ArrayList<>();
+        keyNode.fieldNames().forEachRemaining(fieldNames::add);
+        return fieldNames;
+    }
+
+    @Override
     protected String primaryField() {
         return FIELD_PRIMARY;
     }

@@ -50,6 +50,7 @@ public class LuminaVectorGlobalIndexer implements VectorGlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
     }

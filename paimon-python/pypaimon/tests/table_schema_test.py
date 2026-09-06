@@ -17,7 +17,11 @@
 
 import unittest
 
+import pyarrow as pa
+
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.schema import Schema
 from pypaimon.schema.table_schema import TableSchema
 
 
@@ -86,6 +90,66 @@ class TableSchemaBucketKeysTest(unittest.TestCase):
             options={'bucket-key': '   '},
         )
         self.assertEqual(schema.bucket_keys, ['id'])
+
+
+class SchemaPrimaryKeyNullabilityTest(unittest.TestCase):
+
+    def test_primary_key_is_not_nullable_by_default(self):
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([pa.field('id', pa.int64())]), primary_keys=['id'])
+        self.assertFalse(schema.fields[0].type.nullable)
+
+    def test_primary_key_nullable_option_overrides_not_null_input(self):
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([pa.field('id', pa.int64(), nullable=False)]),
+            primary_keys=['id'],
+            options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'},
+        )
+        self.assertTrue(schema.fields[0].type.nullable)
+
+    def test_primary_key_nullable_requires_primary_key_table(self):
+        with self.assertRaisesRegex(
+                ValueError, "can only be enabled for a table with primary keys"):
+            Schema.from_pyarrow_schema(
+                pa.schema([pa.field('id', pa.int64())]),
+                options={CoreOptions.PRIMARY_KEY_NULLABLE.key(): 'true'},
+            )
+
+
+class DataFileFieldsTest(unittest.TestCase):
+
+    @staticmethod
+    def _schema(optimized):
+        options = {'data-evolution.enabled': 'true'}
+        if optimized:
+            options['data-evolution.write-cols-optimization.enabled'] = 'true'
+        return TableSchema(
+            id=0,
+            fields=[
+                DataField(0, 'id', AtomicType('INT')),
+                DataField(1, 'blob', AtomicType('BLOB')),
+                DataField(2, 'name', AtomicType('STRING')),
+            ],
+            options=options,
+        )
+
+    def test_null_write_cols_uses_legacy_meaning_without_option(self):
+        schema = self._schema(False)
+        self.assertEqual(
+            ['id', 'blob', 'name'],
+            [field.name for field in schema.data_file_fields(None)],
+        )
+        self.assertIsNone(schema.partial_file_write_cols(None))
+
+    def test_null_write_cols_resolves_non_dedicated_fields_with_option(self):
+        schema = self._schema(True)
+        self.assertEqual(
+            ['id', 'name'],
+            [field.name for field in schema.data_file_fields(None)],
+        )
+        self.assertEqual(
+            ['id', 'name'], schema.partial_file_write_cols(None)
+        )
 
 
 if __name__ == '__main__':

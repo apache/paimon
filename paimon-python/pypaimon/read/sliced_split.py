@@ -19,7 +19,7 @@
 SlicedSplit wraps a Split with file index ranges for shard/slice processing.
 """
 
-from typing import List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from pypaimon.read.split import Split
 
@@ -40,10 +40,12 @@ class SlicedSplit(Split):
     def __init__(
         self,
         data_split: 'Split',
-        shard_file_idx_map: Dict[str, Tuple[int, int]]
+        shard_file_idx_map: Dict[str, Tuple[int, int]],
+        exact_merged_row_count: Optional[int] = None,
     ):
         self._data_split = data_split
         self._shard_file_idx_map = shard_file_idx_map
+        self._exact_merged_row_count = exact_merged_row_count
 
     def data_split(self) -> 'Split':
         return self._data_split
@@ -102,6 +104,8 @@ class SlicedSplit(Split):
         return file.row_count
 
     def merged_row_count(self):
+        if self._exact_merged_row_count is not None:
+            return self._exact_merged_row_count
         if not self._shard_file_idx_map:
             return self._data_split.merged_row_count()
         
@@ -176,12 +180,20 @@ class SlicedSplit(Split):
     def __eq__(self, other):
         if not isinstance(other, SlicedSplit):
             return False
-        return (self._data_split == other._data_split and
-                self._shard_file_idx_map == other._shard_file_idx_map)
+        return (
+            self._data_split == other._data_split
+            and self._shard_file_idx_map == other._shard_file_idx_map
+            and self._exact_merged_row_count == other._exact_merged_row_count
+        )
 
     def __hash__(self):
-        return hash((id(self._data_split), tuple(sorted(self._shard_file_idx_map.items()))))
+        return hash((
+            id(self._data_split),
+            tuple(sorted(self._shard_file_idx_map.items())),
+            self._exact_merged_row_count,
+        ))
 
     def __repr__(self):
         return (f"SlicedSplit(data_split={self._data_split}, "
-                f"shard_file_idx_map={self._shard_file_idx_map})")
+                f"shard_file_idx_map={self._shard_file_idx_map}, "
+                f"exact_merged_row_count={self._exact_merged_row_count})")

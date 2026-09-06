@@ -27,6 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
 import java.util.List;
 
 /** Request for auth table query. */
@@ -40,6 +41,7 @@ public class AuthTableQueryRequest implements RESTRequest {
     private final List<String> select;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_SELECT})
     public AuthTableQueryRequest(@JsonProperty(FIELD_SELECT) @Nullable List<String> select) {
         this.select = select;
     }

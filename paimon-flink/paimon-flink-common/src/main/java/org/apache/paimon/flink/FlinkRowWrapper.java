@@ -30,8 +30,10 @@ import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.rest.HttpClientUtils;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
@@ -40,6 +42,8 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -57,7 +61,9 @@ public class FlinkRowWrapper implements InternalRow {
     private final org.apache.flink.table.data.RowData row;
     private final UriReaderFactory uriReaderFactory;
     private final boolean checkBlobDescriptorExists;
+    private final boolean writeNullOnFetchFailure;
     private final Set<Integer> blobFields;
+    private final Set<Integer> materializedBlobFields;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
@@ -71,7 +77,20 @@ public class FlinkRowWrapper implements InternalRow {
             org.apache.flink.table.data.RowData row,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
-        this(row, catalogContext, checkBlobDescriptorExists, Collections.emptySet());
+        this(row, catalogContext, checkBlobDescriptorExists, false, Collections.emptySet());
+    }
+
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
+        this(
+                row,
+                catalogContext,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                Collections.emptySet());
     }
 
     public FlinkRowWrapper(
@@ -79,10 +98,68 @@ public class FlinkRowWrapper implements InternalRow {
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists,
             Set<Integer> blobFields) {
+        this(row, catalogContext, checkBlobDescriptorExists, false, blobFields);
+    }
+
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
+        this(
+                row,
+                new UriReaderFactory(catalogContext),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields,
+                Collections.emptySet());
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
+        return fromUriReaderFactory(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields,
+                Collections.emptySet());
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields,
+            Set<Integer> materializedBlobFields) {
+        return new FlinkRowWrapper(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields,
+                materializedBlobFields);
+    }
+
+    private FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields,
+            Set<Integer> materializedBlobFields) {
         this.row = row;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
+        this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFields = blobFields;
+        this.materializedBlobFields = materializedBlobFields;
     }
 
     public static Set<Integer> blobFieldIndexes(org.apache.paimon.types.RowType rowType) {
@@ -197,6 +274,14 @@ public class FlinkRowWrapper implements InternalRow {
         }
 
         BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
+        // Materialized BLOB fields are copied into managed blob files. Their writer has to open
+        // HTTP resources and already maps HTTP 404 and other open failures to NULL according to
+        // the two write-null options. Avoid a redundant HEAD / range-GET existence check before
+        // that required GET. Inline descriptor and view fields keep the existence check because
+        // they have no later writer fetch.
+        if (materializedBlobFields.contains(pos) && isHttpUri(descriptor.uri())) {
+            return false;
+        }
         return !descriptorFileExists(pos, descriptor);
     }
 
@@ -204,42 +289,72 @@ public class FlinkRowWrapper implements InternalRow {
         try {
             boolean exists = uriReaderFactory.exists(descriptor.uri());
             if (!exists) {
-                LOG.warn(
-                        "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
-                        descriptor.uri(),
-                        pos);
+                logMissingDescriptor(pos, descriptor);
             }
             return exists;
         } catch (IOException e) {
+            if (deferExistsCheckFailure(e)) {
+                return true;
+            }
             LOG.warn(
                     "Failed to check blob descriptor file {} for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos,
                     e);
             throw new RuntimeException(e);
         } catch (RuntimeException e) {
+            if (deferExistsCheckFailure(e)) {
+                return true;
+            }
             LOG.warn(
                     "Failed to check blob descriptor file {} for BLOB field at position {}.",
-                    descriptor.uri(),
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
                     pos,
                     e);
             throw e;
         }
     }
 
+    private void logMissingDescriptor(int pos, BlobDescriptor descriptor) {
+        if (isHttpUri(descriptor.uri())) {
+            LOG.warn(
+                    "Blob descriptor file {} returned HTTP 404, returning NULL for BLOB field at position {}.",
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
+                    pos);
+        } else {
+            LOG.warn(
+                    "Blob descriptor file {} does not exist, returning NULL for BLOB field at position {}.",
+                    SensitiveConfigUtils.sanitizeUri(descriptor.uri()),
+                    pos);
+        }
+    }
+
+    private static boolean isHttpUri(String uri) {
+        return uri.regionMatches(true, 0, "http://", 0, "http://".length())
+                || uri.regionMatches(true, 0, "https://", 0, "https://".length());
+    }
+
+    /**
+     * When fetch-failure null write is enabled, non-404 errors during exists pre-check are deferred
+     * to the writer fetch path, so they can be logged and written as NULL.
+     */
+    private boolean deferExistsCheckFailure(Throwable failure) {
+        return writeNullOnFetchFailure && !HttpClientUtils.isNotFoundError(failure);
+    }
+
     @Override
     public InternalArray getArray(int pos) {
-        return new FlinkArrayWrapper(row.getArray(pos));
+        return new FlinkArrayWrapper(row.getArray(pos), uriReaderFactory);
     }
 
     @Override
     public InternalVector getVector(int pos) {
-        return new FlinkVectorWrapper(row.getArray(pos));
+        return new FlinkVectorWrapper(row.getArray(pos), uriReaderFactory);
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return new FlinkMapWrapper(row.getMap(pos));
+        return new FlinkMapWrapper(row.getMap(pos), uriReaderFactory);
     }
 
     @Override
@@ -250,9 +365,17 @@ public class FlinkRowWrapper implements InternalRow {
     private static class FlinkArrayWrapper implements InternalArray {
 
         private final org.apache.flink.table.data.ArrayData array;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         private FlinkArrayWrapper(org.apache.flink.table.data.ArrayData array) {
+            this(array, null);
+        }
+
+        private FlinkArrayWrapper(
+                org.apache.flink.table.data.ArrayData array,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.array = array;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -329,22 +452,22 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public Blob getBlob(int pos) {
-            return Blob.fromBytes(array.getBinary(pos), null, null);
+            return Blob.fromBytes(array.getBinary(pos), uriReaderFactory, null);
         }
 
         @Override
         public InternalArray getArray(int pos) {
-            return new FlinkArrayWrapper(array.getArray(pos));
+            return new FlinkArrayWrapper(array.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalVector getVector(int pos) {
-            return new FlinkVectorWrapper(array.getArray(pos));
+            return new FlinkVectorWrapper(array.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalMap getMap(int pos) {
-            return new FlinkMapWrapper(array.getMap(pos));
+            return new FlinkMapWrapper(array.getMap(pos), uriReaderFactory);
         }
 
         @Override
@@ -392,14 +515,28 @@ public class FlinkRowWrapper implements InternalRow {
         private FlinkVectorWrapper(org.apache.flink.table.data.ArrayData array) {
             super(array);
         }
+
+        private FlinkVectorWrapper(
+                org.apache.flink.table.data.ArrayData array,
+                @Nullable UriReaderFactory uriReaderFactory) {
+            super(array, uriReaderFactory);
+        }
     }
 
     private static class FlinkMapWrapper implements InternalMap {
 
         private final org.apache.flink.table.data.MapData map;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         private FlinkMapWrapper(org.apache.flink.table.data.MapData map) {
+            this(map, null);
+        }
+
+        private FlinkMapWrapper(
+                org.apache.flink.table.data.MapData map,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.map = map;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -409,12 +546,12 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public InternalArray keyArray() {
-            return new FlinkArrayWrapper(map.keyArray());
+            return new FlinkArrayWrapper(map.keyArray(), uriReaderFactory);
         }
 
         @Override
         public InternalArray valueArray() {
-            return new FlinkArrayWrapper(map.valueArray());
+            return new FlinkArrayWrapper(map.valueArray(), uriReaderFactory);
         }
     }
 

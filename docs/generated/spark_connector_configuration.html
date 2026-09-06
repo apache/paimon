@@ -27,6 +27,18 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>format-table.repair.collect-statistics</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether MSCK REPAIR TABLE on a Format Table also measures the partitions it finds. Off by default: measuring lists the files inside every partition, not only the partition directories.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.statistics.parallelism</h5></td>
+            <td style="word-wrap: break-word;">8</td>
+            <td>Integer</td>
+            <td>How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to measure Format Table partitions, so that a large table does not burst them at storage.</td>
+        </tr>
+        <tr>
             <td><h5>legacy-timestamp-mapping.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -87,6 +99,12 @@ under the License.
             <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
         </tr>
         <tr>
+            <td><h5>vector-search.lateral-join.parallelism</h5></td>
+            <td style="word-wrap: break-word;">16</td>
+            <td>Integer</td>
+            <td>Parallelism used to repartition a single-partition LIMIT input before executing a lateral vector search.</td>
+        </tr>
+        <tr>
             <td><h5>write.data-evolution.update-conflict-retry.max-attempts</h5></td>
             <td style="word-wrap: break-word;">20</td>
             <td>Integer</td>
@@ -97,6 +115,12 @@ under the License.
             <td style="word-wrap: break-word;">10</td>
             <td>Long</td>
             <td>Wait time in milliseconds between retry attempts for Spark V1 UPDATE on data-evolution tables after row-id range update conflicts.</td>
+        </tr>
+        <tr>
+            <td><h5>write.hive-style-dynamic-partition.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, positional SQL inserts with explicit dynamic partitions use Hive's column order, with non-dynamic columns followed by dynamic partition columns. If false, the query output follows the table schema order.</td>
         </tr>
         <tr>
             <td><h5>write.merge-schema</h5></td>

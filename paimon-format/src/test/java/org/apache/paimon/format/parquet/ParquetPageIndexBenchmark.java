@@ -40,14 +40,14 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
-import org.apache.parquet.filter2.compat.FilterCompat;
-import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -157,16 +157,16 @@ class ParquetPageIndexBenchmark {
         queries.add(
                 new QuerySpec(
                         "point (id = " + POINT_ID + ")",
-                        ParquetFilters.convert(Collections.singletonList(point)),
+                        Collections.singletonList(point),
                         POINT_ID,
                         POINT_ID));
         queries.add(
                 new QuerySpec(
                         "range (id between " + RANGE_LO + " and " + RANGE_HI + ")",
-                        ParquetFilters.convert(Collections.singletonList(range)),
+                        Collections.singletonList(range),
                         RANGE_LO,
                         RANGE_HI));
-        queries.add(new QuerySpec("full scan (no filter)", FilterCompat.NOOP, null, null));
+        queries.add(new QuerySpec("full scan (no filter)", null, null, null));
 
         Map<String, Path> variants = new LinkedHashMap<>();
         variants.put("1. original + page index", source);
@@ -185,7 +185,6 @@ class ParquetPageIndexBenchmark {
 
         for (QuerySpec query : queries) {
             String queryName = query.name;
-            FilterCompat.Filter filter = query.filter;
 
             long droppedBytes = -1;
             Map<String, Measurement> results = new LinkedHashMap<>();
@@ -408,11 +407,15 @@ class ParquetPageIndexBenchmark {
     /** A query to measure: the pushed-down filter plus the true match range for validation. */
     private static class QuerySpec {
         private final String name;
-        private final FilterCompat.Filter filter;
+        @Nullable private final List<Predicate> filter;
         private final Integer hitLo;
         private final Integer hitHi;
 
-        private QuerySpec(String name, FilterCompat.Filter filter, Integer hitLo, Integer hitHi) {
+        private QuerySpec(
+                String name,
+                @Nullable List<Predicate> filter,
+                Integer hitLo,
+                Integer hitHi) {
             this.name = name;
             this.filter = filter;
             this.hitLo = hitLo;
@@ -472,7 +475,7 @@ class ParquetPageIndexBenchmark {
         long rows = 0;
         long hits = 0;
         try (FileRecordReader<InternalRow> reader =
-                factory.createReader(new FormatReaderContext(io, file, fileSize))) {
+                factory.createReader(new FormatReaderContext(io, file, fileSize, null, null))) {
             RecordReader.RecordIterator<InternalRow> iterator;
             while ((iterator = reader.readBatch()) != null) {
                 InternalRow row;

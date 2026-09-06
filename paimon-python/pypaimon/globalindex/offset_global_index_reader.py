@@ -61,7 +61,8 @@ class OffsetGlobalIndexReader(GlobalIndexReader):
 
     def visit_full_text_search(self, full_text_search) -> 'Future[Optional[GlobalIndexResult]]':
         return self._apply_offset_future(
-            self._wrapped.visit_full_text_search(full_text_search))
+            self._wrapped.visit_full_text_search(
+                full_text_search.offset_range(self._offset, self._to)))
 
     def visit_equal(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
         return self._apply_offset_future(self._wrapped.visit_equal(field_ref, literal))

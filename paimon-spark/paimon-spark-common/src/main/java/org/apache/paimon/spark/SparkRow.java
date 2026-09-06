@@ -33,6 +33,8 @@ import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -65,14 +67,23 @@ public class SparkRow implements InternalRow, Serializable {
     private final UriReaderFactory uriReaderFactory;
 
     public SparkRow(RowType type, Row row) {
-        this(type, row, RowKind.INSERT, null);
+        this(type, row, RowKind.INSERT, (CatalogContext) null);
     }
 
     public SparkRow(RowType type, Row row, RowKind rowkind, CatalogContext catalogContext) {
+        this(type, row, rowkind, new UriReaderFactory(catalogContext));
+    }
+
+    public static SparkRow fromUriReaderFactory(
+            RowType type, Row row, RowKind rowkind, UriReaderFactory uriReaderFactory) {
+        return new SparkRow(type, row, rowkind, uriReaderFactory);
+    }
+
+    private SparkRow(RowType type, Row row, RowKind rowkind, UriReaderFactory uriReaderFactory) {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     @Override
@@ -151,6 +162,12 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public byte[] getBinary(int i) {
+        if (type.getTypeAt(i) instanceof GeometryType) {
+            return SparkShimLoader.shim().toPaimonGeometry(row.getAs(i));
+        }
+        if (type.getTypeAt(i) instanceof GeographyType) {
+            return SparkShimLoader.shim().toPaimonGeography(row.getAs(i));
+        }
         return row.getAs(i);
     }
 
@@ -166,7 +183,8 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public InternalArray getArray(int i) {
-        return new PaimonArray(((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i));
+        return new PaimonArray(
+                ((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i), uriReaderFactory);
     }
 
     @Override
@@ -179,12 +197,13 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public InternalMap getMap(int i) {
-        return toPaimonMap((MapType) type.getTypeAt(i), row.getJavaMap(i));
+        return toPaimonMap((MapType) type.getTypeAt(i), row.getJavaMap(i), uriReaderFactory);
     }
 
     @Override
     public InternalRow getRow(int i, int i1) {
-        return new SparkRow((RowType) type.getTypeAt(i), row.getStruct(i));
+        return new SparkRow(
+                (RowType) type.getTypeAt(i), row.getStruct(i), RowKind.INSERT, uriReaderFactory);
     }
 
     private static int toPaimonDate(Object object) {
@@ -217,7 +236,8 @@ public class SparkRow implements InternalRow, Serializable {
         }
     }
 
-    private static InternalMap toPaimonMap(MapType mapType, Map<Object, Object> map) {
+    private static InternalMap toPaimonMap(
+            MapType mapType, Map<Object, Object> map, UriReaderFactory uriReaderFactory) {
         List<Object> keys = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         map.forEach(
@@ -226,8 +246,8 @@ public class SparkRow implements InternalRow, Serializable {
                     values.add(v);
                 });
 
-        PaimonArray key = new PaimonArray(mapType.getKeyType(), keys);
-        PaimonArray value = new PaimonArray(mapType.getValueType(), values);
+        PaimonArray key = new PaimonArray(mapType.getKeyType(), keys, uriReaderFactory);
+        PaimonArray value = new PaimonArray(mapType.getValueType(), values, uriReaderFactory);
         return new InternalMap() {
             @Override
             public int size() {
@@ -250,10 +270,17 @@ public class SparkRow implements InternalRow, Serializable {
 
         private final DataType elementType;
         private final List<Object> list;
+        private final UriReaderFactory uriReaderFactory;
 
         private PaimonArray(DataType elementType, List<Object> list) {
+            this(elementType, list, null);
+        }
+
+        private PaimonArray(
+                DataType elementType, List<Object> list, UriReaderFactory uriReaderFactory) {
             this.list = list;
             this.elementType = elementType;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -326,6 +353,12 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public byte[] getBinary(int i) {
+            if (elementType instanceof GeometryType) {
+                return SparkShimLoader.shim().toPaimonGeometry(getAs(i));
+            }
+            if (elementType instanceof GeographyType) {
+                return SparkShimLoader.shim().toPaimonGeography(getAs(i));
+            }
             return getAs(i);
         }
 
@@ -336,7 +369,7 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int i) {
-            return Blob.fromBytes(getAs(i), null, null);
+            return Blob.fromBytes(getAs(i), uriReaderFactory, null);
         }
 
         @Override
@@ -346,7 +379,8 @@ public class SparkRow implements InternalRow, Serializable {
                     o instanceof scala.collection.Seq
                             ? JavaConverters.seqAsJavaList((scala.collection.Seq<Object>) o)
                             : (List<Object>) o;
-            return new PaimonArray(((ArrayType) elementType).getElementType(), array);
+            return new PaimonArray(
+                    ((ArrayType) elementType).getElementType(), array, uriReaderFactory);
         }
 
         @Override
@@ -361,12 +395,12 @@ public class SparkRow implements InternalRow, Serializable {
                     o instanceof scala.collection.Map
                             ? JavaConverters.mapAsJavaMap((scala.collection.Map<Object, Object>) o)
                             : (Map<Object, Object>) o;
-            return toPaimonMap((MapType) elementType, map);
+            return toPaimonMap((MapType) elementType, map, uriReaderFactory);
         }
 
         @Override
         public InternalRow getRow(int i, int i1) {
-            return new SparkRow((RowType) elementType, getAs(i));
+            return new SparkRow((RowType) elementType, getAs(i), RowKind.INSERT, uriReaderFactory);
         }
 
         @Override

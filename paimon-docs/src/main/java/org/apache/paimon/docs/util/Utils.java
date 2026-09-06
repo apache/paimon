@@ -29,6 +29,7 @@ public class Utils {
 
     public static String escapeCharacters(String value) {
         return value.replaceAll("<wbr>", TEMPORARY_PLACEHOLDER)
+                .replaceAll("&", "&amp;")
                 .replaceAll("<", "&lt;")
                 .replaceAll(">", "&gt;")
                 .replaceAll(TEMPORARY_PLACEHOLDER, "<wbr>");

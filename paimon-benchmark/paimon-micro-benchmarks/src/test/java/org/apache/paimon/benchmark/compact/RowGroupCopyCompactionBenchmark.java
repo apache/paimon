@@ -38,8 +38,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -397,7 +397,7 @@ public class RowGroupCopyCompactionBenchmark {
                 Path path = pathFactory.toPath(file);
                 try (FileRecordReader<InternalRow> reader =
                         readerFactory.createReader(
-                                new FormatReaderContext(fileIO, path, file.fileSize()))) {
+                                new FormatReaderContext(fileIO, path, file.fileSize(), null, null))) {
                     RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
                     while (iterator != null) {
                         InternalRow row;
@@ -472,7 +472,7 @@ public class RowGroupCopyCompactionBenchmark {
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), codec);
         schemaBuilder.option("parquet.block.size", String.valueOf(rowGroupSizeKb * 1024));
         TableSchema tableSchema =
-                new SchemaManager(fileIO, tablePath).createTable(schemaBuilder.build());
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schemaBuilder.build());
         FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
 
         String commitUser = UUID.randomUUID().toString();

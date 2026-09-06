@@ -24,18 +24,21 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.StateFactory;
+import org.apache.paimon.lookup.StateUtils;
+import org.apache.paimon.lookup.local.LocalKvStateFactory;
 import org.apache.paimon.lookup.memory.InMemoryStateFactory;
-import org.apache.paimon.lookup.rocksdb.RocksDBBulkLoader;
-import org.apache.paimon.lookup.rocksdb.RocksDBState;
-import org.apache.paimon.lookup.rocksdb.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
@@ -84,6 +87,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final boolean refreshAsync;
     protected final boolean blobAsDescriptor;
     protected final Set<Integer> blobFieldPositions;
+    private final boolean hasBlobFileFields;
 
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
@@ -140,6 +144,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
         this.blobAsDescriptor = options.get(CoreOptions.LOOKUP_CACHE_BLOB_DESCRIPTOR);
         this.blobFieldPositions = BlobAsDescriptorRow.blobFieldPositions(projectedType);
+        this.hasBlobFileFields =
+                projectedType.getFieldTypes().stream().anyMatch(BlobType::isBlobFileField);
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
     }
@@ -179,7 +185,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         if (options.get(LOOKUP_CACHE_MODE) == MEMORY) {
             return new InMemoryStateFactory();
         } else {
-            return new RocksDBStateFactory(diskDir, options, null);
+            return new LocalKvStateFactory(diskDir, options, null, null, false);
         }
     }
 
@@ -192,7 +198,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         // blob.toDescriptor() succeeds during cache serialization, even when the table
         // was not originally written with blob-as-descriptor=true.
         LookupFileStoreTable readerTable = context.table;
-        if (blobAsDescriptor && !blobFieldPositions.isEmpty()) {
+        if (blobAsDescriptor && hasBlobFileFields) {
             readerTable =
                     (LookupFileStoreTable)
                             context.table.copy(
@@ -213,12 +219,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
             return;
         }
 
-        // Parallel bootstrap read serializes rows with BlobSerializer, which materializes
-        // BlobRef into BlobData. Disable parallelism when caching blob descriptors.
-        boolean useParallelBootstrapRead = !(blobAsDescriptor && !blobFieldPositions.isEmpty());
+        // Parallel bootstrap serialization drops runtime readers from descriptor-backed blobs.
+        // Disable it when caching blob descriptors so cache conversion sees the original blobs.
+        boolean useParallelBootstrapRead = !(blobAsDescriptor && hasBlobFileFields);
 
         BinaryExternalSortBuffer bulkLoadSorter =
-                RocksDBState.createBulkLoadSorter(
+                StateUtils.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
         Predicate predicate = projectedPredicate();
         try (RecordReaderIterator<InternalRow> batch =
@@ -240,7 +246,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
             while ((row = keyIterator.next(row)) != null) {
                 bulkLoader.write(row.getBinary(0), row.getBinary(1));
             }
-        } catch (RocksDBBulkLoader.WriteException e) {
+        } catch (BulkLoader.WriteException e) {
             throw new RuntimeException(
                     "Exception in bulkLoad, the most suspicious reason is that "
                             + "your data contains duplicates, please check your lookup table. ",
@@ -253,12 +259,41 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void refresh() throws Exception {
+        // Surface a failure from a previous asynchronous refresh. Without this the field is
+        // write-only and the failure is lost: the scan cursor has already moved past the
+        // snapshot whose rows failed to apply, so nothing retries it and the cache keeps
+        // serving what it held before. Same shape as TableCommitImpl.maintain().
+        Exception previousFailure = cachedException.getAndSet(null);
+        if (previousFailure != null) {
+            throw previousFailure;
+        }
+
         if (refreshExecutor == null) {
             doRefresh();
             return;
         }
 
-        Long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        // For chain tables, the delta branch maintains its own snapshot sequence.
+        // Navigate to the delta branch's snapshot manager for backlog calculation:
+        //   unwrapped = ChainTableFileStoreTable
+        //     .other() = ChainGroupReadTable
+        //     .other() = delta branch table
+        FileStoreTable unwrapped = table;
+        if (table instanceof LookupFileStoreTable) {
+            unwrapped = ((LookupFileStoreTable) table).wrapped();
+        }
+        boolean isChainTable =
+                unwrapped instanceof FallbackReadFileStoreTable
+                        && ((FallbackReadFileStoreTable) unwrapped).other()
+                                instanceof ChainGroupReadTable;
+        Long latestSnapshotId =
+                isChainTable
+                        ? ((FallbackReadFileStoreTable)
+                                        ((FallbackReadFileStoreTable) unwrapped).other())
+                                .other()
+                                .snapshotManager()
+                                .latestSnapshotId()
+                        : table.snapshotManager().latestSnapshotId();
         Long nextSnapshotId = reader.nextSnapshotId();
         if (latestSnapshotId != null
                 && nextSnapshotId != null
@@ -408,12 +443,13 @@ public abstract class FullCacheLookupTable implements LookupTable {
     /** Bulk loader for the table. */
     public interface TableBulkLoader {
 
-        void write(byte[] key, byte[] value) throws RocksDBBulkLoader.WriteException, IOException;
+        void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
 
         void finish() throws IOException;
     }
 
-    static FullCacheLookupTable create(Context context, long lruCacheSize) {
+    @VisibleForTesting
+    public static FullCacheLookupTable create(Context context, long lruCacheSize) {
         List<String> primaryKeys = context.table.primaryKeys();
         if (primaryKeys.isEmpty()) {
             return new NoPrimaryKeyLookupTable(context, lruCacheSize);
@@ -445,7 +481,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 File tempPath,
                 List<String> joinKey,
                 @Nullable Set<Integer> requiredCachedBucketIds) {
-            this.table = new LookupFileStoreTable(table, joinKey);
+            this.table = LookupFileStoreTable.create(table, joinKey);
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;

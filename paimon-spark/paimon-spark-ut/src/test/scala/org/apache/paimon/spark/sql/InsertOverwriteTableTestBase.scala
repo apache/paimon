@@ -727,11 +727,50 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Paimon Insert: V2 dynamic overwrite accepts Hive partition column order") {
+  test("Paimon Insert: [table-order-default] dynamic partition follows table order") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf(
+        "spark.sql.sources.partitionOverwriteMode" -> "dynamic",
+        "spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target_table") {
+          sql("""
+                |CREATE TABLE target_table (
+                |  ds STRING,
+                |  part STRING,
+                |  uid STRING,
+                |  value STRING
+                |) PARTITIONED BY (ds, part)
+                |TBLPROPERTIES (
+                |  'primary-key' = 'ds,part,uid',
+                |  'bucket' = '2',
+                |  'bucket-key' = 'uid'
+                |)
+                |""".stripMargin)
+
+          sql("""
+                |INSERT OVERWRITE target_table PARTITION (ds, part)
+                |SELECT
+                |  '20260808' AS ds,
+                |  'p1' AS part,
+                |  '1001' AS uid,
+                |  '0.8' AS metric
+                |""".stripMargin)
+
+          checkAnswer(
+            sql("SELECT ds, part, uid, value FROM target_table"),
+            Row("20260808", "p1", "1001", "0.8"))
+        }
+      }
+    }
+  }
+
+  test("Paimon Insert: [hive-tail-enabled] dynamic overwrite accepts Hive partition order") {
     if (gteqSpark3_4) {
       withSparkSQLConf(
         "spark.sql.sources.partitionOverwriteMode" -> "dynamic",
-        "spark.paimon.write.use-v2-write" -> "true") {
+        "spark.paimon.write.use-v2-write" -> "true",
+        "spark.paimon.write.hive-style-dynamic-partition.enabled" -> "true"
+      ) {
         withTable("my_table") {
           sql("""
                 |CREATE TABLE my_table (

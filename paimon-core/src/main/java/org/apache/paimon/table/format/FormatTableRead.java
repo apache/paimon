@@ -23,15 +23,18 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** A {@link TableRead} implementation for {@link FormatTable}. */
 public class FormatTableRead implements TableRead {
@@ -43,6 +46,7 @@ public class FormatTableRead implements TableRead {
     private final Integer limit;
 
     private boolean executeFilter = false;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public FormatTableRead(
             RowType readType,
@@ -74,17 +78,22 @@ public class FormatTableRead implements TableRead {
     }
 
     @Override
+    public TableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        this.readBatchSizer = sizer;
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         FormatDataSplit dataSplit = (FormatDataSplit) split;
-        RecordReader<InternalRow> reader = read.createReader(dataSplit);
+        // Capture the binding per TableRead so lazy file suppliers cannot observe another read's
+        // sizer.
+        ReadBatchSizer sizer = this.readBatchSizer;
+        RecordReader<InternalRow> reader = read.createReader(dataSplit, sizer);
         if (executeFilter) {
             reader = executeFilter(reader);
         }
-        if (limit != null && limit > 0) {
-            reader = applyLimit(reader, limit);
-        }
-
-        return reader;
+        return LimitRecordReader.limit(reader, limit);
     }
 
     private RecordReader<InternalRow> executeFilter(RecordReader<InternalRow> reader) {
@@ -105,45 +114,5 @@ public class FormatTableRead implements TableRead {
 
         Predicate finalFilter = predicate;
         return reader.filter(finalFilter::test);
-    }
-
-    private RecordReader<InternalRow> applyLimit(RecordReader<InternalRow> reader, int limit) {
-        return new RecordReader<InternalRow>() {
-            private final AtomicLong recordCount = new AtomicLong(0);
-
-            @Override
-            public RecordIterator<InternalRow> readBatch() throws IOException {
-                if (recordCount.get() >= limit) {
-                    return null;
-                }
-                RecordIterator<InternalRow> iterator = reader.readBatch();
-                if (iterator == null) {
-                    return null;
-                }
-                return new RecordIterator<InternalRow>() {
-                    @Override
-                    public InternalRow next() throws IOException {
-                        if (recordCount.get() >= limit) {
-                            return null;
-                        }
-                        InternalRow next = iterator.next();
-                        if (next != null) {
-                            recordCount.incrementAndGet();
-                        }
-                        return next;
-                    }
-
-                    @Override
-                    public void releaseBatch() {
-                        iterator.releaseBatch();
-                    }
-                };
-            }
-
-            @Override
-            public void close() throws IOException {
-                reader.close();
-            }
-        };
     }
 }

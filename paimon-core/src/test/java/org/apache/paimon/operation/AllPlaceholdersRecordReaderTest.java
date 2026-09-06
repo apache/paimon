@@ -90,6 +90,29 @@ public class AllPlaceholdersRecordReaderTest {
         assertThat(reader.readBatch()).isNull();
     }
 
+    @Test
+    public void testSkipWithRowRangePushed() throws Exception {
+        AllPlaceholdersRecordReader reader =
+                new AllPlaceholdersRecordReader(
+                        10L,
+                        10L,
+                        Arrays.asList(new Range(10, 11), new Range(14, 14), new Range(18, 19)),
+                        READ_ROW_TYPE,
+                        BLOB_INDEX,
+                        SEQUENCE_NUMBER);
+
+        FileRecordIterator<InternalRow> iterator = reader.readBatch();
+        assertThat(iterator.skip()).isTrue();
+        assertThat(iterator.returnedPosition()).isZero();
+        assertNextPlaceholder(iterator, 11L, 1L);
+        assertThat(iterator.skip()).isTrue();
+        assertThat(iterator.returnedPosition()).isEqualTo(4L);
+        assertThat(iterator.skip()).isTrue();
+        assertThat(iterator.returnedPosition()).isEqualTo(8L);
+        assertNextPlaceholder(iterator, 19L, 9L);
+        assertThat(iterator.skip()).isFalse();
+    }
+
     private static void assertNextPlaceholder(
             FileRecordIterator<InternalRow> iterator, long rowId, long returnedPosition)
             throws Exception {

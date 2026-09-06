@@ -21,6 +21,7 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
 from pypaimon.read.explain_render import render_predicate
+from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
@@ -79,12 +80,14 @@ class ReadBuilder:
         return self
 
     def new_scan(self) -> TableScan:
-        return TableScan(
+        scan = TableScan(
             table=self.table,
             predicate=self._predicate,
             limit=self._limit,
             partition_predicate=self._partition_filter,
         )
+        scan._read_type = self.read_type()
+        return scan
 
     def new_read(self) -> TableRead:
         return TableRead(
@@ -213,9 +216,15 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    partition_pruning = _partition_pruning(stats, scan)
-    bucket_pruning = _bucket_pruning(stats, scan)
-    file_skipping = _file_skipping(stats, scan)
+    # stats is None when planned natively (pypaimon_rust): no manifest pruning
+    # funnel is tracked, so the split-level signals below are all we can report.
+    native_planned = stats is None
+    if native_planned:
+        partition_pruning = bucket_pruning = file_skipping = None
+    else:
+        partition_pruning = _partition_pruning(stats, scan)
+        bucket_pruning = _bucket_pruning(stats, scan)
+        file_skipping = _file_skipping(stats, scan)
 
     files_per_split = [len(getattr(s, 'files', []) or []) for s in splits]
     sizes = [int(getattr(s, 'file_size', 0) or 0) for s in splits]
@@ -235,6 +244,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     splits_with_dv = 0
     splits_all_above_l0 = 0
     split_infos: List[ExplainSplitInfo] = []
+
+    plan_has_auth = any(isinstance(s, QueryAuthSplit) for s in splits)
 
     for split in splits:
         files = getattr(split, 'files', []) or []
@@ -268,6 +279,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
                 level_histogram=per_split_levels,
                 deletion_file_count=dv_count_here,
                 file_paths=list(getattr(split, 'file_paths', []) or []),
+                data_files=list(files),
             ))
 
     fps_min, fps_max, fps_avg = _min_max_avg(files_per_split)
@@ -307,6 +319,8 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
         split_size_avg=sz_avg,
         split_size_p50=sz_p50,
         split_size_p95=sz_p95,
+        has_auth=plan_has_auth,
+        native_planned=native_planned,
         splits=split_infos if verbose else None,
     )
 

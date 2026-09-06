@@ -18,11 +18,8 @@
 
 package org.apache.paimon.compression;
 
-import com.github.luben.zstd.RecyclingBufferPool;
-import com.github.luben.zstd.ZstdInputStream;
-
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
+import com.github.luben.zstd.Zstd;
+import com.github.luben.zstd.ZstdException;
 
 /** A {@link BlockDecompressor} for zstd. */
 public class ZstdBlockDecompressor implements BlockDecompressor {
@@ -30,25 +27,20 @@ public class ZstdBlockDecompressor implements BlockDecompressor {
     @Override
     public int decompress(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff)
             throws BufferDecompressionException {
-        ByteArrayInputStream inputStream = new ByteArrayInputStream(src, srcOff, srcLen);
-        try (ZstdInputStream decompressorStream =
-                new ZstdInputStream(inputStream, RecyclingBufferPool.INSTANCE)) {
-            int decompressedLen = 0;
-            while (true) {
-                int offset = dstOff + decompressedLen;
-                int count = decompressorStream.read(dst, offset, dst.length - offset);
-                if (count <= 0) {
-                    if (decompressorStream.available() != 0) {
-                        throw new BufferDecompressionException(
-                                "Dst is too small and the decompression was not completed.");
-                    }
-                    break;
-                }
-                decompressedLen += count;
-            }
-            return decompressedLen;
-        } catch (IOException e) {
+        long decompressedLen;
+        try {
+            decompressedLen =
+                    Zstd.decompressByteArray(dst, dstOff, dst.length - dstOff, src, srcOff, srcLen);
+        } catch (ZstdException e) {
             throw new BufferDecompressionException(e);
         }
+        if (Zstd.isError(decompressedLen)) {
+            throw new BufferDecompressionException(Zstd.getErrorName(decompressedLen));
+        }
+        if (decompressedLen > Integer.MAX_VALUE) {
+            throw new BufferDecompressionException(
+                    "Decompressed ZSTD block is too large: " + decompressedLen);
+        }
+        return (int) decompressedLen;
     }
 }

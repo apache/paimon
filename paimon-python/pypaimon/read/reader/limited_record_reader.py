@@ -88,9 +88,7 @@ class LimitedRecordBatchReader(RecordBatchReader):
         self._inner = inner
         self._limit = limit
         self.count = 0
-        self.file_io = inner.file_io
-        self.blob_field_indices = inner.blob_field_indices
-        self.vector_field_indices = inner.vector_field_indices
+        self._adopt_metadata(inner)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         if self.count >= self._limit:

@@ -23,6 +23,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -45,6 +46,15 @@ class _StreamingOnlyBlob(Blob):
     def new_input_stream(self):
         self.opened = True
         return io.BytesIO(self.data)
+
+
+class _RecordBatchWithoutSelect:
+    def __init__(self, batch):
+        self.schema = batch.schema
+        self._batch = batch
+
+    def column(self, index):
+        return self._batch.column(index)
 
 
 class DedicatedFormatWriterTest(unittest.TestCase):
@@ -125,6 +135,147 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 self.assertGreater(file_meta.row_count, 0)
 
         blob_writer.close()
+
+    def test_omit_write_cols_for_all_non_dedicated_columns(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'data-evolution.write-cols-optimization.enabled': 'true',
+                'metadata.stats-mode': 'full',
+            },
+        )
+        self.catalog.create_table(
+            'test_db.optimized_write_cols', schema, False)
+        table = self.catalog.get_table('test_db.optimized_write_cols')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'blob_data': [b'blob_data'],
+        }, schema=pa_schema))
+        commit_messages = writer.prepare_commit()
+        all_files = [
+            file for message in commit_messages for file in message.new_files
+        ]
+        normal_files = [
+            file for file in all_files if file.file_name.endswith('.parquet')
+        ]
+        blob_files = [
+            file for file in all_files if file.file_name.endswith('.blob')
+        ]
+        self.assertEqual(1, len(normal_files))
+        self.assertIsNone(normal_files[0].write_cols)
+        self.assertEqual([['blob_data']], [file.write_cols for file in blob_files])
+
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        manifests = ManifestListManager(table).read_all(snapshot)
+        committed_files = ManifestFileManager(table).read_entries_parallel(
+            manifests, drop_stats=False)
+        committed_normal = next(
+            entry.file for entry in committed_files
+            if entry.file.file_name.endswith('.parquet')
+        )
+        self.assertEqual(
+            ['id', 'name'],
+            [field.name for field in committed_normal.value_stats.min_values.fields],
+        )
+        self.assertEqual(
+            'Alice', committed_normal.value_stats.min_values.get_field(1)
+        )
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual([1], result.column('id').to_pylist())
+        self.assertEqual(['Alice'], result.column('name').to_pylist())
+        self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['id', 'name'])
+        update_messages = table_update.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({
+                '_ROW_ID': pa.array([0], type=pa.int64()),
+                'id': pa.array([2], type=pa.int32()),
+                'name': pa.array(['Bob'], type=pa.string()),
+            }))
+        update_files = [
+            file
+            for message in update_messages
+            for file in message.new_files
+        ]
+        self.assertTrue(update_files)
+        self.assertTrue(all(
+            file.file_name.endswith('.parquet')
+            and file.write_cols is None
+            for file in update_files
+        ))
+        update_builder.new_commit().commit(update_messages)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual([2], result.column('id').to_pylist())
+        self.assertEqual(['Bob'], result.column('name').to_pylist())
+        self.assertEqual([b'blob_data'], result.column('blob_data').to_pylist())
+
+    def test_split_data_with_pyarrow_6_record_batch_api(self):
+        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+
+        payload_type = pa.list_(
+            pa.field('item', pa.large_binary(), nullable=False)
+        )
+        schema = pa.schema(
+            [
+                pa.field('id', pa.int32(), nullable=False),
+                pa.field('payloads', payload_type),
+                pa.field('embedding', pa.list_(pa.float32())),
+            ],
+            metadata={b'table': b'array-blob'},
+        )
+        batch = pa.RecordBatch.from_arrays(
+            [
+                pa.array([1, 2], type=pa.int32()),
+                pa.array([[b'a'], []], type=payload_type),
+                pa.array([[1.0], [2.0]], type=pa.list_(pa.float32())),
+            ],
+            schema=schema,
+        )
+
+        writer = object.__new__(DedicatedFormatWriter)
+        writer.normal_column_names = ['id']
+        writer.blob_file_column_names = ['payloads']
+        writer.vector_write_columns = ['embedding']
+
+        normal_data, blob_data_map, vector_data = writer._split_data(
+            _RecordBatchWithoutSelect(batch)
+        )
+
+        self.assertEqual(normal_data.column(0).to_pylist(), [1, 2])
+        self.assertFalse(normal_data.schema.field('id').nullable)
+        self.assertEqual(
+            blob_data_map['payloads'].column(0).to_pylist(),
+            [[b'a'], []],
+        )
+        self.assertFalse(
+            blob_data_map['payloads'].schema.field('payloads').type.value_field.nullable
+        )
+        self.assertEqual(vector_data.column(0).to_pylist(), [[1.0], [2.0]])
+        self.assertEqual(normal_data.schema.metadata, {b'table': b'array-blob'})
 
     def test_dedicated_format_writer_schema_detection(self):
         """Test that DedicatedFormatWriter correctly detects blob columns from schema."""
@@ -1275,6 +1426,402 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             3: b'blob-3',
         })
 
+    def test_array_blob_column_write_read_and_update(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        self.catalog.create_table('test_db.array_blob_update_column', schema, False)
+        table = self.catalog.get_table('test_db.array_blob_update_column')
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payloads': pa.array(
+                [[b'blob-1a', None, b'blob-1b'], None, [b'blob-3']],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'blob-1a', None, b'blob-1b'],
+                2: None,
+                3: [b'blob-3'],
+            },
+        )
+
+        row_id_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits())
+        row_ids_by_id = {
+            row['id']: row['_ROW_ID']
+            for row in row_id_result.select(['id', '_ROW_ID']).to_pylist()
+        }
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['payloads'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids_by_id[2]], type=pa.int64()),
+            'payloads': pa.array([[b'updated-2']], type=array_blob_type),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+
+        update_files = [f for msg in update_messages for f in msg.new_files]
+        update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 2)
+        blob_fields = [field for field in table.fields if field.name == 'payloads']
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['payloads'],
+            full_fields=blob_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        update_blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertEqual(
+            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
+            1,
+        )
+
+        update_builder.new_commit().commit(update_messages)
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'blob-1a', None, b'blob-1b'],
+                2: [b'updated-2'],
+                3: [b'blob-3'],
+            },
+        )
+
+    def test_map_blob_column_write_read_and_update(self):
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.table.row.blob import BlobDescriptor
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        map_blob_type = pa.map_(pa.string(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        table_name = 'test_db.map_blob_update_column'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        descriptor_body = b'descriptor-map-value'
+        descriptor_prefix = b'prefix-'
+        descriptor_path = os.path.join(self.temp_dir, 'map_blob_descriptor_source')
+        with open(descriptor_path, 'wb') as source:
+            source.write(descriptor_prefix + descriptor_body + b'-suffix')
+        source_descriptor = BlobDescriptor(
+            descriptor_path,
+            len(descriptor_prefix),
+            len(descriptor_body),
+        )
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5, 6],
+            'payloads': pa.array(
+                [
+                    [('first', b'blob-1'), ('null', None), ('empty', b'')],
+                    None,
+                    [],
+                    [('last', b'blob-4')],
+                    [('descriptor', source_descriptor.serialize())],
+                    [('first', b'first'), ('last', b'last')],
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: None if row['payloads'] is None else dict(row['payloads'])
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: {'first': b'blob-1', 'null': None, 'empty': b''},
+                2: None,
+                3: {},
+                4: {'last': b'blob-4'},
+                5: {'descriptor': descriptor_body},
+                6: {'first': b'first', 'last': b'last'},
+            },
+        )
+
+        descriptor_table = table.copy({'blob-as-descriptor': 'true'})
+        descriptor_builder = descriptor_table.new_read_builder()
+        descriptor_result = descriptor_builder.new_read().to_arrow(
+            descriptor_builder.new_scan().plan().splits())
+        descriptor_rows = {
+            row['id']: None if row['payloads'] is None else dict(row['payloads'])
+            for row in descriptor_result.select(['id', 'payloads']).to_pylist()
+        }
+        output_descriptor = BlobDescriptor.deserialize(
+            descriptor_rows[5]['descriptor']
+        )
+        self.assertNotEqual(output_descriptor.uri, descriptor_path)
+        self.assertGreater(output_descriptor.offset, 0)
+        self.assertEqual(output_descriptor.length, len(descriptor_body))
+        output_blob = Blob.from_descriptor(
+            table.file_io.uri_reader_factory.create(output_descriptor.uri),
+            output_descriptor,
+        )
+        self.assertEqual(output_blob.to_data(), descriptor_body)
+
+        row_id_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits())
+        row_ids_by_id = {
+            row['id']: row['_ROW_ID']
+            for row in row_id_result.select(['id', '_ROW_ID']).to_pylist()
+        }
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['payloads'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids_by_id[2]], type=pa.int64()),
+            'payloads': pa.array(
+                [[('updated', b'updated-2'), ('null', None)]],
+                type=map_blob_type,
+            ),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+
+        update_files = [f for msg in update_messages for f in msg.new_files]
+        update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 2)
+        blob_fields = [field for field in table.fields if field.name == 'payloads']
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['payloads'],
+            full_fields=blob_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        update_blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertEqual(
+            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
+            1,
+        )
+
+        update_builder.new_commit().commit(update_messages)
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payloads'])
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            {
+                row['id']: None if row['payloads'] is None else dict(row['payloads'])
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: {'first': b'blob-1', 'null': None, 'empty': b''},
+                2: {'updated': b'updated-2', 'null': None},
+                3: {},
+                4: {'last': b'blob-4'},
+                5: {'descriptor': descriptor_body},
+                6: {'first': b'first', 'last': b'last'},
+            },
+        )
+
+    def test_map_blob_value_not_null(self):
+        map_blob_type = pa.map_(
+            pa.field('key', pa.string(), nullable=False),
+            pa.field('value', pa.large_binary(), nullable=False),
+        )
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        table_name = 'test_db.map_blob_value_not_null'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        valid_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payloads': pa.array(
+                [[('first', b'alpha'), ('empty', b'')], [], None],
+                type=map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(valid_data)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertFalse(result.schema.field('payloads').type.item_field.nullable)
+        self.assertEqual(
+            {
+                row['id']: None if row['payloads'] is None else dict(row['payloads'])
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: {'first': b'alpha', 'empty': b''},
+                2: {},
+                3: None,
+            },
+        )
+
+        nullable_map_type = pa.map_(pa.string(), pa.large_binary())
+        incompatible_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', nullable_map_type),
+        ])
+        incompatible_data = pa.Table.from_pydict({
+            'id': [4],
+            'payloads': pa.array([[('bad', None)]], type=nullable_map_type),
+        }, schema=incompatible_schema)
+        incompatible_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+            incompatible_writer.write_arrow(incompatible_data)
+        incompatible_writer.abort()
+
+        invalid_data = pa.Table.from_pydict({
+            'id': [5],
+            'payloads': pa.array([[('bad', None)]], type=map_blob_type),
+        }, schema=pa_schema)
+        invalid_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "does not allow null values"):
+            invalid_writer.write_arrow(invalid_data)
+        invalid_writer.abort()
+
+    def test_array_blob_element_not_null(self):
+        array_blob_type = pa.list_(
+            pa.field('item', pa.large_binary(), nullable=False)
+        )
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            },
+        )
+        table_name = 'test_db.array_blob_element_not_null'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        valid_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payloads': pa.array(
+                [[b'alpha', b''], [], None],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(valid_data)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertFalse(
+            result.schema.field('payloads').type.value_field.nullable
+        )
+        self.assertEqual(
+            {
+                row['id']: row['payloads']
+                for row in result.select(['id', 'payloads']).to_pylist()
+            },
+            {
+                1: [b'alpha', b''],
+                2: [],
+                3: None,
+            },
+        )
+
+        nullable_array_type = pa.list_(pa.large_binary())
+        incompatible_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', nullable_array_type),
+        ])
+        incompatible_data = pa.Table.from_pydict({
+            'id': [4],
+            'payloads': pa.array([[b'bad', None]], type=nullable_array_type),
+        }, schema=incompatible_schema)
+        incompatible_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "Input schema isn't consistent"):
+            incompatible_writer.write_arrow(incompatible_data)
+        incompatible_writer.abort()
+
+        invalid_data = pa.Table.from_pydict({
+            'id': [5],
+            'payloads': pa.array([[b'bad', None]], type=array_blob_type),
+        }, schema=pa_schema)
+        invalid_writer = table.new_batch_write_builder().new_write()
+        with self.assertRaisesRegex(ValueError, "does not allow null elements"):
+            invalid_writer.write_arrow(invalid_data)
+        invalid_writer.abort()
+
     def test_blob_update_single_row_at_first_position(self):
         from pypaimon import Schema
 
@@ -1328,6 +1875,89 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         }
         self.assertEqual(by_id[0], b'updated-0')
         self.assertEqual(by_id[9], b'blob-9')
+
+    def test_update_new_blob_column_writes_full_normal_range(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        table_name = 'test_db.blob_update_new_column'
+        normal_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(normal_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+        }, schema=normal_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        self.catalog.alter_table(
+            table_name,
+            [SchemaChange.add_column('blob_data', AtomicType('BLOB'))],
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        row_id_builder = table.new_read_builder().with_projection(
+            ['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits()).sort_by('id')
+        first_row_id = row_id_result.column('_ROW_ID')[0].as_py()
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([first_row_id], type=pa.int64()),
+            'blob_data': pa.array([b'updated-blob'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_blob_files = [
+            file
+            for message in update_messages
+            for file in message.new_files
+            if file.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].first_row_id, first_row_id)
+        self.assertEqual(update_blob_files[0].row_count, 3)
+
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['blob_data'],
+            full_fields=[table.field_dict['blob_data']],
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertEqual(blob_lengths.count(BlobFormatWriter.NULL_LENGTH), 2)
+        self.assertNotIn(BlobFormatWriter.PLACE_HOLDER_LENGTH, blob_lengths)
+
+        update_builder.new_commit().commit(update_messages)
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(
+            result.select(['id', 'blob_data']).to_pylist(),
+            [
+                {'id': 1, 'blob_data': b'updated-blob'},
+                {'id': 2, 'blob_data': None},
+                {'id': 3, 'blob_data': None},
+            ],
+        )
 
     def test_blob_update_all_rows_full_span(self):
         from pypaimon import Schema
@@ -1805,6 +2435,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             5: b'blob-5',
         })
 
+    @pytest.mark.python_plan
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema
@@ -2142,6 +2773,114 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 BlobDescriptor.is_blob_descriptor(value),
                 "Expected BlobDescriptor bytes when blob-as-descriptor=true"
             )
+
+    def test_blob_view_default_read_uses_upstream_file_io(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        class GuardedFileIO:
+            def __init__(self, wrapped, forbidden_uris):
+                self._wrapped = wrapped
+                self._forbidden_uris = forbidden_uris
+                self.forbidden_reads = []
+
+            def new_input_stream(self, path):
+                path = str(path)
+                if path in self._forbidden_uris:
+                    self.forbidden_reads.append(path)
+                    raise AssertionError(
+                        "Downstream file_io must not read upstream blob {}.".format(path)
+                    )
+                return self._wrapped.new_input_stream(path)
+
+            def __getattr__(self, name):
+                return getattr(self._wrapped, name)
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_guard_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_guard_source')
+        payloads = [b'guard-source-0', b'guard-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        source_commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(source_commit_messages)
+        writer.close()
+
+        source_blob_paths = {
+            str(f.file_path)
+            for msg in source_commit_messages
+            for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        }
+        self.assertGreater(len(source_blob_paths), 0)
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_guard_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_guard_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        all_target_files = [f for msg in target_commit_messages for f in msg.new_files]
+        self.assertFalse(
+            any(f.file_name.endswith('.blob') for f in all_target_files),
+            "Blob view fields should be stored inline without writing new blob files",
+        )
+
+        original_file_io = target_table.file_io
+        guarded_file_io = GuardedFileIO(original_file_io, source_blob_paths)
+        target_table.file_io = guarded_file_io
+        try:
+            read_builder = target_table.new_read_builder()
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            ).sort_by('id')
+        finally:
+            target_table.file_io = original_file_io
+
+        self.assertEqual(result.column('picture').to_pylist(), payloads)
+        self.assertEqual(guarded_file_io.forbidden_reads, [])
 
     def test_blob_view_resolve_disabled_preserves_references(self):
         from pypaimon import Schema
@@ -4454,7 +5193,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 [SchemaChange.rename_column('blob_col', 'blob_col_renamed')],
                 False
             )
-        self.assertIn('Cannot rename BLOB column', str(ctx.exception))
+        self.assertIn(
+            'Cannot rename BLOB, ARRAY<BLOB> or MAP<X, BLOB> column',
+            str(ctx.exception),
+        )
 
     def test_nested_field_named_blob_not_treated_as_blob(self):
         """Regression: a ROW field with a nested column whose name contains
@@ -4601,6 +5343,52 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
         self.assertEqual(result['id'], list(range(2000)))
         self.assertEqual(result['name'], ['updated'] * 2000)
+
+    def test_legacy_stored_descriptor_fields_keeps_dedicated_blob_layout(self):
+        """blob.stored-descriptor-fields must not switch Python to inline descriptors.
+
+        Master ignored that key and wrote dedicated .blob payloads. Head write
+        with the same option must keep that layout so old readers still see
+        payloads, and head read must not fail-fast on those bytes.
+        """
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.stored-descriptor-fields': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.legacy_stored_descriptor_fields', schema, False)
+        table = self.catalog.get_table('test_db.legacy_stored_descriptor_fields')
+
+        payload = b'legacy-dedicated-blob-payload'
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'picture': [payload],
+        }, schema=pa_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertGreaterEqual(len(blob_files), 1)
+        self.assertTrue(all(f.write_cols == ['picture'] for f in blob_files))
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('picture').to_pylist()[0], payload)
 
 
 class GetBlobTest(unittest.TestCase):

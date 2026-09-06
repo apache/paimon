@@ -19,21 +19,38 @@ import logging
 import os
 import shutil
 import threading
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pyarrow
 import pyarrow.fs as pafs
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.uri_reader import UriReaderFactory
 from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+
+def _file_uri_path(parsed, windows=None) -> str:
+    """Decode a file URI path, preserving Windows drives and UNC hosts."""
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        from nturl2path import url2pathname as windows_url2pathname
+        if parsed.netloc and not parsed.netloc.endswith(":"):
+            value = "//%s%s" % (parsed.netloc, parsed.path)
+        elif parsed.netloc:
+            value = "/%s%s" % (parsed.netloc, parsed.path)
+        else:
+            value = parsed.path
+        return windows_url2pathname(value)
+    if parsed.netloc and parsed.netloc != "localhost":
+        return "//%s%s" % (parsed.netloc, unquote(parsed.path))
+    return unquote(parsed.path)
 
 
 class LocalFileIO(FileIO):
@@ -62,13 +79,14 @@ class LocalFileIO(FileIO):
         
         if parsed.scheme == 'file' and parsed.netloc and parsed.netloc.endswith(':'):
             drive_letter = parsed.netloc.rstrip(':')
-            path_part = parsed.path.lstrip('/') if parsed.path else ''
+            path_part = unquote(parsed.path).lstrip('/') if parsed.path else ''
             if path_part:
                 return Path(f"{drive_letter}:/{path_part}")
             else:
                 return Path(f"{drive_letter}:")
         
-        local_path = parsed.path if parsed.scheme else path
+        local_path = (
+            _file_uri_path(parsed) if parsed.scheme == 'file' else path)
         
         if not local_path:
             return Path(".")
@@ -139,18 +157,16 @@ class LocalFileIO(FileIO):
         if file_path.is_file():
             results.append(self.get_file_status(path))
         elif file_path.is_dir():
-            try:
-                for item in file_path.iterdir():
-                    try:
-                        if path.startswith('file://'):
-                            item_path = f"file://{item}"
-                        else:
-                            item_path = str(item)
-                        results.append(self.get_file_status(item_path))
-                    except FileNotFoundError:
-                        pass
-            except PermissionError:
-                pass
+            for item in file_path.iterdir():
+                try:
+                    if path.startswith('file://'):
+                        item_path = item.absolute().as_uri()
+                    else:
+                        item_path = str(item)
+                    results.append(self.get_file_status(item_path))
+                except FileNotFoundError:
+                    # A child may disappear between listing and stat.
+                    pass
         
         return results
     
@@ -243,7 +259,7 @@ class LocalFileIO(FileIO):
         if parent and not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
         
-        temp_path = file_path.parent / f"{file_path.name}.{uuid.uuid4()}.tmp"
+        temp_path = Path(create_temp_path(str(file_path)))
         success = False
         try:
             with open(temp_path, 'w', encoding='utf-8') as f:
@@ -307,9 +323,8 @@ class LocalFileIO(FileIO):
     def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
         try:
-            import sys
             import pyarrow.orc as orc
-            
+
             file_path = self._to_file(path)
             parent = file_path.parent
             if parent and not parent.exists():
@@ -318,7 +333,9 @@ class LocalFileIO(FileIO):
             data = self._cast_time_columns_for_orc(data)
             
             with open(file_path, 'wb') as f:
-                if sys.version_info[:2] == (3, 6):
+                # ORC compression= was added in PyArrow 7.0; PyArrow 6 lacks it.
+                from pypaimon.filesystem.pyarrow_file_io import _pyarrow_lt_7
+                if _pyarrow_lt_7():
                     orc.write_table(data, f, **kwargs)
                 else:
                     orc.write_table(data, f, compression=compression, **kwargs)

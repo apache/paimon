@@ -35,4 +35,6 @@ object SparkTable {
   def of(table: Table): SparkTable = SparkTable(table)
 
   private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = false
+
+  def supportsV2DeltaOps(sparkTable: SparkTable): Boolean = false
 }

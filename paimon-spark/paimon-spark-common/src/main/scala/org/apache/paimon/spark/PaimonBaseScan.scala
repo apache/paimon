@@ -21,18 +21,20 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder, VectorSearch}
+import org.apache.paimon.spark.PostponeMergeOnRead.MergePlan
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonStatistics, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{DataTableBatchScan, InnerTableScan, Split}
+import org.apache.paimon.table.source.{InnerTableScan, Split}
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
+import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.Batch
+import org.apache.spark.sql.connector.read.{Batch, Statistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 
 import scala.collection.JavaConverters._
@@ -42,7 +44,9 @@ abstract class PaimonBaseScan(table: InnerTable)
   with PaimonSupportsRuntimeFiltering
   with SQLConfHelper {
 
-  private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
+  private[spark] lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
+
+  @transient private lazy val postponeMergeOnRead = new PostponeMergeOnRead(this)
 
   protected def getInputSplits: Array[Split] = {
     val scan = readBuilder
@@ -52,15 +56,17 @@ abstract class PaimonBaseScan(table: InnerTable)
       .withMetricRegistry(paimonMetricsRegistry)
 
     val plan = scan.plan()
+    registerReadProtectionTagCleanup(scan.readProtectionTagName)
+    plan.splits().asScala.toArray
+  }
 
-    Option(scan.readProtectionTagName).foreach {
+  final private[spark] def registerReadProtectionTagCleanup(tagName: String): Unit = {
+    Option(tagName).foreach {
       name =>
         BatchReadTagCleanupListener
           .getOrCreate(SparkSession.active)
           .registerCleanup(name, table)
     }
-
-    plan.splits().asScala.toArray
   }
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
@@ -82,26 +88,16 @@ abstract class PaimonBaseScan(table: InnerTable)
     null
   }
 
+  override def filterAttributes(): Array[NamedReference] = {
+    if (postponeMergeOnRead.enabled) Array.empty else super.filterAttributes()
+  }
+
   private def evalVectorSearch(): GlobalIndexResult = {
-    val vectorSearch = pushedVectorSearch.get
-    val vectorSearchBuilder =
-      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
-        new SparkVectorSearchBuilderImpl(table)
-      } else {
-        table.newVectorSearchBuilder()
-      }
-    val vectorBuilder = vectorSearchBuilder
-      .withVector(vectorSearch.vector())
-      .withVectorColumn(vectorSearch.fieldName())
-      .withLimit(vectorSearch.limit())
-      .withOptions(vectorSearch.options())
-    if (pushedPartitionFilters.nonEmpty) {
-      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
-    }
-    if (pushedDataFilters.nonEmpty) {
-      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
-    }
-    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+    PaimonBaseScan.evalVectorSearch(
+      table,
+      pushedVectorSearch.get,
+      pushedPartitionFilters,
+      pushedDataFilters)
   }
 
   private def evalHybridSearch(): GlobalIndexResult = {
@@ -129,7 +125,7 @@ abstract class PaimonBaseScan(table: InnerTable)
     val fullTextSearch = pushedFullTextSearch.get
     val ftBuilder = table
       .newFullTextSearchBuilder()
-      .withQuery(fullTextSearch.query())
+      .withQuery(fullTextSearch.column(), fullTextSearch.query())
       .withLimit(fullTextSearch.limit())
     if (pushedPartitionFilters.nonEmpty) {
       ftBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
@@ -143,12 +139,37 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   override def toBatch: Batch = {
-    ensureNoFullScan()
-    super.toBatch
+    if (postponeMergeOnRead.enabled) {
+      throw new UnsupportedOperationException(
+        "Postpone merge-on-read must be executed by PostponeMergeOnReadExec.")
+    } else {
+      ensureNoFullScan()
+      super.toBatch
+    }
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
+    if (PostponeMergeOnRead.enabled(table)) {
+      throw new UnsupportedOperationException(
+        "Option 'postpone.merge-on-read' is only supported for batch reads.")
+    }
     new PaimonMicroBatchStream(table.asInstanceOf[DataTable], readBuilder, checkpointLocation)
+  }
+
+  override def estimateStatistics: Statistics = {
+    if (postponeMergeOnRead.enabled) {
+      val splits =
+        planPostponeMerge()
+          .map(_.corePlan.splits().asScala.toArray)
+          .getOrElse(Array.empty[Split])
+      PaimonStatistics(splits, readTableRowType, table.rowType(), table.statistics())
+    } else {
+      super.estimateStatistics
+    }
+  }
+
+  final private[spark] def planPostponeMerge(): Option[MergePlan] = {
+    postponeMergeOnRead.plan()
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {
@@ -165,7 +186,9 @@ abstract class PaimonBaseScan(table: InnerTable)
     paimonMetricsRegistry.buildSparkScanMetrics()
   }
 
-  private def ensureNoFullScan(): Unit = {
+  final protected def ensureNoFullScan(): Unit = ensureNoFullScan(0L)
+
+  final private[spark] def ensureNoFullScan(externallyReadFiles: Long): Unit = {
     if (OptionUtils.readAllowFullScan()) {
       return
     }
@@ -175,10 +198,38 @@ abstract class PaimonBaseScan(table: InnerTable)
         val skippedFiles = paimonMetricsRegistry.buildSparkScanMetrics().collectFirst {
           case m: PaimonSkippedTableFilesTaskMetric => m.value
         }
-        if (skippedFiles.contains(0)) {
+        if (skippedFiles.exists(_ <= externallyReadFiles)) {
           throw new RuntimeException("Full scan is not supported.")
         }
       case _ =>
     }
+  }
+}
+
+object PaimonBaseScan {
+
+  private[spark] def evalVectorSearch(
+      table: InnerTable,
+      vectorSearch: VectorSearch,
+      pushedPartitionFilters: Seq[PartitionPredicate],
+      pushedDataFilters: Seq[Predicate]): GlobalIndexResult = {
+    val vectorSearchBuilder =
+      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
+        new SparkVectorSearchBuilderImpl(table)
+      } else {
+        table.newVectorSearchBuilder()
+      }
+    val vectorBuilder = vectorSearchBuilder
+      .withVector(vectorSearch.vector())
+      .withVectorColumn(vectorSearch.fieldName())
+      .withLimit(vectorSearch.limit())
+      .withOptions(vectorSearch.options())
+    if (pushedPartitionFilters.nonEmpty) {
+      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
   }
 }

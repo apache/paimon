@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import pyarrow as pa
 
@@ -84,6 +85,25 @@ class FileStoreTableTest(unittest.TestCase):
 
         self.assertIn("Cannot change bucket number", str(context.exception))
 
+    def test_copy_without_time_travel_preserves_resolved_schema(self):
+        current_schema = self.table.table_schema
+        with mock.patch.object(
+                self.table,
+                "_try_time_travel",
+                side_effect=AssertionError("must not resolve time travel again")):
+            copied_table = self.table.copy_without_time_travel({
+                CoreOptions.SCAN_MODE.key(): "from-snapshot",
+                CoreOptions.SCAN_SNAPSHOT_ID.key(): "1",
+            })
+
+        self.assertEqual(current_schema.fields, copied_table.table_schema.fields)
+        self.assertEqual(current_schema.id, copied_table.table_schema.id)
+        self.assertEqual(
+            "1",
+            copied_table.table_schema.options[
+                CoreOptions.SCAN_SNAPSHOT_ID.key()],
+        )
+
     def test_consumer_manager(self):
         """Test that FileStoreTable has consumer_manager method."""
         # Get consumer_manager
@@ -112,7 +132,7 @@ class FileStoreTableTest(unittest.TestCase):
         """Test consumer_manager when branch is encoded in the identifier."""
         branch_name = "feature_branch"
 
-        # Create a regular table; the branch is supplied later via the
+        # Create a regular table and branch, then select the branch via the
         # branch-encoded identifier (Java-aligned routing).
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
@@ -120,6 +140,7 @@ class FileStoreTableTest(unittest.TestCase):
             options={CoreOptions.BUCKET.key(): "2"},
         )
         self.catalog.create_table('default.test_branch_table', schema, True)
+        self.catalog.create_branch('default.test_branch_table', branch_name)
 
         # Access the table with a branch-encoded identifier.
         branch_table = self.catalog.get_table(
@@ -267,6 +288,8 @@ class FileStoreTableTest(unittest.TestCase):
             options={CoreOptions.BUCKET.key(): "2"},
         )
         self.catalog.create_table('default.test_changelog_branch_table', schema, False)
+        self.catalog.create_branch(
+            'default.test_changelog_branch_table', branch_name)
         branch_table = self.catalog.get_table(
             'default.test_changelog_branch_table$branch_{}'.format(branch_name))
 
@@ -316,6 +339,7 @@ class FileStoreTableTest(unittest.TestCase):
             options={CoreOptions.BUCKET.key(): "2"},
         )
         self.catalog.create_table('default.test_current_branch', schema, False)
+        self.catalog.create_branch('default.test_current_branch', branch_name)
         branch_table = self.catalog.get_table(
             'default.test_current_branch$branch_{}'.format(branch_name))
         self.assertEqual(branch_table.current_branch(), branch_name)

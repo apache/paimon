@@ -25,16 +25,26 @@ from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
-from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser,
+    VectorType,
+    is_blob_file_field,
+    is_blob_type,
+)
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobConsumer,
+    video_payload_descriptor,
+)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.row_utils import (
     require_columns,
     row_to_named_values,
     row_values_to_arrow_table,
-    value_for_arrow,
 )
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.video_group import VideoGroupRollingPolicy
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +54,7 @@ class DedicatedFormatWriter(DataWriter):
 
     Splits incoming data three ways:
     - Normal columns → standard data files (.parquet / .orc / .vortex / …)
-    - Blob columns (large_binary) → .blob files
+    - Blob columns (large_binary) → .blob or .video files
     - Vector columns (when vector.file.format is configured) → .vector.<format> files
 
     This mirrors Java's DedicatedFormatRollingFileWriter.
@@ -66,6 +76,7 @@ class DedicatedFormatWriter(DataWriter):
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
         self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
+        configured_video_fields = CoreOptions.video_frame_fields(self.options)
         self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
@@ -76,8 +87,18 @@ class DedicatedFormatWriter(DataWriter):
                 "Fields in 'blob-descriptor-field' must be blob fields in schema. "
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
             )
+        inline_nested_blob_fields = [
+            field.name
+            for field in self.table.table_schema.fields
+            if field.name in self.blob_inline_fields and not is_blob_type(field.type)
+        ]
+        if inline_nested_blob_fields:
+            raise ValueError(
+                "ARRAY<BLOB> and MAP<X, BLOB> are only supported by 'blob-field'. "
+                f"Invalid inline blob fields: {sorted(inline_nested_blob_fields)}"
+            )
 
-        # Blob fields that should still be written to `.blob` files.
+        # Blob fields that should still be written to dedicated BLOB files.
         self.blob_file_column_names = [
             col for col in self.blob_column_names if col not in self.blob_inline_fields
         ]
@@ -110,18 +131,42 @@ class DedicatedFormatWriter(DataWriter):
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set
             ]
+        self.video_frame_columns = [
+            column for column in self.blob_file_column_names
+            if column in configured_video_fields
+        ]
         normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
             field for field in self.table.table_schema.fields if field.name in normal_name_set
         ]
-        self.write_cols = self.normal_column_names
+        all_normal_column_names = [
+            col for col in all_column_names if col not in dedicated_set
+        ]
+        self.write_cols = (
+            None
+            if options.data_evolution_enabled(False)
+            and options.data_evolution_write_cols_optimization_enabled(False)
+            and self.normal_column_names == all_normal_column_names
+            else self.normal_column_names
+        )
 
         # State management for blob writer
         self.record_count = 0
         self.closed = False
+        self._video_group_policy = (
+            VideoGroupRollingPolicy()
+            if self.video_frame_columns
+            else None
+        )
 
-        # Track pending data for normal data only
-        self.pending_normal_data: Optional[pa.Table] = None
+        # Normal columns are buffered separately from the blob and vector
+        # columns, which their own writers own.
+        self._normal_buffer = WriteBuffer(self._merge_normal_data)
+        self._committed_files_to_delete_on_abort: List[DataFileMeta] = []
+        # A normal data file that landed while a later phase of the same flush
+        # failed. Held so the retry resumes at that phase instead of writing the
+        # rows a second time.
+        self._pending_normal_meta: Optional[DataFileMeta] = None
 
         # Initialize blob writers for each blob-file column.
         from pypaimon.write.writer.blob_writer import BlobWriter
@@ -135,6 +180,7 @@ class DedicatedFormatWriter(DataWriter):
                 blob_column=blob_column,
                 options=options,
                 blob_consumer=blob_consumer,
+                video=blob_column in configured_video_fields,
             )
 
         # Initialize vector writer when vector.file.format is configured.
@@ -162,12 +208,11 @@ class DedicatedFormatWriter(DataWriter):
         )
 
     def _get_blob_columns_from_schema(self) -> List[str]:
-        blob_columns = []
-        for field in self.table.table_schema.fields:
-            type_str = str(field.type).lower()
-            if 'blob' in type_str:
-                blob_columns.append(field.name)
-
+        blob_columns = [
+            field.name
+            for field in self.table.table_schema.fields
+            if is_blob_file_field(field)
+        ]
         if len(blob_columns) == 0:
             raise ValueError("No blob field found in table schema.")
         return blob_columns
@@ -186,41 +231,51 @@ class DedicatedFormatWriter(DataWriter):
         return self._merge_normal_data(existing_data, new_data)
 
     def write(self, data: pa.RecordBatch):
+        # Outside the try on purpose: rejecting the write must not abort the
+        # writer, or the unfinished flush would lose its chance to be retried.
+        self._require_finished_flush()
         try:
-            # Split data into normal, blob, and vector parts
-            normal_data, blob_data_map, vector_data = self._split_data(data)
-            self._validate_inline_stored_fields_input(data)
+            if self.video_frame_columns:
+                self._write_video_batches(data)
+                return
 
-            # Process and accumulate normal data (may be None for partial writes)
-            processed_normal = self._process_normal_data(normal_data)
-            if processed_normal is not None:
-                if self.pending_normal_data is None:
-                    self.pending_normal_data = processed_normal
-                else:
-                    self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
-
-            # Write blob-file columns to dedicated blob writers.
-            for blob_column, blob_data in blob_data_map.items():
-                if blob_data is not None and blob_data.num_rows > 0:
-                    self.blob_writers[blob_column].write(blob_data)
-
-            # Write vector columns to dedicated vector writer.
-            if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
-                self.vector_writer.write(vector_data)
-
-            self.record_count += data.num_rows
-
-            # Check if normal data rolling is needed
-            if self._should_roll_normal():
-                # When normal data rolls, close both writers and fetch blob metadata
-                self._close_current_writers()
+            self._write_bounded_batches(data)
 
         except Exception as e:
             logger.error("Exception occurs when writing data. Cleaning up.", exc_info=e)
             self.abort()
             raise e
 
+    def _write_batch(self, data: pa.RecordBatch):
+        if data.num_rows == 0:
+            return
+
+        # Split data into normal, blob, and vector parts
+        normal_data, blob_data_map, vector_data = self._split_data(data)
+        self._validate_inline_stored_fields_input(data)
+
+        # Process and accumulate normal data (may be None for partial writes)
+        processed_normal = self._process_normal_data(normal_data)
+        if processed_normal is not None:
+            self._normal_buffer.append(processed_normal)
+
+        # Write blob-file columns to dedicated blob writers.
+        for blob_column, blob_data in blob_data_map.items():
+            if blob_data is not None and blob_data.num_rows > 0:
+                self.blob_writers[blob_column].write(blob_data)
+
+        # Write vector columns to dedicated vector writer.
+        if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
+            self.vector_writer.write(vector_data)
+
+        self.record_count += data.num_rows
+
+        # Check if normal data rolling is needed
+        if self._should_roll_normal():
+            self._roll_or_defer_for_video_group()
+
     def write_row(self, row):
+        self._require_finished_flush()
         try:
             values_by_name = row_to_named_values(
                 row, self.table.table_schema.fields)
@@ -230,6 +285,14 @@ class DedicatedFormatWriter(DataWriter):
                 + list(self.vector_write_columns)
             )
             require_columns(values_by_name, required_columns, "write_row")
+
+            if self.video_frame_columns:
+                next_group = self._video_group(
+                    values_by_name[column]
+                    for column in self.video_frame_columns
+                )
+                self._roll_before_video_group(next_group)
+                self._video_group_policy.record(next_group)
 
             if self.normal_column_names:
                 normal_values = dict(values_by_name)
@@ -242,13 +305,10 @@ class DedicatedFormatWriter(DataWriter):
                     self.table.table_schema.fields,
                     self.normal_column_names,
                 ).to_batches()[0]
+                self._validate_inline_stored_fields_input(normal_data)
                 processed_normal = self._process_normal_data(normal_data)
                 if processed_normal is not None:
-                    if self.pending_normal_data is None:
-                        self.pending_normal_data = processed_normal
-                    else:
-                        self.pending_normal_data = self._merge_normal_data(
-                            self.pending_normal_data, processed_normal)
+                    self._normal_buffer.append(processed_normal)
 
             for blob_column in self.blob_file_column_names:
                 arrow_type = PyarrowFieldParser.from_paimon_type(
@@ -266,7 +326,7 @@ class DedicatedFormatWriter(DataWriter):
 
             self.record_count += 1
             if self._should_roll_normal():
-                self._close_current_writers()
+                self._roll_or_defer_for_video_group()
 
         except Exception as e:
             logger.error("Exception occurs when writing row. Cleaning up.", exc_info=e)
@@ -275,8 +335,6 @@ class DedicatedFormatWriter(DataWriter):
 
     def _normal_row_value(self, field_name: str, value):
         if field_name in self.blob_descriptor_fields and value is not None:
-            from pypaimon.table.row.blob import Blob
-
             if isinstance(value, Blob):
                 try:
                     return value.to_descriptor().serialize()
@@ -294,7 +352,7 @@ class DedicatedFormatWriter(DataWriter):
                 return value.view_struct.serialize()
             return value
 
-        return value_for_arrow(value)
+        return value
 
     def prepare_commit(self) -> List[DataFileMeta]:
         # Close any remaining data
@@ -314,7 +372,7 @@ class DedicatedFormatWriter(DataWriter):
             raise
         finally:
             self.closed = True
-            self.pending_normal_data = None
+            self._normal_buffer.reset()
 
     def abort(self):
         """Abort all writers and clean up resources."""
@@ -322,29 +380,49 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer.abort()
         if self.vector_writer is not None:
             self.vector_writer.abort()
-        committed_non_blob_files = [
-            file_meta for file_meta in self.committed_files
-            if not DataFileMeta.is_blob_file(file_meta.file_name)
-        ]
-        self._delete_committed_files(committed_non_blob_files)
-        self.pending_normal_data = None
-        self.pending_data = None
+        # An unpublished normal file is already in the delete list, added when it
+        # landed, so there is nothing left to resume.
+        self._pending_normal_meta = None
+        self._delete_committed_files(self._committed_files_to_delete_on_abort)
+        self._normal_buffer.reset()
+        self._buffer.reset()
         self.committed_files.clear()
+        self._committed_files_to_delete_on_abort.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
-            pa.RecordBatch, Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
+            Optional[pa.RecordBatch], Dict[str, pa.RecordBatch], Optional[pa.RecordBatch]]:
         """Split data into normal, blob, and vector parts based on column names."""
-        normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
+        normal_data = (
+            self._project_columns(data, self.normal_column_names)
+            if self.normal_column_names else None
+        )
         blob_data_map = {
-            blob_column: data.select([blob_column]) for blob_column in self.blob_file_column_names
+            blob_column: self._project_columns(data, [blob_column])
+            for blob_column in self.blob_file_column_names
         }
         vector_data = (
-            pa.RecordBatch.from_arrays(
-                [data.column(name) for name in self.vector_write_columns],
-                names=self.vector_write_columns,
-            ) if self.vector_write_columns else None
+            self._project_columns(data, self.vector_write_columns)
+            if self.vector_write_columns else None
         )
         return normal_data, blob_data_map, vector_data
+
+    @staticmethod
+    def _project_columns(data: pa.RecordBatch, column_names: List[str]) -> pa.RecordBatch:
+        indices = [data.schema.get_field_index(name) for name in column_names]
+        missing_columns = [
+            name for name, index in zip(column_names, indices) if index < 0
+        ]
+        if missing_columns:
+            raise KeyError(f"Columns not found in record batch: {missing_columns}")
+
+        projected_schema = pa.schema(
+            [data.schema.field(index) for index in indices],
+            metadata=data.schema.metadata,
+        )
+        return pa.RecordBatch.from_arrays(
+            [data.column(index) for index in indices],
+            schema=projected_schema,
+        )
 
     def _validate_inline_stored_fields_input(self, data: pa.RecordBatch):
         if not self.blob_inline_fields:
@@ -368,16 +446,26 @@ class DedicatedFormatWriter(DataWriter):
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     )
+                descriptor_bytes = bytes(value)
+                if descriptor_bytes:
+                    version = descriptor_bytes[0]
+                    if version < 1 or version > BlobDescriptor.CURRENT_VERSION:
+                        raise ValueError(
+                            f"blob-descriptor-field requires BlobDescriptor version "
+                            f"in [1, {BlobDescriptor.CURRENT_VERSION}], but found "
+                            f"{version}."
+                        )
                 try:
-                    descriptor_bytes = bytes(value)
-                    descriptor = BlobDescriptor.deserialize(descriptor_bytes)
-                    if descriptor.serialize() != descriptor_bytes:
-                        raise ValueError("Descriptor payload contains trailing bytes.")
+                    BlobDescriptor.deserialize(descriptor_bytes)
                 except Exception as e:
                     raise ValueError(
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
+                # serialize() always emits CURRENT_VERSION, so a round-trip
+                # would reject exact v1 bytes. Check exact wire length instead.
+                if BlobDescriptor.parse_if_serialized(descriptor_bytes) is None:
+                    raise ValueError("Descriptor payload contains trailing bytes.")
 
         for field_name in self.blob_view_fields:
             if field_name not in data.schema.names:
@@ -418,41 +506,157 @@ class DedicatedFormatWriter(DataWriter):
         return pa.concat_tables([existing_data, new_data])
 
     def _should_roll_normal(self) -> bool:
-        if self.pending_normal_data is None:
+        # Runs on every write, so it answers from the running counts only.
+        if self._normal_buffer.is_empty:
             return False
+
+        if self._normal_buffer.num_rows >= self.target_file_row_num:
+            return True
 
         # Check rolling condition periodically (every CHECK_ROLLING_RECORD_CNT records)
         if self.record_count % self.CHECK_ROLLING_RECORD_CNT != 0:
             return False
 
         # Check if normal data exceeds target size
-        current_size = self.pending_normal_data.nbytes
-        return current_size > self.target_file_size
+        return self._normal_buffer.nbytes > self.target_file_size
+
+    def _roll_or_defer_for_video_group(self):
+        if self._video_group_policy is not None and self._video_group_policy.defer_roll():
+            return
+        self._close_current_writers()
+
+    def _roll_before_video_group(self, next_group):
+        if (
+            self._video_group_policy is not None
+            and self._video_group_policy.should_roll_before(next_group)
+        ):
+            self._close_current_writers()
+
+    def _write_video_batches(self, data: pa.RecordBatch):
+        for batch, group in self._video_group_runs(data):
+            self._roll_before_video_group(group)
+            self._video_group_policy.record(group)
+            if group is None:
+                self._write_bounded_batches(batch)
+            else:
+                self._write_batch(batch)
+
+    def _write_bounded_batches(self, data: pa.RecordBatch):
+        offset = 0
+        # _write_batch keeps normal/blob/vector pending rows in lockstep
+        # and closes all writers when the common row limit is reached.
+        while offset < data.num_rows:
+            capacity = self.target_file_row_num - self.pending_row_count
+            if capacity <= 0:
+                self._close_current_writers()
+                capacity = self.target_file_row_num
+            length = min(capacity, data.num_rows - offset)
+            self._write_batch(data.slice(offset, length))
+            offset += length
+
+    def _video_group_runs(self, data: pa.RecordBatch):
+        column_indices = [
+            data.schema.get_field_index(column)
+            for column in self.video_frame_columns
+        ]
+        missing = [
+            column for column, index
+            in zip(self.video_frame_columns, column_indices)
+            if index < 0
+        ]
+        if missing:
+            raise KeyError(f"Video columns were not found in the record batch: {missing}")
+        if data.num_rows == 0:
+            return
+
+        columns = [data.column(index) for index in column_indices]
+        start = 0
+        current_group = self._video_group(column[0] for column in columns)
+        for index in range(1, data.num_rows):
+            next_group = self._video_group(column[index] for column in columns)
+            if next_group != current_group:
+                yield data.slice(start, index - start), current_group
+                start = index
+                current_group = next_group
+        yield data.slice(start, data.num_rows - start), current_group
+
+    @staticmethod
+    def _video_group(values):
+        group = tuple(video_payload_descriptor(value) for value in values)
+        return group if any(value is not None for value in group) else None
+
+    @property
+    def pending_row_count(self) -> int:
+        # Overrides the base property, which reads a buffer this writer never
+        # fills. Normal, blob and vector rows are kept in lockstep, so any half
+        # answers for all of them; the sidecars are asked only when the table
+        # has no normal columns at all.
+        if not self._normal_buffer.is_empty:
+            return self._normal_buffer.num_rows
+        for blob_writer in self.blob_writers.values():
+            if blob_writer.current_writer is not None:
+                return blob_writer.current_writer.row_count
+        if self.vector_writer is not None:
+            # Running count, not a folded buffer: this runs on every write.
+            return self.vector_writer.pending_row_count
+        return 0
 
     def _close_current_writers(self):
         """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
-        normal_meta = None
-        if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
-            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
-            self.committed_files.append(normal_meta)
+        # A flush spans the normal file and every blob/vector sidecar, and the
+        # sidecar writers drain their own buffers as they go, so their half cannot
+        # be replayed from scratch. Two rules make a retry resume rather than
+        # restart: the normal rows stay buffered until their file lands, and once
+        # it has landed the file is remembered instead of the rows. Nothing
+        # reaches ``committed_files`` until every phase has succeeded, so a retry
+        # never finds a half-published flush.
+        normal_meta = self._pending_normal_meta
+        if normal_meta is None:
+            normal_data = self._normal_buffer.materialize()
+            if normal_data is not None and normal_data.num_rows > 0:
+                normal_meta = self._write_normal_data_to_file(normal_data)
+                self._pending_normal_meta = normal_meta
+                # Tracked for abort right away: until the flush publishes it, this
+                # file is in no other list.
+                self._committed_files_to_delete_on_abort.append(normal_meta)
+            self._normal_buffer.reset()
 
         blob_metas = []
+        deletable_blob_metas = []
         for blob_column in self.blob_file_column_names:
-            writer_metas = self.blob_writers[blob_column].prepare_commit()
+            blob_writer = self.blob_writers[blob_column]
+            writer_metas = blob_writer.prepare_commit()
             if normal_meta is not None:
                 self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
-        self.committed_files.extend(blob_metas)
+            if blob_writer.delete_file_upon_abort():
+                deletable_blob_metas.extend(writer_metas)
 
         vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
             if vector_metas and normal_meta is not None:
                 self._validate_consistency(normal_meta, vector_metas, 'vector')
-            self.committed_files.extend(vector_metas)
+
+        # Every phase landed; publish in order: normal, blob, vector.
+        if normal_meta is not None:
+            self.committed_files.append(normal_meta)
+        self.committed_files.extend(blob_metas)
+        self.committed_files.extend(vector_metas)
+        self._committed_files_to_delete_on_abort.extend(deletable_blob_metas)
+        self._committed_files_to_delete_on_abort.extend(vector_metas)
+        # The sub-writers' metas are cleared only now: before the flush completes,
+        # a retry has to be able to harvest the same ones again, and an abort has
+        # to find them so each sub-writer can apply its own delete policy.
+        for blob_column in self.blob_file_column_names:
+            self.blob_writers[blob_column].committed_files.clear()
+        if self.vector_writer is not None:
             self.vector_writer.committed_files.clear()
 
-        self.pending_normal_data = None
+        self._pending_normal_meta = None
+        self.record_count = 0
+        if self._video_group_policy is not None:
+            self._video_group_policy.reset()
 
         if normal_meta is not None or blob_metas or vector_metas:
             normal_name = normal_meta.file_name if normal_meta is not None else '<none>'

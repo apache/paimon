@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.FlinkCatalogOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.jdbc.JdbcCatalogFactory;
@@ -138,23 +139,26 @@ public class LineageUtils {
 
     @VisibleForTesting
     static String resolveNameByMetastore(Table table, @Nullable String defaultName) {
-        if (defaultName != null) {
-            return defaultName;
-        }
-
         CatalogContext ctx = catalogContext(table);
         if (ctx != null) {
             Options catalogOptions = ctx.options();
-            // If jdbc metastore is used, use catalog-key as the catalog identifier.
-            if (JdbcCatalogFactory.IDENTIFIER.equals(
-                    catalogOptions.get(CatalogOptions.METASTORE))) {
+            // Use catalog-key as the identifier when explicitly opted-in via config,
+            // or when no explicit name is provided (DataStream API path).
+            boolean useCatalogKey =
+                    defaultName == null
+                            || catalogOptions.get(FlinkCatalogOptions.LINEAGE_USE_CATALOG_KEY);
+            if (useCatalogKey
+                    && JdbcCatalogFactory.IDENTIFIER.equals(
+                            catalogOptions.get(CatalogOptions.METASTORE))) {
                 String catalogKeyValue = catalogOptions.get(JdbcCatalogOptions.CATALOG_KEY);
                 if (!StringUtils.isNullOrWhitespaceOnly(catalogKeyValue)) {
                     return catalogKeyValue + "." + table.fullName();
                 }
             }
         }
-        return DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
+        return defaultName != null
+                ? defaultName
+                : DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
     }
 
     /**

@@ -32,6 +32,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 /**
  * Columnar row to support access to vector column data. It is a row view in {@link
@@ -149,6 +150,15 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         return vectorizedColumnBatch.getBinary(rowId, pos);
     }
 
+    /** Returns a view of the binary value without copying its column-vector bytes. */
+    public ByteBuffer getBinaryBuffer(int pos) {
+        return vectorizedColumnBatch.getByteBuffer(rowId, pos);
+    }
+
+    BytesColumnVector.Bytes getByteArray(int pos) {
+        return vectorizedColumnBatch.getByteArray(rowId, pos);
+    }
+
     @Override
     public Variant getVariant(int pos) {
         return vectorizedColumnBatch.getVariant(rowId, pos);
@@ -166,7 +176,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public InternalArray getArray(int pos) {
-        return vectorizedColumnBatch.getArray(rowId, pos);
+        InternalArray array = vectorizedColumnBatch.getArray(rowId, pos);
+        if (array instanceof ColumnarArray) {
+            ((ColumnarArray) array).setFileIO(fileIO);
+        }
+        return array;
     }
 
     @Override
@@ -176,7 +190,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public InternalMap getMap(int pos) {
-        return vectorizedColumnBatch.getMap(rowId, pos);
+        InternalMap map = vectorizedColumnBatch.getMap(rowId, pos);
+        if (map instanceof ColumnarMap) {
+            ((ColumnarMap) map).setFileIO(fileIO);
+        }
+        return map;
     }
 
     @Override

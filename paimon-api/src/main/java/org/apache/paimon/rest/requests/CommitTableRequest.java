@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Request for committing snapshot to table. */
@@ -34,11 +36,16 @@ import java.util.List;
 public class CommitTableRequest implements RESTRequest {
 
     private static final String FIELD_TABLE_ID = "tableId";
+    private static final String FIELD_BASE_SNAPSHOT_UUID = "baseSnapshotUuid";
     private static final String FIELD_SNAPSHOT = "snapshot";
     private static final String FIELD_STATISTICS = "statistics";
 
     @JsonProperty(FIELD_TABLE_ID)
     private final String tableId;
+
+    @JsonProperty(FIELD_BASE_SNAPSHOT_UUID)
+    @Nullable
+    private final String baseSnapshotUuid;
 
     @JsonProperty(FIELD_SNAPSHOT)
     private final Snapshot snapshot;
@@ -49,9 +56,11 @@ public class CommitTableRequest implements RESTRequest {
     @JsonCreator
     public CommitTableRequest(
             @JsonProperty(FIELD_TABLE_ID) String tableId,
+            @JsonProperty(FIELD_BASE_SNAPSHOT_UUID) @Nullable String baseSnapshotUuid,
             @JsonProperty(FIELD_SNAPSHOT) Snapshot snapshot,
             @JsonProperty(FIELD_STATISTICS) List<PartitionStatistics> statistics) {
         this.tableId = tableId;
+        this.baseSnapshotUuid = baseSnapshotUuid;
         this.snapshot = snapshot;
         this.statistics = statistics;
     }
@@ -59,6 +68,12 @@ public class CommitTableRequest implements RESTRequest {
     @JsonGetter(FIELD_TABLE_ID)
     public String getTableId() {
         return tableId;
+    }
+
+    @JsonGetter(FIELD_BASE_SNAPSHOT_UUID)
+    @Nullable
+    public String getBaseSnapshotUuid() {
+        return baseSnapshotUuid;
     }
 
     @JsonGetter(FIELD_SNAPSHOT)

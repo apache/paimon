@@ -21,96 +21,55 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.lookup.FullCacheLookupTable;
+import org.apache.paimon.flink.lookup.LookupFileStoreTable;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.ChainTableFileStoreTable;
 import org.apache.paimon.table.ChainTableStreamScan;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.ArrayList;
+import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for chain table using Flink SQL. */
-public class FlinkChainTableITCase extends CatalogITCaseBase {
+public class FlinkChainTableITCase extends FlinkChainTableITCaseBase {
 
-    private List<String> collectResult(String query) throws Exception {
-        List<String> result = new ArrayList<>();
-        try (CloseableIterator<Row> it = tEnv.executeSql(query).collect()) {
-            while (it.hasNext()) {
-                result.add(it.next().toString());
-            }
-        }
-        return result;
-    }
-
-    private void createChainTable(String tableName) {
-        sql(
-                "CREATE TABLE %s ("
-                        + "  t1 BIGINT,"
-                        + "  t2 BIGINT,"
-                        + "  t3 STRING,"
-                        + "  dt STRING"
-                        + ") PARTITIONED BY (dt) WITH ("
-                        + "  'primary-key' = 'dt,t1',"
-                        + "  'bucket-key' = 't1',"
-                        + "  'bucket' = '2',"
-                        + "  'sequence.field' = 't2',"
-                        + "  'merge-engine' = 'deduplicate',"
-                        + "  'chain-table.enabled' = 'true',"
-                        + "  'partition.timestamp-pattern' = '$dt',"
-                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
-                        + ")",
-                tableName);
-    }
-
-    private void setupChainTableBranches(String tableName) {
-        sql("CALL sys.create_branch('%s.%s', 'snapshot')", tEnv.getCurrentDatabase(), tableName);
-        sql("CALL sys.create_branch('%s.%s', 'delta')", tEnv.getCurrentDatabase(), tableName);
-
-        sql(
-                "ALTER TABLE %s SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta'"
-                        + ")",
-                tableName);
-        sql(
-                "ALTER TABLE `%s$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta'"
-                        + ")",
-                tableName);
-        sql(
-                "ALTER TABLE `%s$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta'"
-                        + ")",
-                tableName);
+    @SuppressWarnings("unused")
+    static boolean isFlink2OrLater() {
+        return isFlinkVersionGreaterThanOrEqualTo("2.0");
     }
 
     @Test
@@ -266,21 +225,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_hourly', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_hourly', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_hourly SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_hourly$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_hourly$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_hourly");
 
         // Write main branch
         sql(
@@ -414,21 +359,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_partial', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_partial', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_partial SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_partial$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_partial$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_partial");
 
         // Write main branch
         sql(
@@ -533,21 +464,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'chain-table.chain-partition-keys' = 'dt'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_test_group', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_test_group', 'delta')", db);
-        sql(
-                "ALTER TABLE chain_test_group SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_group$branch_snapshot` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
-        sql(
-                "ALTER TABLE `chain_test_group$branch_delta` SET ("
-                        + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "  'scan.fallback-delta-branch' = 'delta')");
+        setupChainTableBranches("chain_test_group");
 
         // Write main branch
         sql(
@@ -718,67 +635,6 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         "+I[2, 2, 1-1, CN, 20250811]", "+I[4, 1, 1, CN, 20250811]");
     }
 
-    /** Write Row data (with RowKind) to a specific branch using DataStream API. */
-    private void writeChangelogToBranch(String db, String tableName, String branch, Row... rows)
-            throws Exception {
-        FileStoreTable table = paimonTable(tableName + "$branch_" + branch);
-
-        StreamExecutionEnvironment env =
-                streamExecutionEnvironmentBuilder()
-                        .streamingMode()
-                        .checkpointIntervalMs(100)
-                        .parallelism(1)
-                        .build();
-
-        DataStream<Row> stream = env.fromCollection(Arrays.asList(rows));
-
-        new FlinkSinkBuilder(table)
-                .forRow(
-                        stream,
-                        DataTypes.ROW(
-                                DataTypes.FIELD("k", DataTypes.BIGINT()),
-                                DataTypes.FIELD("seq", DataTypes.BIGINT()),
-                                DataTypes.FIELD("v", DataTypes.STRING()),
-                                DataTypes.FIELD("dt", DataTypes.STRING())))
-                .build();
-        env.execute();
-    }
-
-    /**
-     * Collect n rows from a streaming iterator with a timeout. If no data arrives within
-     * timeoutSeconds, the iterator is closed and an AssertionError is thrown. This is necessary
-     * because it.next() blocks indefinitely when no data is available, and JUnit @Timeout cannot
-     * interrupt it.
-     */
-    /**
-     * Collects {@code n} rows from a streaming iterator using the project-standard {@link
-     * BlockingIterator}.
-     */
-    private List<String> collectRows(CloseableIterator<Row> it, int n) throws Exception {
-        return BlockingIterator.of(it).collect(n, 30, TimeUnit.SECONDS).stream()
-                .map(Row::toString)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Polls the given table until it contains at least {@code minRows} rows. Used instead of
-     * fixed-duration Thread.sleep to avoid flaky tests on slow CI.
-     */
-    private void waitForRowCount(String tableName, int minRows) throws Exception {
-        long deadline = System.currentTimeMillis() + 60_000;
-        int count = 0;
-        while (System.currentTimeMillis() < deadline) {
-            List<Row> rows = sql("SELECT * FROM " + tableName);
-            count = rows.size();
-            if (count >= minRows) {
-                return;
-            }
-            Thread.sleep(1000);
-        }
-        throw new AssertionError(
-                "Timed out waiting for " + minRows + " rows in " + tableName + ", got " + count);
-    }
-
     /**
      * Tests the streaming read lifecycle for a chain table with changelog-producer=input.
      *
@@ -807,18 +663,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + ")");
 
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_life_cl', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_life_cl', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_life_cl", "chain_life_cl$branch_snapshot", "chain_life_cl$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_life_cl");
 
         // === Phase 1: Delta-only initial data (all inserts) ===
         sql(
@@ -975,19 +820,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'sequence.field' = 'seq'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restart', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restart', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restart", "chain_restart$branch_snapshot", "chain_restart$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restart");
 
         // Configure checkpoint for stateful restart
         org.apache.flink.configuration.Configuration config = sEnv.getConfig().getConfiguration();
@@ -1139,18 +972,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + ")");
 
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_overlap', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_overlap', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_overlap", "chain_overlap$branch_snapshot", "chain_overlap$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_overlap");
 
         // Write snapshot data: dt=20250807 (snapshot-only) and dt=20250808 (overlapping)
         sql(
@@ -1203,6 +1025,192 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
     }
 
     /**
+     * Tests streaming read with {@code chain-table.streaming.merge-snapshot=true}. Verifies that
+     * the starting phase merges the latest snapshot partition with later delta partitions, so
+     * cross-branch deletes and updates are visible in the initial snapshot.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "none"})
+    @Timeout(120)
+    public void testStreamingReadWithMergeSnapshot(String changelogProducer) throws Exception {
+        String tableName = "chain_merge_stream_" + changelogProducer;
+        sql(
+                format(
+                        "CREATE TABLE %s ("
+                                + "  k BIGINT, seq BIGINT, v STRING, dt STRING"
+                                + ") PARTITIONED BY (dt) WITH ("
+                                + "  'primary-key' = 'dt,k',"
+                                + "  'bucket-key' = 'k',"
+                                + "  'bucket' = '2',"
+                                + "  'sequence.field' = 'seq',"
+                                + "  'merge-engine' = 'deduplicate',"
+                                + "  'changelog-producer' = '%s',"
+                                + "  'chain-table.enabled' = 'true',"
+                                + "  'chain-table.streaming.merge-snapshot' = 'true',"
+                                + "  'partition.timestamp-pattern' = '$dt',"
+                                + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                                + "  'continuous.discovery-interval' = '1ms'"
+                                + ")",
+                        tableName, changelogProducer));
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches(tableName);
+
+        // Write snapshot data at dt=20250808
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2')");
+
+        // Write delta data spanning dt=20250809 and dt=20250810:
+        // - delete k=1 at dt=20250809
+        // - update k=2: -U old snapshot value at dt=20250809, +U new delta value at dt=20250810
+        // - insert k=3 at dt=20250810
+        writeChangelogToBranch(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 1L, 2L, "snap_1", "20250809"),
+                Row.ofKind(RowKind.UPDATE_BEFORE, 2L, 2L, "snap_2", "20250809"),
+                Row.ofKind(RowKind.UPDATE_AFTER, 2L, 3L, "delta_2", "20250810"),
+                Row.ofKind(RowKind.INSERT, 3L, 1L, "delta_3", "20250810"));
+
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM " + tableName).collect();
+
+        // Starting (merge mode): snapshot@20250808 is anchored to the latest delta partition
+        // dt=20250810.
+        // k=1 is deleted; k=2 is updated from snapshot value to delta value; k=3 is newly inserted.
+        // The logical partition of the merged ChainSplit is the latest delta partition 20250810.
+        // With changelog-producer=input the update is emitted as +U; with changelog-producer=none
+        // the upsert result is emitted as +I.
+        String updatedRowKind = "input".equals(changelogProducer) ? "+U" : "+I";
+        List<String> startingRows = collectRows(it, 2);
+        assertThat(startingRows)
+                .as(
+                        "Starting with merge-snapshot: cross-branch delete/update should be applied, "
+                                + "updated/inserted rows should use the latest delta partition")
+                .containsExactlyInAnyOrder(
+                        updatedRowKind + "[2, 3, delta_2, 20250810]",
+                        "+I[3, 1, delta_3, 20250810]");
+
+        // Incremental: write new delta and verify it streams through
+        writeChangelogToBranch(
+                db, tableName, "delta", Row.ofKind(RowKind.INSERT, 4L, 1L, "delta_4", "20250811"));
+
+        List<String> incr = collectRows(it, 1);
+        assertThat(incr)
+                .as("Incremental: new delta data should stream through")
+                .containsExactlyInAnyOrder("+I[4, 1, delta_4, 20250811]");
+
+        it.close();
+    }
+
+    /**
+     * Tests streaming read with {@code chain-table.streaming.merge-snapshot=true} and a group
+     * partition (region). Verifies that each group is handled independently:
+     *
+     * <ul>
+     *   <li>CN: snapshot anchor at 20250809 + delta at 20250810 (cross-branch delete/insert).
+     *   <li>UK: snapshot anchor at 20250808 + delta at 20250809 (cross-branch delete).
+     *   <li>US: delta-only group (inserts at 20250811, delete at 20250812, later insert at
+     *       20250813).
+     * </ul>
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "none"})
+    @Timeout(120)
+    public void testStreamingReadWithMergeSnapshotAndGroup(String changelogProducer)
+            throws Exception {
+        String tableName = "chain_merge_stream_group_" + changelogProducer;
+        sql(
+                format(
+                        "CREATE TABLE %s ("
+                                + "  k BIGINT, seq BIGINT, v STRING, region STRING, dt STRING"
+                                + ") PARTITIONED BY (region, dt) WITH ("
+                                + "  'primary-key' = 'region,dt,k',"
+                                + "  'bucket-key' = 'k',"
+                                + "  'bucket' = '2',"
+                                + "  'sequence.field' = 'seq',"
+                                + "  'merge-engine' = 'deduplicate',"
+                                + "  'changelog-producer' = '%s',"
+                                + "  'chain-table.enabled' = 'true',"
+                                + "  'chain-table.streaming.merge-snapshot' = 'true',"
+                                + "  'partition.timestamp-pattern' = '$dt',"
+                                + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
+                                + "  'chain-table.chain-partition-keys' = 'dt',"
+                                + "  'continuous.discovery-interval' = '1ms'"
+                                + ")",
+                        tableName, changelogProducer));
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches(tableName);
+
+        // Snapshot branch: CN and UK have anchors; US has no snapshot.
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot`"
+                        + " PARTITION (region = 'CN', dt = '20250809')"
+                        + " VALUES (1, 1, 'cn_snap_1'), (2, 1, 'cn_snap_2')");
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot`"
+                        + " PARTITION (region = 'UK', dt = '20250808')"
+                        + " VALUES (21, 1, 'uk_snap_21'), (22, 1, 'uk_snap_22')");
+
+        // First delta commit:
+        // - CN: at dt=20250810, delete k=1 and insert k=3 (delta > snapshot anchor 20250809).
+        // - UK: at dt=20250809, delete k=21 (delta > snapshot anchor 20250808).
+        // - US: delta-only group, insert k=11 and k=12 at dt=20250811.
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 1L, 2L, "cn_snap_1", "CN", "20250810"),
+                Row.ofKind(RowKind.INSERT, 3L, 1L, "cn_delta_3", "CN", "20250810"),
+                Row.ofKind(RowKind.INSERT, 11L, 1L, "us_delta_11", "US", "20250811"),
+                Row.ofKind(RowKind.INSERT, 12L, 1L, "us_delta_12", "US", "20250811"),
+                Row.ofKind(RowKind.DELETE, 21L, 2L, "uk_snap_21", "UK", "20250809"));
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.DELETE, 11L, 2L, "us_delta_11", "US", "20250812"));
+
+        // Start streaming read (pinned at the second delta commit)
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM " + tableName).collect();
+
+        // Starting (merge mode):
+        List<String> startingRows = collectRows(it, 4);
+        assertThat(startingRows)
+                .as(
+                        "Starting with merge-snapshot and group: each group should be handled "
+                                + "independently")
+                .containsExactlyInAnyOrder(
+                        "+I[2, 1, cn_snap_2, CN, 20250810]",
+                        "+I[3, 1, cn_delta_3, CN, 20250810]",
+                        "+I[12, 1, us_delta_12, US, 20250812]",
+                        "+I[22, 1, uk_snap_22, UK, 20250809]");
+
+        // Third delta commit (Phase 2 incremental): US delta-only group inserts k=11 at
+        // dt=20250813.
+        writeChangelogToBranchWithRegion(
+                db,
+                tableName,
+                "delta",
+                Row.ofKind(RowKind.INSERT, 11L, 3L, "us_delta_11", "US", "20250813"));
+
+        List<String> incr = collectRows(it, 1);
+        assertThat(incr)
+                .as("Incremental: new insert in delta-only group should stream through")
+                .containsExactlyInAnyOrder("+I[11, 3, us_delta_11, US, 20250813]");
+
+        it.close();
+    }
+
+    /**
      * T2: Tests that non-default startup modes throw an error for chain table streaming read. When
      * scan.mode=latest is specified, an {@link UnsupportedOperationException} is thrown with a
      * helpful message.
@@ -1225,20 +1233,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_bypass', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_bypass', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_bypass", "chain_bypass$branch_snapshot", "chain_bypass$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_bypass");
 
         // Write data to main table (so snapshots exist for copy() to resolve)
         sql(
@@ -1284,25 +1279,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_consumer', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_consumer', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_consumer",
-                    "chain_consumer$branch_snapshot",
-                    "chain_consumer$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
-
-        sql(
-                "INSERT INTO `chain_consumer$branch_delta` PARTITION (dt = '20250808')"
-                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+        setupChainTableBranches("chain_consumer");
 
         FileStoreTable table = paimonTable("chain_consumer");
 
@@ -1352,19 +1329,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_no_cl', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_no_cl', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_no_cl", "chain_no_cl$branch_snapshot", "chain_no_cl$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_no_cl");
 
         // Phase 1: Insert initial data into delta branch
         sql(
@@ -1413,21 +1378,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_stream_group', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_stream_group', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_stream_group",
-                    "chain_stream_group$branch_snapshot",
-                    "chain_stream_group$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_stream_group");
 
         // Write initial delta data for two regions
         sql(
@@ -1500,21 +1451,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_all', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_all', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_all",
-                    "chain_restore_all$branch_snapshot",
-                    "chain_restore_all$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_all");
 
         sql(
                 "INSERT INTO `chain_restore_all$branch_delta` PARTITION (dt = '20250808')"
@@ -1568,21 +1505,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_null', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_null', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_null",
-                    "chain_restore_null$branch_snapshot",
-                    "chain_restore_null$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_null");
 
         sql(
                 "INSERT INTO `chain_restore_null$branch_delta` PARTITION (dt = '20250808')"
@@ -1626,22 +1549,8 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_empty_delta', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_empty_delta', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_empty_delta",
-                    "chain_empty_delta$branch_snapshot",
-                    "chain_empty_delta$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_empty_delta");
 
         // Write ONLY to snapshot branch, delta stays empty
         sql(
@@ -1691,21 +1600,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_empty_snap', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_empty_snap', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_empty_snap",
-                    "chain_empty_snap$branch_snapshot",
-                    "chain_empty_snap$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_empty_snap");
 
         // Write ONLY to delta branch, snapshot stays empty
         sql(
@@ -1747,19 +1642,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_shard', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_shard', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_shard", "chain_shard$branch_snapshot", "chain_shard$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_shard");
 
         sql(
                 "INSERT INTO `chain_shard$branch_delta` PARTITION (dt = '20250808')"
@@ -1803,21 +1686,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_both_empty', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_both_empty', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_both_empty",
-                    "chain_both_empty$branch_snapshot",
-                    "chain_both_empty$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_both_empty");
 
         // Both branches are empty — Phase 1 should produce no splits
         FileStoreTable table = paimonTable("chain_both_empty");
@@ -1854,21 +1723,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_overwrite_p2', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_overwrite_p2', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_overwrite_p2",
-                    "chain_overwrite_p2$branch_snapshot",
-                    "chain_overwrite_p2$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_overwrite_p2");
 
         // Initial delta data
         sql(
@@ -1915,21 +1770,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_restore_newdata', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_restore_newdata', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_restore_newdata",
-                    "chain_restore_newdata$branch_snapshot",
-                    "chain_restore_newdata$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_restore_newdata");
 
         // Write initial snapshot + delta data
         sql(
@@ -2058,22 +1899,8 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
         String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_data_filter', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_data_filter', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_data_filter",
-                    "chain_data_filter$branch_snapshot",
-                    "chain_data_filter$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta')",
-                    tbl);
-        }
+        setupChainTableBranches("chain_data_filter");
 
         // Write initial delta data with mixed values of v
         sql(
@@ -2259,21 +2086,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'partition.timestamp-formatter' = 'yyyyMMdd',"
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
-
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_race', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_race', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_race", "chain_race$branch_snapshot", "chain_race$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta'"
-                            + ")",
-                    tbl);
-        }
+        setupChainTableBranches("chain_race");
 
         // Step 1: Write delta data at dt=20250808
         sql(
@@ -2301,8 +2114,6 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + " VALUES (4, 1, 'delta_4')");
 
         // Step 6: Collect Phase 2 output (should include delta@20250810)
-        // BUG: If snapshot branch was not pinned, Phase 1 might have excluded delta@20250808
-        // after seeing snapshot@20250809, and Phase 2 would miss it too.
         List<String> phase2 = collectRows(it, 1);
         assertThat(phase2)
                 .as("Phase 2 should include new delta@20250810 data")
@@ -2339,20 +2150,7 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + "  'continuous.discovery-interval' = '1ms'"
                         + ")");
 
-        String db = tEnv.getCurrentDatabase();
-        sql("CALL sys.create_branch('%s.chain_phase2', 'snapshot')", db);
-        sql("CALL sys.create_branch('%s.chain_phase2', 'delta')", db);
-        for (String tbl :
-                new String[] {
-                    "chain_phase2", "chain_phase2$branch_snapshot", "chain_phase2$branch_delta"
-                }) {
-            sql(
-                    "ALTER TABLE `%s` SET ("
-                            + "  'scan.fallback-snapshot-branch' = 'snapshot',"
-                            + "  'scan.fallback-delta-branch' = 'delta'"
-                            + ")",
-                    tbl);
-        }
+        setupChainTableBranches("chain_phase2");
 
         // Write snapshot data at dt=20250808
         sql(
@@ -2378,13 +2176,1360 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                         + " VALUES (3, 1, 'delta_3')");
 
         // Collect Phase 2 output
-        // BUG: If Phase 2 read bypasses branch-aware logic, this might fail or produce
-        // wrong results when snapshot/delta schemas diverge.
         List<String> phase2 = collectRows(it, 1);
         assertThat(phase2)
                 .as("Phase 2 should correctly read delta@20250810 with branch-aware logic")
                 .containsExactlyInAnyOrder("+I[3, 1, delta_3, 20250810]");
 
         it.close();
+    }
+
+    @Test
+    public void testLookupJoin() throws Exception {
+        // Create chain table as dimension table
+        sql(
+                "CREATE TABLE chain_dim ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim");
+
+        // Write snapshot branch
+        sql(
+                "INSERT OVERWRITE `chain_dim$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2'), (3, 1, 'snap_3')");
+
+        // Write delta branch (new partition, no anchor in snapshot)
+        sql(
+                "INSERT OVERWRITE `chain_dim$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (2, 2, 'delta_2_updated'), (4, 1, 'delta_4')");
+
+        // Create source table as Paimon table
+        sql(
+                "CREATE TABLE source_t ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+
+        // Insert source data
+        sql("INSERT INTO source_t VALUES (1), (2), (3), (4)");
+
+        // Lookup join on k (non-partition key)
+        List<String> result =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_t AS S "
+                                + "LEFT JOIN chain_dim /*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        // Verify lookup results.
+        // Source has 4 rows (id=1,2,3,4). Lightweight Phase 1 dim data:
+        //   snapshot@20250808: k=1(snap_1), k=2(snap_2), k=3(snap_3)
+        //   delta@20250809 (no anchor merge): k=2(delta_2_updated), k=4(delta_4)
+        // k=1 matches id=1 (snapshot only), k=2 matches id=2 (snapshot + delta = 2 rows),
+        // k=3 matches id=3 (snapshot only), k=4 matches id=4 (delta only) → 5 lookup matches.
+        assertThat(result).hasSize(5);
+        assertThat(result)
+                .anyMatch(r -> r.contains("snap_1"))
+                .anyMatch(r -> r.contains("snap_2"))
+                .anyMatch(r -> r.contains("delta_2_updated"))
+                .anyMatch(r -> r.contains("snap_3"))
+                .anyMatch(r -> r.contains("delta_4"));
+    }
+
+    @Test
+    @EnabledIf(
+            value = "isFlink2OrLater",
+            disabledReason = "Custom shuffle lookup join requires Flink 2.x.")
+    public void testLookupJoinWithBucketShuffle() throws Exception {
+        sql(
+                "CREATE TABLE chain_dim_shuffle ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_shuffle");
+
+        // Write snapshot branch
+        sql(
+                "INSERT OVERWRITE `chain_dim_shuffle$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2'), (3, 1, 'snap_3')");
+
+        // Write delta branch (new partition, no anchor in snapshot)
+        sql(
+                "INSERT OVERWRITE `chain_dim_shuffle$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (2, 2, 'delta_2_updated'), (4, 1, 'delta_4')");
+
+        // Create source table
+        sql(
+                "CREATE TABLE source_shuffle ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_shuffle VALUES (1), (2), (3), (4)");
+
+        String query =
+                "SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ S.id, D.k, D.v "
+                        + "FROM source_shuffle AS S "
+                        + "JOIN chain_dim_shuffle "
+                        + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                        + "ON S.id = D.k";
+
+        // Verify the execution plan actually uses bucket shuffle partitioning.
+        // "shuffle=[true]" in the LookupJoin node proves the planner recognized the LOOKUP hint
+        // and will use the BucketShufflePartitioner provided by Paimon's BaseDataTableSource.
+        sEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
+        String explainPlan = sEnv.explainSql(query);
+        assertThat(explainPlan)
+                .as("EXPLAIN plan should contain shuffle=[true] proving bucket shuffle is active")
+                .contains("shuffle=[true]");
+
+        // Expected lightweight Phase 1 data (no anchor merge):
+        //   snapshot@20250808: k=1(snap_1), k=2(snap_2), k=3(snap_3)
+        //   delta@20250809 (no anchor merge): k=2(delta_2_updated), k=4(delta_4)
+        // Source has 4 rows (id=1,2,3,4). k=1 matches id=1 (snapshot only),
+        // k=2 matches id=2 (snapshot + delta = 2 rows), k=3 matches id=3 (snapshot only),
+        // k=4 matches id=4 (delta only) → 5 lookup matches.
+        List<Row> result = streamSqlBlockIter(query).collect(5);
+
+        assertThat(result).hasSize(5);
+        assertThat(result)
+                .anyMatch(r -> r.toString().contains("snap_1"))
+                .anyMatch(r -> r.toString().contains("snap_2"))
+                .anyMatch(r -> r.toString().contains("delta_2_updated"))
+                .anyMatch(r -> r.toString().contains("snap_3"))
+                .anyMatch(r -> r.toString().contains("delta_4"));
+    }
+
+    @Test
+    public void testLookupJoinDeltaOnly() throws Exception {
+        // Chain table with only delta data (no snapshot)
+        sql(
+                "CREATE TABLE chain_dim_delta_only ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_delta_only");
+
+        // Write only delta (no snapshot)
+        sql(
+                "INSERT OVERWRITE `chain_dim_delta_only$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2'), (3, 1, 'v3')");
+
+        // Verify batch read works first
+        List<String> batchResult =
+                collectResult("SELECT k, v FROM chain_dim_delta_only WHERE dt = '20250808'");
+        assertThat(batchResult).as("Batch read of delta-only chain table").hasSize(3);
+
+        sql(
+                "CREATE TABLE source_delta_only ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_delta_only VALUES (1), (2), (3)");
+
+        List<String> result =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_delta_only AS S "
+                                + "LEFT JOIN chain_dim_delta_only "
+                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        assertThat(result).hasSize(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+I[1, 1, v1]", "+I[2, 2, v2]", "+I[3, 3, v3]");
+    }
+
+    @Test
+    public void testLookupJoinSnapshotOnly() throws Exception {
+        // Chain table with only snapshot data (no delta)
+        sql(
+                "CREATE TABLE chain_dim_snap_only ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_snap_only");
+
+        // Write only snapshot (no delta)
+        sql(
+                "INSERT OVERWRITE `chain_dim_snap_only$branch_snapshot` "
+                        + "PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 's1'), (2, 1, 's2')");
+
+        sql(
+                "CREATE TABLE source_snap_only ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_snap_only VALUES (1), (2)");
+
+        List<String> result =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_snap_only AS S "
+                                + "LEFT JOIN chain_dim_snap_only "
+                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        assertThat(result).hasSize(2);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, s1]", "+I[2, 2, s2]");
+    }
+
+    @Test
+    public void testLookupJoinRejectsPartitionKeyInJoinCondition() throws Exception {
+        sql(
+                "CREATE TABLE chain_dim_pk ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_pk");
+
+        sql(
+                "INSERT OVERWRITE `chain_dim_pk$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1')");
+
+        sql(
+                "CREATE TABLE source_pk ("
+                        + "  id BIGINT,"
+                        + "  dt STRING,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_pk VALUES (1, '20250808')");
+
+        // Join on partition key dt should fail
+        assertThatThrownBy(
+                        () ->
+                                collectResult(
+                                        "SELECT S.id, D.k "
+                                                + "FROM source_pk AS S "
+                                                + "LEFT JOIN chain_dim_pk "
+                                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                                + "ON S.dt = D.dt"))
+                .rootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("partition keys");
+    }
+
+    @Test
+    public void testLookupJoinRejectsInvalidCacheMode() throws Exception {
+        sql(
+                "CREATE TABLE chain_dim_mode ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_mode");
+
+        sql(
+                "INSERT OVERWRITE `chain_dim_mode$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1')");
+
+        sql(
+                "CREATE TABLE source_mode ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_mode VALUES (1)");
+
+        // cache-mode=memory is not supported for chain tables
+        assertThatThrownBy(
+                        () ->
+                                collectResult(
+                                        "SELECT S.id, D.k "
+                                                + "FROM source_mode AS S "
+                                                + "LEFT JOIN chain_dim_mode "
+                                                + "/*+ OPTIONS('lookup.cache' = 'memory') */ "
+                                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                                + "ON S.id = D.k"))
+                .rootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("cache mode");
+    }
+
+    @Test
+    public void testLookupJoinRejectsJoinKeyContainingPartitionKey() throws Exception {
+        // PK = (dt, k). If join keys = (dt, k) = PK, this triggers the AUTO + PK==JK path
+        // in FileStoreLookupFunction.open(). The chain table validation should reject it
+        // because dt is a partition key.
+        sql(
+                "CREATE TABLE chain_dim_pkjk ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_pkjk");
+
+        sql(
+                "INSERT OVERWRITE `chain_dim_pkjk$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1')");
+
+        sql(
+                "CREATE TABLE source_pkjk ("
+                        + "  id BIGINT,"
+                        + "  dt STRING,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_pkjk VALUES (1, '20250808')");
+
+        // Join on both dt and k (= full PK) should fail because dt is a partition key
+        assertThatThrownBy(
+                        () ->
+                                collectResult(
+                                        "SELECT S.id, D.v "
+                                                + "FROM source_pkjk AS S "
+                                                + "LEFT JOIN chain_dim_pkjk "
+                                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                                + "ON S.dt = D.dt AND S.id = D.k"))
+                .rootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("partition keys");
+    }
+
+    @Test
+    public void testLookupJoinWithAutoCacheMode() throws Exception {
+        // Same as testLookupJoinDeltaOnly but without explicit 'lookup.cache' = 'full' hint.
+        // Default cache mode is AUTO. LookupFileStoreTable.create() validates chain table
+        // constraints and FileStoreLookupFunction excludes chain tables from the AUTO path,
+        // preventing PrimaryKeyPartialLookupTable from being used.
+        sql(
+                "CREATE TABLE chain_dim_auto ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_auto");
+
+        sql(
+                "INSERT OVERWRITE `chain_dim_auto$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+
+        sql(
+                "CREATE TABLE source_auto ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_auto VALUES (1), (2)");
+
+        // No explicit lookup.cache hint — defaults to AUTO, should work via AUTO→FULL conversion
+        List<String> result =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_auto AS S "
+                                + "LEFT JOIN chain_dim_auto "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        assertThat(result).hasSize(2);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, v1]", "+I[2, 2, v2]");
+    }
+
+    @Test
+    public void testChainTableStreamScanIncrementalRefresh() throws Exception {
+        // Tests the ChainTableStreamScan directly at the API level.
+        // Verifies: first plan() = bootstrap (chain-merged ChainSplits),
+        //           second plan() = incremental (delta DataSplits with new data).
+        sql(
+                "CREATE TABLE chain_dim_incr ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_incr");
+
+        // Write initial delta data
+        sql(
+                "INSERT OVERWRITE `chain_dim_incr$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+
+        // Get the chain table and create a LookupFileStoreTable with ChainTableStreamScan
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_dim_incr");
+        LookupFileStoreTable lookupTable = LookupFileStoreTable.create(table, Arrays.asList("k"));
+
+        ChainTableStreamScan scan = (ChainTableStreamScan) lookupTable.newStreamScan();
+
+        // First plan() = bootstrap: should return ChainSplits with initial data
+        List<Split> bootstrapSplits = scan.plan().splits();
+        assertThat(bootstrapSplits).isNotEmpty();
+        assertThat(bootstrapSplits.get(0))
+                .as("Bootstrap should produce ChainSplits")
+                .isInstanceOf(ChainSplit.class);
+
+        // Second plan() = incremental: should be empty (no new delta data)
+        List<Split> emptySplits = scan.plan().splits();
+        assertThat(emptySplits).as("No new data, should be empty").isEmpty();
+
+        // Write new delta data
+        sql(
+                "INSERT INTO `chain_dim_incr$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (3, 1, 'v3')");
+
+        // Third plan() = incremental: should return DataSplits with new data
+        List<Split> incrementalSplits = scan.plan().splits();
+        assertThat(incrementalSplits)
+                .as("Should have incremental splits after new delta data")
+                .isNotEmpty();
+        assertThat(incrementalSplits.get(0))
+                .as("Incremental should produce DataSplits")
+                .isInstanceOf(DataSplit.class);
+    }
+
+    @Test
+    public void testLookupScanCheckpointRestore() throws Exception {
+        // Tests checkpoint/restore behavior of ChainTableStreamScan at the API level.
+        // Verifies:
+        //   1. Before bootstrap, checkpoint() returns null.
+        //   2. After bootstrap, checkpoint() returns the delta position.
+        //   3. restore(id) sets bootstrapDone=true and positions delta scan correctly.
+        //   4. After restore, plan() only returns NEW data (not already-consumed data).
+        sql(
+                "CREATE TABLE chain_dim_ckp ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_ckp");
+
+        // Write initial delta data
+        sql(
+                "INSERT OVERWRITE `chain_dim_ckp$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_dim_ckp");
+        LookupFileStoreTable lookupTable = LookupFileStoreTable.create(table, Arrays.asList("k"));
+
+        ChainTableStreamScan scan = (ChainTableStreamScan) lookupTable.newStreamScan();
+
+        // Before bootstrap, checkpoint should be null
+        assertThat(scan.checkpoint()).as("Before bootstrap, checkpoint should be null").isNull();
+
+        // Bootstrap
+        List<Split> bootstrapSplits = scan.plan().splits();
+        assertThat(bootstrapSplits).isNotEmpty();
+
+        // After bootstrap, checkpoint should capture the delta position
+        Long checkpointId = scan.checkpoint();
+        assertThat(checkpointId)
+                .as("After bootstrap, checkpoint should capture delta position")
+                .isNotNull();
+
+        // No new data, plan() should be empty
+        assertThat(scan.plan().splits()).isEmpty();
+
+        // Write new delta data
+        sql(
+                "INSERT INTO `chain_dim_ckp$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (3, 1, 'v3')");
+
+        // Incremental plan() should return new data
+        List<Split> incrSplits1 = scan.plan().splits();
+        assertThat(incrSplits1).isNotEmpty();
+
+        // Checkpoint again
+        Long checkpointId2 = scan.checkpoint();
+        assertThat(checkpointId2).isNotNull();
+        assertThat(checkpointId2)
+                .as("Second checkpoint should be after the first")
+                .isGreaterThan(checkpointId);
+
+        // Simulate restore from first checkpoint
+        ChainTableStreamScan restoredScan = (ChainTableStreamScan) lookupTable.newStreamScan();
+        restoredScan.restore(checkpointId);
+
+        // After restore, plan() should return data from checkpointId onwards
+        // (i.e., the data at dt=20250809 that was written after the first checkpoint)
+        List<Split> restoredSplits = restoredScan.plan().splits();
+        assertThat(restoredSplits)
+                .as("Restored scan should return data after checkpoint position")
+                .isNotEmpty();
+
+        // A fresh scan (no restore) should bootstrap and then be empty
+        ChainTableStreamScan freshScan = (ChainTableStreamScan) lookupTable.newStreamScan();
+        freshScan.plan(); // bootstrap
+        assertThat(freshScan.plan().splits())
+                .as("Fresh scan after bootstrap should have no incremental data")
+                .isEmpty();
+    }
+
+    @Test
+    public void testLookupJoinWithPredicatePushdown() throws Exception {
+        // Tests that a WHERE condition on the dimension table is correctly pushed down
+        // and produces correct lookup results with chain-merged data.
+        sql(
+                "CREATE TABLE chain_dim_pred ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_pred");
+
+        // Write snapshot branch with 3 rows
+        sql(
+                "INSERT OVERWRITE `chain_dim_pred$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2'), (3, 1, 'snap_3')");
+
+        // Write delta branch with updated row k=2 and new row k=4
+        sql(
+                "INSERT OVERWRITE `chain_dim_pred$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (2, 2, 'delta_2_updated'), (4, 1, 'delta_4')");
+
+        sql(
+                "CREATE TABLE source_pred ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_pred VALUES (1), (2), (3), (4)");
+
+        // Lookup join with a predicate on the dimension table's v column.
+        // The predicate v LIKE '%updated%' should be pushed down to the chain table scan.
+        // Chain-merged data: k=1(snap_1), k=2(delta_2_updated), k=3(snap_3), k=4(delta_4).
+        // Only k=2 has v containing 'updated'.
+        List<String> result =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_pred AS S "
+                                + "LEFT JOIN chain_dim_pred "
+                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k "
+                                + "WHERE D.v LIKE '%updated%'");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0)).contains("delta_2_updated");
+    }
+
+    @Test
+    public void testLookupRejectsIncompatibleDeltaBranchConfig() throws Exception {
+        // Tests that creating a lookup table for a chain table with partial-update merge engine
+        // on the delta branch is rejected. The SQL lookup join path is covered by
+        // testLookupRejectsAggregateOnDeltaBranch, which verifies the same validation
+        // through the SQL path (prepareBranchOptions preserves branch-specific merge-engine
+        // during table.copy(TableSchema)).
+        sql(
+                "CREATE TABLE chain_dim_partial_cfg ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_partial_cfg");
+
+        // Alter delta branch to partial-update (unsupported for incremental lookup).
+        // The incremental read path (createNoMergeReader) does not apply the merge engine,
+        // which would cause partial rows to overwrite complete cached data.
+        sql(
+                "ALTER TABLE `chain_dim_partial_cfg$branch_delta` SET ("
+                        + "  'merge-engine' = 'partial-update'"
+                        + ")");
+
+        // Load the chain table directly from catalog (preserves branch on-disk options).
+        // Table loading succeeds because batch reads work fine with PARTIAL_UPDATE.
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_dim_partial_cfg");
+
+        // Creating a lookup table should fail because the incremental read path
+        // (ChainTableStreamScan) does not support PARTIAL_UPDATE on the delta branch.
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                        table, Collections.singletonList("k")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
+    }
+
+    @Test
+    public void testStreamingReadRejectsPartialUpdateOnDeltaBranch() throws Exception {
+        // Tests that creating a streaming scan for a chain table with partial-update merge engine
+        // on the delta branch is rejected.
+        sql(
+                "CREATE TABLE chain_stream_partial ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_stream_partial");
+
+        sql(
+                "ALTER TABLE `chain_stream_partial$branch_delta` SET ("
+                        + "  'merge-engine' = 'partial-update'"
+                        + ")");
+
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_stream_partial");
+
+        // Creating a streaming scan should fail because ChainTableStreamScan does not support
+        // PARTIAL_UPDATE on the delta branch.
+        assertThatThrownBy(() -> table.newStreamScan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
+    }
+
+    @Test
+    public void testStreamingReadRejectsAggregateOnDeltaBranch() throws Exception {
+        // Tests that creating a streaming scan for a chain table with aggregation merge engine
+        // on the delta branch is rejected.
+        sql(
+                "CREATE TABLE chain_stream_agg ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v INT,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_stream_agg");
+
+        sql(
+                "ALTER TABLE `chain_stream_agg$branch_delta` SET ("
+                        + "  'merge-engine' = 'aggregation',"
+                        + "  'fields.v.aggregate-function' = 'sum'"
+                        + ")");
+
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_stream_agg");
+
+        // Creating a streaming scan should fail because ChainTableStreamScan does not support
+        // AGGREGATE on the delta branch.
+        assertThatThrownBy(() -> table.newStreamScan())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
+    }
+
+    @Test
+    public void testLookupRejectsAggregateOnDeltaBranch() throws Exception {
+        // Tests that creating a lookup table for a chain table with aggregation merge engine
+        // on the delta branch is rejected.
+        sql(
+                "CREATE TABLE chain_dim_agg_cfg ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v INT,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_agg_cfg");
+
+        sql(
+                "ALTER TABLE `chain_dim_agg_cfg$branch_delta` SET ("
+                        + "  'merge-engine' = 'aggregation',"
+                        + "  'fields.v.aggregate-function' = 'sum'"
+                        + ")");
+
+        FileStoreTable table = (FileStoreTable) paimonTable("chain_dim_agg_cfg");
+
+        // Creating a lookup table should fail because ChainTableStreamScan does not support
+        // AGGREGATE on the delta branch.
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                        table, Collections.singletonList("k")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
+
+        // Also verify through SQL lookup join path
+        sql(
+                "INSERT OVERWRITE `chain_dim_agg_cfg$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 10)");
+        sql(
+                "INSERT OVERWRITE `chain_dim_agg_cfg$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (2, 2, 20)");
+
+        sql(
+                "CREATE TABLE source_agg_cfg ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_agg_cfg VALUES (1), (2)");
+
+        String query =
+                "SELECT S.id, D.k, D.v "
+                        + "FROM source_agg_cfg AS S "
+                        + "LEFT JOIN chain_dim_agg_cfg "
+                        + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                        + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                        + "ON S.id = D.k";
+
+        assertThatThrownBy(() -> collectResult(query))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
+    }
+
+    /**
+     * Tests that chain table lookup join rejects unsupported scan modes and consumer-id. The
+     * validation is inherited from {@link ChainTableFileStoreTable#newStreamScan()}.
+     */
+    @Test
+    public void testLookupRejectsUnsupportedScanMode() throws Exception {
+        sql(
+                "CREATE TABLE chain_dim_scan_mode ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_scan_mode");
+
+        FileStoreTable table = paimonTable("chain_dim_scan_mode");
+
+        // scan.mode=latest should be rejected for chain table lookup
+        FileStoreTable tableLatest = table.copy(Collections.singletonMap("scan.mode", "latest"));
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                                tableLatest, Collections.singletonList("k"))
+                                        .newStreamScan())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("scan.mode=latest")
+                .hasMessageContaining("Chain table streaming read does not support");
+
+        // consumer-id should be rejected for chain table lookup
+        FileStoreTable tableWithConsumer =
+                table.copy(Collections.singletonMap("consumer-id", "my-consumer"));
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                                tableWithConsumer, Collections.singletonList("k"))
+                                        .newStreamScan())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("consumer mode")
+                .hasMessageContaining("consumer-id='my-consumer'");
+    }
+
+    @Test
+    @Timeout(180)
+    public void testLookupJoinWithCompactDeltaMonitorMode() throws Exception {
+        // Main table uses partial-update + force-lookup so that
+        // supportCompactDiffStreamingReading returns true and lookupScanMode becomes
+        // COMPACT_DELTA_MONITOR.
+        sql(
+                "CREATE TABLE chain_dim_cdm ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'partial-update',"
+                        + "  'force-lookup' = 'true',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_cdm");
+
+        // Delta branch must be deduplicate for chain table incremental read.
+        sql("ALTER TABLE `chain_dim_cdm$branch_delta` SET ('merge-engine' = 'deduplicate')");
+
+        // Write data to both branches.
+        sql(
+                "INSERT OVERWRITE `chain_dim_cdm$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_v1'), (2, 2, 'snap_v2')");
+        sql(
+                "INSERT INTO `chain_dim_cdm$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (1, 3, 'delta_v1'), (3, 4, 'delta_v3')");
+
+        // Verify that LookupFileStoreTable.newRead() delegates to wrapped.newRead()
+        // (not LookupCompactDiffRead, which would cause ClassCastException on ChainSplit).
+        FileStoreTable table = paimonTable("chain_dim_cdm");
+        org.apache.paimon.flink.lookup.LookupFileStoreTable lookupTable =
+                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                        table, Collections.singletonList("k"));
+        assertThat(lookupTable.newRead()).isInstanceOf(table.newRead().getClass());
+
+        // Run the lookup join and verify results.
+        sql(
+                "CREATE TABLE source_cdm ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ('connector' = 'paimon')");
+        sql("INSERT INTO source_cdm VALUES (1), (2), (3)");
+
+        List<String> results =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_cdm AS S "
+                                + "LEFT JOIN chain_dim_cdm "
+                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        // k=1: appears in both snapshot (dt=20250808) and delta (dt=20250809) partitions.
+        // Chain table merges at partition level, not row level, so both rows appear.
+        // k=2: only in snapshot partition.
+        // k=3: only in delta partition.
+        assertThat(results)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1, snap_v1]",
+                        "+I[1, 1, delta_v1]",
+                        "+I[2, 2, snap_v2]",
+                        "+I[3, 3, delta_v3]");
+    }
+
+    /**
+     * Verifies that ChainTableStreamScan correctly propagates bucket filters to its internal scans.
+     */
+    @Test
+    public void testStreamingReadBucketFilter() throws Exception {
+        sql(
+                "CREATE TABLE chain_bucket_filter ("
+                        + "  k BIGINT, seq BIGINT, v STRING, dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+
+        String db = tEnv.getCurrentDatabase();
+        setupChainTableBranches("chain_bucket_filter");
+
+        // Write main branch
+        sql(
+                "INSERT OVERWRITE chain_bucket_filter PARTITION (dt = '20250810')"
+                        + " VALUES (1, 1, 'v1')");
+
+        // Write delta data across many keys to guarantee both buckets are populated
+        for (int i = 1; i <= 50; i++) {
+            sql(
+                    format(
+                            "INSERT INTO `chain_bucket_filter$branch_delta`"
+                                    + " PARTITION (dt = '%d') VALUES (%d, 1, 'v%d')",
+                            20250809 + (i % 5), i, i));
+        }
+
+        FileStoreTable table = paimonTable("chain_bucket_filter");
+
+        // Verify data spans both buckets via delta branch batch scan
+        FileStoreTable deltaTable =
+                (FileStoreTable) paimonTable("chain_bucket_filter$branch_delta");
+        java.util.Set<Integer> deltaBuckets = new java.util.HashSet<>();
+        for (Split split : deltaTable.newScan().plan().splits()) {
+            if (split instanceof DataSplit) {
+                deltaBuckets.add(((DataSplit) split).bucket());
+            }
+        }
+        assertThat(deltaBuckets)
+                .as("Test requires data in both buckets")
+                .containsExactlyInAnyOrder(0, 1);
+
+        // Without bucket filter: Phase 1 should return splits from both buckets
+        ChainTableStreamScan scanAll = (ChainTableStreamScan) table.newStreamScan();
+        TableScan.Plan planAll = scanAll.plan();
+        java.util.Set<Integer> bucketsAll = collectBucketsFromChainSplits(planAll);
+        assertThat(bucketsAll)
+                .as("Without filter, should have data from both buckets")
+                .containsExactlyInAnyOrder(0, 1);
+
+        // With bucket filter (only bucket 0): Phase 1 should only return bucket 0
+        ChainTableStreamScan scanFiltered = (ChainTableStreamScan) table.newStreamScan();
+        scanFiltered.withBucketFilter(b -> b == 0);
+        TableScan.Plan planFiltered = scanFiltered.plan();
+        java.util.Set<Integer> bucketsFiltered = collectBucketsFromChainSplits(planFiltered);
+        assertThat(bucketsFiltered)
+                .as("Bucket filter should restrict Phase 1 to bucket 0 only")
+                .containsExactly(0);
+    }
+
+    private java.util.Set<Integer> collectBucketsFromChainSplits(TableScan.Plan plan) {
+        java.util.Set<Integer> buckets = new java.util.HashSet<>();
+        for (Split split : plan.splits()) {
+            if (split instanceof ChainSplit) {
+                for (String path : ((ChainSplit) split).fileBucketPathMapping().values()) {
+                    if (path.contains("bucket-0")) {
+                        buckets.add(0);
+                    } else if (path.contains("bucket-1")) {
+                        buckets.add(1);
+                    }
+                }
+            }
+        }
+        return buckets;
+    }
+
+    /**
+     * Verifies that lookup join on a chain table branch (e.g., t$branch_delta) works correctly.
+     * Branch tables may still carry chain-table.enabled=true, but they are not wrapped in
+     * FallbackReadFileStoreTable, so they should be treated as regular tables for lookup join.
+     */
+    @Test
+    public void testLookupJoinOnBranchTable() throws Exception {
+        sql(
+                "CREATE TABLE chain_branch_lookup ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_branch_lookup");
+
+        // Write some data to delta branch
+        sql(
+                "INSERT OVERWRITE `chain_branch_lookup$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'v1'), (2, 1, 'v2')");
+
+        // Create source table
+        sql(
+                "CREATE TABLE source_branch ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_branch VALUES (1), (2)");
+
+        // Lookup join on branch table should work correctly
+        String query =
+                "SELECT S.id, D.k, D.v "
+                        + "FROM source_branch AS S "
+                        + "LEFT JOIN `chain_branch_lookup$branch_delta` "
+                        + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                        + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                        + "ON S.id = D.k";
+
+        List<String> result = collectResult(query);
+        assertThat(result)
+                .as("Lookup join on branch table should return matching rows")
+                .hasSize(2)
+                .containsExactlyInAnyOrder("+I[1, 1, v1]", "+I[2, 2, v2]");
+    }
+
+    /**
+     * Tests that chain table lookup join refresh works correctly for both async and non-async
+     * modes. This test verifies the refresh logic in {@code FullCacheLookupTable.refresh()} which
+     * has different code paths for async vs non-async refresh. For chain tables, the async path
+     * skips the backlog calculation (since outer table and delta branch use different snapshot
+     * sequences).
+     *
+     * <p>The lookup join job is started BEFORE inserting source data, so the lookup cache is warmed
+     * up before any source data arrives.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @Timeout(120)
+    public void testLookupJoinRefresh(boolean asyncRefresh) throws Exception {
+        String tableName = "chain_refresh_" + (asyncRefresh ? "async" : "sync");
+
+        tEnv.useCatalog("PAIMON");
+        tEnv.useDatabase("default");
+
+        sql(
+                "CREATE TABLE "
+                        + tableName
+                        + " ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches(tableName);
+
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2')");
+
+        sql(
+                "INSERT INTO `"
+                        + tableName
+                        + "$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (3, 1, 'delta_3')");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(100);
+        env.setParallelism(1);
+
+        EnvironmentSettings settings = EnvironmentSettings.newInstance().inStreamingMode().build();
+        StreamTableEnvironment streamTableEnv = StreamTableEnvironment.create(env, settings);
+
+        streamTableEnv.registerCatalog("PAIMON", tEnv.getCatalog("PAIMON").get());
+        streamTableEnv.useCatalog("PAIMON");
+        streamTableEnv.useDatabase("default");
+
+        streamTableEnv.executeSql(
+                "CREATE TABLE IF NOT EXISTS source_refresh ("
+                        + "  id BIGINT,"
+                        + "  v BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+
+        streamTableEnv.executeSql(
+                "CREATE TABLE IF NOT EXISTS sink_refresh ("
+                        + "  id BIGINT,"
+                        + "  k BIGINT,"
+                        + "  v STRING"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon',"
+                        + "  'primary-key' = 'id',"
+                        + "  'bucket' = '1'"
+                        + ")");
+
+        streamTableEnv
+                .executeSql("INSERT INTO source_refresh VALUES (1, 1), (2, 2), (3, 3)")
+                .await();
+
+        // Submit lookup join job BEFORE inserting source data
+        String query =
+                format(
+                        "INSERT INTO sink_refresh "
+                                + "SELECT S.id, D.k, D.v "
+                                + "FROM source_refresh AS S "
+                                + "LEFT JOIN "
+                                + tableName
+                                + " /*+ OPTIONS('lookup.cache' = 'full', 'lookup.refresh-async' = '%s', 'continuous.refresh-interval' = '1s') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k",
+                        asyncRefresh);
+
+        TableResult tableResult = streamTableEnv.executeSql(query);
+        JobClient jobClient =
+                tableResult
+                        .getJobClient()
+                        .orElseThrow(() -> new RuntimeException("Failed to get JobClient"));
+
+        try {
+            waitForJobRunning(jobClient);
+
+            waitForQueryResult(
+                    "SELECT * FROM sink_refresh ORDER BY id", results -> results.size() == 3);
+
+            // Insert new delta data
+            sql(
+                    "INSERT INTO `"
+                            + tableName
+                            + "$branch_delta` PARTITION (dt = '20250810') VALUES (4, 1, 'delta_4')");
+
+            waitForQueryResult(
+                    "SELECT * FROM " + tableName + " WHERE dt = '20250810' ORDER BY k",
+                    results -> results.size() == 4);
+
+            long startTime = System.currentTimeMillis();
+            long value = 0;
+            List<String> results = null;
+            while (System.currentTimeMillis() - startTime < 30000L) {
+                // Insert new source data to trigger lookup
+                streamTableEnv
+                        .executeSql("INSERT INTO source_refresh VALUES (4, " + value + ")")
+                        .await();
+
+                results = collectResult("SELECT * FROM sink_refresh WHERE id = 4");
+                if (results.size() == 1 && results.get(0).contains("delta_4")) {
+                    break;
+                }
+                Thread.sleep(500);
+            }
+
+            assertThat(results).hasSize(1).contains("+I[4, 4, delta_4]");
+        } finally {
+            jobClient.cancel().get();
+        }
+    }
+
+    /**
+     * Tests that {@link FullCacheLookupTable#refresh()} uses the delta branch's snapshot manager
+     * for chain tables, so that async refresh is chosen when the delta backlog is small.
+     */
+    @Test
+    @Timeout(120)
+    public void testChainTableLookupRefreshAsyncPath() throws Exception {
+        String tableName = "chain_refresh_async_path";
+
+        tEnv.useCatalog("PAIMON");
+        tEnv.useDatabase("default");
+
+        sql(
+                "CREATE TABLE "
+                        + tableName
+                        + " ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches(tableName);
+
+        // Write initial data to delta branch so the lookup table can bootstrap.
+        sql(
+                "INSERT OVERWRITE `"
+                        + tableName
+                        + "$branch_delta` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'delta_1')");
+
+        // Get the chain table and enable async refresh with a pending-snapshot-count of 0.
+        FileStoreTable table = paimonTable(tableName);
+        Map<String, String> lookupOptions = new HashMap<>();
+        lookupOptions.put("lookup.refresh.async", "true");
+        lookupOptions.put("lookup.refresh.async.pending-snapshot-count", "0");
+        table = table.copy(lookupOptions);
+
+        // Create and open a FullCacheLookupTable directly so we can inspect refreshFuture.
+        File tempDir = new File(temporaryFolder.toFile(), tableName);
+        tempDir.mkdirs();
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        table,
+                        new int[] {0, 1, 2, 3},
+                        null,
+                        null,
+                        tempDir,
+                        Collections.singletonList("k"),
+                        null);
+        FullCacheLookupTable lookupTable = FullCacheLookupTable.create(context, 0);
+        lookupTable.open();
+
+        try {
+            // Write many commits to the MAIN table. The main table and delta branch maintain
+            // independent snapshot sequences, so this inflates the main table's snapshot id
+            // while the delta branch remains at a low snapshot id.
+            for (int i = 0; i < 10; i++) {
+                sql(
+                        "INSERT INTO "
+                                + tableName
+                                + " PARTITION (dt = '20250810')"
+                                + " VALUES ("
+                                + (100 + i)
+                                + ", "
+                                + i
+                                + ", 'main_"
+                                + i
+                                + "')");
+            }
+
+            // Write a single new delta record so the delta branch has a small backlog.
+            sql(
+                    "INSERT INTO `"
+                            + tableName
+                            + "$branch_delta` PARTITION (dt = '20250810')"
+                            + " VALUES (3, 1, 'delta_3')");
+
+            // The delta branch has only one new snapshot, so the async refresh path should be
+            // chosen.
+            lookupTable.refresh();
+
+            assertThat(lookupTable.getRefreshFuture())
+                    .as(
+                            "Chain table lookup refresh should use the async path when the delta backlog is small.")
+                    .isNotNull();
+
+            // Wait for the async refresh to complete before closing.
+            lookupTable.getRefreshFuture().get();
+        } finally {
+            lookupTable.close();
+        }
     }
 }

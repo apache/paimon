@@ -77,6 +77,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final long targetFileSize;
     private final long blobTargetFileSize;
     private final long vectorTargetFileSize;
+    private final long targetFileRowNum;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -85,8 +86,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
     private final boolean statsDenseStore;
+    private final FileSource fileSource;
     @Nullable private final FileFormat rowSidecarFileFormat;
     @Nullable private final BlobFileContext blobContext;
+    private final boolean omitAllNonDedicatedWriteCols;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -112,6 +115,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             long targetFileSize,
             long blobTargetFileSize,
             long vectorTargetFileSize,
+            long targetFileRowNum,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -131,7 +135,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean statsDenseStore,
             boolean dataEvolutionEnabled,
             @Nullable FileFormat rowSidecarFileFormat,
-            @Nullable BlobFileContext blobContext) {
+            @Nullable BlobFileContext blobContext,
+            FileSource fileSource,
+            boolean omitAllNonDedicatedWriteCols) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -139,6 +145,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
         this.vectorTargetFileSize = vectorTargetFileSize;
+        this.targetFileRowNum = targetFileRowNum;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -147,8 +154,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
         this.statsDenseStore = statsDenseStore;
+        this.fileSource = fileSource;
         this.rowSidecarFileFormat = dataEvolutionEnabled ? rowSidecarFileFormat : null;
         this.blobContext = blobContext;
+        this.omitAllNonDedicatedWriteCols = omitAllNonDedicatedWriteCols;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -279,7 +288,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         for (DataFileMeta file : compactAfter) {
             // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
             // can directly delete the file in compactAfter.
-            fileIO.deleteQuietly(pathFactory.toPath(file));
+            file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
         }
 
         sinkWriter.close();
@@ -306,15 +315,17 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             } finally {
                 // remove small files
                 for (DataFileMeta file : files) {
-                    fileIO.deleteQuietly(pathFactory.toPath(file));
+                    file.collectFiles(pathFactory).forEach(fileIO::deleteQuietly);
                 }
             }
         }
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (blobContext != null
-                || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty()) {
+        boolean hasDedicatedFields =
+                blobContext != null
+                        || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty();
+        if (hasDedicatedFields) {
             return new DedicatedFormatRollingFileWriter(
                     fileIO,
                     schemaId,
@@ -323,15 +334,17 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     targetFileSize,
                     blobTargetFileSize,
                     vectorTargetFileSize,
+                    targetFileRowNum,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
                     fileCompression,
                     statsCollectorFactories,
                     fileIndexOptions,
-                    FileSource.APPEND,
+                    fileSource,
                     statsDenseStore,
-                    blobContext);
+                    blobContext,
+                    omitAllNonDedicatedWriteCols);
         }
         return new RowDataRollingFileWriter(
                 fileIO,
@@ -344,11 +357,12 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 fileCompression,
                 statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
                 fileIndexOptions,
-                FileSource.APPEND,
+                fileSource,
                 asyncFileWrite,
                 statsDenseStore,
                 writeCols,
-                rowSidecarFileFormat);
+                rowSidecarFileFormat,
+                targetFileRowNum);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

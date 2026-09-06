@@ -95,7 +95,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             CoreOptions options,
             String tableName,
             @Nullable Integer writeId) {
-        super(snapshotManager, scan, options, partitionType, null, null, tableName);
+        super(snapshotManager, scan, options, partitionType, null, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.mfFactory = mfFactory;
@@ -240,5 +240,15 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                             + " does not match the pattern. This is unexpected.",
                     e);
         }
+    }
+
+    /** Returns the unique prefix shared by files produced by the same postpone writer. */
+    public static String getWriterPrefix(String fileName) {
+        int separator = fileName.lastIndexOf("-w-");
+        if (separator < 0) {
+            throw new IllegalArgumentException(
+                    "Data file name " + fileName + " does not match the postpone writer pattern.");
+        }
+        return fileName.substring(0, separator + 3);
     }
 }

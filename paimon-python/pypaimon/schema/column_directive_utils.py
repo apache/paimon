@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
-                                        DataType, VectorType)
+                                        DataType, MapType, VectorType)
 
 BLOB_FIELD_DIRECTIVE = "__BLOB_FIELD"
 BLOB_DESCRIPTOR_FIELD_DIRECTIVE = "__BLOB_DESCRIPTOR_FIELD"
@@ -149,13 +149,62 @@ def _convert_type(directive: ParsedDirective, field_name: str, source_type: Data
             )
         return VectorType(source_type.nullable, source_type.element, directive.vector_dim)
     else:
+        if isinstance(source_type, MapType):
+            if directive.option_key != CoreOptions.BLOB_FIELD.key():
+                raise ValueError(
+                    f"MAP<X, BLOB> is only supported by '{CoreOptions.BLOB_FIELD.key()}'."
+                )
+            value_type = getattr(source_type.value, 'type', None) \
+                if isinstance(source_type.value, AtomicType) else None
+            if not _is_blob_source_type(value_type):
+                raise ValueError(
+                    f"Column {field_name} declared with a BLOB directive must be of "
+                    f"BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY>, ARRAY<BLOB>, "
+                    f"MAP<X, BYTES>, MAP<X, BINARY> or MAP<X, BLOB> type, but was "
+                    f"{source_type}."
+                )
+            return MapType(
+                source_type.nullable,
+                source_type.key,
+                AtomicType('BLOB', source_type.value.nullable),
+            )
+        if isinstance(source_type, ArrayType):
+            if directive.option_key != CoreOptions.BLOB_FIELD.key():
+                raise ValueError(
+                    f"ARRAY<BLOB> is only supported by '{CoreOptions.BLOB_FIELD.key()}'."
+                )
+            element_type = getattr(source_type.element, 'type', None) \
+                if isinstance(source_type.element, AtomicType) else None
+            if not _is_blob_source_type(element_type):
+                raise ValueError(
+                    f"Column {field_name} declared with a BLOB directive must be of "
+                    f"BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY>, ARRAY<BLOB>, "
+                    f"MAP<X, BYTES>, MAP<X, BINARY> or MAP<X, BLOB> type, but was "
+                    f"{source_type}."
+                )
+            return ArrayType(
+                source_type.nullable,
+                AtomicType('BLOB', source_type.element.nullable),
+            )
         type_name = getattr(source_type, 'type', None) if isinstance(source_type, AtomicType) else None
-        if type_name not in ('VARBINARY', 'BINARY', 'BYTES', 'BLOB'):
+        if not _is_blob_source_type(type_name):
             raise ValueError(
                 f"Column {field_name} declared with a BLOB directive "
-                f"must be of BYTES, BINARY or BLOB type, but was {source_type}."
+                f"must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY>, "
+                f"ARRAY<BLOB>, MAP<X, BYTES>, MAP<X, BINARY> or MAP<X, BLOB> "
+                f"type, but was {source_type}."
             )
         return AtomicType('BLOB', source_type.nullable)
+
+
+def _is_blob_source_type(type_name: Optional[str]) -> bool:
+    if type_name is None:
+        return False
+    return (
+        type_name in ('BYTES', 'BLOB')
+        or type_name.startswith('BINARY')
+        or type_name.startswith('VARBINARY')
+    )
 
 
 def _modify_field_options(option_key: str, field_name: str, options: Dict[str, str]):

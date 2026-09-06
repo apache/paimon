@@ -26,6 +26,8 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -40,6 +42,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.SnapshotManager;
@@ -54,6 +57,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -74,6 +78,8 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -104,7 +110,7 @@ public class SchemaManagerTest {
         FailingFileIO.reset(failingName, 100, 100);
         String root = FailingFileIO.getFailingPath(failingName, tempDir.toString());
         path = new Path(root);
-        manager = new SchemaManager(FileIOFinder.find(path), path);
+        manager = new FileSystemSchemaManager(FileIOFinder.find(path), path);
     }
 
     @AfterEach
@@ -168,6 +174,548 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(nanos)))
+                .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @Test
+    public void testIcebergMetadataAllowsMicrosecondTimestamps() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema micros =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(6))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatCode(() -> retryArtificialException(() -> manager.createTable(micros)))
+                .doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnablingIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        retryArtificialException(() -> manager.createTable(nanos));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {4, 6, 9})
+    public void testIcebergMetadataRefusesUnsupportedTimePrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.createTable(timeSchema(options, precision))))
+                .hasStackTraceContaining("precision of 3 or less");
+
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.createTable(timeSchema(options, 3))))
+                .doesNotThrowAnyException();
+    }
+
+    private Schema timeSchema(Map<String, String> options, int precision) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "t", DataTypes.TIME(precision))),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalTimePrecisions() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema micros =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "t", DataTypes.TIME(6))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(micros));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("t")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision of 3 or less");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnableIcebergMetadataValidatesHistoricalTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(nanos));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("ts")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalGeospatialSchemas() throws Exception {
+        Map<String, String> geospatialOptions = new HashMap<>();
+        geospatialOptions.put(CoreOptions.BUCKET.key(), "-1");
+        Schema geospatialSchema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "geom", DataTypes.GEOMETRY())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        geospatialOptions,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(geospatialSchema));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("geom")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining(
+                        "Geometry and geography columns require 'metadata.iceberg.format-version'='3'");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .METADATA_ICEBERG_STORAGE
+                                                                                .key(),
+                                                                        "rest-catalog"),
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .FORMAT_VERSION
+                                                                                .key(),
+                                                                        "3")))))
+                .hasStackTraceContaining(
+                        "Geometry and geography columns do not support 'metadata.iceberg.storage'='rest-catalog'");
+
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .METADATA_ICEBERG_STORAGE
+                                                                                .key(),
+                                                                        "table-location"),
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .FORMAT_VERSION
+                                                                                .key(),
+                                                                        "3")))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testChangeMapStorageLayoutForExistingField() throws Exception {
+        retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema("default")));
+
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                SchemaChange.setOption(
+                                        "fields.metrics.map.storage-layout", "shared-shredding")));
+        Optional<TableSchema> sharedShredding = retryArtificialException(() -> manager.latest());
+        assertThat(sharedShredding).isPresent();
+        assertThat(sharedShredding.get().options())
+                .containsEntry("fields.metrics.map.storage-layout", "shared-shredding")
+                .containsEntry("fields.metrics.map.shared-shredding.max-columns", "2");
+
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                SchemaChange.setOption(
+                                        "fields.metrics.map.storage-layout", "default")));
+        Optional<TableSchema> defaultLayout = retryArtificialException(() -> manager.latest());
+        assertThat(defaultLayout).isPresent();
+        assertThat(defaultLayout.get().options())
+                .containsEntry("fields.metrics.map.storage-layout", "default")
+                .containsEntry("fields.metrics.map.shared-shredding.max-columns", "2");
+    }
+
+    @Test
+    public void testChangeMapStorageLayoutByRenameColumn() throws Exception {
+        retryArtificialException(() -> manager.createTable(mapStorageLayoutSchema(null)));
+
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                Arrays.asList(
+                                        SchemaChange.renameColumn("metrics", "renamed_metrics"),
+                                        SchemaChange.setOption(
+                                                "fields.renamed_metrics.map.storage-layout",
+                                                "shared-shredding"))));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest).isPresent();
+        assertThat(latest.get().fields().get(1).id()).isEqualTo(1);
+        assertThat(latest.get().fields().get(1).name()).isEqualTo("renamed_metrics");
+        assertThat(latest.get().options())
+                .doesNotContainKey("fields.metrics.map.storage-layout")
+                .containsEntry("fields.renamed_metrics.map.storage-layout", "shared-shredding");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"plain", "sequential"})
+    public void testRenameColumnKeepsMapStorageLayoutOptions(String placementPolicy)
+            throws Exception {
+        retryArtificialException(
+                () ->
+                        manager.createTable(
+                                mapStorageLayoutSchema("shared-shredding", placementPolicy)));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.renameColumn("metrics", "renamed")));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(latest.get().options())
+                .doesNotContainKeys(
+                        "fields.metrics.map.storage-layout",
+                        "fields.metrics.map.shared-shredding.max-columns",
+                        "fields.metrics.map.shared-shredding.column-placement-policy")
+                .containsEntry("fields.renamed.map.storage-layout", "shared-shredding")
+                .containsEntry("fields.renamed.map.shared-shredding.max-columns", "2")
+                .containsEntry(
+                        "fields.renamed.map.shared-shredding.column-placement-policy",
+                        placementPolicy);
+    }
+
+    private Schema mapStorageLayoutSchema(String layout) {
+        return mapStorageLayoutSchema(layout, null);
+    }
+
+    private Schema mapStorageLayoutSchema(String layout, String placementPolicy) {
+        Map<String, String> options = new HashMap<>();
+        if (layout != null) {
+            options.put("fields.metrics.map.storage-layout", layout);
+            options.put("fields.metrics.map.shared-shredding.max-columns", "2");
+        }
+        if (placementPolicy != null) {
+            options.put(
+                    "fields.metrics.map.shared-shredding.column-placement-policy", placementPolicy);
+        }
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    @Test
+    public void testRejectRenamePrimaryKeyVectorIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
+        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(
+                                        1, "embedding", DataTypes.VECTOR(8, DataTypes.FLOAT()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"embedding"}, "renamed_embedding")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key index column: [embedding]");
+    }
+
+    @Test
+    public void testRejectRenamePrimaryKeyBTreeIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "name", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"name"}, "renamed_name")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key index column: [name]");
+    }
+
+    @Test
+    public void testRejectDestructivePrimaryKeyFullTextIndexColumnChanges() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "content", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"content"}, "renamed_content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key index column: [content]");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [content]");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType("content", DataTypes.INT())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [content]");
+    }
+
+    @Test
+    public void testRejectDestructivePrimaryKeyFMIndexColumnChanges() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_FM_INDEX_COLUMNS.key(), "content");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "content", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"content"}, "renamed_content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key index column: [content]");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [content]");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType("content", DataTypes.INT())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [content]");
+    }
+
+    @Test
+    public void testRejectDropPrimaryKeyBitmapIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "status", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("status")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [status]");
+    }
+
+    @Test
+    public void testRejectTypeChangeOfPrimaryKeyBitmapIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "status", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType(
+                                                "status", DataTypes.BIGINT())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [status]");
+    }
+
+    @Test
+    public void testRejectChangeOfPrimaryKeyMultiValueIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "tags", DataTypes.ARRAY(DataTypes.STRING()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("tags")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [tags]");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType(
+                                                "tags", DataTypes.ARRAY(DataTypes.BIGINT()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [tags]");
     }
 
     @Test
@@ -344,6 +892,33 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testVariantKeyType() {
+        final RowType variantType =
+                RowType.of(new VariantType(), new BigIntType(), new VarCharType());
+
+        final Schema variantPrimaryKeySchema =
+                new Schema(variantType.getFields(), partitionKeys, primaryKeys, options, "");
+        assertThatThrownBy(() -> manager.createTable(variantPrimaryKeySchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in primary key field %s is unsupported",
+                        VariantType.class.getSimpleName(), "f0");
+
+        final Schema variantPartitionSchema =
+                new Schema(
+                        variantType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> manager.createTable(variantPartitionSchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in partition field %s is unsupported",
+                        VariantType.class.getSimpleName(), "f0");
+    }
+
+    @Test
     public void testChangelogTableWithFullCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("key", "value");
@@ -367,7 +942,7 @@ public class SchemaManagerTest {
                         options,
                         "append-only table with primary key");
         // use non-failing manager
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
         String schemaContent = manager.latest().get().toString();
 
@@ -387,7 +962,7 @@ public class SchemaManagerTest {
             List<String> expectedOrder) {
         List<DataField> fields = new LinkedList<>(initialFields);
 
-        manager.applyMove(fields, moveOperation);
+        SchemaManager.applyMove(fields, moveOperation);
 
         for (int i = 0; i < expectedOrder.size(); i++) {
             assertEquals(
@@ -449,8 +1024,17 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
+
+        // 'type' is rejected even without snapshots (format tables hold data but create none)
+        assertThatThrownBy(
+                        () -> manager.commitChanges(SchemaChange.setOption("type", "format-table")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.removeOption("type")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
 
         // set immutable options and set primary keys
         manager.commitChanges(
@@ -513,6 +1097,18 @@ public class SchemaManagerTest {
                                         SchemaChange.setOption("merge-engine", "deduplicate")))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
+
+        // flipping the type in place would build a different table kind over the same data
+        assertThatThrownBy(
+                        () -> manager.commitChanges(SchemaChange.setOption("type", "format-table")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Change 'type' is not supported yet.");
+
+        // setting the default type explicitly is not a change
+        assertThatCode(() -> manager.commitChanges(SchemaChange.setOption("type", "table")))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> table.copy(Collections.singletonMap("type", "table")))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -531,7 +1127,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
@@ -541,6 +1137,59 @@ public class SchemaManagerTest {
         assertThat(
                         SchemaManager.isUnchangedNormalizedKey(
                                 "primary-key", null, null, copied.schema()))
+                .isFalse();
+    }
+
+    @Test
+    public void testIsUnchangedNormalizedKeyWithKeyLists() {
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        List<String> partitionKeys = Collections.singletonList("f0");
+        // an explicit type equal to the default is not a change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type",
+                                null,
+                                CoreOptions.TYPE.defaultValue().toString(),
+                                primaryKeys,
+                                partitionKeys))
+                .isTrue();
+        // default type matched case-insensitively
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", null, "TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        // a different type is a real change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", null, "format-table", primaryKeys, partitionKeys))
+                .isFalse();
+        // primary-key / partition restated with the same normalized value are no-ops
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", null, "f0, f1", primaryKeys, partitionKeys))
+                .isTrue();
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "partition", null, "f0", primaryKeys, partitionKeys))
+                .isTrue();
+        // an explicitly stored type restated with different case is still a no-op
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "table", "TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "format-table", "FORMAT-TABLE", primaryKeys, partitionKeys))
+                .isTrue();
+        // a genuinely different explicit type is a real change
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "type", "table", "format-table", primaryKeys, partitionKeys))
+                .isFalse();
+        // non-type keys with a non-null old value are treated as changes
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", "f0", "f0,f1", primaryKeys, partitionKeys))
                 .isFalse();
     }
 
@@ -558,7 +1207,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
@@ -584,7 +1233,7 @@ public class SchemaManagerTest {
     @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // drop primary keys on empty table should succeed
@@ -606,7 +1255,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(pkSchema);
 
         // write data to create a snapshot
@@ -647,7 +1296,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange addColumn =
@@ -788,7 +1437,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange renameColumn =
@@ -845,7 +1494,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange updateColumnType =
@@ -892,7 +1541,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange addColumn =
@@ -931,7 +1580,7 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // write table
@@ -963,7 +1612,7 @@ public class SchemaManagerTest {
 
     @Test
     public void testRollbackSchemaSuccess() throws Exception {
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
         long firstSchemaId = manager.latest().get().id();
 
@@ -997,7 +1646,7 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(appendOnlySchema);
         long firstSchemaId = manager.latest().get().id();
 
@@ -1047,7 +1696,7 @@ public class SchemaManagerTest {
 
     @Test
     public void testRollbackSchemaNotExist() throws Exception {
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
@@ -1059,5 +1708,79 @@ public class SchemaManagerTest {
                                         new TagManager(LocalFileIO.create(), path),
                                         new ChangelogManager(LocalFileIO.create(), path, null)))
                 .hasMessageContaining("Schema 999 does not exist");
+    }
+
+    private Schema schemaWithDefault(String defaultValue) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "c", DataTypes.STRING(), null, defaultValue)),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonMap(CoreOptions.BUCKET.key(), "-1"),
+                "");
+    }
+
+    @Test
+    public void testUpdateColumnTypeRejectsADefaultValueTheNewTypeCannotRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'abc'")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.updateColumnType(
+                                                                "c", DataTypes.INT()))))
+                .rootCause()
+                .isInstanceOf(NumberFormatException.class);
+
+        // the column is untouched, so the table is still writable
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testUpdateColumnTypeKeepsADefaultValueTheNewTypeCanRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'123'")));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.updateColumnType("c", DataTypes.INT())));
+
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.INT());
+        assertThat(after.fields().get(1).defaultValue()).isEqualTo("'123'");
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testResetCannotWeakenAnOptionThatSetCannotWeaken() {
+        // Resetting an option puts it back to its default. For these three the default is the
+        // weaker value, so a reset is the same change that setting it explicitly already rejects.
+        for (ConfigOption<Boolean> option :
+                Arrays.asList(DELETION_VECTORS_ENABLED, IGNORE_DELETE, IGNORE_UPDATE_BEFORE)) {
+            Map<String, String> enabled = new HashMap<>();
+            enabled.put(option.key(), "true");
+            assertThatThrownBy(
+                            () -> SchemaManager.checkResetTableOption(enabled, option.key()),
+                            option.key())
+                    .isInstanceOf(UnsupportedOperationException.class);
+
+            // resetting an option that is already at its default changes nothing
+            Map<String, String> disabled = new HashMap<>();
+            disabled.put(option.key(), "false");
+            assertThatCode(() -> SchemaManager.checkResetTableOption(disabled, option.key()))
+                    .as("%s", option.key())
+                    .doesNotThrowAnyException();
+        }
     }
 }

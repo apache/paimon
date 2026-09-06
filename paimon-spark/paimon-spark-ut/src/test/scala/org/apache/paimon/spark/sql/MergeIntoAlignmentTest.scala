@@ -24,6 +24,29 @@ import org.apache.spark.sql.Row
 
 class MergeIntoAlignmentTest extends PaimonSparkTestBase {
 
+  test("merge into with is not null in condition") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, b INT, v STRING)
+            | USING paimon
+            | TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1')""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 10, 'old-1'), (2, NULL, 'old-2')")
+
+      spark
+        .sql("SELECT 1 AS id, 'new-1' AS v")
+        .createOrReplaceTempView("s")
+
+      sql("""MERGE INTO t
+            | USING s
+            | ON t.id = s.id AND t.b IS NOT NULL
+            | WHEN MATCHED THEN UPDATE SET v = s.v""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, b, v FROM t ORDER BY id"),
+        Seq(Row(1, 10, "new-1"), Row(2, null, "old-2"))
+      )
+    }
+  }
+
   test("basic merge: matched UPDATE *, not-matched INSERT *") {
     withTable("t") {
       sql("""CREATE TABLE t (id INT, name STRING)

@@ -1,0 +1,501 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+################################################################################
+
+name: Release Java
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: release-java-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.lane }}
+    if: >-
+      github.repository == 'apache/paimon' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      contains(github.ref_name, '-rc')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: jdk8
+            java_version: 8
+          - lane: jdk11
+            java_version: 11
+          - lane: jdk17
+            java_version: 17
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK ${{ matrix.java_version }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ matrix.java_version }}
+          distribution: temurin
+          cache: maven
+
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@12eb41b233df95d49b0c11fc1b5bc8312e5d4ce0 # v5.1
+        with:
+          maven-version: 3.8.8
+
+      - name: Validate release tag and version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_version="$(
+            mvn -q -DforceStdout help:evaluate \
+              -Dexpression=project.version
+          )"
+          rc_number="${GITHUB_REF_NAME##*-rc}"
+          expected_tag="release-${release_version}-rc${rc_number}"
+
+          if [[ ! "${rc_number}" =~ ^[0-9]+$ ]]; then
+            echo "RC number must be numeric: ${rc_number}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Maven version ${release_version}" >&2
+            exit 1
+          fi
+          if [[ "${release_version}" == *-SNAPSHOT ]]; then
+            echo "Release version must not contain -SNAPSHOT" >&2
+            exit 1
+          fi
+
+          echo "version=${release_version}" >> "${GITHUB_OUTPUT}"
+          echo "rc_number=${rc_number}" >> "${GITHUB_OUTPUT}"
+
+          java -version
+          mvn -version
+
+      - name: Reject SNAPSHOT project versions and dependencies
+        shell: bash
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+
+          enforcer_goal="org.apache.maven.plugins:maven-enforcer-plugin:3.6.3:enforce"
+          enforcer_rules="requireReleaseVersion,requireReleaseDeps"
+          case "${LANE}" in
+            jdk8)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,spark3,flink1
+              ;;
+            jdk11)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,flink2 \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                -am
+              ;;
+            jdk17)
+              mvn -ntp -B "${enforcer_goal}" \
+                -Denforcer.rules="${enforcer_rules}" \
+                -Papache-release,docs-and-source,spark4 \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                -am
+              ;;
+            *)
+              echo "Unknown Java release lane: ${LANE}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Package Java release artifacts
+        shell: bash
+        env:
+          LANE: ${{ matrix.lane }}
+          MAVEN_OPTS: -Xmx4096m
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-java
+          repository="${RUNNER_TEMP}/paimon-${LANE}-repository"
+          alt_repository="local::default::file://${repository}"
+          effective_pom="${RUNNER_TEMP}/paimon-${LANE}-effective-pom.xml"
+          expected_projects="release-java/${LANE}-expected-projects.txt"
+          log="release-java/${LANE}.log"
+
+          capture_expected_projects() {
+            mvn -q -ntp -B help:effective-pom \
+              -Doutput="${effective_pom}" "$@"
+          }
+
+          case "${LANE}" in
+            jdk8)
+              capture_expected_projects \
+                -Papache-release,docs-and-source,spark3,flink1
+              mvn clean deploy -ntp -B \
+                -Papache-release,docs-and-source,spark3,flink1 \
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
+                -DdeployAtEnd=true \
+                -DaltDeploymentRepository="${alt_repository}" \
+                2>&1 | tee "${log}"
+              ;;
+            jdk11)
+              capture_expected_projects \
+                -Papache-release,docs-and-source,flink2 \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg
+              # This install only supplies reactor dependencies for the deploy
+              # below. Their Javadocs are built by the owning release lane.
+              mvn clean install -ntp -B \
+                -Pdocs-and-source,flink2 \
+                -DskipTests -Dmaven.javadoc.skip=true \
+                -Dstyle.color=never \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-iceberg \
+                -am \
+                2>&1 | tee "${log}"
+              mvn deploy -ntp -B \
+                -Papache-release,docs-and-source,flink2 \
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
+                -DdeployAtEnd=true \
+                -DaltDeploymentRepository="${alt_repository}" \
+                -pl org.apache.paimon:paimon-flink-2.0,org.apache.paimon:paimon-flink-2.1,org.apache.paimon:paimon-flink-2.2,org.apache.paimon:paimon-flink2-common,org.apache.paimon:paimon-iceberg \
+                2>&1 | tee -a "${log}"
+              ;;
+            jdk17)
+              capture_expected_projects \
+                -Papache-release,docs-and-source,spark4 \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13
+              # This install only supplies reactor dependencies for the deploy
+              # below. Their Javadocs are built by the owning release lane.
+              mvn clean install -ntp -B \
+                -Pdocs-and-source,spark4 \
+                -DskipTests -Dmaven.javadoc.skip=true \
+                -Dstyle.color=never \
+                -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+                -am \
+                2>&1 | tee "${log}"
+              mvn deploy -ntp -B \
+                -Papache-release,docs-and-source,spark4 \
+                -DskipTests -Dgpg.skip=true -Dstyle.color=never \
+                -DdeployAtEnd=true \
+                -DaltDeploymentRepository="${alt_repository}" \
+                -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 \
+                2>&1 | tee -a "${log}"
+              ;;
+            *)
+              echo "Unknown Java release lane: ${LANE}" >&2
+              exit 1
+              ;;
+          esac
+
+          python3 - \
+            "${effective_pom}" "${expected_projects}" \
+            "${RELEASE_VERSION}" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          effective_pom, output, release_version = sys.argv[1:]
+          root = ET.parse(effective_pom).getroot()
+          projects = list(root) if root.tag == "projects" else [root]
+          namespace = "{http://maven.apache.org/POM/4.0.0}"
+          expected = []
+          for project in projects:
+              def required(name):
+                  element = project.find(namespace + name)
+                  if element is None or not element.text:
+                      raise ValueError("Effective POM is missing " + name)
+                  return element.text.strip()
+
+              deploy_skipped = False
+              plugins = project.findall(
+                  "./%sbuild/%splugins/%splugin"
+                  % (namespace, namespace, namespace)
+              )
+              for plugin in plugins:
+                  artifact = plugin.find(namespace + "artifactId")
+                  if artifact is None or artifact.text != "maven-deploy-plugin":
+                      continue
+                  skip = plugin.find(
+                      "./%sconfiguration/%sskip" % (namespace, namespace)
+                  )
+                  if (
+                      skip is not None
+                      and skip.text
+                      and skip.text.strip().lower() == "true"
+                  ):
+                      deploy_skipped = True
+                      break
+              if deploy_skipped:
+                  continue
+
+              group_id = required("groupId")
+              artifact_id = required("artifactId")
+              version = required("version")
+              packaging_element = project.find(namespace + "packaging")
+              packaging = (
+                  packaging_element.text.strip()
+                  if packaging_element is not None and packaging_element.text
+                  else "jar"
+              )
+              if group_id != "org.apache.paimon":
+                  raise ValueError("Unexpected release groupId: " + group_id)
+              if version != release_version:
+                  raise ValueError(
+                      "Unexpected project version for %s: %s"
+                      % (artifact_id, version)
+                  )
+              if packaging not in ("jar", "pom"):
+                  raise ValueError(
+                      "Unsupported release packaging for %s: %s"
+                      % (artifact_id, packaging)
+                  )
+              expected.append((group_id, artifact_id, version, packaging))
+
+          if not expected:
+              raise ValueError("Effective POM contains no release projects")
+          if len(expected) != len(set(expected)):
+              raise ValueError("Effective POM contains duplicate projects")
+          with open(output, "w", encoding="utf-8") as result:
+              for project in sorted(expected):
+                  result.write("\t".join(project) + "\n")
+          PY
+
+          while IFS=$'\t' read -r group_id artifact_id version packaging; do
+            artifact_directory="${repository}/${group_id//.//}/${artifact_id}/${version}"
+            artifact_base="${artifact_directory}/${artifact_id}-${version}"
+            if [[ ! -f "${artifact_base}.pom" ]]; then
+              echo "Missing release POM: ${artifact_base}.pom" >&2
+              exit 1
+            fi
+            if [[ "${packaging}" == "jar" ]]; then
+              for classifier in '' '-sources'; do
+                if [[ ! -f "${artifact_base}${classifier}.jar" ]]; then
+                  echo "Missing release JAR: ${artifact_base}${classifier}.jar" >&2
+                  exit 1
+                fi
+              done
+              if [[ ! -f "${artifact_base}-javadoc.jar" ]]; then
+                echo "No Javadoc JAR was produced for ${group_id}:${artifact_id}"
+              fi
+            fi
+          done < "${expected_projects}"
+
+          unexpected_artifact="$(
+            find "${repository}" -type f \
+              \( -name '*.jar' -o -name '*.pom' \) \
+              ! -path "*/${RELEASE_VERSION}/*" -print -quit
+          )"
+          if [[ -n "${unexpected_artifact}" ]]; then
+            echo "Artifact is outside the release version: ${unexpected_artifact}" >&2
+            exit 1
+          fi
+
+          files="${GITHUB_WORKSPACE}/release-java/${LANE}-files.txt"
+          (
+            cd "${repository}"
+            find . -type f | LC_ALL=C sort > "${files}"
+          )
+          if [[ ! -s "${files}" ]] ||
+             ! grep -q '\.pom$' "${files}" ||
+             ! grep -q '\.jar$' "${files}"; then
+            echo "Incomplete Maven repository image for ${LANE}" >&2
+            exit 1
+          fi
+          if grep -q '\.asc$' "${files}"; then
+            echo "Unsigned repository image unexpectedly contains signatures" >&2
+            exit 1
+          fi
+
+          (
+            cd "${repository}"
+            while IFS= read -r artifact; do
+              sha512sum "${artifact}"
+            done < "${files}"
+          ) > "release-java/${LANE}-sha512.txt"
+
+          tar -czf "release-java/${LANE}-repository.tar.gz" \
+            -C "${repository}" .
+          (
+            cd release-java
+            sha512sum "${LANE}-repository.tar.gz" \
+              > "${LANE}-repository.tar.gz.sha512"
+          )
+
+          {
+            echo "lane=${LANE}"
+            echo "jdk=${{ matrix.java_version }}"
+            echo "version=${{ steps.release.outputs.version }}"
+            echo "rc=${{ steps.release.outputs.rc_number }}"
+            echo "commit=${GITHUB_SHA}"
+            echo "signed=false"
+            echo "staged=false"
+            echo "artifact_source=maven-file-repository"
+          } > "release-java/${LANE}-manifest.txt"
+
+      - name: Upload Java repository lane
+        uses: actions/upload-artifact@v6
+        with:
+          name: java-repository-${{ matrix.lane }}
+          path: release-java/
+          if-no-files-found: error
+          retention-days: 1
+
+  combine:
+    name: Combine Java repository
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: java-repository-*
+          path: release-java/lanes
+          merge-multiple: true
+
+      - name: Merge repository lanes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-java/final/evidence
+          combined="${RUNNER_TEMP}/paimon-maven-repository"
+          mkdir -p "${combined}"
+
+          for lane in jdk8 jdk11 jdk17; do
+            archive="release-java/lanes/${lane}-repository.tar.gz"
+            checksum="release-java/lanes/${lane}-repository.tar.gz.sha512"
+            test -f "${archive}"
+            test -f "${checksum}"
+            (
+              cd release-java/lanes
+              sha512sum -c "${lane}-repository.tar.gz.sha512"
+            )
+
+            candidate="${RUNNER_TEMP}/paimon-${lane}-candidate"
+            mkdir -p "${candidate}"
+            tar -xzf "${archive}" -C "${candidate}"
+            while IFS= read -r source; do
+              relative="${source#"${candidate}/"}"
+              target="${combined}/${relative}"
+              if [[ -f "${target}" ]]; then
+                if ! cmp -s "${source}" "${target}"; then
+                  echo "Conflicting repository file from ${lane}: ${relative}" >&2
+                  exit 1
+                fi
+              else
+                mkdir -p "$(dirname "${target}")"
+                cp -p "${source}" "${target}"
+              fi
+            done < <(find "${candidate}" -type f | LC_ALL=C sort)
+
+            cp "release-java/lanes/${lane}-manifest.txt" \
+              "release-java/final/evidence/"
+            cp "release-java/lanes/${lane}.log" \
+              "release-java/final/evidence/"
+            cp "release-java/lanes/${lane}-expected-projects.txt" \
+              "release-java/final/evidence/"
+          done
+
+          version="$(
+            sed -n 's/^version=//p' \
+              release-java/lanes/jdk8-manifest.txt
+          )"
+          rc_number="$(
+            sed -n 's/^rc=//p' \
+              release-java/lanes/jdk8-manifest.txt
+          )"
+          if [[ -z "${version}" ]]; then
+            echo "Missing release version from JDK 8 manifest" >&2
+            exit 1
+          fi
+          if [[ -z "${rc_number}" ]]; then
+            echo "Missing RC number from JDK 8 manifest" >&2
+            exit 1
+          fi
+          for lane in jdk8 jdk11 jdk17; do
+            expected_jdk="${lane#jdk}"
+            grep -qx "lane=${lane}" \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx "jdk=${expected_jdk}" \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx "version=${version}" \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx "rc=${rc_number}" \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx "commit=${GITHUB_SHA}" \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx 'signed=false' \
+              "release-java/lanes/${lane}-manifest.txt"
+            grep -qx 'staged=false' \
+              "release-java/lanes/${lane}-manifest.txt"
+          done
+
+          files="${GITHUB_WORKSPACE}/release-java/final/paimon-maven-repository-files.txt"
+          (
+            cd "${combined}"
+            find . -type f | LC_ALL=C sort > "${files}"
+          )
+          if [[ ! -s "${files}" ]] ||
+             ! grep -q '\.pom$' "${files}" ||
+             ! grep -q '\.jar$' "${files}"; then
+            echo "Combined Maven repository image is incomplete" >&2
+            exit 1
+          fi
+          if grep -q '\.asc$' "${files}"; then
+            echo "Combined repository image is unexpectedly signed" >&2
+            exit 1
+          fi
+
+          (
+            cd "${combined}"
+            while IFS= read -r artifact; do
+              sha512sum "${artifact}"
+            done < "${files}"
+          ) > release-java/final/paimon-maven-repository-sha512.txt
+
+          archive="paimon-${version}-maven-repository.tar.gz"
+          tar -czf "release-java/final/${archive}" \
+            -C "${combined}" .
+          (
+            cd release-java/final
+            sha512sum "${archive}" > "${archive}.sha512"
+          )
+
+          {
+            echo "version=${version}"
+            echo "rc=${rc_number}"
+            echo "tag=${GITHUB_REF_NAME}"
+            echo "commit=${GITHUB_SHA}"
+            echo "lanes=jdk8,jdk11,jdk17"
+            echo "signed=false"
+            echo "staged=false"
+            echo "artifact_source=combined-maven-file-repository"
+          } > release-java/final/paimon-maven-repository-manifest.txt
+
+      - name: Upload combined Java repository
+        uses: actions/upload-artifact@v6
+        with:
+          name: java-release-repository
+          path: release-java/final/
+          if-no-files-found: error

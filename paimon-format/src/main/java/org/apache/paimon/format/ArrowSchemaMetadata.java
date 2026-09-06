@@ -33,6 +33,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -46,6 +48,7 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import com.google.flatbuffers.FlatBufferBuilder;
 
@@ -63,13 +66,19 @@ import java.util.stream.Collectors;
  * Minimal Arrow IPC schema metadata encoder and decoder used by format metadata.
  *
  * <p>NOTE: The RowType-to-Arrow-field conversion in this class is copied from {@code
- * org.apache.paimon.arrow.ArrowUtils} and must be kept in sync with that class. The IPC
- * serialization code is a minimal implementation of the public Arrow IPC FlatBuffers layout used by
- * {@code ARROW:schema}. It implements only the subset needed by Paimon field metadata so that
- * {@code paimon-format} can stay compatible with Arrow metadata without depending on the Arrow
- * runtime.
+ * org.apache.paimon.arrow.ArrowUtils} and must be kept in sync with that class. The Arrow IPC
+ * FlatBuffers layout, enum values, and defaults are adapted from Apache Arrow Java / Arrow format
+ * generated classes. This class implements only the subset needed by Paimon field metadata so that
+ * {@code paimon-format} can stay compatible with {@code ARROW:schema} without depending on the
+ * Arrow runtime. Geospatial types are the exception to the direct {@code ArrowUtils} mapping: this
+ * metadata-only encoder writes the standard GeoArrow WKB extension metadata, while the Java Arrow
+ * API rejects geospatial conversion until it can expose the extension type itself.
  */
 class ArrowSchemaMetadata {
+
+    private static final String ARROW_EXTENSION_NAME = "ARROW:extension:name";
+    private static final String ARROW_EXTENSION_METADATA = "ARROW:extension:metadata";
+    private static final String GEOARROW_WKB_EXTENSION_NAME = "geoarrow.wkb";
 
     private static final String LIST_DATA_VECTOR_NAME = "$data$";
     private static final String MAP_DATA_VECTOR_NAME = "entries";
@@ -102,11 +111,15 @@ class ArrowSchemaMetadata {
     private static final short PRECISION_DOUBLE = 2;
 
     private static final short DATE_UNIT_DAY = 0;
+    private static final short DATE_UNIT_MILLISECOND = 1;
 
     private static final short TIME_UNIT_SECOND = 0;
     private static final short TIME_UNIT_MILLISECOND = 1;
     private static final short TIME_UNIT_MICROSECOND = 2;
     private static final short TIME_UNIT_NANOSECOND = 3;
+
+    private static final int TIME_BIT_WIDTH_MILLISECOND = 32;
+    private static final int DECIMAL_BIT_WIDTH_128 = 128;
 
     private ArrowSchemaMetadata() {}
 
@@ -242,16 +255,16 @@ class ArrowSchemaMetadata {
                 builder.startTable(3);
                 builder.addInt(0, type.precisionValue, 0);
                 builder.addInt(1, type.scale, 0);
-                builder.addInt(2, type.bitWidth, 0);
+                builder.addInt(2, type.bitWidth, DECIMAL_BIT_WIDTH_128);
                 return builder.endTable();
             case TYPE_DATE:
                 builder.startTable(1);
-                builder.addShort(0, DATE_UNIT_DAY, 0);
+                builder.addShort(0, DATE_UNIT_DAY, DATE_UNIT_MILLISECOND);
                 return builder.endTable();
             case TYPE_TIME:
                 builder.startTable(2);
-                builder.addShort(0, type.unit, 0);
-                builder.addInt(1, type.bitWidth, 0);
+                builder.addShort(0, type.unit, TIME_UNIT_MILLISECOND);
+                builder.addInt(1, type.bitWidth, TIME_BIT_WIDTH_MILLISECOND);
                 return builder.endTable();
             case TYPE_TIMESTAMP:
                 int timezone = type.timezone == null ? 0 : builder.createString(type.timezone);
@@ -392,7 +405,10 @@ class ArrowSchemaMetadata {
     private static ArrowField toArrowField(
             String fieldName, int fieldId, DataType dataType, int depth, String fieldIdKey) {
         ArrowTypeInfo type = dataType.accept(ArrowFieldTypeVisitor.INSTANCE);
-        Map<String, String> metadata = fieldIdMetadata(fieldId, fieldIdKey);
+        Map<String, String> metadata = new LinkedHashMap<>(fieldIdMetadata(fieldId, fieldIdKey));
+        if (dataType instanceof GeometryType || dataType instanceof GeographyType) {
+            metadata.putAll(geospatialMetadata(dataType));
+        }
         List<ArrowField> children = Collections.emptyList();
         if (dataType instanceof ArrayType || dataType instanceof VectorType) {
             DataType elementType =
@@ -441,6 +457,22 @@ class ArrowSchemaMetadata {
             children = rowChildren;
         }
         return new ArrowField(fieldName, dataType.isNullable(), type, children, metadata);
+    }
+
+    private static Map<String, String> geospatialMetadata(DataType dataType) {
+        Map<String, String> extensionMetadata = new LinkedHashMap<>();
+        if (dataType instanceof GeographyType) {
+            GeographyType geographyType = (GeographyType) dataType;
+            extensionMetadata.put("edges", geographyType.getAlgorithm().toString());
+            extensionMetadata.put("crs", geographyType.getCrs());
+        } else {
+            extensionMetadata.put("crs", ((GeometryType) dataType).getCrs());
+        }
+
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put(ARROW_EXTENSION_NAME, GEOARROW_WKB_EXTENSION_NAME);
+        metadata.put(ARROW_EXTENSION_METADATA, JsonSerdeUtil.toFlatJson(extensionMetadata));
+        return metadata;
     }
 
     private static ArrowField toArrowMapEntryField(
@@ -507,8 +539,10 @@ class ArrowSchemaMetadata {
             this.metadata = metadata;
         }
 
-        private ArrowField withMetadata(Map<String, String> metadata) {
-            return new ArrowField(name, nullable, type, children, metadata);
+        private ArrowField withMetadata(Map<String, String> additionalMetadata) {
+            Map<String, String> mergedMetadata = new LinkedHashMap<>(metadata);
+            mergedMetadata.putAll(additionalMetadata);
+            return new ArrowField(name, nullable, type, children, mergedMetadata);
         }
     }
 
@@ -562,11 +596,21 @@ class ArrowSchemaMetadata {
         }
 
         @Override
+        public ArrowTypeInfo visit(GeometryType geometryType) {
+            return ArrowTypeInfo.simple(TYPE_BINARY);
+        }
+
+        @Override
+        public ArrowTypeInfo visit(GeographyType geographyType) {
+            return ArrowTypeInfo.simple(TYPE_BINARY);
+        }
+
+        @Override
         public ArrowTypeInfo visit(DecimalType decimalType) {
             ArrowTypeInfo type = ArrowTypeInfo.simple(TYPE_DECIMAL);
             type.precisionValue = decimalType.getPrecision();
             type.scale = decimalType.getScale();
-            type.bitWidth = 128;
+            type.bitWidth = DECIMAL_BIT_WIDTH_128;
             return type;
         }
 
@@ -613,7 +657,7 @@ class ArrowSchemaMetadata {
         public ArrowTypeInfo visit(TimeType timeType) {
             ArrowTypeInfo type = ArrowTypeInfo.simple(TYPE_TIME);
             type.unit = TIME_UNIT_MILLISECOND;
-            type.bitWidth = 32;
+            type.bitWidth = TIME_BIT_WIDTH_MILLISECOND;
             return type;
         }
 

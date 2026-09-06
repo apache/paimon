@@ -226,7 +226,8 @@ public class BlockPrefetcherTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -299,7 +300,8 @@ public class BlockPrefetcherTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -352,7 +354,8 @@ public class BlockPrefetcherTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -423,7 +426,8 @@ public class BlockPrefetcherTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -452,7 +456,8 @@ public class BlockPrefetcherTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 row -> {

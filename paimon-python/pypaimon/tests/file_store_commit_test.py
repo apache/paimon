@@ -16,15 +16,245 @@
 # under the License.
 
 import unittest
+import uuid
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import FileStoreCommit
+from pypaimon.write.file_store_commit import (
+    CommitFailRetryResult,
+    FileStoreCommit,
+    ManifestMergeResult,
+    RollbackRetryResult,
+    RewriteResult,
+    _abort_commit_messages,
+    _try_replace_manifest_files,
+)
+
+
+class TestAbortCommitMessages(unittest.TestCase):
+
+    def test_index_path_failure_does_not_escape_abort(self):
+        table = Mock()
+        table.path_factory.side_effect = RuntimeError("path lookup failed")
+        index_file = Mock(file_name="index-file", external_path=None)
+        message = Mock(
+            new_files=[],
+            changelog_files=[],
+            index_adds=[Mock(index_file=index_file)],
+        )
+
+        with self.assertLogs(
+                'pypaimon.write.file_store_commit', level='WARNING'):
+            _abort_commit_messages(table, [message])
+
+
+class TestFileStoreCommitRowTracking(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_table = Mock()
+        self.mock_table.partition_keys = ['dt', 'region']
+        self.mock_table.current_branch.return_value = 'main'
+        self.mock_table.table_path = '/test/table/path'
+        self.mock_table.file_io = Mock()
+        self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.manifest_merge_min_count.return_value = 30
+        self.mock_snapshot_commit = Mock()
+
+    def _create_file_store_commit(self):
+        with patch('pypaimon.write.file_store_commit.ManifestFileManager'), \
+                patch('pypaimon.write.file_store_commit.ManifestListManager'):
+            return FileStoreCommit(
+                snapshot_commit=self.mock_snapshot_commit,
+                table=self.mock_table,
+                commit_user='test_user'
+            )
+
+    @staticmethod
+    def _manifest_meta(name):
+        row = GenericRowSerializer.to_bytes(GenericRow([], []))
+        return ManifestFileMeta(
+            file_name=name,
+            file_size=10,
+            num_added_files=1,
+            num_deleted_files=0,
+            partition_stats=SimpleStats(
+                BinaryRow(row, []), BinaryRow(row, []), []),
+            schema_id=0,
+        )
+
+    @staticmethod
+    def _data_file(name, row_count):
+        return DataFileMeta.create(
+            file_name=name,
+            file_size=10,
+            row_count=row_count,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            file_source=0,
+        )
+
+    @classmethod
+    def _append_entry(cls, partition, name, row_count):
+        return ManifestEntry(
+            kind=0,
+            partition=GenericRow(list(partition), None),
+            bucket=0,
+            total_buckets=1,
+            file=cls._data_file(name, row_count),
+        )
+
+    def test_groups_files_by_partition_before_assigning_row_ids(self):
+        file_store_commit = self._create_file_store_commit()
+        entries = [
+            self._append_entry(('dt=1',), 'a-1.parquet', 2),
+            self._append_entry(('dt=2',), 'b-1.parquet', 3),
+            self._append_entry(('dt=1',), 'a-2.parquet', 4),
+        ]
+
+        grouped = file_store_commit._group_commit_entries_by_partition(entries)
+        assigned, next_row_id = file_store_commit._assign_row_tracking_meta(
+            10, grouped)
+
+        self.assertEqual(19, next_row_id)
+        self.assertEqual(
+            [
+                ('a-1.parquet', 10),
+                ('a-2.parquet', 12),
+                ('b-1.parquet', 16),
+            ],
+            [(entry.file.file_name, entry.file.first_row_id)
+             for entry in assigned],
+        )
+
+    def test_partition_group_on_commit_option_defaults_to_true(self):
+        options = CoreOptions(Options({}))
+
+        self.assertTrue(options.row_tracking_partition_group_on_commit())
+        self.assertFalse(
+            CoreOptions(Options({
+                "row-tracking.partition-group-on-commit": "false",
+            })).row_tracking_partition_group_on_commit())
+
+    def test_keeps_order_when_partition_grouping_disabled(self):
+        file_store_commit = self._create_file_store_commit()
+        entries = [
+            self._append_entry(('dt=1',), 'a-1.parquet', 2),
+            self._append_entry(('dt=2',), 'b-1.parquet', 3),
+            self._append_entry(('dt=1',), 'a-2.parquet', 4),
+        ]
+
+        assigned, next_row_id = file_store_commit._assign_row_tracking_meta(
+            10, entries)
+
+        self.assertEqual(19, next_row_id)
+        self.assertEqual(
+            [
+                ('a-1.parquet', 10),
+                ('b-1.parquet', 12),
+                ('a-2.parquet', 15),
+            ],
+            [(entry.file.file_name, entry.file.first_row_id)
+             for entry in assigned],
+        )
+
+    def _commit_row_tracking_entries(self, options):
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options = CoreOptions(Options(options))
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.return_value = True
+        file_store_commit.snapshot_commit = snapshot_commit
+        file_store_commit.manifest_list_manager.read_all.return_value = []
+        file_store_commit.manifest_file_merger = Mock()
+        file_store_commit.manifest_file_merger.merge.return_value = ([], [])
+        file_store_commit._generate_partition_statistics = Mock(
+            return_value=[])
+
+        written_entries = []
+
+        def capture_entries(entries, manifest_file_name):
+            del manifest_file_name
+            written_entries.extend(entries)
+            return [self._manifest_meta('delta')]
+
+        file_store_commit._write_manifest_files = Mock(
+            side_effect=capture_entries)
+
+        entries = [
+            self._append_entry(('dt=1',), 'a-1.parquet', 2),
+            self._append_entry(('dt=2',), 'b-1.parquet', 3),
+            self._append_entry(('dt=1',), 'a-2.parquet', 4),
+        ]
+
+        file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="APPEND",
+            commit_entries=entries,
+            changelog_entries=[],
+            commit_identifier=11,
+            latest_snapshot=None,
+        )
+
+        committed_snapshot = snapshot_commit.commit.call_args[0][1]
+        return committed_snapshot, written_entries
+
+    def test_commit_applies_default_partition_grouping_before_row_id(self):
+        committed_snapshot, written_entries = (
+            self._commit_row_tracking_entries({
+                "row-tracking.enabled": "true",
+            }))
+
+        self.assertEqual(9, committed_snapshot.next_row_id)
+        self.assertEqual(
+            [
+                ('a-1.parquet', 0),
+                ('a-2.parquet', 2),
+                ('b-1.parquet', 6),
+            ],
+            [(entry.file.file_name, entry.file.first_row_id)
+             for entry in written_entries],
+        )
+
+    def test_commit_respects_disabled_partition_grouping(self):
+        committed_snapshot, written_entries = (
+            self._commit_row_tracking_entries({
+                "row-tracking.enabled": "true",
+                "row-tracking.partition-group-on-commit": "false",
+            }))
+
+        self.assertEqual(9, committed_snapshot.next_row_id)
+        self.assertEqual(
+            [
+                ('a-1.parquet', 0),
+                ('b-1.parquet', 2),
+                ('a-2.parquet', 5),
+            ],
+            [(entry.file.file_name, entry.file.first_row_id)
+             for entry in written_entries],
+        )
 
 
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')
@@ -52,6 +282,373 @@ class TestFileStoreCommit(unittest.TestCase):
             snapshot_commit=self.mock_snapshot_commit,
             table=self.mock_table,
             commit_user='test_user'
+        )
+
+    @staticmethod
+    def _manifest_meta(name):
+        row = GenericRowSerializer.to_bytes(GenericRow([], []))
+        return ManifestFileMeta(
+            file_name=name,
+            file_size=10,
+            num_added_files=1,
+            num_deleted_files=0,
+            partition_stats=SimpleStats(
+                BinaryRow(row, []), BinaryRow(row, []), []),
+            schema_id=0,
+        )
+
+    def test_replace_manifest_files_uses_stable_value_equality(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        previous = [self._manifest_meta('a'), self._manifest_meta('b')]
+        current = [
+            self._manifest_meta('prefix'),
+            self._manifest_meta('a'),
+            self._manifest_meta('b'),
+            self._manifest_meta('suffix'),
+        ]
+        replacement = [self._manifest_meta('merged')]
+
+        result = _try_replace_manifest_files(
+            current, previous, replacement)
+
+        self.assertEqual(
+            ['prefix', 'merged', 'suffix'],
+            [manifest.file_name for manifest in result],
+        )
+        self.assertIsNot(current[1], previous[0])
+
+    def test_replace_manifest_files_preserves_order_and_empty_semantics(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        a = self._manifest_meta('a')
+        b = self._manifest_meta('b')
+        merged = self._manifest_meta('merged')
+
+        self.assertIsNone(_try_replace_manifest_files(
+            [a, self._manifest_meta('x'), b], [a, b], [merged]))
+        self.assertEqual(
+            ['a', 'merged'],
+            [manifest.file_name for manifest in _try_replace_manifest_files(
+                [a, self._manifest_meta('a'), b], [a, b], [merged])],
+        )
+        self.assertEqual(
+            [merged], _try_replace_manifest_files([], [], [merged]))
+        self.assertIsNone(_try_replace_manifest_files([a], [], [merged]))
+
+    def test_manifest_merge_result_copies_and_freezes_lists(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        before = [self._manifest_meta('before')]
+        after = [self._manifest_meta('after')]
+
+        result = ManifestMergeResult(before, after)
+        before.clear()
+        after.clear()
+
+        self.assertIsInstance(result.merge_before_manifests, tuple)
+        self.assertIsInstance(result.merge_after_manifests, tuple)
+        self.assertEqual(
+            ['before'],
+            [manifest.file_name
+             for manifest in result.merge_before_manifests],
+        )
+        self.assertEqual(
+            ['after'],
+            [manifest.file_name
+             for manifest in result.merge_after_manifests],
+        )
+
+    def test_conflict_rollback_retry_skips_history_and_rescans_base(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        conflict = RuntimeError("conflicting compaction")
+        read_all = Mock(return_value=[])
+        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = read_all
+        file_store_commit.conflict_detection.check_conflicts = Mock(
+            return_value=conflict
+        )
+        file_store_commit.rollback = Mock()
+        file_store_commit.rollback.try_to_rollback.return_value = True
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="APPEND",
+            commit_entries=[Mock()],
+            changelog_entries=[],
+            commit_identifier=11,
+            latest_snapshot=Mock(id=3),
+            detect_conflicts=True,
+            allow_rollback=True,
+        )
+
+        self.assertIsInstance(result, RollbackRetryResult)
+        self.assertIs(result.exception, conflict)
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.side_effect = (
+            AssertionError("rollback retry must not scan snapshot history")
+        )
+        file_store_commit.commit_scanner.read_incremental_changes = Mock(
+            side_effect=AssertionError(
+                "rollback retry must not reuse the previous conflict base"
+            )
+        )
+        read_all.reset_mock()
+        file_store_commit.conflict_detection.check_conflicts.return_value = (
+            RuntimeError("conflict after rollback retry")
+        )
+
+        with self.assertRaisesRegex(
+                RuntimeError, "conflict after rollback retry"):
+            file_store_commit._try_commit_once(
+                retry_result=result,
+                commit_kind="APPEND",
+                commit_entries=[Mock()],
+                changelog_entries=[],
+                commit_identifier=11,
+                latest_snapshot=Mock(id=2),
+                detect_conflicts=True,
+            )
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_not_called()
+        file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
+        read_all.assert_called_once()
+
+    def test_commit_fail_retry_missing_snapshot_still_fails_closed(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = None
+
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 1 cannot be found"):
+            file_store_commit._is_duplicate_commit(
+                CommitFailRetryResult(None),
+                Mock(id=3),
+                11,
+                "APPEND",
+            )
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_called_once_with(1)
+
+    def _run_manifest_commit_attempt(self, commit_side_effect=None,
+                                     commit_result=None, retry_result=None,
+                                     existing_manifests=None,
+                                     merged_manifests=None,
+                                     latest_watermark=None):
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options.row_tracking_enabled.return_value = False
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.side_effect = commit_side_effect
+        snapshot_commit.commit.return_value = commit_result
+        file_store_commit.snapshot_commit = snapshot_commit
+
+        before = self._manifest_meta('before')
+        after = self._manifest_meta('after')
+        existing_manifests = (
+            [before] if existing_manifests is None
+            else existing_manifests)
+        merged_manifests = (
+            [after] if merged_manifests is None
+            else merged_manifests)
+        delta = self._manifest_meta('delta')
+        file_store_commit._write_manifest_files = Mock(
+            return_value=[delta])
+        file_store_commit._generate_partition_statistics = Mock(
+            return_value=[])
+        file_store_commit.manifest_list_manager.read_all.return_value = (
+            existing_manifests)
+        file_store_commit.manifest_file_merger = Mock()
+        file_store_commit.manifest_file_merger.merge.return_value = (
+            merged_manifests, merged_manifests)
+        file_store_commit._clean_up_reuse_tmp_manifests = Mock()
+        file_store_commit._clean_up_no_reuse_tmp_manifests = Mock()
+
+        latest_snapshot = Mock(
+            id=3,
+            uuid='base-snapshot-uuid',
+            total_record_count=10,
+            index_manifest=None,
+            watermark=latest_watermark,
+        )
+        commit_entry = Mock(kind=0)
+        commit_entry.file.row_count = 2
+        result = file_store_commit._try_commit_once(
+            retry_result=retry_result,
+            commit_kind='APPEND',
+            commit_entries=[commit_entry],
+            changelog_entries=[],
+            commit_identifier=11,
+            latest_snapshot=latest_snapshot,
+        )
+        return file_store_commit, result
+
+    def test_append_commit_inherits_watermark(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True,
+            latest_watermark=123,
+        )
+
+        self.assertTrue(result.is_success())
+        committed_snapshot = (
+            file_store_commit.snapshot_commit.commit.call_args[0][1])
+        self.assertEqual(123, committed_snapshot.watermark)
+
+    def test_false_atomic_commit_retains_manifest_merge_result(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=False)
+
+        self.assertIsInstance(result, CommitFailRetryResult)
+        self.assertIsNone(result.exception)
+        self.assertEqual(
+            ['before'],
+            [manifest.file_name for manifest
+             in result.manifest_merge_result.merge_before_manifests],
+        )
+        self.assertEqual(
+            ['after'],
+            [manifest.file_name for manifest
+             in result.manifest_merge_result.merge_after_manifests],
+        )
+        file_store_commit.manifest_file_merger.merge.assert_called_once()
+
+    def test_atomic_commit_exception_does_not_retain_manifest_merge_result(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        failure = TimeoutError('lost commit response')
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_side_effect=failure)
+
+        self.assertIsInstance(result, CommitFailRetryResult)
+        self.assertIs(failure, result.exception)
+        self.assertTrue(result.commit_result_may_be_uncertain)
+        self.assertIsNone(result.manifest_merge_result)
+        file_store_commit._clean_up_reuse_tmp_manifests.assert_not_called()
+        file_store_commit._clean_up_no_reuse_tmp_manifests.assert_not_called()
+
+    def test_retry_reuses_manifest_merge_and_preserves_surrounding_files(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        previous_before = [
+            self._manifest_meta('before-a'),
+            self._manifest_meta('before-b'),
+        ]
+        previous_after = [self._manifest_meta('merged')]
+        retry_result = CommitFailRetryResult(
+            Mock(id=3),
+            manifest_merge_result=ManifestMergeResult(
+                previous_before, previous_after),
+        )
+        current = [
+            self._manifest_meta('prefix'),
+            self._manifest_meta('before-a'),
+            self._manifest_meta('before-b'),
+            self._manifest_meta('suffix'),
+        ]
+
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=False,
+            retry_result=retry_result,
+            existing_manifests=current,
+        )
+
+        self.assertIsInstance(result, CommitFailRetryResult)
+        self.assertEqual(
+            ['prefix', 'before-a', 'before-b', 'suffix'],
+            [manifest.file_name for manifest
+             in result.manifest_merge_result.merge_before_manifests],
+        )
+        self.assertEqual(
+            ['prefix', 'merged', 'suffix'],
+            [manifest.file_name for manifest
+             in result.manifest_merge_result.merge_after_manifests],
+        )
+        file_store_commit.manifest_file_merger.merge.assert_not_called()
+        base_manifests = (
+            file_store_commit.manifest_list_manager.write
+            .call_args_list[-1].args[1])
+        self.assertEqual(
+            ['prefix', 'merged', 'suffix'],
+            [manifest.file_name for manifest in base_manifests],
+        )
+
+    def test_retry_skips_manifest_merge_when_previous_input_is_not_contiguous(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        previous_before = [
+            self._manifest_meta('before-a'),
+            self._manifest_meta('before-b'),
+        ]
+        retry_result = CommitFailRetryResult(
+            Mock(id=3),
+            manifest_merge_result=ManifestMergeResult(
+                previous_before, [self._manifest_meta('merged')]),
+        )
+        current = [
+            self._manifest_meta('before-a'),
+            self._manifest_meta('between'),
+            self._manifest_meta('before-b'),
+        ]
+
+        file_store_commit, result = self._run_manifest_commit_attempt(
+            commit_result=False,
+            retry_result=retry_result,
+            existing_manifests=current,
+        )
+
+        self.assertIsInstance(result, CommitFailRetryResult)
+        self.assertIsNone(result.manifest_merge_result)
+        file_store_commit.manifest_file_merger.merge.assert_not_called()
+        base_manifests = (
+            file_store_commit.manifest_list_manager.write
+            .call_args_list[-1].args[1])
+        self.assertEqual(current, base_manifests)
+
+    def test_manifest_merge_runs_once_across_multiple_retries(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        first_commit, retry_result = self._run_manifest_commit_attempt(
+            commit_result=False,
+            existing_manifests=[self._manifest_meta('before')],
+            merged_manifests=[self._manifest_meta('merged')],
+        )
+        first_commit.manifest_file_merger.merge.assert_called_once()
+
+        unchanged_retry, retry_result = self._run_manifest_commit_attempt(
+            commit_result=False,
+            retry_result=retry_result,
+            existing_manifests=[self._manifest_meta('before')],
+        )
+        retry_commits = [unchanged_retry]
+        current_names = ['before']
+        for suffix in ['concurrent-1', 'concurrent-2']:
+            current_names.append(suffix)
+            retry_commit, retry_result = self._run_manifest_commit_attempt(
+                commit_result=False,
+                retry_result=retry_result,
+                existing_manifests=[
+                    self._manifest_meta(name) for name in current_names
+                ],
+            )
+            retry_commits.append(retry_commit)
+
+        final_names = current_names + ['concurrent-3']
+        final_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True,
+            retry_result=retry_result,
+            existing_manifests=[
+                self._manifest_meta(name) for name in final_names
+            ],
+        )
+
+        self.assertTrue(result.is_success())
+        for retry_commit in retry_commits + [final_commit]:
+            retry_commit.manifest_file_merger.merge.assert_not_called()
+        base_manifests = (
+            final_commit.manifest_list_manager.write
+            .call_args_list[-1].args[1])
+        self.assertEqual(
+            ['merged', 'concurrent-1', 'concurrent-2', 'concurrent-3'],
+            [manifest.file_name for manifest in base_manifests],
         )
 
     def test_generate_partition_statistics_single_partition_single_file(
@@ -169,6 +766,35 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertEqual(stat.file_size_in_bytes, 3 * 1024 * 1024)  # 1MB + 2MB
         expected_time = file_meta_2.creation_time_epoch_millis()
         self.assertEqual(stat.last_file_creation_time, expected_time)
+
+    def test_partition_statistics_use_replacement_bucket_count(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_meta = Mock(row_count=1, file_size=10, creation_time=None)
+
+        for old_buckets, new_buckets in [(-2, 2), (2, 3)]:
+            with self.subTest(old=old_buckets, new=new_buckets):
+                partition = GenericRow(['2024-01-15', 'us-east-1'], None)
+                entries = [
+                    ManifestEntry(
+                        kind=1,
+                        partition=partition,
+                        bucket=0,
+                        total_buckets=old_buckets,
+                        file=file_meta,
+                    ),
+                    ManifestEntry(
+                        kind=0,
+                        partition=partition,
+                        bucket=0,
+                        total_buckets=new_buckets,
+                        file=file_meta,
+                    ),
+                ]
+
+                statistics = (
+                    file_store_commit._generate_partition_statistics(entries))
+                self.assertEqual(new_buckets, statistics[0].total_buckets)
 
     def test_generate_partition_statistics_multiple_partitions(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -425,8 +1051,10 @@ class TestFileStoreCommit(unittest.TestCase):
 
         latest_snapshot = Mock()
         latest_snapshot.id = 3
+        latest_snapshot.uuid = "base-snapshot-uuid"
         latest_snapshot.total_record_count = 10
         latest_snapshot.index_manifest = "index-manifest-existing"
+        latest_snapshot.watermark = None
 
         commit_entry = Mock()
         commit_entry.kind = 0
@@ -444,9 +1072,15 @@ class TestFileStoreCommit(unittest.TestCase):
 
         self.assertTrue(result.is_success())
         self.assertEqual(
-            "index-manifest-existing",
-            snapshot_commit.commit.call_args[0][0].index_manifest
+            "base-snapshot-uuid",
+            snapshot_commit.commit.call_args[0][0],
         )
+        committed_snapshot = snapshot_commit.commit.call_args[0][1]
+        self.assertEqual(
+            "index-manifest-existing",
+            committed_snapshot.index_manifest
+        )
+        self.assertEqual(str(uuid.UUID(committed_snapshot.uuid)), committed_snapshot.uuid)
 
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
@@ -494,6 +1128,38 @@ class TestFileStoreCommit(unittest.TestCase):
 
         result = file_store_commit._write_manifest_files(entries, "manifest-test")
         self.assertIsNotNone(result)
+
+    def test_row_id_rewrite_respects_commit_retry_limit(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.commit_max_retries = 1
+        file_store_commit.commit_timeout = 10 ** 9
+        file_store_commit._commit_retry_wait = Mock()
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 7
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
+            latest_snapshot
+        )
+
+        commit_entry = Mock()
+        rewrite = RewriteResult(RowIdRewriteResult([commit_entry], 1))
+        file_store_commit._try_commit_once = Mock(side_effect=[
+            rewrite,
+            rewrite,
+            AssertionError("rewrite retry budget was not enforced"),
+        ])
+
+        with self.assertRaises(RuntimeError) as ctx:
+            file_store_commit._try_commit(
+                commit_kind="APPEND",
+                commit_identifier=11,
+                commit_entries_plan=lambda snapshot: [commit_entry],
+            )
+
+        self.assertIn("with 1 retries", str(ctx.exception))
+        self.assertEqual(2, file_store_commit._try_commit_once.call_count)
+        file_store_commit._commit_retry_wait.assert_called_once_with(0)
 
     @staticmethod
     def _to_entries(commit_messages):

@@ -20,8 +20,8 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -29,6 +29,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
@@ -99,6 +100,29 @@ public class HiveTableSchemaTest {
                                 DataTypes.INT(), DataTypes.STRING(), DataTypes.DECIMAL(5, 3)));
         assertThat(schema.fieldComments())
                 .isEqualTo(Arrays.asList("col1 comment", "col2 comment", "col3 comment"));
+    }
+
+    @Test
+    public void testExtractSchemaWithCustomColumnNameDelimiter() {
+        // Column names are split with a custom delimiter (not the default comma).
+        // This requires the "column.name.delimiter" property key to be honored.
+        List<String> columns = Arrays.asList("a", "b", "c");
+        Properties properties = new Properties();
+        properties.setProperty("columns", String.join(";", columns));
+        properties.setProperty("column.name.delimiter", ";");
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
+        properties.setProperty("location", tempDir.toString());
+
+        HiveSchema schema = HiveSchema.extract(null, properties);
+        assertThat(schema.fieldNames()).isEqualTo(columns);
     }
 
     @Test
@@ -244,7 +268,7 @@ public class HiveTableSchemaTest {
     }
 
     private void createSchema() throws Exception {
-        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+        new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
                                 ROW_TYPE.getFields(),
@@ -349,7 +373,7 @@ public class HiveTableSchemaTest {
     }
 
     private void createSchemaWithPartition() throws Exception {
-        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+        new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
                                 ROW_TYPE.getFields(),
@@ -403,5 +427,78 @@ public class HiveTableSchemaTest {
                 JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
         HiveSchema newHiveSchema = new HiveSchema(new RowType(dataFieldsDeserialized));
         assertThat(newHiveSchema).usingRecursiveComparison().isEqualTo(hiveSchema);
+    }
+
+    @Test
+    public void testGetDataFieldsJsonStrWithNullConf() throws Exception {
+        createSchema();
+        Properties properties = createTableWithExistsDDL();
+
+        String jsonStr = PaimonStorageHandler.getDataFieldsJsonStr(null, properties);
+
+        List<DataField> deserializedFields =
+                JsonSerdeUtil.fromJson(jsonStr, new TypeReference<List<DataField>>() {});
+        assertThat(deserializedFields).hasSize(3);
+        assertThat(deserializedFields.get(0).name()).isEqualTo("a");
+        assertThat(deserializedFields.get(0).type()).isEqualTo(DataTypes.INT());
+        assertThat(deserializedFields.get(0).description()).isEqualTo("first comment");
+        assertThat(deserializedFields.get(1).name()).isEqualTo("b");
+        assertThat(deserializedFields.get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThat(deserializedFields.get(1).description()).isEqualTo("second comment");
+        assertThat(deserializedFields.get(2).name()).isEqualTo("c");
+        assertThat(deserializedFields.get(2).type()).isEqualTo(DataTypes.DECIMAL(5, 3));
+        assertThat(deserializedFields.get(2).description()).isEqualTo("last comment");
+    }
+
+    @Test
+    public void testGetDataFieldsJsonStrWithConf() throws Exception {
+        createSchema();
+        Properties properties = createTableWithExistsDDL();
+        Configuration conf = new Configuration();
+
+        String jsonStr = PaimonStorageHandler.getDataFieldsJsonStr(conf, properties);
+
+        List<DataField> deserializedFields =
+                JsonSerdeUtil.fromJson(jsonStr, new TypeReference<List<DataField>>() {});
+        assertThat(deserializedFields).hasSize(3);
+        assertThat(deserializedFields.get(0).name()).isEqualTo("a");
+        assertThat(deserializedFields.get(0).type()).isEqualTo(DataTypes.INT());
+        assertThat(deserializedFields.get(1).name()).isEqualTo("b");
+        assertThat(deserializedFields.get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThat(deserializedFields.get(2).name()).isEqualTo("c");
+        assertThat(deserializedFields.get(2).type()).isEqualTo(DataTypes.DECIMAL(5, 3));
+    }
+
+    @Test
+    public void testGetDataFieldsJsonStrWithEmptyDDLAndPaimonTable() throws Exception {
+        createSchema();
+        Properties properties = createTableWithEmptyDDL();
+        Configuration conf = new Configuration();
+
+        String jsonStr = PaimonStorageHandler.getDataFieldsJsonStr(conf, properties);
+
+        List<DataField> deserializedFields =
+                JsonSerdeUtil.fromJson(jsonStr, new TypeReference<List<DataField>>() {});
+        HiveSchema reconstructedSchema = new HiveSchema(new RowType(deserializedFields));
+        HiveSchema originalSchema = HiveSchema.extract(conf, properties);
+        assertThat(reconstructedSchema).usingRecursiveComparison().isEqualTo(originalSchema);
+    }
+
+    @Test
+    public void testGetDataFieldsJsonStrRoundtrip() throws Exception {
+        createSchema();
+        Properties properties = createTableWithExistsDDL();
+        Configuration conf = new Configuration();
+
+        String jsonStr = PaimonStorageHandler.getDataFieldsJsonStr(conf, properties);
+
+        List<DataField> deserializedFields =
+                JsonSerdeUtil.fromJson(jsonStr, new TypeReference<List<DataField>>() {});
+        HiveSchema schemaFromJson = new HiveSchema(new RowType(deserializedFields));
+        HiveSchema schemaDirect = HiveSchema.extract(conf, properties);
+
+        assertThat(schemaFromJson.fieldNames()).isEqualTo(schemaDirect.fieldNames());
+        assertThat(schemaFromJson.fieldTypes()).isEqualTo(schemaDirect.fieldTypes());
+        assertThat(schemaFromJson.fieldComments()).isEqualTo(schemaDirect.fieldComments());
     }
 }

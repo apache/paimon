@@ -68,7 +68,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Function<String, File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-    private final Function<Long, BloomFilter.Builder> bfGenerator;
+    private final Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory;
     private final Cache<String, LookupFile> lookupFileCache;
     private final Set<String> ownCachedFiles;
     private final Object[] lookupFileLocks;
@@ -87,7 +87,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
-            Function<Long, BloomFilter.Builder> bfGenerator,
+            Function<Long, BloomFilter.Builder> bloomFilterBuilderFactory,
             Cache<String, LookupFile> lookupFileCache) {
         this.schemaFunction = schemaFunction;
         this.currentSchemaId = currentSchemaId;
@@ -99,7 +99,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
-        this.bfGenerator = bfGenerator;
+        this.bloomFilterBuilderFactory = bloomFilterBuilderFactory;
         this.lookupFileCache = lookupFileCache;
         this.ownCachedFiles = ConcurrentHashMap.newKeySet();
         this.lookupFileLocks = new Object[LOOKUP_FILE_LOCK_STRIPES];
@@ -135,23 +135,40 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     public T lookup(InternalRow key, int startLevel) throws IOException {
-        return LookupUtils.lookup(levels, key, startLevel, this::lookup, this::lookupLevel0);
+        return lookup(key, startLevel, null);
     }
 
     @Nullable
-    private T lookupLevel0(InternalRow key, TreeSet<DataFileMeta> level0) throws IOException {
-        return LookupUtils.lookupLevel0(keyComparator, key, level0, this::lookup);
+    public T lookup(InternalRow key, int startLevel, @Nullable LookupContext context)
+            throws IOException {
+        return LookupUtils.lookup(
+                levels,
+                key,
+                startLevel,
+                (lookupKey, level) -> lookup(lookupKey, level, context),
+                (lookupKey, level0) -> lookupLevel0(lookupKey, level0, context));
     }
 
     @Nullable
-    private T lookup(InternalRow key, SortedRun level) throws IOException {
-        return LookupUtils.lookup(keyComparator, key, level, this::lookup);
+    private T lookupLevel0(
+            InternalRow key, TreeSet<DataFileMeta> level0, @Nullable LookupContext context)
+            throws IOException {
+        return LookupUtils.lookupLevel0(
+                keyComparator, key, level0, (lookupKey, file) -> lookup(lookupKey, file, context));
     }
 
     @Nullable
-    private T lookup(InternalRow key, DataFileMeta file) throws IOException {
+    private T lookup(InternalRow key, SortedRun level, @Nullable LookupContext context)
+            throws IOException {
+        return LookupUtils.lookup(
+                keyComparator, key, level, (lookupKey, file) -> lookup(lookupKey, file, context));
+    }
+
+    @Nullable
+    private T lookup(InternalRow key, DataFileMeta file, @Nullable LookupContext context)
+            throws IOException {
         byte[] keyBytes = serializeKey(key);
-        LookupResult lookupResult = lookupFile(file, keyBytes);
+        LookupResult lookupResult = lookupFile(file, keyBytes, context);
         byte[] valueBytes = lookupResult.valueBytes;
         if (valueBytes == null) {
             return null;
@@ -165,7 +182,9 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 file.fileName());
     }
 
-    private LookupResult lookupFile(DataFileMeta file, byte[] keyBytes) throws IOException {
+    private LookupResult lookupFile(
+            DataFileMeta file, byte[] keyBytes, @Nullable LookupContext context)
+            throws IOException {
         String fileName = file.fileName();
         LookupFile lookupFile = lookupFileCache.getIfPresent(fileName);
         LookupResult lookupResult = lookupCachedFile(fileName, lookupFile, keyBytes);
@@ -181,6 +200,9 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 return lookupResult;
             }
 
+            if (context != null) {
+                context.markRemoteAccessed();
+            }
             lookupFile = createLookupFile(file);
 
             try {
@@ -188,6 +210,20 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             } finally {
                 addLocalFile(file, lookupFile);
             }
+        }
+    }
+
+    /** Tracks whether one lookup invocation created any lookup file from table storage. */
+    public static class LookupContext {
+
+        private boolean remoteAccessed;
+
+        private void markRemoteAccessed() {
+            remoteAccessed = true;
+        }
+
+        public boolean remoteAccessed() {
+            return remoteAccessed;
         }
     }
 
@@ -349,7 +385,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private void createSstFileFromDataFile(DataFileMeta file, File localFile) throws IOException {
         try (LookupStoreWriter kvWriter =
                         lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
+                                localFile, bloomFilterBuilderFactory.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             PersistProcessor<T> processor =
                     getOrCreateProcessor(currentSchemaId, serializerFactory.version());

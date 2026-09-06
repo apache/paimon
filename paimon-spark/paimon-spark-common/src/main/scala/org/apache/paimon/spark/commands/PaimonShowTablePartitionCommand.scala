@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
+import org.apache.paimon.spark.util.PartitionStatisticsDisplay
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
@@ -92,14 +93,21 @@ case class PaimonShowTablePartitionCommand(
     val metadata = partitionTable.loadPartitionMetadata(row)
     if (!metadata.isEmpty) {
       val metadataMap = metadata.asScala
-      results.put(
-        "Partition Parameters",
-        s"{${metadataMap.map { case (k, v) => s"$k=$v" }.mkString(", ")}}")
+      // Omit recognized Paimon statistic parameters with negative numeric values.
+      val reported = metadataMap.filterNot {
+        case (field, value) => PartitionStatisticsDisplay.isUnreported(field, value)
+      }
+      if (reported.nonEmpty) {
+        results.put(
+          "Partition Parameters",
+          s"{${reported.map { case (k, v) => s"$k=$v" }.mkString(", ")}}")
+      }
 
-      val fileSizeInBytes =
-        metadataMap.getOrElse(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES, "0").toLong
+      // Render missing or negative row counts and byte sizes as unknown instead of zero.
       val recordCount =
-        metadataMap.getOrElse(PartitionStatistics.FIELD_RECORD_COUNT, "0").toLong
+        PartitionStatisticsDisplay.render(metadataMap, PartitionStatistics.FIELD_RECORD_COUNT)
+      val fileSizeInBytes =
+        PartitionStatisticsDisplay.render(metadataMap, PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES)
       results.put("Partition Statistics", s"$recordCount rows, $fileSizeInBytes bytes")
     }
 

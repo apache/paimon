@@ -16,8 +16,10 @@
 # under the License.
 
 import logging
-import time
 import random
+import sys
+import time
+import unittest
 from datetime import date
 from decimal import Decimal
 from unittest.mock import Mock
@@ -649,6 +651,10 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
             table_write.write_arrow_batch(record_batch)
         self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
 
+    @unittest.skipIf(
+        sys.version_info[:2] == (3, 6),
+        "Large wide-table test is prohibitively slow on Python 3.6."
+    )
     def test_write_wide_table_large_data(self):
         logging.basicConfig(level=logging.INFO)
         catalog = CatalogFactory.create(self.options)

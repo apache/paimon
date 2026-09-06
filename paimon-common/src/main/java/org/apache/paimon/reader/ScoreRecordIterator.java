@@ -30,6 +30,8 @@ public interface ScoreRecordIterator<T> extends RecordReader.RecordIterator<T> {
 
     float returnedScore();
 
+    long returnedRowId();
+
     @Override
     default <R> ScoreRecordIterator<R> transform(Function<T, R> function) {
         ScoreRecordIterator<T> thisIterator = this;
@@ -37,6 +39,11 @@ public interface ScoreRecordIterator<T> extends RecordReader.RecordIterator<T> {
             @Override
             public float returnedScore() {
                 return thisIterator.returnedScore();
+            }
+
+            @Override
+            public long returnedRowId() {
+                return thisIterator.returnedRowId();
             }
 
             @Nullable
@@ -63,6 +70,11 @@ public interface ScoreRecordIterator<T> extends RecordReader.RecordIterator<T> {
             @Override
             public float returnedScore() {
                 return thisIterator.returnedScore();
+            }
+
+            @Override
+            public long returnedRowId() {
+                return thisIterator.returnedRowId();
             }
 
             @Nullable

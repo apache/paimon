@@ -46,6 +46,7 @@ import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -155,7 +156,7 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     private static SchemaManager schemaManager(String root, CoreOptions options) {
-        return new SchemaManager(FileIOFinder.find(new Path(root)), options.path());
+        return new FileSystemSchemaManager(FileIOFinder.find(new Path(root)), options.path());
     }
 
     public FileIO fileIO() {
@@ -175,7 +176,8 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.path()),
+                        null)
                 .config(
                         ExpireConfig.builder()
                                 .snapshotRetainMax(numRetainedMax)
@@ -189,7 +191,8 @@ public class TestFileStore extends KeyValueFileStore {
                         snapshotManager(),
                         changelogManager(),
                         newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()))
+                        new TagManager(fileIO, options.path()),
+                        null)
                 .config(expireConfig);
     }
 
@@ -248,8 +251,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) ->
-                        commit.overwritePartition(partition, committable, Collections.emptyMap()));
+                (commit, committable) -> commit.overwritePartition(partition, committable));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
@@ -539,7 +541,7 @@ public class TestFileStore extends KeyValueFileStore {
     private Set<Path> getFilesInUse() {
         Set<Path> result = new HashSet<>();
 
-        SchemaManager schemaManager = new SchemaManager(fileIO, options.path());
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, options.path());
         schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
 
         SnapshotManager snapshotManager = snapshotManager();
@@ -626,7 +628,8 @@ public class TestFileStore extends KeyValueFileStore {
             ManifestList manifestList,
             ManifestFile manifestFile) {
         Set<Path> result = new HashSet<>();
-        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, snapshotManager.tablePath());
         CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
         boolean produceChangelog =
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
@@ -699,7 +702,8 @@ public class TestFileStore extends KeyValueFileStore {
             ManifestList manifestList,
             ManifestFile manifestFile) {
         Set<Path> result = new HashSet<>();
-        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO, snapshotManager.tablePath());
         CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
 
         Path changelogPath = changelogManager.longLivedChangelogPath(changelogId);
@@ -820,7 +824,6 @@ public class TestFileStore extends KeyValueFileStore {
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
             conf.set(CoreOptions.FILE_FORMAT, format);
-            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 

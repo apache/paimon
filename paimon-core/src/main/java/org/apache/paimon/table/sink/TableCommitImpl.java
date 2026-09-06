@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
@@ -55,13 +56,11 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -89,9 +88,10 @@ public class TableCommitImpl implements InnerTableCommit {
     private final AtomicReference<Throwable> maintainError;
     private final String tableName;
     private final boolean forceCreatingSnapshot;
-    private final ThreadPoolExecutor fileCheckExecutor;
+    private final ExecutorService fileCheckExecutor;
 
-    @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private Map<String, String> overwritePartitionSpec = null;
+    @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -135,7 +135,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (overwritePartition != null) {
+        if (overwritePartitionSpec != null || overwriteStaticPartitions != null) {
             return true;
         }
         return tagAutoManager != null
@@ -144,8 +144,16 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
-        this.overwritePartition = overwritePartitions;
+    public TableCommitImpl withOverwrite(@Nullable Map<String, String> spec) {
+        this.overwritePartitionSpec = spec;
+        this.overwriteStaticPartitions = null;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withOverwriteStaticPartitions(List<BinaryRow> overwritePartitions) {
+        this.overwritePartitionSpec = null;
+        this.overwriteStaticPartitions = overwritePartitions;
         return this;
     }
 
@@ -170,6 +178,13 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
         commit.rowIdCheckConflict(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl rowIdCheckConflictForMaterializeDvCompaction(
+            @Nullable Long rowIdCheckFromSnapshot) {
+        commit.rowIdCheckConflictForMaterializeDvCompaction(rowIdCheckFromSnapshot);
         return this;
     }
 
@@ -267,7 +282,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        if (overwritePartition == null) {
+        if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
@@ -293,8 +308,10 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    commit.overwritePartition(
-                            overwritePartition, committable, Collections.emptyMap());
+                    overwriteStaticPartitions == null
+                            ? commit.overwritePartition(overwritePartitionSpec, committable)
+                            : commit.overwriteStaticPartitions(
+                                    overwriteStaticPartitions, committable);
             maintain(
                     committable.identifier(),
                     maintainExecutor,

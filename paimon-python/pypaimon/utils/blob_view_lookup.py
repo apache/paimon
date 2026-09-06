@@ -19,8 +19,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Set
 
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.uri_reader import FileUriReader, UriReader
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 
@@ -58,6 +59,7 @@ class BlobViewLookup:
     def __init__(self, table):
         self._table = table
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
+        self._uri_reader_cache: Dict[str, UriReader] = {}
         self._null_value_cache: Set[BlobViewStruct] = set()
 
     def preload(self, view_structs: List[BlobViewStruct]):
@@ -112,6 +114,31 @@ class BlobViewLookup:
             )
         return descriptor
 
+    def resolve_blob(self, view_struct: BlobViewStruct) -> Blob:
+        descriptor = self.resolve_descriptor(view_struct)
+        uri_reader = self.resolve_uri_reader(view_struct)
+        return Blob.from_descriptor(uri_reader, descriptor)
+
+    def resolve_file_io(self, view_struct: BlobViewStruct):
+        uri_reader = self.resolve_uri_reader(view_struct)
+        if not isinstance(uri_reader, FileUriReader):
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} with parallel blob reads because "
+                "upstream table {} does not use a file-backed UriReader.".format(
+                    view_struct, view_struct.identifier.get_full_name())
+            )
+        return uri_reader._file_io
+
+    def resolve_uri_reader(self, view_struct: BlobViewStruct) -> UriReader:
+        table_key = view_struct.identifier.get_full_name()
+        uri_reader = self._uri_reader_cache.get(table_key)
+        if uri_reader is None:
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} because upstream table {} "
+                "was not loaded.".format(view_struct, table_key)
+            )
+        return uri_reader
+
     def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
         if view_struct in self._null_value_cache:
             return True
@@ -135,6 +162,9 @@ class BlobViewLookup:
 
     def _create_table_read_plan(self, table_refs: TableReferences) -> TableReadPlan:
         upstream_table = self._load_table(table_refs.identifier)
+        self._uri_reader_cache[table_refs.identifier.get_full_name()] = (
+            UriReader.from_file(upstream_table.file_io)
+        )
 
         fields: List = []
         for field_id in table_refs.references_by_field:
@@ -260,7 +290,15 @@ class BlobViewLookup:
         return max(_MIN_ROWS_PER_TASK, (total_rows + _PRELOAD_THREAD_NUM - 1) // _PRELOAD_THREAD_NUM)
 
     def _load_table(self, identifier: Identifier):
-        catalog = self._table.catalog_environment.catalog_loader.load()
+        catalog_environment = self._table.catalog_environment
+        catalog_loader = catalog_environment.catalog_loader
+        dependency_context = catalog_environment.dependency_read_context()
+        if dependency_context is catalog_environment.catalog_context():
+            catalog = catalog_loader.load()
+        else:
+            from pypaimon.catalog.catalog_factory import CatalogFactory
+            catalog = CatalogFactory.create_from_context(
+                dependency_context, config_required=False)
         return catalog.get_table(identifier)
 
     @staticmethod

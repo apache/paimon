@@ -29,11 +29,10 @@ import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.OrcOptions;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -57,6 +56,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** An orc {@link FormatReadWriteTest}. */
 public class OrcFormatReadWriteTest extends FormatReadWriteTest {
+
+    @Test
+    public void testArrayBlobDescriptors() throws Exception {
+        testArrayBlobDescriptorRoundTrip();
+    }
 
     private final FileFormat legacyFormat =
             new OrcFileFormat(
@@ -131,21 +135,15 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         }
 
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        RowType emptyRowType = new RowType(Collections.emptyList());
-        try (FileRecordReader<InternalRow> reader =
-                newFormat
-                        .createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
-                        .createReader(context)) {
-            Map<String, Map<String, String>> readFieldMetadata =
-                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-            assertThat(readFieldMetadata).containsOnlyKeys("id", "name");
-            assertThat(readFieldMetadata.get("id"))
-                    .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "0");
-            assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
-            assertThat(readFieldMetadata.get("name"))
-                    .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");
-        }
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
+        Map<String, Map<String, String>> readFieldMetadata =
+                ((SupportsFieldMetadata) newFormat).readFieldMetadata(context);
+        assertThat(readFieldMetadata).containsOnlyKeys("id", "name");
+        assertThat(readFieldMetadata.get("id"))
+                .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "0");
+        assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
+        assertThat(readFieldMetadata.get("name"))
+                .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");
     }
 
     @Test
@@ -168,7 +166,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 legacyFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -195,7 +194,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 newFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -222,7 +222,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 legacyFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         Timestamp shiftedTimestamp =
@@ -254,7 +255,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 newFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         Timestamp shiftedTimestamp =

@@ -126,7 +126,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
                                 GlobalIndexAssignerOperator.forRowData(table))
                         .setParallelism(partitionByKeyHash.getParallelism());
 
-        // declare managed memory for RocksDB
+        // declare managed memory for the local key-value index
         declareManagedMemory(
                 bucketAssigned, options.toConfiguration().get(SINK_CROSS_PARTITION_MANAGED_MEMORY));
 

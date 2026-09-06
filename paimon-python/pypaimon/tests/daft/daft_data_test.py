@@ -106,7 +106,6 @@ async def _read_paimon_source_batches(
     filter_expr=None,
     columns=None,
     limit=None,
-    call_push_filters=True,
 ):
     from daft import context, runners
     from daft.daft import StorageConfig
@@ -117,11 +116,6 @@ async def _read_paimon_source_batches(
     io_config = context.get_context().daft_planning_config.default_io_config
     storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
     source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
-
-    if filter_expr is not None and call_push_filters:
-        pushed_filters, remaining_filters = source.push_filters([filter_expr._expr])
-        assert pushed_filters
-        assert not remaining_filters
 
     pushdowns = Pushdowns(filters=filter_expr, columns=columns, limit=limit)
     return await _collect_paimon_source_batches(source, pushdowns)
@@ -249,8 +243,87 @@ def test_read_paimon_source_is_serializable(append_only_table):
     assert restored._storage_config.multithreaded_io is False
 
 
-def test_read_paimon_source_serialization_preserves_pushed_filter_for_fallback(local_paimon_catalog):
-    """A serialized source must keep filters accepted by SupportsPushdownFilters."""
+def test_source_serialization_preserves_explicit_io_config_for_native_task(
+    append_only_table, monkeypatch
+):
+    from daft.io import IOConfig, S3Config
+    from daft.io.pushdowns import Pushdowns
+    from daft.io.source import DataSourceTask
+    from daft.pickle import dumps, loads
+
+    from pypaimon.daft.daft_paimon import _source_for_table
+
+    table, warehouse = append_only_table
+    _write_to_paimon(
+        table,
+        pa.table(
+            {
+                "id": [1],
+                "name": ["a"],
+                "value": [1.0],
+                "dt": ["2024-01-01"],
+            }
+        ),
+    )
+
+    explicit_values = (
+        "https://explicit.example",
+        "explicit-key",
+        "explicit-secret",
+        "explicit-token",
+    )
+    explicit_io_config = IOConfig(
+        s3=S3Config(
+            endpoint_url=explicit_values[0],
+            key_id=explicit_values[1],
+            access_key=explicit_values[2],
+            session_token=explicit_values[3],
+        )
+    )
+    catalog_options = {
+        "warehouse": str(warehouse),
+        "fs.s3.endpoint": "https://catalog.example",
+        "fs.s3.accessKeyId": "catalog-key",
+        "fs.s3.accessKeySecret": "catalog-secret",
+        "fs.s3.securityToken": "catalog-token",
+    }
+
+    source = _source_for_table(
+        table,
+        catalog_options=catalog_options,
+        io_config=explicit_io_config,
+    )
+    restored = loads(dumps(source))
+
+    captured = {}
+    sentinel = object()
+
+    def capture_parquet(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(DataSourceTask, "parquet", capture_parquet)
+
+    async def first_task():
+        async for task in restored.get_tasks(Pushdowns()):
+            return task
+        raise AssertionError("Expected at least one native task")
+
+    assert asyncio.run(first_task()) is sentinel
+    assert captured["storage_config"] is restored._storage_config
+
+    for storage_config in (source._storage_config, restored._storage_config):
+        s3 = storage_config.io_config.s3
+        assert (
+            s3.endpoint_url,
+            s3.key_id,
+            s3.access_key,
+            s3.session_token,
+        ) == explicit_values
+
+
+def test_read_paimon_serialized_source_uses_current_filter_for_fallback(local_paimon_catalog):
+    """A serialized source must plan from the filters in the current request."""
     from daft import context, runners
     from daft.daft import StorageConfig
     from daft.io.pushdowns import Pushdowns
@@ -278,15 +351,12 @@ def test_read_paimon_source_serialization_preserves_pushed_filter_for_fallback(l
     io_config = context.get_context().daft_planning_config.default_io_config
     storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
     source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
-    pushed_filters, remaining_filters = source.push_filters([(col("id") == 999)._expr])
-    assert pushed_filters
-    assert not remaining_filters
 
     restored = loads(dumps(source))
     batches = asyncio.run(
         _collect_paimon_source_batches(
             restored,
-            Pushdowns(filters=None, limit=1),
+            Pushdowns(filters=col("id") == 999, limit=1),
         )
     )
 
@@ -585,8 +655,8 @@ def test_read_paimon_pk_fallback_filters_before_projection(pk_table):
     assert batches == [{"name": ["new_a"], "id": [1]}]
 
 
-def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_paimon_catalog):
-    """Fallback planning must use Pushdowns.filters even if push_filters was not called."""
+def test_read_paimon_fallback_plans_current_pushdown_filter(local_paimon_catalog):
+    """Fallback planning must use the filter from the current request."""
     catalog, _ = local_paimon_catalog
     schema = pypaimon.Schema.from_pyarrow_schema(
         pa.schema([
@@ -609,7 +679,6 @@ def test_read_paimon_fallback_plans_pushdown_filter_without_push_filters(local_p
             table,
             filter_expr=col("id") == 999,
             limit=1,
-            call_push_filters=False,
         )
     )
 
@@ -637,7 +706,6 @@ def test_read_paimon_fallback_not_in_filter_excludes_nulls_before_limit(local_pa
             table,
             filter_expr=~col("id").is_in([1, 2]),
             limit=1,
-            call_push_filters=False,
         )
     )
 
@@ -827,7 +895,6 @@ def test_row_and_partition_filters_both_reach_planning_predicate(append_only_tab
     io_config = context.get_context().daft_planning_config.default_io_config
     storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
     source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
-    source.push_filters([(col("id") > 1)._expr])
     pushdowns = Pushdowns(filters=(col("id") > 1),
                           partition_filters=(col("dt") == "2024-01-02"))
 

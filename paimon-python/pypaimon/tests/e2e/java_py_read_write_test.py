@@ -16,18 +16,20 @@
 # under the License.
 
 import datetime
+import json
 import os
 import sys
 import unittest
+import uuid
+from decimal import Decimal
 
 import pandas as pd
 import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
-from pypaimon.globalindex.full_text_query import MatchQuery
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-from pypaimon.schema.data_types import VectorType
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
 
@@ -39,10 +41,22 @@ else:
 
 
 def get_file_format_params():
-    if sys.version_info[:2] == (3, 6):
+    # lance has no wheel on Python < 3.8.
+    if sys.version_info[:2] < (3, 8):
         return [('parquet',), ('orc',), ('avro',)]
     else:
         return [('parquet',), ('orc',), ('avro',), ('lance',)]
+
+
+def match_query(terms, operator=None):
+    body = {"query": terms}
+    if operator is not None:
+        body["operator"] = operator
+    return json.dumps({"match": body}, separators=(",", ":"))
+
+
+def boolean_query(queries):
+    return json.dumps({"boolean": {"queries": queries}}, separators=(",", ":"))
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -54,6 +68,79 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'warehouse': cls.warehouse
         })
         cls.catalog.create_database('default', True)
+
+    def test_read_java_dynamic_bucket_hash_index(self):
+        table = self.catalog.get_table(
+            'default.dynamic_hash_java_to_python'
+        )
+        read_builder = table.new_read_builder()
+        initial = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(
+            {
+                'key1': ['hello-java'],
+                'key2': [42],
+                'value': ['java-old'],
+            },
+            initial.to_pydict(),
+        )
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['python-only', 'hello-java'],
+            'key2': pa.array([7, 42], type=pa.int64()),
+            'value': ['python-only', 'python-new'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        read_builder = table.new_read_builder()
+        result = table_sort_by(read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ), 'key1')
+        self.assertEqual(
+            {
+                'key1': ['hello-java', 'python-only'],
+                'key2': [42, 7],
+                'value': ['python-new', 'python-only'],
+            },
+            result.to_pydict(),
+        )
+
+    def test_py_write_dynamic_bucket_hash_index(self):
+        table_name = 'default.dynamic_hash_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([
+                pa.field('key1', pa.string()),
+                pa.field('key2', pa.int64()),
+                pa.field('value', pa.string()),
+            ]),
+            primary_keys=['key1', 'key2'],
+            options={
+                'bucket': '-1',
+                'dynamic-bucket.target-row-num': '1',
+                'file.format': 'parquet',
+            },
+        )
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['hello-java', 'python-only'],
+            'key2': pa.array([42, 7], type=pa.int64()),
+            'value': ['python-old', 'python-only'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_append_table(self, file_format):
@@ -451,14 +538,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     def test_read_btree_raw_fallback(self):
         table = self.catalog.get_table('default.test_btree_raw_fallback')
-        fast_builder = table.new_read_builder()
+        fast_table = table.copy({'scalar-index.search-mode': 'fast'})
+        fast_builder = fast_table.new_read_builder()
         fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
         fast_builder.with_filter(fast_predicate)
         fast_result = fast_builder.new_read().to_arrow(
             fast_builder.new_scan().plan().splits())
         self.assertEqual(0, fast_result.num_rows)
 
-        full_table = table.copy({'global-index.search-mode': 'full'})
+        # full mode falls back to a raw scan for the unindexed k4 row
+        full_table = table.copy({'scalar-index.search-mode': 'full'})
         read_builder = full_table.new_read_builder()
         read_builder.with_filter(
             read_builder.new_predicate_builder().equal('k', 'k4'))
@@ -746,7 +835,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         predicate = predicate_factory(read_builder.new_predicate_builder())
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -774,7 +863,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                      .new_predicate_builder()
                      .greater_or_equal('k', 'key-295'))
 
-        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
         self.assertIsNotNone(scanner)
         with scanner:
             result = scanner.scan(predicate)
@@ -792,7 +881,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
         disabled_table = table.copy({budget_key: '0 b'})
-        disabled_scanner = GlobalIndexScanner.create(disabled_table, predicate=predicate)
+        disabled_scanner = DataEvolutionGlobalIndexScanner.create(disabled_table, predicate=predicate)
         self.assertIsNotNone(disabled_scanner)
         with disabled_scanner:
             disabled_result = disabled_scanner.scan(predicate)
@@ -1046,19 +1135,19 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(result.column('label').to_pylist(), ['first', 'second', 'third'])
         print("test_py_write_multi_vector_dedicated_file: wrote 3 rows with 2 vector columns")
 
-    def test_read_tantivy_full_text_index(self):
-        """Test reading a Tantivy full-text index built by Java."""
-        table = self.catalog.get_table('default.test_tantivy_fulltext')
+    def test_read_native_full_text_index(self):
+        """Test reading a Native full-text index built by Java."""
+        table = self.catalog.get_table('default.test_native_fulltext')
 
         # Use FullTextSearchBuilder to search
         builder = table.new_full_text_search_builder()
-        builder.with_query(MatchQuery('paimon', 'content'))
+        builder.with_query('content', match_query('paimon'))
         builder.with_limit(10)
 
         result = builder.execute_local()
         # Row 0, 2, 4 mention "paimon"
         row_ids = sorted(list(result.results()))
-        print(f"Tantivy full-text search for 'paimon': row_ids={row_ids}")
+        print(f"Native full-text search for 'paimon': row_ids={row_ids}")
         self.assertEqual(row_ids, [0, 2, 4])
 
         # Read matching rows using withGlobalIndexResult
@@ -1072,14 +1161,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids = pa_table.column('id').to_pylist()
         self.assertEqual(ids, [0, 2, 4])
 
-        # Search for "tantivy" - only row 1
+        # Search for "native" - only row 1
         builder2 = table.new_full_text_search_builder()
-        builder2.with_query(MatchQuery('tantivy', 'content'))
+        builder2.with_query('content', match_query('native'))
         builder2.with_limit(10)
 
         result2 = builder2.execute_local()
         row_ids2 = sorted(list(result2.results()))
-        print(f"Tantivy full-text search for 'tantivy': row_ids={row_ids2}")
+        print(f"Native full-text search for 'native': row_ids={row_ids2}")
         self.assertEqual(row_ids2, [1])
 
         # Read matching rows
@@ -1092,12 +1181,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "full-text search" - rows 1, 3
         builder3 = table.new_full_text_search_builder()
-        builder3.with_query(MatchQuery('full-text search', 'content'))
+        builder3.with_query('content', match_query('full-text search'))
         builder3.with_limit(10)
 
         result3 = builder3.execute_local()
         row_ids3 = sorted(list(result3.results()))
-        print(f"Tantivy full-text search for 'full-text search': row_ids={row_ids3}")
+        print(f"Native full-text search for 'full-text search': row_ids={row_ids3}")
         self.assertIn(1, row_ids3)
         self.assertIn(3, row_ids3)
 
@@ -1111,16 +1200,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIn(1, ids3)
         self.assertIn(3, ids3)
 
-        ngram_table = self.catalog.get_table('default.test_tantivy_fulltext_ngram')
+        ngram_table = self.catalog.get_table('default.test_native_fulltext_ngram')
 
         # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
         ngram_builder = ngram_table.new_full_text_search_builder()
-        ngram_builder.with_query(MatchQuery('中文', 'content'))
+        ngram_builder.with_query('content', match_query('中文'))
         ngram_builder.with_limit(10)
 
         ngram_result = ngram_builder.execute_local()
         ngram_row_ids = sorted(list(ngram_result.results()))
-        print(f"Tantivy ngram search for '中文': row_ids={ngram_row_ids}")
+        print(f"Native full-text ngram search for '中文': row_ids={ngram_row_ids}")
         self.assertEqual(ngram_row_ids, [0, 4])
 
         ngram_read_builder = ngram_table.new_read_builder()
@@ -1133,43 +1222,50 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
 
         fragment_builder = ngram_table.new_full_text_search_builder()
-        fragment_builder.with_query(MatchQuery('片段', 'content'))
+        fragment_builder.with_query('content', match_query('片段'))
         fragment_builder.with_limit(10)
 
         fragment_result = fragment_builder.execute_local()
         fragment_row_ids = sorted(list(fragment_result.results()))
-        print(f"Tantivy ngram search for '片段': row_ids={fragment_row_ids}")
+        print(f"Native full-text ngram search for '片段': row_ids={fragment_row_ids}")
         self.assertEqual(fragment_row_ids, [4])
 
         ngram_and_builder = ngram_table.new_full_text_search_builder()
-        ngram_and_builder.with_query(MatchQuery('中文 片段', 'content', operator='and'))
+        ngram_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('片段'))],
+            ]))
         ngram_and_builder.with_limit(10)
 
         ngram_and_result = ngram_and_builder.execute_local()
         ngram_and_row_ids = sorted(list(ngram_and_result.results()))
-        print(f"Tantivy ngram AND search for '中文 片段': row_ids={ngram_and_row_ids}")
+        print(
+            "Native full-text ngram boolean search for "
+            f"'中文' AND '片段': row_ids={ngram_and_row_ids}")
         self.assertEqual(ngram_and_row_ids, [4])
 
-        simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
+        simple_table = self.catalog.get_table('default.test_native_fulltext_simple')
         simple_builder = simple_table.new_full_text_search_builder()
-        simple_builder.with_query(MatchQuery('running', 'content'))
+        simple_builder.with_query('content', match_query('search'))
         simple_builder.with_limit(10)
 
         simple_result = simple_builder.execute_local()
         simple_row_ids = sorted(list(simple_result.results()))
-        print(f"Tantivy simple stemmed search for 'running': row_ids={simple_row_ids}")
+        print(f"Native full-text simple search for 'search': row_ids={simple_row_ids}")
         self.assertEqual(simple_row_ids, [0, 1, 2])
 
-        jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')
+        jieba_table = self.catalog.get_table('default.test_native_fulltext_jieba')
 
         # Search for Chinese words using the jieba tokenizer metadata written by Java.
         jieba_builder = jieba_table.new_full_text_search_builder()
-        jieba_builder.with_query(MatchQuery('售货员', 'content'))
+        jieba_builder.with_query('content', match_query('售货员'))
         jieba_builder.with_limit(10)
 
         jieba_result = jieba_builder.execute_local()
         jieba_row_ids = sorted(list(jieba_result.results()))
-        print(f"Tantivy jieba search for '售货员': row_ids={jieba_row_ids}")
+        print(f"Native full-text jieba search for '售货员': row_ids={jieba_row_ids}")
         self.assertEqual(jieba_row_ids, [0])
 
         jieba_read_builder = jieba_table.new_read_builder()
@@ -1182,21 +1278,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['张华在百货公司当售货员'])
 
         jieba_phrase_builder = jieba_table.new_full_text_search_builder()
-        jieba_phrase_builder.with_query(MatchQuery('自然', 'content'))
+        jieba_phrase_builder.with_query('content', match_query('自然'))
         jieba_phrase_builder.with_limit(10)
 
         jieba_phrase_result = jieba_phrase_builder.execute_local()
         jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
-        print(f"Tantivy jieba search for '自然': row_ids={jieba_phrase_row_ids}")
+        print(f"Native full-text jieba search for '自然': row_ids={jieba_phrase_row_ids}")
         self.assertEqual(jieba_phrase_row_ids, [3])
 
         jieba_and_builder = jieba_table.new_full_text_search_builder()
-        jieba_and_builder.with_query(MatchQuery('中文 自然', 'content', operator='and'))
+        jieba_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('自然'))],
+            ]))
         jieba_and_builder.with_limit(10)
 
         jieba_and_result = jieba_and_builder.execute_local()
         jieba_and_row_ids = sorted(list(jieba_and_result.results()))
-        print(f"Tantivy jieba AND search for '中文 自然': row_ids={jieba_and_row_ids}")
+        print(
+            "Native full-text jieba boolean search for "
+            f"'中文' AND '自然': row_ids={jieba_and_row_ids}")
         self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
@@ -1358,12 +1461,279 @@ class JavaPyReadWriteTest(unittest.TestCase):
         result = table_read.to_arrow(splits)
         self.assertEqual(result.num_rows, 200)
 
+    def test_read_array_blob_written_by_java(self):
+        table = self.catalog.get_table('default.array_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_list(result.schema.field('payloads').type))
+        self.assertEqual(
+            result.column('id').to_pylist(),
+            [1, 2, 3, 4],
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
+            [
+                [b'java-alpha', None, b''],
+                [],
+                None,
+                [b'java-omega'],
+            ],
+        )
+
+    def test_write_array_blob_for_java(self):
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        table_name = 'default.array_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [b'python-alpha', None, b''],
+                    [],
+                    None,
+                    [b'python-omega'],
+                ],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(
+            result.column('id').to_pylist(),
+            data.column('id').to_pylist(),
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
+            data.column('payloads').to_pylist(),
+        )
+
+    def test_read_map_blob_written_by_java(self):
+        table = self.catalog.get_table('default.map_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_map(result.schema.field('payloads').type))
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'java-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'java-omega'},
+            ],
+        )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'java-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'java-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'java-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'java-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'java-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'java-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'java-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
+
+    def test_write_map_blob_for_java(self):
+        map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())
+        compact_decimal_map_blob_type = pa.map_(
+            pa.decimal128(10, 2), pa.large_binary())
+        high_decimal_map_blob_type = pa.map_(
+            pa.decimal128(20, 2), pa.large_binary())
+        date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
+        time_map_blob_type = pa.map_(pa.time32('ms'), pa.large_binary())
+        binary_schema_type = pa.map_(pa.binary(4), pa.large_binary())
+        varbinary_schema_type = pa.map_(pa.binary(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+            ('boolean_payloads', boolean_map_blob_type),
+            ('compact_decimal_payloads', compact_decimal_map_blob_type),
+            ('high_decimal_payloads', high_decimal_map_blob_type),
+            ('date_payloads', date_map_blob_type),
+            ('time_payloads', time_map_blob_type),
+            ('binary_payloads', binary_schema_type),
+            ('varbinary_payloads', varbinary_schema_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        pa_schema = PyarrowFieldParser.from_paimon_schema(schema.fields)
+        binary_map_blob_type = pa_schema.field('binary_payloads').type
+        varbinary_map_blob_type = pa_schema.field('varbinary_payloads').type
+        table_name = 'default.map_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [(1, b'python-alpha'), (2, None), (3, b'')],
+                    [],
+                    None,
+                    [(4, b'python-omega')],
+                ],
+                type=map_blob_type,
+            ),
+            'boolean_payloads': pa.array(
+                [[(True, b'python-boolean')], None, None, None],
+                type=boolean_map_blob_type,
+            ),
+            'compact_decimal_payloads': pa.array(
+                [[(Decimal('12.34'), b'python-compact-decimal')],
+                 None, None, None],
+                type=compact_decimal_map_blob_type,
+            ),
+            'high_decimal_payloads': pa.array(
+                [[(
+                    Decimal('123456789012345678.90'),
+                    b'python-high-decimal',
+                )], None, None, None],
+                type=high_decimal_map_blob_type,
+            ),
+            'date_payloads': pa.array(
+                [[(
+                    datetime.date(1969, 12, 31),
+                    b'python-date',
+                )], None, None, None],
+                type=date_map_blob_type,
+            ),
+            'time_payloads': pa.array(
+                [[(
+                    datetime.time(12, 34, 56, 789000),
+                    b'python-time',
+                )], None, None, None],
+                type=time_map_blob_type,
+            ),
+            'binary_payloads': pa.array(
+                [
+                    [
+                        (bytes([0, 255, 1, 2]), b'python-binary'),
+                    ],
+                    None,
+                    None,
+                    None,
+                ],
+                type=binary_map_blob_type,
+            ),
+            'varbinary_payloads': pa.array(
+                [[(b'', b'python-varbinary')], None, None, None],
+                type=varbinary_map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'python-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'python-omega'},
+            ],
+        )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'python-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'python-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'python-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'python-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'python-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'python-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'python-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
+
     def test_compact_conflict_shard_update(self):
         """
         1. Java writes 5 base files (testCompactConflictWriteBase)
         2. pypaimon ShardTableUpdator scans table, prepares evolution
         3. Java runs compact (testCompactConflictRunCompact)
-        4. pypaimon commits stale evolution -> conflict detected, raises RuntimeError
+        4. pypaimon rebases the stale evolution files and commits successfully
         """
         import subprocess
 
@@ -1409,13 +1779,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
                          f"Java compact failed:\n{result.stdout}\n{result.stderr}")
         print("Java compact completed")
 
-        # Step 4: pypaimon commits stale evolution -> conflict detected
+        # Step 4: pypaimon rewrites stale evolution files against the compacted range
         tc = wb.new_commit()
-        with self.assertRaises(RuntimeError) as ctx:
-            tc.commit(stale_commit_msgs)
-        self.assertIn("conflict", str(ctx.exception))
+        tc.commit(stale_commit_msgs)
         tc.close()
-        print(f"Conflict detected as expected: {ctx.exception}")
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            rows_read,
+            sum(value is not None for value in result.column('f2').to_pylist()),
+        )
 
     def test_blob_compact_conflict_update(self):
         import subprocess
@@ -1557,7 +1932,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
-        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.num_rows, 7)
 
         # VARIANT maps to struct<value: binary NOT NULL, metadata: binary NOT NULL>
         payload_field = result.schema.field('payload')
@@ -1598,6 +1973,31 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Row 3: Carol, [1,2,3]
         carol_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(3)]).to_python()
         self.assertEqual(carol_data, [1, 2, 3])
+
+        # Row 4: Dave, DATE '2024-01-15'
+        dave_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(4)]).to_python()
+        self.assertEqual(dave_data, datetime.date(2024, 1, 15))
+
+        # Row 5: Eve, TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+        eve_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(5)]).to_python()
+        self.assertEqual(
+            eve_data, datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        )
+
+        # Row 6: Frank, TIMESTAMP '2024-01-15 12:30:45.123456 UTC'
+        frank_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(6)]).to_python()
+        self.assertEqual(
+            frank_data,
+            datetime.datetime(
+                2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+            ),
+        )
+
+        # Row 7: Grace, UUID '12345678-1234-5678-1234-567812345678'
+        grace_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(7)]).to_python()
+        self.assertEqual(
+            grace_data, uuid.UUID('12345678-1234-5678-1234-567812345678')
+        )
 
         print("test_py_read_variant_table: verified {} VARIANT rows".format(result.num_rows))
 
@@ -1655,6 +2055,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             id=2  payload=[10,20,30]
             id=3  payload="hello"
             id=4  payload=null
+            id=5  payload=DATE '2024-01-15'
+            id=6  payload=TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+            id=7  payload=UUID '12345678-1234-5678-1234-567812345678'
         """
         variant_type = pa.struct([
             pa.field('value', pa.binary(), nullable=False),
@@ -1672,15 +2075,24 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
+        test_uuid = uuid.UUID('12345678-1234-5678-1234-567812345678')
         variant_col = GenericVariant.to_arrow_array([
             GenericVariant.from_python({"name": "test", "value": 42}),
             GenericVariant.from_python([10, 20, 30]),
             GenericVariant.from_python("hello"),
             None,  # SQL NULL at the column level, not a VARIANT containing JSON null
+            GenericVariant.from_python(datetime.date(2024, 1, 15)),
+            GenericVariant.from_python(
+                datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+            ),
+            GenericVariant.from_python(test_uuid),
         ])
         data = pa.table({
-            'id': pa.array([1, 2, 3, 4], type=pa.int32()),
-            'name': pa.array(['row1', 'row2', 'row3', 'row4'], type=pa.string()),
+            'id': pa.array([1, 2, 3, 4, 5, 6, 7], type=pa.int32()),
+            'name': pa.array(
+                ['row1', 'row2', 'row3', 'row4', 'row5', 'row6', 'row7'],
+                type=pa.string()
+            ),
             'payload': variant_col,
         }, schema=pa_schema)
 
@@ -1691,7 +2103,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
-        print("test_py_write_variant_table: wrote 4 VARIANT rows to {}".format(table_name))
+        print("test_py_write_variant_table: wrote 7 VARIANT rows to {}".format(table_name))
 
         # Also write a shredded VARIANT table (py_variant_shredded_test) for Java to read.
         # Python shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields of 'payload'

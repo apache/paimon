@@ -21,7 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.types.DataTypes
+import org.apache.paimon.types.{DataTypes, VectorType}
 
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
@@ -132,6 +132,21 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     withTable("paimon_tbl") {
       sql("CREATE TABLE paimon_tbl (id int)")
       assert(!loadTable("paimon_tbl").options().containsKey("provider"))
+    }
+  }
+
+  test("Paimon DDL: alter table set location is not supported") {
+    withTempDir {
+      newLocation =>
+        withTable("paimon_tbl") {
+          sql("CREATE TABLE paimon_tbl (id int)")
+
+          val error = intercept[Exception] {
+            sql(s"ALTER TABLE paimon_tbl SET LOCATION '${newLocation.getCanonicalPath}'")
+          }.getMessage
+
+          assert(error.contains("ALTER TABLE ... SET LOCATION is not supported for Paimon tables."))
+        }
     }
   }
 
@@ -371,6 +386,57 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: self-referencing RTAS on a partitioned table keeps the table") {
+    assume(gteqSpark3_4)
+    withTable("q") {
+      sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
+      sql("INSERT INTO q VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      val location = loadTable("q").location()
+      val fileIO = loadTable("q").fileIO()
+
+      val e = intercept[RuntimeException] {
+        sql("REPLACE TABLE q AS SELECT * FROM q WHERE dt = 'a'")
+      }
+      val messages = Iterator
+        .iterate(e: Throwable)(_.getCause)
+        .takeWhile(_ != null)
+        .map(t => String.valueOf(t.getMessage))
+        .mkString(" | ")
+      Assertions.assertTrue(messages.contains("Cannot replace table"), messages)
+
+      Assertions.assertTrue(sql("SHOW TABLES").collect().exists(_.getString(1) == "q"))
+      Assertions.assertTrue(fileIO.exists(location))
+      checkAnswer(
+        sql("SELECT * FROM q ORDER BY id"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: self-referencing RTAS restating partitioning replaces in place") {
+    assume(gteqSpark3_4)
+    withTable("q") {
+      sql("CREATE TABLE q (id INT, dt STRING) USING paimon PARTITIONED BY (dt)")
+      sql("INSERT INTO q VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      sql("REPLACE TABLE q PARTITIONED BY (dt) AS SELECT * FROM q WHERE dt = 'a'")
+
+      checkAnswer(sql("SELECT * FROM q"), Row(1, "a") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: self-referencing RTAS on an unpartitioned table replaces in place") {
+    assume(gteqSpark3_4)
+    withTable("q2") {
+      sql("CREATE TABLE q2 (id INT, dt STRING) USING paimon")
+      sql("INSERT INTO q2 VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      sql("REPLACE TABLE q2 AS SELECT * FROM q2 WHERE dt = 'a'")
+
+      checkAnswer(sql("SELECT * FROM q2"), Row(1, "a") :: Nil)
+    }
+  }
+
   test("Paimon DDL: CREATE OR REPLACE TABLE AS SELECT supports incompatible schema") {
     assume(gteqSpark3_4)
     withTable("t") {
@@ -403,6 +469,63 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
           sql(s"SELECT id, data FROM t VERSION AS OF $oldSnapshotId"),
           Seq((1L, "old")).toDF())
       }
+    }
+  }
+
+  test(
+    "Paimon DDL: CREATE OR REPLACE TABLE AS SELECT reads latest rows after incompatible nested type replace") {
+    assume(gteqSpark3_4)
+    withTable("src", "t") {
+      sql("""
+            |CREATE TABLE src (
+            |  id BIGINT,
+            |  payload DOUBLE,
+            |  name_a STRING,
+            |  name_b STRING
+            |)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO src VALUES
+            |  (1, 1.1D, 'a', 'x'),
+            |  (2, 2.2D, 'b', 'y')
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS SELECT * FROM src
+            |""".stripMargin)
+
+      sql("""
+            |CREATE OR REPLACE TABLE t
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |AS
+            |SELECT
+            |  id,
+            |  named_struct(
+            |    'items_before', array(name_a),
+            |    'items_after', array(name_b)
+            |  ) AS payload,
+            |  name_a,
+            |  name_b
+            |FROM src
+            |""".stripMargin)
+
+      Assertions.assertEquals("struct", spark.table("t").schema("payload").dataType.typeName)
+
+      checkAnswer(
+        sql("""
+              |SELECT id, payload.items_before, payload.items_after, name_a, name_b
+              |FROM t
+              |WHERE name_a = 'a'
+              |LIMIT 1
+              |""".stripMargin),
+        Row(1L, Seq("a"), Seq("x"), "a", "x") :: Nil
+      )
     }
   }
 
@@ -836,6 +959,78 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
              |""".stripMargin)
     }.getMessage
     assert(error.contains("Unsupported partition transform"))
+  }
+
+  test("Paimon DDL: create table with vector-field") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id BIGINT, embed ARRAY<FLOAT> NOT NULL)
+            |TBLPROPERTIES (
+            |  'vector-field' = 'embed',
+            |  'field.embed.vector-dim' = '3',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+
+      val rowType = loadTable("T").rowType()
+      val embedType = rowType.getTypeAt(rowType.getFieldIndex("embed"))
+      assert(embedType.isInstanceOf[VectorType])
+      val vectorType = embedType.asInstanceOf[VectorType]
+      assert(vectorType.getLength == 3)
+      assert(vectorType.getElementType == DataTypes.FLOAT())
+      // NOT NULL declared on the Spark column must survive the conversion.
+      assert(!vectorType.isNullable)
+    }
+  }
+
+  test("Paimon DDL: create table with invalid vector-field") {
+    def createVectorTable(column: String, options: String): Unit = {
+      sql(s"""
+             |CREATE TABLE T (id BIGINT, $column)
+             |TBLPROPERTIES (
+             |  'vector-field' = 'embed',
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true'
+             |  $options)
+             |""".stripMargin)
+    }
+
+    // A vector column must be declared as an array.
+    withTable("T") {
+      val error = intercept[Exception] {
+        createVectorTable("embed FLOAT", ", 'field.embed.vector-dim' = '3'")
+      }
+      assert(
+        error.getMessage.contains("The type of vector field 'embed' must be array, but is float"))
+    }
+
+    // The dimension option is required, and the message must name the real option key.
+    withTable("T") {
+      val error = intercept[Exception] {
+        createVectorTable("embed ARRAY<FLOAT>", "")
+      }
+      assert(
+        error.getMessage.contains(
+          "When setting 'vector-field', you must also set 'field.embed.vector-dim'."))
+    }
+
+    // An empty or non-integer dimension must fail with a readable message.
+    withTable("T") {
+      val error = intercept[Exception] {
+        createVectorTable("embed ARRAY<FLOAT>", ", 'field.embed.vector-dim' = '  '")
+      }
+      assert(
+        error.getMessage.contains(
+          "Expected an integer for 'field.embed.vector-dim', but got empty value."))
+    }
+    withTable("T") {
+      val error = intercept[Exception] {
+        createVectorTable("embed ARRAY<FLOAT>", ", 'field.embed.vector-dim' = 'abc'")
+      }
+      assert(
+        error.getMessage.contains(
+          "Expected an integer for 'field.embed.vector-dim', but got: abc."))
+    }
   }
 
   test("Fix partition column generate wrong partition spec") {

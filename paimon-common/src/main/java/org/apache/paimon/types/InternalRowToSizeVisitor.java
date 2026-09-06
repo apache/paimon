@@ -18,6 +18,11 @@
 
 package org.apache.paimon.types;
 
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -32,6 +37,7 @@ public class InternalRowToSizeVisitor
         implements DataTypeVisitor<BiFunction<DataGetters, Integer, Integer>> {
 
     public static final int NULL_SIZE = 0;
+    private static final int UNKNOWN_SIZE = 1;
 
     @Override
     public BiFunction<DataGetters, Integer, Integer> visit(CharType charType) {
@@ -86,6 +92,20 @@ public class InternalRowToSizeVisitor
                 return row.getBinary(index).length;
             }
         };
+    }
+
+    @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(GeometryType geometryType) {
+        return binarySize();
+    }
+
+    @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(GeographyType geographyType) {
+        return binarySize();
+    }
+
+    private BiFunction<DataGetters, Integer, Integer> binarySize() {
+        return (row, index) -> row.isNullAt(index) ? NULL_SIZE : row.getBinary(index).length;
     }
 
     @Override
@@ -229,9 +249,24 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                return Math.toIntExact(row.getVariant(index).sizeInBytes());
+                Blob blob = row.getBlob(index);
+                if (blob instanceof BlobData) {
+                    return ((BlobData) blob).toData().length;
+                } else if (blob instanceof BlobRef) {
+                    return descriptorLength(blob.toDescriptor());
+                } else if (blob instanceof BlobView) {
+                    BlobView view = (BlobView) blob;
+                    return view.isResolved()
+                            ? descriptorLength(view.toDescriptor())
+                            : view.viewStruct().serialize().length;
+                }
+                return UNKNOWN_SIZE;
             }
         };
+    }
+
+    private static int descriptorLength(BlobDescriptor descriptor) {
+        return descriptor.length() < 0 ? UNKNOWN_SIZE : Math.toIntExact(descriptor.length());
     }
 
     @Override

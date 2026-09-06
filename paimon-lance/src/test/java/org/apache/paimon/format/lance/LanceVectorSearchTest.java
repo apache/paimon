@@ -59,7 +59,7 @@ public class LanceVectorSearchTest extends VectorSearchBuilderTest {
                 .option(CoreOptions.FILE_FORMAT.key(), "lance");
     }
 
-    @Disabled("Cosine metric uses Tantivy index which requires Hadoop dependencies")
+    @Disabled("Cosine metric uses native index which requires Hadoop dependencies")
     @Test
     @Override
     public void testVectorSearchWithCosineMetric() {}

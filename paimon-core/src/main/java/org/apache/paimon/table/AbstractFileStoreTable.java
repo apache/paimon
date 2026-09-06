@@ -24,7 +24,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -32,6 +33,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -45,8 +47,6 @@ import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.WriteSelector;
-import org.apache.paimon.table.source.DataTableBatchScan;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.DataTableStreamScan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -288,30 +288,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public DataTableScan newScan() {
-        DataTableBatchScan scan =
-                new DataTableBatchScan(
-                        tableSchema,
-                        schemaManager(),
-                        coreOptions(),
-                        newSnapshotReader(),
-                        catalogEnvironment.tableQueryAuth(coreOptions()));
-        Integer scanBucket = coreOptions().scanBucket();
-        if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
-            scan.withBucket(scanBucket);
-        }
-        if (coreOptions().dataEvolutionEnabled()) {
-            return new DataEvolutionBatchScan(this, scan);
-        }
-        return scan;
-    }
-
-    @Override
     public StreamDataTableScan newStreamScan() {
         DataTableStreamScan scan =
                 new DataTableStreamScan(
                         tableSchema,
+                        schemaManager(),
                         coreOptions(),
                         newSnapshotReader(),
                         snapshotManager(),
@@ -321,7 +302,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         !tableSchema.primaryKeys().isEmpty());
         Integer scanBucket = coreOptions().scanBucket();
         if (scanBucket != null) {
-            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
             scan.withBucket(scanBucket);
         }
         return scan;
@@ -390,6 +370,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        if (new CoreOptions(tableSchema.options())
+                        .toConfiguration()
+                        .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // turning the mirror on here publishes the schemas already on disk, which no commit
+            // has judged under these options
+            SchemaValidation.validateHistoricalIcebergTypes(
+                    () -> schemaManager().listAll(), new CoreOptions(newTableSchema.options()));
+        }
 
         return copy(newTableSchema);
     }
@@ -426,12 +415,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (statsCache != null) {
             copied.setStatsCache(statsCache);
         }
+        if (dvmetaCache != null) {
+            copied.setDVMetaCache(dvmetaCache);
+        }
         return copied;
     }
 
     @Override
     public SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, currentBranch());
+        return new FileSystemSchemaManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -470,7 +462,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 store().newSnapshotDeletion(),
-                store().newTagManager());
+                store().newTagManager(),
+                store().options().scanManifestParallelism());
     }
 
     @Override
@@ -542,6 +535,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
@@ -567,6 +561,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.tag(tagName));
@@ -788,7 +783,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), targetBranch).latest();
+                new FileSystemSchemaManager(fileIO(), location(), targetBranch).latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 

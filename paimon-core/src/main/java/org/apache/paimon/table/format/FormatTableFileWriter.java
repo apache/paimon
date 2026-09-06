@@ -24,10 +24,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.io.FormatTableWrittenFile;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -88,17 +89,42 @@ public class FormatTableFileWriter {
     }
 
     public void close() throws Exception {
-        writers.clear();
+        try {
+            IOUtils.closeAll(writers.values());
+        } finally {
+            writers.clear();
+        }
     }
 
     public List<CommitMessage> prepareCommit() throws Exception {
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        for (FormatTableRecordWriter writer : writers.values()) {
-            List<TwoPhaseOutputStream.Committer> commiters = writer.closeAndGetCommitters();
-            for (TwoPhaseOutputStream.Committer committer : commiters) {
-                TwoPhaseCommitMessage twoPhaseCommitMessage = new TwoPhaseCommitMessage(committer);
-                commitMessages.add(twoPhaseCommitMessage);
+        List<FormatTableWrittenFile> writtenFiles = new ArrayList<>();
+        try {
+            for (FormatTableRecordWriter writer : writers.values()) {
+                writtenFiles.addAll(writer.closeAndGetWrittenFiles());
             }
+        } catch (Exception e) {
+            for (FormatTableWrittenFile writtenFile : writtenFiles) {
+                try {
+                    writtenFile.committer().discard(fileIO);
+                } catch (Exception cleanupException) {
+                    e.addSuppressed(cleanupException);
+                }
+            }
+            try {
+                close();
+            } catch (Exception cleanupException) {
+                e.addSuppressed(cleanupException);
+            }
+            throw e;
+        }
+
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (FormatTableWrittenFile writtenFile : writtenFiles) {
+            commitMessages.add(
+                    new TwoPhaseCommitMessage(
+                            writtenFile.committer(),
+                            writtenFile.recordCount(),
+                            writtenFile.fileSizeInBytes()));
         }
         return commitMessages;
     }
@@ -118,6 +144,7 @@ public class FormatTableFileWriter {
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
+                options.targetFileRowNum(),
                 pathFactory.createDataFilePathFactory(parent, null),
                 writeRowType,
                 options.formatTableFileCompression());

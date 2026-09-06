@@ -24,6 +24,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 
@@ -45,6 +46,21 @@ public interface TableRead {
     TableRead executeFilter();
 
     TableRead withIOManager(IOManager ioManager);
+
+    /**
+     * Configure a sizer shared by all physical readers created by this table read.
+     *
+     * <p>The sizer must be attached before creating readers. Reader creation binds the sizer
+     * instance, not its current value, so later updates through the same sizer remain visible.
+     * Replacing the sizer on this table read after reader creation is unsupported and is not
+     * required to affect existing readers.
+     *
+     * <p>Formats that support dynamic sizing snapshot the selected size when the next physical
+     * batch starts; already started or asynchronously prefetched batches may use the previous size.
+     */
+    default TableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        return this;
+    }
 
     RecordReader<InternalRow> createReader(Split split) throws IOException;
 

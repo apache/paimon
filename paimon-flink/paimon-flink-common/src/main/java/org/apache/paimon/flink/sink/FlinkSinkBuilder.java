@@ -33,12 +33,13 @@ import org.apache.paimon.flink.sink.partition.StatisticsOrRecordChannelComputer;
 import org.apache.paimon.flink.sink.partition.StatisticsOrRecordTypeInfo;
 import org.apache.paimon.flink.sorter.TableSortInfo;
 import org.apache.paimon.flink.sorter.TableSorter;
+import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.utils.BlobDescriptorUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -72,6 +73,7 @@ import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
 import static org.apache.paimon.table.BucketMode.BUCKET_UNAWARE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -90,6 +92,7 @@ public class FlinkSinkBuilder {
     @Nullable protected Map<String, String> overwritePartition;
     @Nullable private Integer parallelism;
     @Nullable private TableSortInfo tableSortInfo;
+    @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
     // ============== for extension ==============
 
@@ -213,17 +216,24 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        CatalogContext contextForDescriptor =
-                BlobDescriptorUtils.getCatalogContext(
-                        table.catalogEnvironment().catalogContext(),
-                        table.coreOptions().toConfiguration());
+        UriReaderFactory readerFactoryForDescriptor = BlobDescriptorReaderFactory.create(table);
+        blobDescriptorReaderFactory = readerFactoryForDescriptor;
 
+        // Primary-key tables externalize BLOBs after merging records, and that path does not apply
+        // the write-null fallback while fetching descriptors. Retain the existence preflight there.
+        Set<Integer> materializedBlobFields =
+                table.schema().primaryKeys().isEmpty()
+                        ? materializedBlobFieldIndexes(
+                                table.rowType(), table.coreOptions().blobInlineField())
+                        : Collections.emptySet();
         DataStream<InternalRow> input =
-                mapToInternalRow(
+                mapToInternalRowWithUriReaderFactory(
                         this.input,
                         table.rowType(),
-                        contextForDescriptor,
-                        table.coreOptions().blobWriteNullOnMissingFile());
+                        readerFactoryForDescriptor,
+                        table.coreOptions().blobWriteNullOnMissingFile(),
+                        table.coreOptions().blobWriteNullOnFetchFailure(),
+                        materializedBlobFields);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -256,7 +266,7 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
-        return mapToInternalRow(input, rowType, catalogContext, false);
+        return mapToInternalRow(input, rowType, catalogContext, false, false);
     }
 
     public static DataStream<InternalRow> mapToInternalRow(
@@ -264,6 +274,31 @@ public class FlinkSinkBuilder {
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
+        return mapToInternalRow(input, rowType, catalogContext, checkBlobDescriptorExists, false);
+    }
+
+    public static DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
+        return mapToInternalRowWithUriReaderFactory(
+                input,
+                rowType,
+                new UriReaderFactory(catalogContext),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                Collections.emptySet());
+    }
+
+    private static DataStream<InternalRow> mapToInternalRowWithUriReaderFactory(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> materializedBlobFields) {
         Set<Integer> blobFields =
                 checkBlobDescriptorExists
                         ? FlinkRowWrapper.blobFieldIndexes(rowType)
@@ -272,11 +307,13 @@ public class FlinkSinkBuilder {
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
                                         r ->
-                                                new FlinkRowWrapper(
+                                                FlinkRowWrapper.fromUriReaderFactory(
                                                         r,
-                                                        catalogContext,
+                                                        uriReaderFactory,
                                                         checkBlobDescriptorExists,
-                                                        blobFields))
+                                                        writeNullOnFetchFailure,
+                                                        blobFields,
+                                                        materializedBlobFields))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
@@ -284,16 +321,32 @@ public class FlinkSinkBuilder {
         return result;
     }
 
+    private static Set<Integer> materializedBlobFieldIndexes(
+            org.apache.paimon.types.RowType rowType, Set<String> inlineBlobFields) {
+        Set<Integer> materializedBlobFields = FlinkRowWrapper.blobFieldIndexes(rowType);
+        materializedBlobFields.removeIf(
+                pos -> inlineBlobFields.contains(rowType.getFields().get(pos).name()));
+        return materializedBlobFields;
+    }
+
     protected DataStreamSink<?> buildDynamicBucketSink(
             DataStream<InternalRow> input, boolean globalIndex) {
-        return compactSink && !globalIndex
-                // todo support global index sort compact
-                ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
-                : globalIndex
-                        ? new GlobalDynamicBucketSink(table, overwritePartition)
-                                .build(input, parallelism)
-                        : new RowDynamicBucketSink(table, overwritePartition)
-                                .build(input, parallelism);
+        if (compactSink && !globalIndex) {
+            // todo support global index sort compact
+            return configureBlobDescriptorReaderFactory(
+                            new DynamicBucketCompactSink(table, overwritePartition))
+                    .build(input, parallelism);
+        }
+
+        if (globalIndex) {
+            return configureBlobDescriptorReaderFactory(
+                            new GlobalDynamicBucketSink(table, overwritePartition))
+                    .build(input, parallelism);
+        }
+
+        return configureBlobDescriptorReaderFactory(
+                        new RowDynamicBucketSink(table, overwritePartition))
+                .build(input, parallelism);
     }
 
     protected DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {
@@ -309,8 +362,8 @@ public class FlinkSinkBuilder {
         }
         DataStream<InternalRow> partitioned =
                 partition(input, new RowDataChannelComputer(table.schema()), parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition);
-        return sink.sinkFrom(partitioned);
+        return configureBlobDescriptorReaderFactory(new FixedBucketSink(table, overwritePartition))
+                .sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildPostponeBucketSink(DataStream<InternalRow> input) {
@@ -323,8 +376,9 @@ public class FlinkSinkBuilder {
                 channelComputer = new PostponeBucketChannelComputer(table.schema());
             }
             DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
-            PostponeBucketSink sink = new PostponeBucketSink(table, overwritePartition);
-            return sink.sinkFrom(partitioned);
+            return configureBlobDescriptorReaderFactory(
+                            new PostponeBucketSink(table, overwritePartition))
+                    .sinkFrom(partitioned);
         } else {
             Map<BinaryRow, Integer> knownNumBuckets = PostponeUtils.getKnownNumBuckets(table);
             DataStream<InternalRow> partitioned =
@@ -333,11 +387,9 @@ public class FlinkSinkBuilder {
                             new PostponeFixedBucketChannelComputer(table.schema(), knownNumBuckets),
                             parallelism);
 
-            FileStoreTable tableForWrite = PostponeUtils.tableForFixBucketWrite(table);
-
-            PostponeFixedBucketSink sink =
-                    new PostponeFixedBucketSink(tableForWrite, overwritePartition, knownNumBuckets);
-            return sink.sinkFrom(partitioned);
+            return configureBlobDescriptorReaderFactory(
+                            new PostponeFixedBucketSink(table, overwritePartition, knownNumBuckets))
+                    .sinkFrom(partitioned);
         }
     }
 
@@ -359,7 +411,15 @@ public class FlinkSinkBuilder {
             }
         }
 
-        return new RowAppendTableSink(table, overwritePartition, parallelism).sinkFrom(input);
+        return configureBlobDescriptorReaderFactory(
+                        new RowAppendTableSink(table, overwritePartition, parallelism))
+                .sinkFrom(input);
+    }
+
+    private <T extends FlinkSink<?>> T configureBlobDescriptorReaderFactory(T sink) {
+        sink.setBlobDescriptorReaderFactory(
+                checkNotNull(blobDescriptorReaderFactory, "BLOB descriptor reader is not set."));
+        return sink;
     }
 
     private DataStream<InternalRow> applyDynamicPartitionShuffle(DataStream<InternalRow> input) {

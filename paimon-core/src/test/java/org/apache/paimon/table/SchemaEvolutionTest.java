@@ -25,10 +25,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -92,7 +94,7 @@ public class SchemaEvolutionTest {
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
         identifier = SchemaManager.identifierFromPath(tablePath.toString(), true);
-        schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -163,6 +165,53 @@ public class SchemaEvolutionTest {
                         String.format(
                                 "Column %s cannot specify NOT NULL in the %s table.",
                                 "f4", identifier.getFullName()));
+    }
+
+    @Test
+    public void testAddVariantFieldWithShredding() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET);
+        options.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(DataTypes.INT()).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""));
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(GenericRow.of(1));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.addColumn("payload", DataTypes.VARIANT())));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+
+        write = table.newWrite(commitUser);
+        write.write(GenericRow.of(2, GenericVariant.fromJson("{\"age\":30,\"name\":\"Alice\"}")));
+        commit = table.newCommit(commitUser);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        Map<Integer, String> actual = new HashMap<>();
+        forEachRemaining(
+                table,
+                null,
+                row ->
+                        actual.put(
+                                row.getInt(0),
+                                row.isNullAt(1) ? null : row.getVariant(1).toJson()));
+
+        assertThat(actual)
+                .containsEntry(1, null)
+                .containsEntry(2, "{\"age\":30,\"name\":\"Alice\"}");
     }
 
     @Test
@@ -270,7 +319,8 @@ public class SchemaEvolutionTest {
                                                         "__BLOB_FIELD",
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("must be of BYTES, BINARY or BLOB type");
+                .hasMessageContaining(
+                        "must be of BYTES, BINARY, BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type");
 
         // nested column rejected.
         assertThatThrownBy(
@@ -475,6 +525,7 @@ public class SchemaEvolutionTest {
     @Test
     public void testCreateTableWithCommentDirectives() throws Exception {
         Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
         options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaManager.createTable(
                 new Schema(
@@ -526,6 +577,37 @@ public class SchemaEvolutionTest {
         assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
         assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
         assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
+    }
+
+    @Test
+    public void testUpdateColumnCommentRejectsDirectives() throws Exception {
+        schemaManager.createTable(
+                Schema.newBuilder().column("pic", DataTypes.BYTES(), "original comment").build());
+
+        for (String directive :
+                Arrays.asList(
+                        "__BLOB_FIELD",
+                        "__BLOB_DESCRIPTOR_FIELD",
+                        "__BLOB_VIEW_FIELD",
+                        "__VECTOR_FIELD;64")) {
+            assertThatThrownBy(
+                            () ->
+                                    schemaManager.commitChanges(
+                                            SchemaChange.updateColumnComment("pic", directive)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Should not alter existing field's type through column directives");
+        }
+
+        TableSchema latest = schemaManager.latest().get();
+        assertThat(latest.fields().get(0).type()).isEqualTo(DataTypes.BYTES());
+        assertThat(latest.fields().get(0).description()).isEqualTo("original comment");
+        assertThat(latest.options())
+                .doesNotContainKeys(
+                        CoreOptions.BLOB_FIELD.key(),
+                        CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                        CoreOptions.BLOB_VIEW_FIELD.key(),
+                        CoreOptions.VECTOR_FIELD.key());
     }
 
     private static Map<String, String> blobEnabledOptions() {

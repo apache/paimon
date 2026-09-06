@@ -74,12 +74,16 @@ class CreateTableRequest(RESTRequest):
 @dataclass
 class CommitTableRequest(RESTRequest):
     FIELD_TABLE_ID = "tableId"
+    FIELD_BASE_SNAPSHOT_UUID = "baseSnapshotUuid"
     FIELD_SNAPSHOT = "snapshot"
     FIELD_STATISTICS = "statistics"
 
     table_id: Optional[str] = json_field(FIELD_TABLE_ID)
     snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
     statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)
+    base_snapshot_uuid: Optional[str] = json_field(
+        FIELD_BASE_SNAPSHOT_UUID, default=None
+    )
 
 
 @dataclass
@@ -171,6 +175,19 @@ class CreateTagRequest(RESTRequest):
     tag_name: str = json_field(FIELD_TAG_NAME)
     snapshot_id: Optional[int] = json_field(FIELD_SNAPSHOT_ID, default=None)
     time_retained: Optional[str] = json_field(FIELD_TIME_RETAINED, default=None)
+
+
+@dataclass
+class CreatePartitionsRequest(RESTRequest):
+    FIELD_PARTITION_SPECS = "partitionSpecs"
+    FIELD_IGNORE_IF_EXISTS = "ignoreIfExists"
+
+    partition_specs: List[Dict[str, str]] = json_field(FIELD_PARTITION_SPECS)
+    ignore_if_exists: Optional[bool] = json_field(FIELD_IGNORE_IF_EXISTS, default=True)
+
+    def __post_init__(self):
+        if self.ignore_if_exists is None:
+            self.ignore_if_exists = True
 
 
 # Branch CRUD wire DTOs. Mirrors Java requests in

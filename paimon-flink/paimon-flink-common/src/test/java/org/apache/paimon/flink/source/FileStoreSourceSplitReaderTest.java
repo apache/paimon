@@ -29,6 +29,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.Split;
@@ -81,7 +82,7 @@ public class FileStoreSourceSplitReaderTest {
     @BeforeEach
     public void beforeEach() throws Exception {
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         toDataType(

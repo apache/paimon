@@ -69,6 +69,31 @@ class VariantShreddingWritePlanTest {
     }
 
     @Test
+    void testConfiguredSchemaAcceptsByteBufferBackedVariant() {
+        RowType logicalType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        RowType configuredSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                DataTypes.ROW(DataTypes.FIELD(0, "age", DataTypes.BIGINT()))));
+        VariantShreddingWritePlan writePlan =
+                VariantShreddingWritePlan.fromConfiguredSchema(logicalType, configuredSchema);
+        GenericVariant expected = GenericVariant.fromJson("{\"age\":30,\"extra\":true}");
+        GenericVariant bufferBacked =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+
+        InternalRow physicalRow = writePlan.toPhysicalRow(GenericRow.of(bufferBacked));
+        RowType physicalVariantType = (RowType) writePlan.physicalRowType().getTypeAt(0);
+        Variant actual =
+                assembleVariant(
+                        physicalRow.getRow(0, physicalVariantType.getFieldCount()),
+                        buildVariantSchema(physicalVariantType));
+
+        assertThat(actual.toJson()).isEqualTo(expected.toJson());
+    }
+
+    @Test
     void testNestedVariantConvertsRecursively() {
         RowType nestedLogicalType =
                 DataTypes.ROW(

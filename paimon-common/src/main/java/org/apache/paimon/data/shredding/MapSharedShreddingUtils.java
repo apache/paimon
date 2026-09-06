@@ -28,6 +28,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
@@ -43,11 +44,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Utility functions for the shared-shredding MAP storage layout.
@@ -102,6 +106,69 @@ public class MapSharedShreddingUtils {
         return new RowType(logicalSchema.isNullable(), physicalFields);
     }
 
+    public static RowType buildPhysicalReadType(
+            RowType logicalReadType,
+            Map<String, MapSharedShreddingFieldMeta> sharedShreddingFieldMetas) {
+        List<DataField> physicalReadFields = new ArrayList<>();
+        boolean converted = false;
+        for (DataField logicalReadField : logicalReadType.getFields()) {
+            MapSharedShreddingFieldMeta fieldMeta =
+                    sharedShreddingFieldMetas.get(logicalReadField.name());
+            if (fieldMeta == null) {
+                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(logicalReadField)) {
+                    // Read a legacy/default-layout file while selected-key pushdown is active.
+                    DataType valueType = selectedKeysValueType((RowType) logicalReadField.type());
+                    DataType physicalType =
+                            DataTypes.MAP(DataTypes.STRING().notNull(), valueType)
+                                    .copy(logicalReadField.type().isNullable());
+                    physicalReadFields.add(logicalReadField.newType(physicalType));
+                    converted = true;
+                } else {
+                    physicalReadFields.add(logicalReadField);
+                }
+                continue;
+            }
+
+            DataType valueType;
+            DataType physicalType;
+            if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(logicalReadField)) {
+                // Read only selected keys from a shared-shredding ROW.
+                valueType = selectedKeysValueType((RowType) logicalReadField.type());
+                physicalType =
+                        buildSpecificPhysicalStructType(
+                                        valueType,
+                                        selectedPhysicalColumnIds(logicalReadField, fieldMeta),
+                                        selectedKeysIncludeOverflow(logicalReadField, fieldMeta))
+                                .copy(logicalReadField.type().isNullable());
+            } else {
+                // Rebuild the whole MAP from a shared-shredding ROW.
+                valueType = ((MapType) logicalReadField.type()).getValueType();
+                physicalType =
+                        buildPhysicalStructType(valueType, fieldMeta.numColumns())
+                                .copy(logicalReadField.type().isNullable());
+            }
+
+            physicalReadFields.add(logicalReadField.newType(physicalType));
+            converted = true;
+        }
+        return converted
+                ? new RowType(logicalReadType.isNullable(), physicalReadFields)
+                : logicalReadType;
+    }
+
+    private static DataType selectedKeysValueType(RowType selectedKeysType) {
+        checkArgument(
+                selectedKeysType.getFieldCount() > 0,
+                "Selected-key MAP read type must contain at least one field.");
+        DataType valueType = selectedKeysType.getTypeAt(0);
+        for (int i = 1; i < selectedKeysType.getFieldCount(); i++) {
+            checkArgument(
+                    selectedKeysType.getTypeAt(i).equalsIgnoreNullable(valueType),
+                    "Selected-key MAP fields must have the same value type.");
+        }
+        return valueType;
+    }
+
     public static Map<String, Integer> buildColumnToNumColumns(
             List<String> shreddingFieldNames, CoreOptions options) {
         Map<String, Integer> fieldToNumColumns = new HashMap<>();
@@ -115,12 +182,14 @@ public class MapSharedShreddingUtils {
             MapSharedShreddingFieldMeta fieldMeta,
             @Nullable String compression,
             Map<String, String> metadata) {
+        String fieldDictCompression = normalizeFieldDictCompression(compression);
         metadata.put(
                 MapShreddingDefine.STORAGE_LAYOUT,
                 MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
         metadata.put(
                 MapSharedShreddingDefine.VERSION,
                 String.valueOf(MapSharedShreddingDefine.CURRENT_VERSION));
+        metadata.put(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, fieldDictCompression);
 
         String fieldDictJson = toJson(new TreeMap<>(fieldMeta.nameToId()));
         metadata.put(
@@ -129,7 +198,9 @@ public class MapSharedShreddingUtils {
         metadata.put(
                 MapSharedShreddingDefine.FIELD_DICT,
                 bytesToString(
-                        compress(fieldDictJson.getBytes(StandardCharsets.UTF_8), compression)));
+                        compress(
+                                fieldDictJson.getBytes(StandardCharsets.UTF_8),
+                                fieldDictCompression)));
         metadata.put(
                 MapSharedShreddingDefine.FIELD_COLUMNS,
                 toJson(sortedFieldColumns(fieldMeta.fieldToColumns())));
@@ -143,6 +214,18 @@ public class MapSharedShreddingUtils {
 
     public static MapSharedShreddingFieldMeta deserializeMetadata(
             @Nullable Map<String, String> metadata, @Nullable String compression) {
+        return deserializeMetadata(metadata, compression, true);
+    }
+
+    public static MapSharedShreddingFieldMeta deserializeMetadata(
+            @Nullable Map<String, String> metadata) {
+        return deserializeMetadata(metadata, null, false);
+    }
+
+    private static MapSharedShreddingFieldMeta deserializeMetadata(
+            @Nullable Map<String, String> metadata,
+            @Nullable String fallbackCompression,
+            boolean useFallbackCompression) {
         if (!hasShreddingMetadata(metadata)) {
             throw new IllegalArgumentException(
                     "metadata is null or storage layout is not shared-shredding");
@@ -158,6 +241,13 @@ public class MapSharedShreddingUtils {
 
         int originalLength =
                 requiredInt(metadata, MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE);
+        String compression =
+                normalizeFieldDictCompression(
+                        metadata.getOrDefault(
+                                MapSharedShreddingDefine.FIELD_DICT_COMPRESSION,
+                                useFallbackCompression
+                                        ? fallbackCompression
+                                        : MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION));
         byte[] fieldDictBytes =
                 decompress(
                         stringToBytes(requiredValue(metadata, MapSharedShreddingDefine.FIELD_DICT)),
@@ -189,13 +279,63 @@ public class MapSharedShreddingUtils {
     }
 
     private static RowType buildPhysicalStructType(DataType valueType, int numColumns) {
+        return buildSpecificPhysicalStructType(valueType, physicalColumnIds(numColumns), true);
+    }
+
+    public static RowType buildSpecificPhysicalStructType(
+            DataType valueType, Set<Integer> physicalColumnIds, boolean includeOverflow) {
+        return innerBuildSpecificPhysicalStructType(
+                valueType, new ArrayList<>(new TreeSet<>(physicalColumnIds)), includeOverflow);
+    }
+
+    private static RowType innerBuildSpecificPhysicalStructType(
+            DataType valueType, List<Integer> sortedColumns, boolean includeOverflow) {
         RowType.Builder builder = RowType.builder();
         builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));
-        for (int i = 0; i < numColumns; i++) {
-            builder.field(MapSharedShreddingDefine.physicalColumnName(i), valueType);
+        for (Integer column : sortedColumns) {
+            builder.field(MapSharedShreddingDefine.physicalColumnName(column), valueType);
         }
-        builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        if (includeOverflow) {
+            builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        }
         return builder.build();
+    }
+
+    private static Set<Integer> physicalColumnIds(int numColumns) {
+        Set<Integer> physicalColumnIds = new TreeSet<>();
+        for (int i = 0; i < numColumns; i++) {
+            physicalColumnIds.add(i);
+        }
+        return physicalColumnIds;
+    }
+
+    private static Set<Integer> selectedPhysicalColumnIds(
+            DataField selectedKeysField, MapSharedShreddingFieldMeta fieldMeta) {
+        Set<Integer> selectedColumns = new TreeSet<>();
+        for (String selectedKey :
+                MapSelectedKeysMetadataUtils.selectedKeys(selectedKeysField.description())) {
+            Integer fieldId = fieldMeta.nameToId().get(selectedKey);
+            if (fieldId == null) {
+                continue;
+            }
+            List<Integer> columns = fieldMeta.fieldToColumns().get(fieldId);
+            if (columns != null) {
+                selectedColumns.addAll(columns);
+            }
+        }
+        return selectedColumns;
+    }
+
+    private static boolean selectedKeysIncludeOverflow(
+            DataField selectedKeysField, MapSharedShreddingFieldMeta fieldMeta) {
+        for (String selectedKey :
+                MapSelectedKeysMetadataUtils.selectedKeys(selectedKeysField.description())) {
+            Integer fieldId = fieldMeta.nameToId().get(selectedKey);
+            if (fieldId != null && fieldMeta.overflowFieldSet().contains(fieldId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Map<Integer, List<Integer>> sortedFieldColumns(
@@ -270,6 +410,25 @@ public class MapSharedShreddingUtils {
 
     private static boolean isNoCompression(@Nullable String compression) {
         return compression == null || "none".equalsIgnoreCase(compression);
+    }
+
+    public static String normalizeFieldDictCompression(@Nullable String compression) {
+        if (compression == null) {
+            return MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION;
+        }
+
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "none":
+            case "lz4":
+            case "zstd":
+                return normalized;
+            default:
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but is "
+                                + compression
+                                + ".");
+        }
     }
 
     private static String bytesToString(byte[] bytes) {

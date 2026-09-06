@@ -41,7 +41,8 @@ public class MigrateTableActionFactory implements ActionFactory {
         String sourceHiveTable = params.get(TABLE);
         Map<String, String> catalogConfig = catalogConfigMap(params);
         String tableConf = params.get(OPTIONS);
-        Integer parallelism = Integer.parseInt(params.get(PARALLELISM));
+        Integer parallelism =
+                params.has(PARALLELISM) ? Integer.parseInt(params.get(PARALLELISM)) : null;
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
@@ -61,6 +62,7 @@ public class MigrateTableActionFactory implements ActionFactory {
                         + "--source_type hive \\\n"
                         + "--table <database.table_name> \\\n"
                         + "[--catalog_conf <key>=<value] \\\n"
-                        + "[--options <key>=<value>,<key>=<value>,...]");
+                        + "[--options <key>=<value>,<key>=<value>,...] \\\n"
+                        + "[--parallelism <parallelism>]");
     }
 }

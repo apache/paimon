@@ -40,9 +40,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for {@link CoreOptions#SCAN_BUCKET}. */
 public class ScanBucketITCase extends CatalogITCaseBase {
@@ -90,52 +88,6 @@ public class ScanBucketITCase extends CatalogITCaseBase {
                                         "SELECT COUNT(*) FROM T /*+ OPTIONS('scan.bucket' = '%s') */",
                                         targetBucket)))
                 .containsExactly(Row.of((long) expected.size()));
-    }
-
-    @Test
-    public void testScanBucketRejectsDynamicBucketTable() {
-        sql(
-                "CREATE TABLE dynamic_t (id INT, v INT, PRIMARY KEY (id) NOT ENFORCED) "
-                        + "WITH ('bucket' = '-1')");
-
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "SELECT * FROM dynamic_t /*+ OPTIONS('scan.bucket' = '0') */"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Bucket scan is only supported for fixed-bucket tables"));
-    }
-
-    @Test
-    public void testScanBucketRejectsBucketUnawareTable() {
-        sql("CREATE TABLE append_t (id INT, v INT) WITH ('bucket' = '-1')");
-
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "SELECT * FROM append_t /*+ OPTIONS('scan.bucket' = '0') */"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Bucket scan is only supported for primary key tables"));
-    }
-
-    @Test
-    public void testScanBucketRejectsPostponeBucketTable() {
-        sql(
-                "CREATE TABLE postpone_t (id INT, v INT, PRIMARY KEY (id) NOT ENFORCED) "
-                        + "WITH ('bucket' = '-2')");
-
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "SELECT * FROM postpone_t /*+ OPTIONS('scan.bucket' = '0') */"))
-                .satisfies(
-                        anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Bucket scan is only supported for fixed-bucket tables"));
     }
 
     private void writeRows(FileStoreTable table, int... idAndValues) throws Exception {

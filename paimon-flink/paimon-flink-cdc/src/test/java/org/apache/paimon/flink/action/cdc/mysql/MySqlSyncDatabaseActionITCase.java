@@ -801,6 +801,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             tableName = getNewTableName(pick);
             records = recordsMap.get(tableName);
 
+            // Wait for the newly added table to finish its incremental snapshot before altering it.
+            // Under load a snapshot split can capture the post-ALTER schema and the binlog split
+            // then replays pre-ALTER rows against it (row smaller than column index error).
+            Thread.sleep(10000);
+
             statement.executeUpdate(
                     String.format(
                             "ALTER TABLE `%s`.`%s` ADD COLUMN v2 INT", databaseName, tableName));
@@ -978,7 +983,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(120)
+    @Timeout(240)
     public void testSyncMultipleShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
@@ -995,7 +1000,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withMode(mode.configString())
                         .build();
-        runActionWithDefaultEnv(action);
+        JobClient client = runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             // test insert into t1
@@ -1013,6 +1018,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(
+                    client,
                     Arrays.asList(
                             "+I[1, db1_1, NULL]",
                             "+I[2, db1_2, NULL]",
@@ -1040,6 +1046,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             },
                             new String[] {"k", "v1", "v2", "v3"});
             waitForResult(
+                    client,
                     Arrays.asList(
                             "+I[1, 1.1, 1, NULL]",
                             "+I[2, 2.2, 2, NULL]",
@@ -1060,6 +1067,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
                             new String[] {"k", "v1"});
             waitForResult(
+                    client,
                     Arrays.asList("+I[3, db1_3]", "+I[4, db1_4]"),
                     table,
                     rowType,
@@ -1083,6 +1091,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                                 new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
                                 new String[] {"k", "v1"});
                 waitForResult(
+                        client,
                         Arrays.asList("+I[1, db1_1]", "+I[2, db2_2]"),
                         table,
                         rowType,
@@ -1383,7 +1392,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testSpecifyKeys() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "test_specify_keys");

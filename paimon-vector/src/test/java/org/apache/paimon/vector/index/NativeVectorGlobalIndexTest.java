@@ -27,6 +27,8 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.IvfPqBatchTableReuseMode;
+import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
@@ -72,19 +74,18 @@ public class NativeVectorGlobalIndexTest {
 
     private static boolean isNativeAvailable() {
         try {
-            NativeVectorIndexLoader.loadJni();
             Options options = new Options();
             options.setInteger("ivf-flat.dimension", 2);
             options.setString("ivf-flat.metric", "l2");
             options.setInteger("ivf-flat.nlist", 1);
-            try (org.apache.paimon.index.vector.VectorIndexWriter ignored =
-                    new org.apache.paimon.index.vector.VectorIndexWriter(
+            try (org.apache.paimon.index.vector.VectorIndexTrainer ignored =
+                    org.apache.paimon.index.vector.VectorIndexTrainer.create(
                             NativeVectorGlobalIndexerFactory.nativeOptions(
                                     new ArrayType(new FloatType()),
                                     options,
                                     IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
                                     "vec"))) {
-                // Closed immediately; constructing the writer is enough to validate JNI loading.
+                // Closed immediately; constructing the trainer is enough to validate JNI loading.
             }
             return true;
         } catch (Throwable t) {
@@ -181,6 +182,52 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
+    public void testTrainingVectorCountUsesConfiguredSampleRatio() {
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 1.0))
+                .isEqualTo(10_000);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 0.25))
+                .isEqualTo(2_500);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(3L, 0.01)).isEqualTo(1);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(0L, 0.25)).isEqualTo(0);
+
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 1.1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("less than or equal to 1");
+    }
+
+    @Test
+    public void testSampleIndexSequenceIsUniform() {
+        assertThat(
+                        new long[] {
+                            NativeVectorGlobalIndexWriter.sampleIndex(0, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(1, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(2, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(3, 10, 4)
+                        })
+                .containsExactly(0L, 2L, 5L, 7L);
+    }
+
+    @Test
+    public void testVectorBatchSizeProtectsSingleJavaArrayAllocation() {
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 128)).isEqualTo(4096);
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(10000, 128)).isEqualTo(10000);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                4096, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                10000, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positive integer");
+    }
+
+    @Test
     public void testMetaSerializationIsEmptyMap() throws IOException {
         VectorIndexMeta meta = new VectorIndexMeta();
         byte[] serialized = meta.serialize();
@@ -194,25 +241,87 @@ public class NativeVectorGlobalIndexTest {
     public void testVectorSearchParameterParsing() {
         Map<String, String> parameters = new HashMap<>();
         parameters.put("ivf.nprobe", "24");
-        parameters.put("hnsw.ef_search", "80");
         parameters.put("ignored", "bad");
 
-        assertThat(NativeVectorGlobalIndexReader.nprobe(parameters)).isEqualTo(24);
-        assertThat(NativeVectorGlobalIndexReader.efSearch(parameters)).isEqualTo(80);
-        assertThat(NativeVectorGlobalIndexReader.nprobe(Collections.emptyMap())).isEqualTo(16);
-        assertThat(NativeVectorGlobalIndexReader.efSearch(Collections.emptyMap())).isEqualTo(0);
+        VectorSearchParams ivfParams = NativeVectorGlobalIndexReader.searchParams(parameters, 10);
+        assertThat(ivfParams.topK()).isEqualTo(10);
+
+        VectorSearchParams automaticParams =
+                NativeVectorGlobalIndexReader.searchParams(Collections.emptyMap(), 5);
+        assertThat(automaticParams.topK()).isEqualTo(5);
+
+        VectorSearchParams diskAnnParams =
+                NativeVectorGlobalIndexReader.searchParams(
+                        Collections.singletonMap("diskann.l_search", "80"), 10);
+        assertThat(diskAnnParams.topK()).isEqualTo(10);
+    }
+
+    @Test
+    public void testIvfInitialFilterExpansionFactorValidationIsPropagated() {
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexReader.searchParams(
+                                        Collections.singletonMap(
+                                                "ivf.max_initial_filter_expansion_factor", "0"),
+                                        10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("ivf.nprobe", "16");
+        parameters.put("ivf.max_initial_filter_expansion_factor", "4");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexReader.searchParams(parameters, 10))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires automatic IVF search");
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseIsPropagatedToBatchSearchParams() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap("ivf_pq.batch_table_reuse", "on"), 10);
+
+        assertThat(params.ivfPqBatchTableReuse()).isEqualTo(IvfPqBatchTableReuseMode.ON);
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseMaxBytesIsPropagated() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap("ivf_pq.batch_table_reuse.max_bytes", "134217728"),
+                        10);
+
+        assertThat(params.ivfPqBatchTableReuseMaxBytes()).isEqualTo(128L * 1024 * 1024);
+    }
+
+    @Test
+    public void testIvfPqBatchTableReuseMaxBytesSupportsLongValues() {
+        VectorSearchParams params =
+                NativeVectorGlobalIndexReader.batchSearchParams(
+                        Collections.singletonMap(
+                                "ivf_pq.batch_table_reuse.max_bytes", "5368709120"),
+                        10);
+
+        assertThat(params.ivfPqBatchTableReuseMaxBytes()).isEqualTo(5L * 1024 * 1024 * 1024);
     }
 
     @Test
     public void testVectorSearchParameterRangeValidationDelegatedToNative() {
         assertThat(
-                        NativeVectorGlobalIndexReader.nprobe(
-                                Collections.singletonMap("ivf.nprobe", "0")))
-                .isEqualTo(0);
+                        NativeVectorGlobalIndexReader.searchParams(
+                                Collections.singletonMap("ivf.nprobe", "0"), 10))
+                .isNotNull();
         assertThat(
-                        NativeVectorGlobalIndexReader.efSearch(
-                                Collections.singletonMap("hnsw.ef_search", "-1")))
-                .isEqualTo(-1);
+                        NativeVectorGlobalIndexReader.searchParams(
+                                Collections.singletonMap("diskann.l_search", "-1"), 10))
+                .isNotNull();
+
+        Map<String, String> conflicting = new HashMap<>();
+        conflicting.put("ivf.nprobe", "16");
+        conflicting.put("diskann.l_search", "100");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexReader.searchParams(conflicting, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot set both");
     }
 
     @Test
@@ -271,6 +380,57 @@ public class NativeVectorGlobalIndexTest {
             assertThat(result.results().contains(0L)).isTrue();
             float score = result.scoreGetter().score(0L);
             assertThat(score).isNotNaN();
+        }
+    }
+
+    @Test
+    public void testNewIndexTypesEndToEnd() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        float[][] vectors = new float[32][2];
+        for (int i = 0; i < vectors.length; i++) {
+            double angle = 2 * Math.PI * i / vectors.length;
+            vectors[i][0] = (float) Math.cos(angle);
+            vectors[i][1] = (float) Math.sin(angle);
+        }
+
+        for (String identifier :
+                new String[] {
+                    IvfSqVectorGlobalIndexerFactory.IDENTIFIER,
+                    IvfRqVectorGlobalIndexerFactory.IDENTIFIER,
+                    DiskAnnVectorGlobalIndexerFactory.IDENTIFIER
+                }) {
+            Options options = new Options();
+            options.setInteger(identifier + ".dimension", 2);
+            options.setString(identifier + ".metric", "l2");
+            if (IvfRqVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)) {
+                options.setInteger(identifier + ".nlist", 1);
+            } else {
+                if (DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)) {
+                    options.setInteger("diskann.max-degree", 4);
+                    options.setInteger("diskann.build-search-list-size", 8);
+                }
+            }
+
+            NativeVectorGlobalIndexWriter writer =
+                    new NativeVectorGlobalIndexWriter(
+                            createFileWriter(indexPath),
+                            vectorType,
+                            NativeVectorGlobalIndexerFactory.nativeOptions(
+                                    vectorType, options, identifier, fieldName),
+                            identifier);
+            writeVectors(writer, vectors);
+            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+
+            try (NativeVectorGlobalIndexReader reader =
+                    new NativeVectorGlobalIndexReader(
+                            createFileReader(indexPath), metas, vectorType, executor)) {
+                ScoredGlobalIndexResult result =
+                        reader.visitVectorSearch(new VectorSearch(vectors[0], 2, fieldName))
+                                .join()
+                                .get();
+                assertThat(result.results().contains(0L)).as(identifier).isTrue();
+            }
         }
     }
 
@@ -398,7 +558,8 @@ public class NativeVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (NativeVectorGlobalIndexReader reader =
-                (NativeVectorGlobalIndexReader) indexer.createReader(fileReader, metas, executor)) {
+                (NativeVectorGlobalIndexReader)
+                        indexer.createReader(fileReader, metas, vectors.length, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 2, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);

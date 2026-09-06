@@ -115,13 +115,15 @@ class StreamReadBuilder:
 
     def new_streaming_scan(self) -> AsyncStreamingTableScan:
         """Create a new AsyncStreamingTableScan with this builder's settings."""
-        return AsyncStreamingTableScan(
+        scan = AsyncStreamingTableScan(
             table=self.table,
             predicate=self._predicate,
             poll_interval_ms=self._poll_interval_ms,
             bucket_filter=self._bucket_filter,
             consumer_id=self._consumer_id
         )
+        scan._read_type = self.read_type()
+        return scan
 
     def new_read(self) -> TableRead:
         """Create a new TableRead with this builder's settings."""

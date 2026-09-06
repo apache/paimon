@@ -26,9 +26,11 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
 import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -41,6 +43,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -70,6 +73,7 @@ import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.apache.paimon.shade.guava30.com.google.common.base.MoreObjects.firstNonNull;
 import static org.apache.paimon.utils.FileStorePathFactory.getPartitionComputer;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Base {@link FileStoreWrite} implementation.
@@ -83,6 +87,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final DynamicBucketIndexMaintainer.Factory dbMaintainerFactory;
     @Nullable private final BucketedDvMaintainer.Factory dvMaintainerFactory;
+
+    @Nullable
+    private final BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory;
+
     private final int numBuckets;
     private final RowType partitionType;
 
@@ -94,6 +102,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected WriteRestore restore;
     private ExecutorService lazyCompactExecutor;
+    private ExecutorService lazyPrimaryKeyIndexExecutor;
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     private boolean ignoreNumBucketCheck = false;
@@ -109,6 +118,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory,
             String tableName,
             CoreOptions options,
             RowType partitionType) {
@@ -117,11 +127,14 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             indexFileHandler = dbMaintainerFactory.indexFileHandler();
         } else if (dvMaintainerFactory != null) {
             indexFileHandler = dvMaintainerFactory.indexFileHandler();
+        } else if (primaryKeyIndexMaintainerFactory != null) {
+            indexFileHandler = primaryKeyIndexMaintainerFactory.indexFileHandler();
         }
         this.snapshotManager = snapshotManager;
         this.restore = new FileSystemWriteRestore(options, snapshotManager, scan, indexFileHandler);
         this.dbMaintainerFactory = dbMaintainerFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
+        this.primaryKeyIndexMaintainerFactory = primaryKeyIndexMaintainerFactory;
         this.numBuckets = options.bucket();
         this.partitionType = partitionType;
         this.writers = new HashMap<>();
@@ -174,6 +187,22 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
+        write(container, data);
+    }
+
+    @Override
+    public void write(BinaryRow partition, int bucket, int totalBuckets, T data) throws Exception {
+        checkArgument(totalBuckets > 0, "Total number of buckets must be positive.");
+        checkArgument(
+                bucket >= 0 && bucket < totalBuckets,
+                "Bucket %s is out of range [0, %s).",
+                bucket,
+                totalBuckets);
+        WriterContainer<T> container = getWriterWrapper(partition, bucket, totalBuckets);
+        write(container, data);
+    }
+
+    private void write(WriterContainer<T> container, T data) throws Exception {
         container.writer.write(data);
         if (container.dynamicBucketMaintainer != null) {
             container.dynamicBucketMaintainer.notifyNewRecord((KeyValue) data);
@@ -242,6 +271,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             .newIndexFiles()
                             .addAll(writerContainer.dynamicBucketMaintainer.prepareCommit());
                 }
+                if (writerContainer.primaryKeyIndexMaintainer != null) {
+                    writerContainer.primaryKeyIndexMaintainer.prepareCommit(
+                            newFilesIncrement, compactIncrement, waitCompaction);
+                }
                 CompactDeletionFile compactDeletionFile = increment.compactDeletionFile();
                 if (compactDeletionFile != null) {
                     compactDeletionFile
@@ -258,7 +291,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerCleanChecker.apply(writerContainer)) {
+                    if (writerCleanChecker.apply(writerContainer)
+                            && (writerContainer.primaryKeyIndexMaintainer == null
+                                    || !writerContainer.primaryKeyIndexMaintainer
+                                            .buildNotCompleted())) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
@@ -274,6 +310,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     commitIdentifier);
                         }
                         writerContainer.writer.close();
+                        if (writerContainer.primaryKeyIndexMaintainer != null) {
+                            writerContainer.primaryKeyIndexMaintainer.close();
+                        }
                         bucketIter.remove();
                     }
                 } else {
@@ -324,17 +363,36 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
+        List<AutoCloseable> writerCloseables = new ArrayList<>();
         for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
             for (WriterContainer<T> writerContainer : bucketWriters.values()) {
-                writerContainer.writer.close();
+                writerCloseables.add(writerContainer.writer::close);
+                if (writerContainer.primaryKeyIndexMaintainer != null) {
+                    writerCloseables.add(writerContainer.primaryKeyIndexMaintainer::close);
+                }
             }
         }
-        writers.clear();
-        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
-            lazyCompactExecutor.shutdownNow();
-        }
-        if (compactionMetrics != null) {
-            compactionMetrics.close();
+
+        try {
+            // There is one writer per bucket per partition, each holding its own files and
+            // buffers. Closing them in a plain loop meant the first failure abandoned every
+            // writer behind it; closeAll runs all of them and rethrows the first failure with
+            // the rest attached to it as suppressed.
+            IOUtils.closeAll(writerCloseables);
+        } finally {
+            // These have to run whatever the writers did. Previously a single failing writer
+            // also left both thread pools running for the life of the process. None of the
+            // calls below throws, so the writer failure is never replaced by one of them.
+            writers.clear();
+            if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
+                lazyCompactExecutor.shutdownNow();
+            }
+            if (lazyPrimaryKeyIndexExecutor != null) {
+                lazyPrimaryKeyIndexExecutor.shutdownNow();
+            }
+            if (compactionMetrics != null) {
+                compactionMetrics.close();
+            }
         }
     }
 
@@ -353,6 +411,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 CommitIncrement increment;
                 try {
                     increment = writerContainer.writer.prepareCommit(false);
+                    if (writerContainer.primaryKeyIndexMaintainer != null) {
+                        writerContainer.primaryKeyIndexMaintainer.prepareCommit(
+                                increment.newFilesIncrement(), increment.compactIncrement(), true);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(
                             "Failed to extract state from writer of partition "
@@ -375,6 +437,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 writerContainer.writer.maxSequenceNumber(),
                                 writerContainer.dynamicBucketMaintainer,
                                 writerContainer.deletionVectorsMaintainer,
+                                writerContainer.primaryKeyIndexMaintainer,
                                 increment));
             }
         }
@@ -401,12 +464,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             // not ignore them.
                             false);
             notifyNewWriter(writer);
+            if (state.primaryKeyIndexMaintainer != null) {
+                state.primaryKeyIndexMaintainer.withExecutor(primaryKeyIndexExecutor());
+            }
             WriterContainer<T> writerContainer =
                     new WriterContainer<>(
                             writer,
                             state.totalBuckets,
                             state.indexMaintainer,
                             state.deletionVectorsMaintainer,
+                            state.primaryKeyIndexMaintainer,
                             state.baseSnapshotId);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
@@ -424,13 +491,28 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
+        Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
+        return buckets.computeIfAbsent(
+                bucket, k -> createWriterContainer(partition.copy(), bucket));
+    }
+
+    private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket, int totalBuckets) {
+        Map<Integer, WriterContainer<T>> buckets = getWriterContainers(partition);
+        if (!buckets.isEmpty()) {
+            checkNumBuckets(
+                    partition, totalBuckets, buckets.values().iterator().next().totalBuckets);
+        }
+        return buckets.computeIfAbsent(
+                bucket, k -> createWriterContainer(partition.copy(), bucket, totalBuckets));
+    }
+
+    private Map<Integer, WriterContainer<T>> getWriterContainers(BinaryRow partition) {
         Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
             writers.put(partition.copy(), buckets);
         }
-        return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket));
+        return buckets;
     }
 
     public RecordWriter<T> createWriter(BinaryRow partition, int bucket) {
@@ -438,6 +520,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
+        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck);
+    }
+
+    private WriterContainer<T> createWriterContainer(
+            BinaryRow partition, int bucket, int totalBuckets) {
+        return createWriterContainer(partition, bucket, totalBuckets, true);
+    }
+
+    private WriterContainer<T> createWriterContainer(
+            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -454,13 +546,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshotFromFileSystem();
         boolean actualIgnorePreviousFiles =
                 ignorePreviousFilesForWriter(
                         partition, bucket, latestSnapshot, ignorePreviousFiles);
         RestoreFiles restored = RestoreFiles.empty();
         if (!actualIgnorePreviousFiles) {
-            restored = scanExistingFileMetas(partition, bucket);
+            restored =
+                    scanExistingFileMetas(
+                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -473,6 +567,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         ? null
                         : dvMaintainerFactory.create(
                                 partition, bucket, restored.deleteVectorsIndex());
+        BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer =
+                primaryKeyIndexMaintainerFactory == null
+                        ? null
+                        : primaryKeyIndexMaintainerFactory.create(
+                                partition,
+                                bucket,
+                                restored.dataFiles(),
+                                restored.sourceIndexPayloads(),
+                                primaryKeyIndexExecutor(),
+                                ioManager,
+                                DeletionVector.factory(dvMaintainer));
 
         List<DataFileMeta> restoreFiles = restored.dataFiles();
         if (restoreFiles == null) {
@@ -494,9 +599,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         Snapshot previousSnapshot = restored.snapshot();
         return new WriterContainer<>(
                 writer,
-                firstNonNull(restored.totalBuckets(), numBuckets),
+                firstNonNull(restored.totalBuckets(), expectedTotalBuckets),
                 indexMaintainer,
                 dvMaintainer,
+                primaryKeyIndexMaintainer,
                 previousSnapshot == null ? null : previousSnapshot.id());
     }
 
@@ -540,7 +646,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         return this;
     }
 
-    private RestoreFiles scanExistingFileMetas(BinaryRow partition, int bucket) {
+    private RestoreFiles scanExistingFileMetas(
+            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -558,7 +665,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partition,
                             bucket,
                             dbMaintainerFactory != null,
-                            dvMaintainerFactory != null);
+                            dvMaintainerFactory != null,
+                            primaryKeyIndexMaintainerFactory != null);
         } catch (RuntimeException e) {
             throw new RuntimeException(
                     String.format(
@@ -566,19 +674,33 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo.get(), bucket),
                     e);
         }
-        Integer restoredTotalBuckets = restored.totalBuckets();
-        int totalBuckets = numBuckets;
-        if (restoredTotalBuckets != null) {
-            totalBuckets = restoredTotalBuckets;
+        if (restored.totalBuckets() != null && validateNumBuckets) {
+            checkNumBuckets(partInfo.get(), expectedTotalBuckets, restored.totalBuckets());
         }
-        if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
+        return restored;
+    }
+
+    private void checkNumBuckets(BinaryRow partition, int expected, int previous) {
+        String partInfo =
+                partitionType.getFieldCount() > 0
+                        ? "partition "
+                                + getPartitionComputer(
+                                                partitionType,
+                                                PARTITION_DEFAULT_NAME.defaultValue(),
+                                                legacyPartitionName)
+                                        .generatePartValues(partition)
+                        : "table";
+        checkNumBuckets(partInfo, expected, previous);
+    }
+
+    private void checkNumBuckets(String partInfo, int expected, int previous) {
+        if (expected != previous) {
             throw new RuntimeException(
                     String.format(
                             "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
                                     + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo.get(), numBuckets, totalBuckets));
+                            partInfo, expected, previous));
         }
-        return restored;
     }
 
     private ExecutorService compactExecutor() {
@@ -589,6 +711,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                     Thread.currentThread().getName() + "-compaction"));
         }
         return lazyCompactExecutor;
+    }
+
+    private ExecutorService primaryKeyIndexExecutor() {
+        if (lazyPrimaryKeyIndexExecutor == null) {
+            lazyPrimaryKeyIndexExecutor =
+                    Executors.newSingleThreadExecutor(
+                            new ExecutorThreadFactory(
+                                    Thread.currentThread().getName() + "-primary-key-index"));
+        }
+        return lazyPrimaryKeyIndexExecutor;
     }
 
     @VisibleForTesting
@@ -621,6 +753,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         public final int totalBuckets;
         @Nullable public final DynamicBucketIndexMaintainer dynamicBucketMaintainer;
         @Nullable public final BucketedDvMaintainer deletionVectorsMaintainer;
+        @Nullable public final BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
 
@@ -629,11 +762,13 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 int totalBuckets,
                 @Nullable DynamicBucketIndexMaintainer dynamicBucketMaintainer,
                 @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+                @Nullable BucketedPrimaryKeyIndexMaintainer primaryKeyIndexMaintainer,
                 Long baseSnapshotId) {
             this.writer = writer;
             this.totalBuckets = totalBuckets;
             this.dynamicBucketMaintainer = dynamicBucketMaintainer;
             this.deletionVectorsMaintainer = deletionVectorsMaintainer;
+            this.primaryKeyIndexMaintainer = primaryKeyIndexMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;

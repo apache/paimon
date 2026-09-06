@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -66,11 +67,23 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
     private final FileStoreTable table;
     private final Map<String, String> partitionSpec;
+    @Nullable private final Long snapshotId;
 
     public PostponeBucketCompactSplitSource(
             FileStoreTable table, Map<String, String> partitionSpec) {
+        this(table, partitionSpec, null);
+    }
+
+    public PostponeBucketCompactSplitSource(
+            FileStoreTable table, Map<String, String> partitionSpec, long snapshotId) {
+        this(table, partitionSpec, Long.valueOf(snapshotId));
+    }
+
+    private PostponeBucketCompactSplitSource(
+            FileStoreTable table, Map<String, String> partitionSpec, @Nullable Long snapshotId) {
         this.table = table;
         this.partitionSpec = partitionSpec;
+        this.snapshotId = snapshotId;
     }
 
     @Override
@@ -88,8 +101,12 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
         @Override
         public InputStatus pollNext(ReaderOutput<Split> output) throws Exception {
+            SnapshotReader snapshotReader = table.newSnapshotReader();
+            if (snapshotId != null) {
+                snapshotReader.withSnapshot(snapshotId);
+            }
             List<Split> splits =
-                    table.newSnapshotReader()
+                    snapshotReader
                             .withPartitionFilter(partitionSpec)
                             .withBucket(BucketMode.POSTPONE_BUCKET)
                             .read()
@@ -123,9 +140,32 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
             FileStoreTable table,
             Map<String, String> partitionSpec,
             @Nullable Integer parallelism) {
+        return buildSource(env, table, partitionSpec, null, parallelism);
+    }
+
+    public static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            Map<String, String> partitionSpec,
+            long snapshotId,
+            @Nullable Integer parallelism) {
+        return buildSource(env, table, partitionSpec, Long.valueOf(snapshotId), parallelism);
+    }
+
+    private static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            Map<String, String> partitionSpec,
+            @Nullable Long snapshotId,
+            @Nullable Integer parallelism) {
+        PostponeBucketCompactSplitSource splitSource =
+                snapshotId == null
+                        ? new PostponeBucketCompactSplitSource(table, partitionSpec)
+                        : new PostponeBucketCompactSplitSource(
+                                table, partitionSpec, snapshotId.longValue());
         DataStream<Split> source =
                 env.fromSource(
-                                new PostponeBucketCompactSplitSource(table, partitionSpec),
+                                splitSource,
                                 WatermarkStrategy.noWatermarks(),
                                 String.format(
                                         "Compact split generator: %s - %s",

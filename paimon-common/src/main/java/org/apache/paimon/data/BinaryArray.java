@@ -75,6 +75,8 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
             case VARCHAR:
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
             case DECIMAL:
             case BIGINT:
             case DOUBLE:

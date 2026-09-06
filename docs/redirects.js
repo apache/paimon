@@ -257,10 +257,6 @@ module.exports = [
     "to": "/maintenance/manage-partitions"
   },
   {
-    "from": "/maintenance/manage-privileges.html",
-    "to": "/maintenance/manage-privileges"
-  },
-  {
     "from": "/maintenance/manage-snapshots.html",
     "to": "/maintenance/manage-snapshots"
   },
@@ -327,6 +323,14 @@ module.exports = [
   {
     "from": "/primary-key-table/query-performance.html",
     "to": "/primary-key-table/query-performance"
+  },
+  {
+    "from": "/primary-key-table/vector-index.html",
+    "to": "/primary-key-table/global-index"
+  },
+  {
+    "from": "/primary-key-table/vector-index",
+    "to": "/primary-key-table/global-index"
   },
   {
     "from": "/primary-key-table/sequence-rowkind.html",
@@ -467,10 +471,6 @@ module.exports = [
   {
     "from": "/spark/sql-query.html",
     "to": "/spark/sql-query"
-  },
-  {
-    "from": "/spark/sql-upsert.html",
-    "to": "/spark/sql-upsert"
   },
   {
     "from": "/spark/sql-write.html",

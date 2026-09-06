@@ -21,8 +21,8 @@ Prefer running the narrowest tests.
 
 #### Java Tests (surefire)
 
-- Single method: `mvn -pl <module> -Dtest=TestClassName#methodName test`
-- Single class: `mvn -pl <module> -Dtest=TestClassName test`
+- Single method: `mvn -pl <module> -DwildcardSuites=none -Dtest=TestClassName#methodName test`
+- Single class: `mvn -pl <module> -DwildcardSuites=none -Dtest=TestClassName test`
 
 #### Scala Tests (scalatest)
 
@@ -32,6 +32,18 @@ Scala tests use `scalatest-maven-plugin`, not surefire. Use `-DwildcardSuites` a
 mvn -pl paimon-spark/paimon-spark-ut -am -Pfast-build -DfailIfNoTests=false \
   -DwildcardSuites=org.apache.paimon.spark.sql.WriteMergeSchemaTest \
   -Dtest=none test
+```
+
+#### Required Maven Profiles
+- Spark tests: add `-Pspark3` or `-Pspark4`
+- Flink tests: add `-Pflink1` or `-Pflink2`
+
+For example, run a Java test in the Spark UT with Spark 3:
+```shell
+mvn -pl paimon-spark/paimon-spark-ut -am -Pfast-build -Pspark3 \
+  -DwildcardSuites=none \
+  -DfailIfNoTests=false \
+  -Dtest=SparkChainTableITCase#testChainTable test
 ```
 
 ### Local Iteration Speedup

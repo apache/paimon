@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -125,11 +126,21 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyVectorScan(
+                    table,
+                    vectorColumn.id(),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    partitionFilter,
+                    filter);
+        }
+        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
     public BatchVectorRead newBatchVectorRead() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(vectorColumn, "Vector column must be set via withVectorColumn()");
         checkArgument(
@@ -137,7 +148,16 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
         for (float[] vector : vectors) {
             checkNotNull(vector, "Search vector element cannot be null");
         }
-        return new BatchVectorReadImpl(
+        if (isPrimaryKeyVectorSearch()) {
+            return new PrimaryKeyBatchVectorRead(
+                    table, vectorColumn, vectors, limit, options, filter);
+        }
+        return new DataEvolutionBatchVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vectors, options);
+    }
+
+    protected boolean isPrimaryKeyVectorSearch() {
+        return vectorColumn != null
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
     }
 }

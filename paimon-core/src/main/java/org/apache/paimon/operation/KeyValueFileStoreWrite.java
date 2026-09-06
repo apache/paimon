@@ -31,6 +31,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -96,6 +97,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStoreScan scan,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
             String tableName) {
@@ -106,6 +108,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 partitionType,
                 dbMaintainerFactory,
                 dvMaintainerFactory,
+                primaryKeyIndexMaintainerFactory,
                 tableName);
         this.valueType = valueType;
         this.commitUser = commitUser;

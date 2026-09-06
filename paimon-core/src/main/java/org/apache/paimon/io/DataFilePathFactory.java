@@ -86,6 +86,10 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(dataFilePrefix, ".blob"));
     }
 
+    public Path newVideoPath() {
+        return newPathFromName(newFileName(dataFilePrefix, ".video"));
+    }
+
     public Path newChangelogPath() {
         return newPath(changelogFilePrefix);
     }

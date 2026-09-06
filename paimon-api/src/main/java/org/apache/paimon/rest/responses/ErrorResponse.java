@@ -35,6 +35,8 @@ public class ErrorResponse implements RESTResponse {
 
     public static final String RESOURCE_TYPE_TABLE = "TABLE";
 
+    public static final String RESOURCE_TYPE_PARTITION = "PARTITION";
+
     public static final String RESOURCE_TYPE_COLUMN = "COLUMN";
 
     public static final String RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT";
@@ -48,6 +50,8 @@ public class ErrorResponse implements RESTResponse {
     public static final String RESOURCE_TYPE_DIALECT = "DIALECT";
 
     public static final String RESOURCE_TYPE_FUNCTION = "FUNCTION";
+
+    public static final String RESOURCE_TYPE_POLICY = "POLICY";
 
     public static final String RESOURCE_TYPE_DEFINITION = "DEFINITION";
 

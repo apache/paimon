@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.compact;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.DataEvolutionTableCompactSink;
@@ -29,6 +31,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
@@ -55,15 +58,22 @@ public class DataEvolutionTableCompact {
     }
 
     public void build() {
+        DataEvolutionCompactCoordinator.validateOptions(table.coreOptions());
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            env.fromSequence(0, 0).name("Nothing to Compact Source").sinkTo(new DiscardingSink<>());
+            return;
+        }
         DataEvolutionTableCompactSource source =
-                new DataEvolutionTableCompactSource(table, partitionPredicate);
+                new DataEvolutionTableCompactSource(table, partitionPredicate, snapshot);
         DataStreamSource<DataEvolutionCompactTask> sourceStream =
                 DataEvolutionTableCompactSource.buildSource(env, source, tableIdentifier);
 
-        sinkFromSource(sourceStream);
+        sinkFromSource(sourceStream, snapshot);
     }
 
-    private void sinkFromSource(DataStreamSource<DataEvolutionCompactTask> input) {
+    private void sinkFromSource(
+            DataStreamSource<DataEvolutionCompactTask> input, Snapshot snapshot) {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
@@ -77,6 +87,6 @@ public class DataEvolutionTableCompact {
         }
 
         DataStream<DataEvolutionCompactTask> rebalanced = new DataStream<>(env, transformation);
-        DataEvolutionTableCompactSink.sink(table, rebalanced);
+        DataEvolutionTableCompactSink.sink(table, rebalanced, snapshot);
     }
 }

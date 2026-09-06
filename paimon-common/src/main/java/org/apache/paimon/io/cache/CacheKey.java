@@ -44,12 +44,18 @@ public interface CacheKey {
         private final long position;
         private final int length;
         private final boolean isIndex;
+        private final int hashCode;
 
         private PositionCacheKey(Path filePath, long position, int length, boolean isIndex) {
             this.filePath = filePath;
             this.position = position;
             this.length = length;
             this.isIndex = isIndex;
+            // Preserve Objects.hash's result without allocating varargs on every cache lookup.
+            int hashCode = 31 + Objects.hashCode(filePath);
+            hashCode = 31 * hashCode + Long.hashCode(position);
+            hashCode = 31 * hashCode + length;
+            this.hashCode = 31 * hashCode + Boolean.hashCode(isIndex);
         }
 
         public long position() {
@@ -77,7 +83,7 @@ public interface CacheKey {
 
         @Override
         public int hashCode() {
-            return Objects.hash(filePath, position, length, isIndex);
+            return hashCode;
         }
 
         @Override
@@ -93,6 +99,7 @@ public interface CacheKey {
         private final int pageSize;
         private final int pageIndex;
         private final boolean isIndex;
+        private final int hashCode;
 
         private PageIndexCacheKey(
                 RandomAccessFile file, int pageSize, int pageIndex, boolean isIndex) {
@@ -100,6 +107,11 @@ public interface CacheKey {
             this.pageSize = pageSize;
             this.pageIndex = pageIndex;
             this.isIndex = isIndex;
+            // Preserve Objects.hash's result without allocating varargs on every cache lookup.
+            int hashCode = 31 + Objects.hashCode(file);
+            hashCode = 31 * hashCode + pageSize;
+            hashCode = 31 * hashCode + pageIndex;
+            this.hashCode = 31 * hashCode + Boolean.hashCode(isIndex);
         }
 
         public int pageIndex() {
@@ -128,7 +140,7 @@ public interface CacheKey {
 
         @Override
         public int hashCode() {
-            return Objects.hash(file, pageSize, pageIndex, isIndex);
+            return hashCode;
         }
     }
 }

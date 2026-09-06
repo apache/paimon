@@ -18,11 +18,11 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.JavaBinaryObjectInspector;
 import org.apache.hadoop.io.BytesWritable;
 import org.junit.jupiter.api.Test;
 
@@ -75,6 +75,32 @@ public class PaimonBlobObjectInspectorTest {
     public void testCreateObjectInspector() {
         PrimitiveObjectInspector oi =
                 (PrimitiveObjectInspector) PaimonObjectInspectorFactory.create(DataTypes.BLOB());
-        assertThat(oi).isInstanceOf(JavaBinaryObjectInspector.class);
+        assertThat(oi).isInstanceOf(PaimonBlobObjectInspector.class);
+    }
+
+    @Test
+    public void testGetPrimitiveJavaObjectFromBlob() {
+        PrimitiveObjectInspector oi =
+                (PrimitiveObjectInspector) PaimonObjectInspectorFactory.create(DataTypes.BLOB());
+        byte[] data = new byte[] {1, 2, 3, 4};
+        assertThat((byte[]) oi.getPrimitiveJavaObject(Blob.fromData(data))).isEqualTo(data);
+    }
+
+    @Test
+    public void testGetPrimitiveWritableObjectFromBlob() {
+        PrimitiveObjectInspector oi =
+                (PrimitiveObjectInspector) PaimonObjectInspectorFactory.create(DataTypes.BLOB());
+        byte[] data = new byte[] {1, 2, 3, 4};
+        assertThat(oi.getPrimitiveWritableObject(Blob.fromData(data)))
+                .isEqualTo(new BytesWritable(data));
+    }
+
+    @Test
+    public void testConvert() {
+        WriteableObjectInspector oi =
+                (WriteableObjectInspector) PaimonObjectInspectorFactory.create(DataTypes.BLOB());
+        byte[] data = new byte[] {1, 2, 3, 4};
+        assertThat(((Blob) oi.convert(data)).toData()).isEqualTo(data);
+        assertThat(oi.convert(null)).isNull();
     }
 }

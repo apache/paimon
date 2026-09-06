@@ -65,7 +65,7 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
 
     public SparkInternalRowWrapper(StructType tableSchema, int length) {
-        this(tableSchema, length, null, null);
+        this(tableSchema, length, null, (CatalogContext) null);
     }
 
     public SparkInternalRowWrapper(
@@ -73,12 +73,28 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             int length,
             StructType dataSchema,
             CatalogContext catalogContext) {
+        this(tableSchema, length, dataSchema, new UriReaderFactory(catalogContext));
+    }
+
+    public static SparkInternalRowWrapper fromUriReaderFactory(
+            StructType tableSchema,
+            int length,
+            StructType dataSchema,
+            @Nullable UriReaderFactory uriReaderFactory) {
+        return new SparkInternalRowWrapper(tableSchema, length, dataSchema, uriReaderFactory);
+    }
+
+    private SparkInternalRowWrapper(
+            StructType tableSchema,
+            int length,
+            StructType dataSchema,
+            @Nullable UriReaderFactory uriReaderFactory) {
         this.tableSchema = tableSchema;
         this.length = length;
         this.dataSchema = dataSchema;
         this.fieldIndexMap =
                 dataSchema != null ? buildFieldIndexMap(tableSchema, dataSchema) : null;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
@@ -225,6 +241,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
+        DataType dataType = tableSchema.fields()[pos].dataType();
+        if (SparkShimLoader.shim().isSparkGeometryType(dataType)) {
+            return SparkShimLoader.shim().toPaimonGeometry(internalRow, actualPos);
+        }
+        if (SparkShimLoader.shim().isSparkGeographyType(dataType)) {
+            return SparkShimLoader.shim().toPaimonGeography(internalRow, actualPos);
+        }
         return internalRow.getBinary(actualPos);
     }
 
@@ -254,7 +277,8 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         return new SparkInternalArray(
                 internalRow.getArray(actualPos),
-                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType());
+                ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType(),
+                uriReaderFactory);
     }
 
     @Override
@@ -264,15 +288,20 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             return null;
         }
         DataType dataType = tableSchema.fields()[pos].dataType();
-        return toSparkInternalVector(dataType, internalRow.getArray(actualPos));
+        return toSparkInternalVector(dataType, internalRow.getArray(actualPos), uriReaderFactory);
     }
 
     private static InternalVector toSparkInternalVector(DataType dataType, ArrayData arrayData) {
+        return toSparkInternalVector(dataType, arrayData, null);
+    }
+
+    private static InternalVector toSparkInternalVector(
+            DataType dataType, ArrayData arrayData, @Nullable UriReaderFactory uriReaderFactory) {
         if (!(dataType instanceof ArrayType)) {
             throw new UnsupportedOperationException("Not a vector type: " + dataType);
         }
         ArrayType arrayType = (ArrayType) dataType;
-        return new SparkInternalVector(arrayData, arrayType.elementType());
+        return new SparkInternalVector(arrayData, arrayType.elementType(), uriReaderFactory);
     }
 
     @Override
@@ -283,7 +312,10 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         MapType mapType = (MapType) tableSchema.fields()[pos].dataType();
         return new SparkInternalMap(
-                internalRow.getMap(actualPos), mapType.keyType(), mapType.valueType());
+                internalRow.getMap(actualPos),
+                mapType.keyType(),
+                mapType.valueType(),
+                uriReaderFactory);
     }
 
     @Override
@@ -296,10 +328,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (dataSchema != null) {
             StructType nestedDataSchema = (StructType) dataSchema.fields()[actualPos].dataType();
             int dataNumFields = nestedDataSchema.size();
-            return new SparkInternalRowWrapper(nestedTableSchema, numFields, nestedDataSchema, null)
+            return new SparkInternalRowWrapper(
+                            nestedTableSchema, numFields, nestedDataSchema, uriReaderFactory)
                     .replace(internalRow.getStruct(actualPos, dataNumFields));
         }
-        return new SparkInternalRowWrapper(nestedTableSchema, numFields)
+        return new SparkInternalRowWrapper(nestedTableSchema, numFields, null, uriReaderFactory)
                 .replace(internalRow.getStruct(actualPos, numFields));
     }
 
@@ -322,10 +355,19 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         private final ArrayData arrayData;
         private final DataType elementType;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         public SparkInternalArray(ArrayData arrayData, DataType elementType) {
+            this(arrayData, elementType, null);
+        }
+
+        public SparkInternalArray(
+                ArrayData arrayData,
+                DataType elementType,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.arrayData = arrayData;
             this.elementType = elementType;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -427,6 +469,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public byte[] getBinary(int pos) {
+            if (SparkShimLoader.shim().isSparkGeometryType(elementType)) {
+                return SparkShimLoader.shim().toPaimonGeometry(arrayData, pos);
+            }
+            if (SparkShimLoader.shim().isSparkGeographyType(elementType)) {
+                return SparkShimLoader.shim().toPaimonGeography(arrayData, pos);
+            }
             return arrayData.getBinary(pos);
         }
 
@@ -437,30 +485,36 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public Blob getBlob(int pos) {
-            return Blob.fromBytes(arrayData.getBinary(pos), null, null);
+            return Blob.fromBytes(arrayData.getBinary(pos), uriReaderFactory, null);
         }
 
         @Override
         public InternalArray getArray(int pos) {
             return new SparkInternalArray(
-                    arrayData.getArray(pos), ((ArrayType) elementType).elementType());
+                    arrayData.getArray(pos),
+                    ((ArrayType) elementType).elementType(),
+                    uriReaderFactory);
         }
 
         @Override
         public InternalVector getVector(int pos) {
-            return toSparkInternalVector(elementType, arrayData.getArray(pos));
+            return toSparkInternalVector(elementType, arrayData.getArray(pos), uriReaderFactory);
         }
 
         @Override
         public InternalMap getMap(int pos) {
             MapType mapType = (MapType) elementType;
             return new SparkInternalMap(
-                    arrayData.getMap(pos), mapType.keyType(), mapType.valueType());
+                    arrayData.getMap(pos),
+                    mapType.keyType(),
+                    mapType.valueType(),
+                    uriReaderFactory);
         }
 
         @Override
         public InternalRow getRow(int pos, int numFields) {
-            return new SparkInternalRowWrapper((StructType) elementType, numFields)
+            return new SparkInternalRowWrapper(
+                            (StructType) elementType, numFields, null, uriReaderFactory)
                     .replace(arrayData.getStruct(pos, numFields));
         }
     }
@@ -470,6 +524,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         public SparkInternalVector(ArrayData arrayData, DataType elementType) {
             super(arrayData, elementType);
         }
+
+        public SparkInternalVector(
+                ArrayData arrayData,
+                DataType elementType,
+                @Nullable UriReaderFactory uriReaderFactory) {
+            super(arrayData, elementType, uriReaderFactory);
+        }
     }
 
     /** adapt to spark internal map. */
@@ -478,11 +539,21 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         private final MapData mapData;
         private final DataType keyType;
         private final DataType valueType;
+        @Nullable private final UriReaderFactory uriReaderFactory;
 
         public SparkInternalMap(MapData mapData, DataType keyType, DataType valueType) {
+            this(mapData, keyType, valueType, null);
+        }
+
+        public SparkInternalMap(
+                MapData mapData,
+                DataType keyType,
+                DataType valueType,
+                @Nullable UriReaderFactory uriReaderFactory) {
             this.mapData = mapData;
             this.keyType = keyType;
             this.valueType = valueType;
+            this.uriReaderFactory = uriReaderFactory;
         }
 
         @Override
@@ -492,12 +563,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public InternalArray keyArray() {
-            return new SparkInternalArray(mapData.keyArray(), keyType);
+            return new SparkInternalArray(mapData.keyArray(), keyType, uriReaderFactory);
         }
 
         @Override
         public InternalArray valueArray() {
-            return new SparkInternalArray(mapData.valueArray(), valueType);
+            return new SparkInternalArray(mapData.valueArray(), valueType, uriReaderFactory);
         }
     }
 }

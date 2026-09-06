@@ -25,6 +25,7 @@ import struct
 import pyarrow as pa
 
 from pypaimon.daft.daft_compat import file_range_position_field, file_range_size_field
+from pypaimon.table.row.blob import BlobDescriptor
 
 
 FILE_PHYSICAL_TYPE = pa.struct(
@@ -39,24 +40,11 @@ FILE_PHYSICAL_TYPE = pa.struct(
 
 def _deserialize_one(data: bytes) -> tuple[str, int, int]:
     """Deserialize a single BlobDescriptor -> (url, offset, length)."""
-    pos = 0
-    version = data[pos]
-    pos += 1
-
-    if version > 1:
-        pos += 8  # skip magic
-
-    uri_len = struct.unpack_from("<I", data, pos)[0]
-    pos += 4
-
-    uri = data[pos:pos + uri_len].decode("utf-8")
-    pos += uri_len
-
-    offset = struct.unpack_from("<q", data, pos)[0]
-    pos += 8
-
-    length = struct.unpack_from("<q", data, pos)[0]
-    return uri, offset, length
+    try:
+        descriptor = BlobDescriptor.deserialize(data)
+    except (struct.error, UnicodeDecodeError) as e:
+        raise ValueError("Invalid BlobDescriptor data") from e
+    return descriptor.uri, descriptor.offset, descriptor.length
 
 
 def blob_column_to_file_array(column: pa.Array, io_config_bytes: bytes | None = None) -> pa.Array:
@@ -99,3 +87,90 @@ def blob_column_to_file_array(column: pa.Array, io_config_bytes: bytes | None = 
         ],
         names=["url", "io_config", file_range_position_field(), file_range_size_field()],
     )
+
+
+def blob_array_column_to_file_array(
+    column: pa.Array,
+    io_config_bytes: bytes | None = None,
+) -> pa.Array:
+    """Convert a list of serialized BlobDescriptors to a list of File structs."""
+    if not (pa.types.is_list(column.type) or pa.types.is_large_list(column.type)):
+        raise TypeError(f"Expected a list column, but got {column.type}.")
+
+    rows = []
+    for row in column:
+        if row is None or not row.is_valid:
+            rows.append(None)
+            continue
+
+        files = []
+        for raw in row.as_py():
+            if raw is None:
+                files.append(None)
+                continue
+            uri, offset, length = _deserialize_one(raw)
+            files.append({
+                "url": uri,
+                "io_config": io_config_bytes,
+                file_range_position_field(): offset,
+                file_range_size_field(): length,
+            })
+        rows.append(files)
+
+    value_field = pa.field(
+        column.type.value_field.name,
+        FILE_PHYSICAL_TYPE,
+        nullable=column.type.value_field.nullable,
+        metadata=column.type.value_field.metadata,
+    )
+    target_type = (
+        pa.large_list(value_field)
+        if pa.types.is_large_list(column.type)
+        else pa.list_(value_field)
+    )
+    return pa.array(rows, type=target_type)
+
+
+def blob_map_column_to_file_array(
+    column: pa.Array,
+    io_config_bytes: bytes | None = None,
+) -> pa.Array:
+    """Convert a map of serialized BlobDescriptors to a map of File structs."""
+    if not pa.types.is_map(column.type):
+        raise TypeError(f"Expected a map column, but got {column.type}.")
+
+    rows = []
+    for row in column:
+        if row is None or not row.is_valid:
+            rows.append(None)
+            continue
+
+        files = []
+        for key, raw in row.as_py():
+            if raw is None:
+                files.append((key, None))
+                continue
+            uri, offset, length = _deserialize_one(raw)
+            files.append((
+                key,
+                {
+                    "url": uri,
+                    "io_config": io_config_bytes,
+                    file_range_position_field(): offset,
+                    file_range_size_field(): length,
+                },
+            ))
+        rows.append(files)
+
+    item_field = pa.field(
+        column.type.item_field.name,
+        FILE_PHYSICAL_TYPE,
+        nullable=column.type.item_field.nullable,
+        metadata=column.type.item_field.metadata,
+    )
+    target_type = pa.map_(
+        column.type.key_field,
+        item_field,
+        keys_sorted=column.type.keys_sorted,
+    )
+    return pa.array(rows, type=target_type)

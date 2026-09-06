@@ -19,8 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.casting.FallbackMappingRow
-import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.{BinaryRow, BlobPlaceholder, GenericRow, InternalRow}
+import org.apache.paimon.data.{BinaryRow, BlobArrayPlaceholder, BlobMapPlaceholder, BlobPlaceholder, GenericRow, InternalRow}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
@@ -29,10 +28,11 @@ import org.apache.paimon.operation.AbstractFileStoreWrite
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{DataTypeRoot, RowType}
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
+import org.apache.paimon.utils.UriReaderFactory
 
 import org.apache.spark.sql.Row
 import org.slf4j.LoggerFactory
@@ -47,7 +47,7 @@ case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     firstRowIdToPartitionMap: mutable.HashMap[Long, (Array[Byte], Long)],
-    catalogContext: CatalogContext,
+    uriReaderFactory: UriReaderFactory,
     rawBlobPlaceholderMarkerIndexes: Map[Int, Int])
   extends InnerTableV1DataWrite {
 
@@ -58,9 +58,8 @@ case class DataEvolutionTableDataWrite(
   private val commitMessages = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, -1, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, -1, uriReaderFactory)
   }
-  private lazy val rowSerializer = InternalSerializers.create(writeType)
   private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray
   private val rawBlobFallbackFieldIndexes = rawBlobFallbackFields.map(_._1)
   private val rawBlobFallbackMappings = {
@@ -72,8 +71,38 @@ case class DataEvolutionTableDataWrite(
     mappings
   }
   private val rawBlobFallbackMarkerIndexes = rawBlobFallbackFields.map(_._2)
+  private val rawBlobFallbackFieldIndexSet = rawBlobFallbackFieldIndexes.toSet
+  private val rawBlobFallbackPlaceholders: Array[AnyRef] = rawBlobFallbackFields.map {
+    case (fieldIndex, _) =>
+      if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.ARRAY) {
+        BlobArrayPlaceholder.INSTANCE
+      } else if (writeType.getTypeAt(fieldIndex).getTypeRoot == DataTypeRoot.MAP) {
+        BlobMapPlaceholder.INSTANCE
+      } else {
+        BlobPlaceholder.INSTANCE
+      }
+  }
   private val rawBlobFallbackRow = new GenericRow(rawBlobFallbackMarkerIndexes.length)
   private val rawBlobFallbackMappingRow = new FallbackMappingRow(rawBlobFallbackMappings)
+  private val fillerFieldCopiers = writeType.getFields.asScala.zipWithIndex.collect {
+    case (field, index) if !rawBlobFallbackFieldIndexSet.contains(index) =>
+      (
+        index,
+        InternalRow.createFieldGetter(field.`type`(), index),
+        InternalSerializers.create[AnyRef](field.`type`()))
+  }.toArray
+
+  private def createFillerRow(source: InternalRow): GenericRow = {
+    val filler = new GenericRow(writeType.getFieldCount)
+    filler.setRowKind(source.getRowKind)
+    // only copy non-blob fields
+    fillerFieldCopiers.foreach {
+      case (index, getter, serializer) =>
+        val value = getter.getFieldOrNull(source)
+        filler.setField(index, if (value == null) null else serializer.copy(value))
+    }
+    filler
+  }
 
   def write(row: Row): Unit = {
     val firstRowId = row.getLong(firstRowIdIndex)
@@ -98,7 +127,11 @@ case class DataEvolutionTableDataWrite(
       case (markerIndex, fallbackIndex) =>
         rawBlobFallbackRow.setField(
           fallbackIndex,
-          if (row.getBoolean(markerIndex)) BlobPlaceholder.INSTANCE else null)
+          if (row.getBoolean(markerIndex)) {
+            rawBlobFallbackPlaceholders(fallbackIndex)
+          } else {
+            null
+          })
     }
     rawBlobFallbackRow
   }
@@ -210,14 +243,10 @@ case class DataEvolutionTableDataWrite(
 
     private def fillGapUntil(rowId: Long, fillerSourceRow: InternalRow = null): Unit = {
       if (fillerRow == null && fillerSourceRow != null) {
-        // Copy the first record this file writer met to minimize the influences on
-        // file stats, but keep raw blob fields as NULLs so filler rows do not trigger
-        // blob fallback.
-        val copied = rowSerializer
-          .copyRowData(fillerSourceRow, new GenericRow(writeType.getFieldCount))
-          .asInstanceOf[GenericRow]
-        rawBlobFallbackFieldIndexes.foreach(copied.setField(_, null))
-        fillerRow = copied
+        // Cache the first record eagerly because finish may need it to fill a trailing gap.
+        // Copy it to minimize the influences on file stats, but keep raw blob fields as
+        // NULLs so filler rows do not trigger blob fallback.
+        fillerRow = createFillerRow(fillerSourceRow)
       }
 
       assert(

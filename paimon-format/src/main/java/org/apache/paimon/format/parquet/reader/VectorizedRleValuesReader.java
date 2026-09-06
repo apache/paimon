@@ -235,7 +235,7 @@ public final class VectorizedRleValuesReader extends ValuesReader
             long rangeStart = state.currentRangeStart();
             long rangeEnd = state.currentRangeEnd();
 
-            if (rowId + n < rangeStart) {
+            if (rowId + n <= rangeStart) {
                 skipValues(n, state, valueReader, updater);
                 rowId += n;
                 leftInPage -= n;
@@ -315,7 +315,7 @@ public final class VectorizedRleValuesReader extends ValuesReader
             long rangeStart = state.currentRangeStart();
             long rangeEnd = state.currentRangeEnd();
 
-            if (rowId + n < rangeStart) {
+            if (rowId + n <= rangeStart) {
                 skipValues(n, state, valueReader, updater);
                 rowId += n;
                 leftInPage -= n;
@@ -471,7 +471,7 @@ public final class VectorizedRleValuesReader extends ValuesReader
                                 // current batch
                                 int n = Math.min(leftInBatch, valuesLeftInBlock);
 
-                                if (rowId + n < rangeStart) {
+                                if (rowId + n <= rangeStart) {
                                     // Need to skip all rows in [rowId, rowId + n)
                                     defLevelProcessor.skipValues(n);
                                     rowId += n;

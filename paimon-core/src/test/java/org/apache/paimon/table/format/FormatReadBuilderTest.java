@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -27,14 +28,23 @@ import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.csv.CsvFileFormat;
+import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -43,8 +53,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -137,6 +149,37 @@ public class FormatReadBuilderTest {
     }
 
     @Test
+    public void testSizerDoesNotBreakBuilderSerialization() {
+        FormatReadBuilder readBuilder = new FormatReadBuilder(createOrcTable("serializable"));
+        readBuilder.newRead().withReadBatchSizer(new ReadBatchSizer());
+
+        assertThatNoException().isThrownBy(() -> InstantiationUtil.serializeObject(readBuilder));
+    }
+
+    @Test
+    public void testSizersAreIsolatedBetweenReads() throws Exception {
+        FormatTable table = createOrcTable("isolated");
+        writeRows(table, 20);
+        FormatReadBuilder readBuilder = new FormatReadBuilder(table);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        ReadBatchSizer firstSizer = new ReadBatchSizer();
+        ReadBatchSizer secondSizer = new ReadBatchSizer();
+        firstSizer.setBatchSize(3);
+        secondSizer.setBatchSize(5);
+        TableRead firstRead = readBuilder.newRead().withReadBatchSizer(firstSizer);
+        TableRead secondRead = readBuilder.newRead().withReadBatchSizer(secondSizer);
+
+        try (RecordReader<InternalRow> firstReader = firstRead.createReader(plan);
+                RecordReader<InternalRow> secondReader = secondRead.createReader(plan)) {
+            assertThat(readBatchSize(firstReader)).isEqualTo(3);
+            assertThat(readBatchSize(secondReader)).isEqualTo(5);
+
+            firstSizer.setBatchSize(2);
+            assertThat(readBatchSize(firstReader)).isEqualTo(2);
+        }
+    }
+
+    @Test
     public void testCreateReaderWithCsvSplit() throws IOException {
         RowType rowType =
                 RowType.builder()
@@ -219,6 +262,59 @@ public class FormatReadBuilderTest {
         assertThat(partialResult.get(0).getString(1).toString()).isEqualTo("Alice");
     }
 
+    @Test
+    public void testExternalSplitUsesCatalogContextFileIOAfterSerialization() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("name", DataTypes.STRING())
+                        .build();
+        LocalFileIO clientFileIO = LocalFileIO.create();
+        Path externalPath = new Path(tempPath.resolve("external").toUri());
+        Path csvFile = new Path(externalPath, "data.csv");
+        clientFileIO.mkdirs(externalPath);
+        try (PositionOutputStream out = clientFileIO.newOutputStream(csvFile, false)) {
+            out.write("1,Alice\n".getBytes(StandardCharsets.UTF_8));
+        }
+
+        Path tablePath = new Path(tempPath.resolve("table").toUri());
+        FileIOLoader clientLoader = new LocalFileIOLoader(clientFileIO);
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(new TableRootOnlyLocalFileIO(tablePath))
+                        .identifier(Identifier.create("test_db", "external_csv"))
+                        .rowType(rowType)
+                        .partitionKeys(Collections.emptyList())
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(Collections.singletonMap("file.format", "csv"))
+                        .catalogContext(CatalogContext.create(new Options(), clientLoader, null))
+                        .build();
+        FormatReadBuilder readBuilder =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(new FormatReadBuilder(table)),
+                        getClass().getClassLoader());
+        FormatDataSplit split =
+                InstantiationUtil.deserializeObject(
+                        InstantiationUtil.serializeObject(
+                                new FormatDataSplit(
+                                        Collections.singletonList(
+                                                new FormatDataSplit.FileMeta(
+                                                        csvFile,
+                                                        clientFileIO.getFileSize(csvFile))),
+                                        null,
+                                        true)),
+                        getClass().getClassLoader());
+
+        List<InternalRow> rows = readAllRows(readBuilder.createReader(split), rowType);
+
+        assertThatNoException().isThrownBy(() -> InstantiationUtil.serializeObject(readBuilder));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(1);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("Alice");
+        assertThat(split.useCatalogContextFileIO()).isTrue();
+    }
+
     private List<InternalRow> readAllRows(RecordReader<InternalRow> reader, RowType rowType)
             throws IOException {
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
@@ -227,5 +323,86 @@ public class FormatReadBuilderTest {
             r.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
         return result;
+    }
+
+    private FormatTable createOrcTable(String name) {
+        Path tablePath = new Path(tempPath.resolve(name).toUri());
+        Map<String, String> options = new HashMap<>();
+        options.put("path", tablePath.toString());
+        options.put("file.format", "orc");
+        options.put("file.compression", "zstd");
+        return FormatTable.builder()
+                .fileIO(LocalFileIO.create())
+                .identifier(Identifier.create("test_db", name))
+                .rowType(RowType.of(DataTypes.INT()))
+                .partitionKeys(new ArrayList<>())
+                .location(tablePath.toString())
+                .format(FormatTable.Format.ORC)
+                .options(options)
+                .build();
+    }
+
+    private static void writeRows(FormatTable table, int count) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i));
+            }
+            messages = write.prepareCommit();
+        }
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(messages);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int size = 0;
+        try {
+            while (batch.next() != null) {
+                size++;
+            }
+        } finally {
+            batch.releaseBatch();
+        }
+        return size;
+    }
+
+    private static class TableRootOnlyLocalFileIO extends LocalFileIO {
+
+        private final Path tableRoot;
+
+        private TableRootOnlyLocalFileIO(Path tableRoot) {
+            this.tableRoot = tableRoot;
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            if (!FormatTablePartitionPathResolver.isWithin(path, tableRoot)) {
+                throw new AssertionError("The table FileIO must not read an external split.");
+            }
+            return super.newInputStream(path);
+        }
+    }
+
+    private static class LocalFileIOLoader implements FileIOLoader {
+
+        private final LocalFileIO fileIO;
+
+        private LocalFileIOLoader(LocalFileIO fileIO) {
+            this.fileIO = fileIO;
+        }
+
+        @Override
+        public String getScheme() {
+            return "file";
+        }
+
+        @Override
+        public LocalFileIO load(Path path) {
+            return fileIO;
+        }
     }
 }

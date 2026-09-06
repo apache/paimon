@@ -1,0 +1,251 @@
+---
+title: "Variant Storage"
+sidebar_position: 7
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Variant Storage
+
+## Overview
+
+The `VARIANT` type stores semi-structured data whose shape can differ from row to row. A value can
+be an object, an array, or a scalar such as a string, number, or boolean. This makes `VARIANT`
+suitable for event attributes, model output, tool parameters, and other data that evolves too
+frequently to model every field as a table column.
+
+Paimon stores `VARIANT` with the
+[Parquet Variant binary encoding](https://github.com/apache/parquet-format/blob/master/VariantEncoding),
+instead of storing its JSON text. The data is parsed when it is converted to `VARIANT`, and queries
+can extract a path as a requested SQL type.
+
+`VARIANT` does not require Data Evolution mode. SQL support requires Spark 4.0 or later, or Flink
+2.1 or later. Variant data files must use Parquet; ORC and Avro do not support this type.
+
+## Variant vs. JSON String
+
+A JSON string and a `VARIANT` value can represent the same logical document, but they have different
+storage and query behavior.
+
+| | JSON stored as `STRING` | `VARIANT` |
+|---|---|---|
+| Logical type | An opaque string | Semi-structured, typed data |
+| Validation | Any text can be written; JSON validity is checked only when a JSON function parses it | Input is parsed when it is converted to `VARIANT` |
+| Physical storage | UTF-8 text in one string column | Binary `value` and `metadata` fields |
+| Value types | Numbers, booleans, and nulls are text until parsed | Types are encoded in the value |
+| Field access | A JSON function interprets the text during the query | A Variant function reads a path and converts it to the requested SQL type |
+| Physical optimization | The whole string is read and interpreted | Frequently queried fields can be shredded into typed sub-columns |
+| Best fit | Preserving the original JSON text, or rarely inspecting the content | Repeatedly querying evolving semi-structured data |
+
+Converting JSON to `VARIANT` preserves its data semantics, but not its textual representation. Do
+not rely on the original whitespace, object field order, or number formatting after conversion. If
+the exact source text is required for auditing, keep it in a separate `STRING` column.
+
+## Write and Query Variant
+
+The following Spark SQL example creates a Variant column and converts JSON strings with
+`parse_json`:
+
+```sql
+CREATE TABLE events (
+    id BIGINT,
+    payload VARIANT
+) USING paimon
+TBLPROPERTIES (
+    'file.format' = 'parquet'
+);
+
+INSERT INTO events VALUES
+    (1, parse_json('{"user":{"id":1001},"city":"Hangzhou","active":true}')),
+    (2, parse_json('{"user":{"id":1002},"city":"Beijing","score":9.5}'));
+```
+
+Use `variant_get` to extract a path and specify its result type:
+
+```sql
+SELECT
+    id,
+    variant_get(payload, '$.user.id', 'bigint') AS user_id,
+    variant_get(payload, '$.city', 'string') AS city
+FROM events
+WHERE variant_get(payload, '$.active', 'boolean') = true;
+```
+
+Paths can address nested objects and arrays, for example `$.user.id`, `$.items[0].sku`, or
+`$[0]`. A missing path returns `NULL`. Conversion behavior for incompatible values is defined by
+the query engine and the Variant function being used.
+
+With a JSON string, an equivalent query uses string-oriented JSON functions and normally parses the
+text while evaluating the query:
+
+```sql
+SELECT
+    id,
+    CAST(get_json_object(payload_json, '$.user.id') AS BIGINT) AS user_id
+FROM json_events;
+```
+
+## Storage Layout
+
+### Plain Variant
+
+By default, a Variant column is stored as two binary fields inside the Parquet file:
+
+```text
+payload (GROUP)
+├── value      BYTE_ARRAY  -- encoded values and structure
+└── metadata   BYTE_ARRAY  -- object-key dictionary and encoding metadata
+```
+
+The binary representation avoids storing and reparsing JSON syntax. It also retains the type of
+each scalar value. Extracting a sub-field from a plain Variant still requires reading the binary
+`value` field for that Variant column.
+
+### Shredded Variant
+
+Shredding materializes selected Variant paths as typed Parquet sub-columns while keeping the
+logical table column as `VARIANT`. For example, shredding `age` and `city` produces a layout similar
+to:
+
+```text
+payload (GROUP)
+├── metadata   BYTE_ARRAY
+├── value      BYTE_ARRAY OPTIONAL       -- fields that were not shredded
+└── typed_value (GROUP) OPTIONAL
+    ├── age (GROUP)
+    │   ├── value        BYTE_ARRAY OPTIONAL
+    │   └── typed_value  INT32 OPTIONAL
+    └── city (GROUP)
+        ├── value        BYTE_ARRAY OPTIONAL
+        └── typed_value  BYTE_ARRAY OPTIONAL (STRING)
+```
+
+The `typed_value` fields are normal typed Parquet leaves. A reader that pushes Variant path
+extractions into the scan can read the required leaves instead of decoding the complete Variant
+value. This is most useful when a document is wide but queries repeatedly access a small set of
+paths.
+
+Shredding is lossless:
+
+- Fields absent from the shredding schema remain in the overflow `value` bytes.
+- A value that does not match the configured shredded type also remains in `value`.
+- Reading the complete Variant transparently reconstructs it from typed fields and overflow bytes.
+- A table can contain both plain and shredded files. Changing the shredding configuration affects
+  new files and does not rewrite existing files.
+
+Shredding trades additional write work and physical columns for faster projected reads. It may not
+help workloads that usually select the entire Variant, access unpredictable paths, or write very
+sparse documents with few repeated fields.
+
+## Configure Shredding
+
+### Explicit Schema
+
+Set `variant.shreddingSchema` to a JSON-encoded Paimon `ROW` type. Top-level fields identify Variant
+columns in the table; their nested types describe the paths to materialize.
+
+```sql
+CREATE TABLE user_events (
+    id BIGINT,
+    payload VARIANT
+) USING paimon
+TBLPROPERTIES (
+    'file.format' = 'parquet',
+    'variant.shreddingSchema' =
+    '{"type":"ROW","fields":[{"name":"payload","type":{"type":"ROW","fields":[{"name":"user_id","type":"BIGINT"},{"name":"city","type":"STRING"}]}}]}'
+);
+```
+
+This schema shreds `$.user_id` as `BIGINT` and `$.city` as `STRING`. Other fields remain available
+through the overflow bytes. The legacy key `parquet.variant.shreddingSchema` is accepted as an
+alias.
+
+Shredded typed values support character and binary types, booleans, decimal and numeric types, and
+nested `ROW` and `ARRAY` types. A `VARIANT` branch in the shredding schema leaves that branch in its
+binary representation.
+
+Use an explicit schema when the important query paths and their types are known. It gives files a
+predictable physical layout and avoids inference buffering.
+
+### Automatic Schema Inference
+
+Paimon can infer a shredding schema independently for each output file:
+
+```sql
+CREATE TABLE inferred_events (
+    id BIGINT,
+    payload VARIANT
+) USING paimon
+TBLPROPERTIES (
+    'file.format' = 'parquet',
+    'variant.inferShreddingSchema' = 'true',
+    'variant.shredding.maxInferBufferRow' = '4096',
+    'variant.shredding.maxSchemaWidth' = '300',
+    'variant.shredding.maxSchemaDepth' = '50',
+    'variant.shredding.minFieldCardinalityRatio' = '0.1'
+);
+```
+
+The writer buffers the initial rows of a file, infers their common shape, creates the physical
+schema, and then flushes those rows. Rare fields, fields beyond the configured width or depth, and
+fields with incompatible observed types remain unshredded.
+
+| Option | Default | Description |
+|---|---:|---|
+| `variant.inferShreddingSchema` | `false` | Enables per-file shredding schema inference when no explicit schema is configured. |
+| `variant.shredding.maxInferBufferRow` | `4096` | Maximum number of initial rows buffered for inference. |
+| `variant.shredding.maxSchemaWidth` | `300` | Maximum number of fields in an inferred shredding schema. |
+| `variant.shredding.maxSchemaDepth` | `50` | Maximum Variant traversal depth during inference. |
+| `variant.shredding.minFieldCardinalityRatio` | `0.1` | Minimum fraction of sampled non-null Variant values that must contain a field before it is shredded. |
+
+Automatic inference is convenient for exploratory or rapidly evolving data. Because inference is
+per file, different files can have different shredded paths; readers use each file's physical
+schema transparently.
+
+## Query Pushdown
+
+Shredding and query pushdown are separate capabilities. Shredding creates typed physical columns;
+the query engine must also push the requested Variant paths into the Paimon scan to avoid reading
+the full Variant.
+
+Spark 4.1 and later can push `variant_get` extractions into Paimon when
+`spark.sql.variant.pushVariantIntoScan` is enabled:
+
+```sql
+SET spark.sql.variant.pushVariantIntoScan = true;
+
+SELECT
+    variant_get(payload, '$.user_id', 'bigint'),
+    variant_get(payload, '$.city', 'string')
+FROM user_events;
+```
+
+The SQL and result are the same for plain, shredded, and mixed-layout files. Shredded files provide
+the largest I/O benefit because the requested paths are available as independent Parquet leaves.
+Selecting the complete Variant, such as `SELECT payload`, requires reading and reconstructing the
+full value.
+
+## Limitations
+
+- Variant data files must use Parquet. ORC and Avro are not supported.
+- `VARIANT` cannot be used as a primary key or partition key.
+- Variant extraction does not by itself create an index or guarantee predicate pushdown. Use
+  shredding to reduce sub-column I/O; use an appropriate index or modeled table column when a path
+  needs indexed filtering.

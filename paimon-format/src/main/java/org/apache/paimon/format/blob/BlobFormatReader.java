@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format.blob;
 
-import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -27,7 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
 
@@ -36,13 +34,11 @@ import java.io.IOException;
 /** {@link FileRecordReader} for blob file. */
 public class BlobFormatReader implements FileRecordReader<InternalRow> {
 
-    private final FileIO fileIO;
     private final Path filePath;
-    private final String filePathString;
     private final BlobFileMeta fileMeta;
-    private final @Nullable SeekableInputStream in;
     private final int fieldCount;
     private final int blobIndex;
+    private final BlobElementSerializer.Reader elementReader;
 
     private boolean returned;
 
@@ -52,14 +48,20 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
             BlobFileMeta fileMeta,
             @Nullable SeekableInputStream in,
             int fieldCount,
-            int blobIndex) {
-        this.fileIO = fileIO;
+            int blobIndex,
+            DataType blobFieldType,
+            boolean blobAsDescriptor) {
         this.filePath = filePath;
-        this.filePathString = filePath.toString();
         this.fileMeta = fileMeta;
-        this.in = in;
         this.fieldCount = fieldCount;
         this.blobIndex = blobIndex;
+        this.elementReader =
+                BlobElementSerializer.createReader(
+                        BlobElementSerializerFactory.create(blobFieldType),
+                        fileIO,
+                        filePath,
+                        in,
+                        blobAsDescriptor);
         this.returned = false;
     }
 
@@ -92,24 +94,29 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                     return null;
                 }
 
-                Blob blob;
+                Object field;
                 if (fileMeta.isNull(currentPosition)) {
-                    blob = null;
+                    field = null;
                 } else if (fileMeta.isPlaceHolder(currentPosition)) {
-                    blob = BlobPlaceholder.INSTANCE;
+                    field = elementReader.placeholder();
                 } else {
-                    long offset = fileMeta.blobOffset(currentPosition) + 4;
-                    long length = fileMeta.blobLength(currentPosition) - 16;
-                    if (in != null) {
-                        blob = Blob.fromData(readInlineBlob(in, offset, length));
-                    } else {
-                        blob = Blob.fromFile(fileIO, filePathString, offset, length);
-                    }
+                    long payloadPosition = fileMeta.blobOffset(currentPosition) + 4;
+                    long payloadLength = fileMeta.blobLength(currentPosition) - 16;
+                    field = elementReader.read(payloadPosition, payloadLength);
                 }
                 currentPosition++;
                 GenericRow row = new GenericRow(fieldCount);
-                row.setField(blobIndex, blob);
+                row.setField(blobIndex, field);
                 return row;
+            }
+
+            @Override
+            public boolean skip() {
+                if (currentPosition >= fileMeta.recordNumber()) {
+                    return false;
+                }
+                currentPosition++;
+                return true;
             }
 
             @Override
@@ -119,17 +126,6 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
 
     @Override
     public void close() throws IOException {
-        IOUtils.closeQuietly(in);
-    }
-
-    private static byte[] readInlineBlob(SeekableInputStream in, long position, long length) {
-        byte[] blobData = new byte[(int) length];
-        try {
-            in.seek(position);
-            IOUtils.readFully(in, blobData);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        return blobData;
+        elementReader.close();
     }
 }

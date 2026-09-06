@@ -30,14 +30,22 @@ class TestExponentialRetryStrategy(unittest.TestCase):
         retry = ExponentialRetry._ExponentialRetry__create_retry_strategy(5)
 
         self.assertEqual(retry.total, 5)
-        self.assertEqual(retry.read, 5)
+        # Read errors / timeouts are not retried: the request has likely
+        # reached the server and its signature nonce is already consumed,
+        # so a retry with the same signed headers would be rejected with
+        # "Specified signature nonce was used already".
+        self.assertEqual(retry.read, 0)
         # Connect failures are intentionally non-retriable — see the
         # comment on ``ExponentialRetry.__create_retry_strategy``.
         self.assertEqual(retry.connect, 0)
+        self.assertEqual(retry.status, 5)
 
+        # Aligned with the Java client: only 429 / 503 are retried.
         self.assertIn(429, retry.status_forcelist)  # Too Many Requests
         self.assertIn(503, retry.status_forcelist)  # Service Unavailable
         self.assertNotIn(404, retry.status_forcelist)
+        self.assertNotIn(502, retry.status_forcelist)
+        self.assertNotIn(504, retry.status_forcelist)
 
     def test_retry_on_connect_error(self):
         # ``connect=0`` means connect errors are not retried — the

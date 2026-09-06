@@ -316,6 +316,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return wrapped.newScan(snapshotReaderFactory);
+    }
+
+    @Override
     public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }
@@ -338,6 +343,12 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
         return wrapped.newWrite(commitUser, writeId);
+    }
+
+    @Override
+    public TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        return wrapped.newPostponeFixedBucketWrite(commitUser, writeId);
     }
 
     @Override

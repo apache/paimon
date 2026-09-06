@@ -20,13 +20,13 @@ package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.spark.catalyst.analysis.PaimonAssignmentUtils
 
-import org.apache.spark.sql.catalyst.expressions.{Alias, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, Assignment, Filter, LogicalPlan, Project, ReplaceData, Union, UpdateTable}
-import org.apache.spark.sql.catalyst.util.RowDeltaUtils.WRITE_WITH_METADATA_OPERATION
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, Assignment, Filter, LogicalPlan, Project, ReplaceData, Union, UpdateTable, WriteDelta}
+import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{OPERATION_COLUMN, UPDATE_OPERATION, WRITE_WITH_METADATA_OPERATION}
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+import org.apache.spark.sql.connector.write.{RowLevelOperationTable, SupportsDelta}
 import org.apache.spark.sql.connector.write.RowLevelOperation.Command.UPDATE
-import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, ExtractV2Table}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -47,9 +47,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * We fire before `ResolveAssignments`, so `u.aligned` is `false`; the rule pre-aligns via
  * `PaimonAssignmentUtils.alignUpdateAssignments` before building the plan.
  *
- * Row-tracking-only tables use the same V2 copy-on-write rewrite. PK / DE / DV tables go through
- * the postHoc V1 rule because they do not expose `SupportsRowLevelOperations`. DELETE is handled by
- * [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite; unaware-bucket deletion-vector
+ * append tables take the transcribed `WriteDelta` branch (delta-based row-level operations). PK /
+ * DE tables go through the postHoc V1 rule because they do not expose `SupportsRowLevelOperations`.
+ * DELETE is handled by [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
  */
 object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendOnlyScope {
 
@@ -58,7 +59,8 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
         case u @ UpdateTable(aliasedTable, assignments, cond)
-            if u.resolved && u.rewritable && targetsV2CopyOnWriteTable(aliasedTable) =>
+            if u.resolved && u.rewritable &&
+              (targetsV2CopyOnWriteTable(aliasedTable) || targetsV2DeltaTable(aliasedTable)) =>
           EliminateSubqueryAliases(aliasedTable) match {
             case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) =>
               val table = buildOperationTable(tbl, UPDATE, CaseInsensitiveStringMap.empty())
@@ -70,16 +72,67 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
                 assignments,
                 fromStar = false,
                 mergeSchemaEnabled = false)
-              if (SubqueryExpression.hasSubquery(updateCond)) {
-                buildReplaceDataWithUnionPlan(r, table, alignedAssignments, updateCond)
-              } else {
-                buildReplaceDataPlan(r, table, alignedAssignments, updateCond)
+              table.operation match {
+                case _: SupportsDelta =>
+                  buildWriteDeltaPlan(r, table, alignedAssignments, updateCond)
+                case _ if SubqueryExpression.hasSubquery(updateCond) =>
+                  buildReplaceDataWithUnionPlan(r, table, alignedAssignments, updateCond)
+                case _ =>
+                  buildReplaceDataPlan(r, table, alignedAssignments, updateCond)
               }
             case _ =>
               u
           }
       }
     }
+  }
+
+  // Mirrors Spark 4.1 `RewriteUpdateTable.buildWriteDeltaPlan` for delta tables (Paimon's
+  // `PaimonSparkDeltaOperation` answers `representUpdateAsDeleteAndInsert = false`, so only the
+  // single-row UPDATE projection branch is transcribed).
+  private def buildWriteDeltaPlan(
+      relation: DataSourceV2Relation,
+      operationTable: RowLevelOperationTable,
+      assignments: Seq[Assignment],
+      cond: Expression): WriteDelta = {
+    val operation = operationTable.operation.asInstanceOf[SupportsDelta]
+    val rowAttrs = relation.output
+    val rowIdAttrs = resolveRowIdAttrs(relation, operation)
+    val metadataAttrs = resolveRequiredMetadataAttrs(relation, operation)
+    val readRelation = buildRelationWithAttrs(relation, operationTable, metadataAttrs, rowIdAttrs)
+    val matchedRowsPlan = Filter(cond, readRelation)
+    assert(
+      !operation.representUpdateAsDeleteAndInsert,
+      "Paimon delta operations represent UPDATE as a single operation")
+    val rowDeltaPlan = buildWriteDeltaUpdateProjection(matchedRowsPlan, assignments, rowIdAttrs)
+    val writeRelation = relation.copy(table = operationTable)
+    val projections = buildWriteDeltaProjections(rowDeltaPlan, rowAttrs, rowIdAttrs, metadataAttrs)
+    WriteDelta(writeRelation, cond, rowDeltaPlan, relation, projections)
+  }
+
+  // Mirrors Spark 4.1 `RewriteUpdateTable.buildWriteDeltaUpdateProjection`.
+  private def buildWriteDeltaUpdateProjection(
+      plan: LogicalPlan,
+      assignments: Seq[Assignment],
+      rowIdAttrs: Seq[Attribute]): LogicalPlan = {
+    val assignedValues = assignments.map(_.value)
+    val updatedValues = plan.output.zipWithIndex.map {
+      case (attr, index) =>
+        if (index < assignments.size) {
+          val assignedExpr = assignedValues(index)
+          Alias(assignedExpr, attr.name)()
+        } else {
+          assert(MetadataAttribute.isValid(attr.metadata))
+          if (MetadataAttribute.isPreservedOnUpdate(attr)) {
+            attr
+          } else {
+            Alias(Literal(null, attr.dataType), attr.name)(explicitMetadata = Some(attr.metadata))
+          }
+        }
+    }
+    val originalRowIdValues = buildOriginalRowIdValues(rowIdAttrs, assignments)
+    val operationType = Alias(Literal(UPDATE_OPERATION), OPERATION_COLUMN)()
+    Project(Seq(operationType) ++ updatedValues ++ originalRowIdValues, plan)
   }
 
   // Mirrors Spark 4.1.1 `RewriteUpdateTable.{buildReplaceDataPlan, buildReplaceDataWithUnionPlan,

@@ -37,7 +37,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 
-/** Indexed split for global index. */
+/**
+ * Indexed split for global index.
+ *
+ * <p>Row ranges use the coordinate system of the table read path. Data Evolution reads them as
+ * stable row IDs, while primary-key raw reads use them as physical positions in the split's single
+ * data file. Scores, when present, follow the expanded row-range order.
+ */
 public class IndexedSplit implements Split {
 
     private static final long serialVersionUID = 1L;

@@ -29,6 +29,7 @@ import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -88,7 +89,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
         super.beforeEach();
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         TableSchema tableSchema = schemaManager.latest().get();
         this.table = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }

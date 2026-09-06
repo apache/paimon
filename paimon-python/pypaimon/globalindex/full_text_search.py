@@ -15,44 +15,65 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""FullTextSearch for performing full-text search with a structured query."""
+"""FullTextSearch for performing full-text search with a query string."""
 
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import List, Optional
-
-from pypaimon.globalindex.full_text_query import FullTextQuery
+from typing import Optional
 
 
 @dataclass
 class FullTextSearch:
     """
-    FullTextSearch to perform full-text search with a structured query.
+    FullTextSearch to perform full-text search with a query string.
 
     Attributes:
-        query: The structured full-text query
+        field_name: Text field to search
+        query: Full-text query string
         limit: Maximum number of results to return
+        include_row_ids: Optional bitmap of row IDs to include in search
     """
 
-    query: FullTextQuery
+    field_name: str
+    query: str
     limit: int
+    include_row_ids: Optional['RoaringBitmap64'] = None
 
     def __post_init__(self):
+        if not self.field_name:
+            raise ValueError("Field name cannot be None or empty")
         if self.query is None:
             raise ValueError("Query cannot be None")
         if self.limit <= 0:
             raise ValueError(f"Limit must be positive, got: {self.limit}")
 
     @property
-    def columns(self) -> List[str]:
-        return self.query.referenced_columns()
+    def column(self) -> str:
+        return self.field_name
 
-    @property
-    def field_name(self) -> str:
-        return self.query.single_column()
+    def with_include_row_ids(self, include_row_ids: 'RoaringBitmap64') -> 'FullTextSearch':
+        """Return a new FullTextSearch with the specified include_row_ids."""
+        return FullTextSearch(
+            field_name=self.field_name,
+            query=self.query,
+            limit=self.limit,
+            include_row_ids=include_row_ids,
+        )
 
-    def query_json(self) -> str:
-        return self.query.to_json()
+    def offset_range(self, from_: int, to: int) -> 'FullTextSearch':
+        """Offset include_row_ids into the given range."""
+        if self.include_row_ids is None:
+            return self
+
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+        range_bitmap = RoaringBitmap64()
+        range_bitmap.add_range(from_, to)
+        and_result = RoaringBitmap64.and_(range_bitmap, self.include_row_ids)
+        offset_bitmap = RoaringBitmap64()
+        for row_id in and_result:
+            offset_bitmap.add(row_id - from_)
+        return self.with_include_row_ids(offset_bitmap)
 
     def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""
@@ -60,6 +81,6 @@ class FullTextSearch:
 
     def __repr__(self) -> str:
         return (
-            f"FullTextSearch(columns={self.columns}, limit={self.limit}, "
-            f"query_json={self.query_json()})"
+            f"FullTextSearch(field_name={self.field_name}, limit={self.limit}, "
+            f"query={self.query})"
         )

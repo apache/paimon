@@ -18,22 +18,40 @@
 
 package org.apache.paimon.data.shredding;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MapSharedShreddingColumnPlacementPolicy;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Creates per-file shared-shredding MAP write plans. */
 public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFactory {
 
     private final RowType logicalRowType;
+    private final Map<String, Integer> fieldToMaxColumns;
+    private final Map<String, MapSharedShreddingColumnPlacementPolicy> fieldToColumnPlacementPolicy;
     private final MapSharedShreddingContext context;
 
-    public MapSharedShreddingWritePlanFactory(
-            RowType logicalRowType, MapSharedShreddingContext context) {
+    public MapSharedShreddingWritePlanFactory(RowType logicalRowType, Options options) {
         this.logicalRowType = logicalRowType;
-        this.context = context;
+        CoreOptions coreOptions = new CoreOptions(options);
+        List<String> shreddingFields =
+                MapSharedShreddingUtils.detectShreddingColumns(logicalRowType, coreOptions);
+        this.fieldToMaxColumns =
+                MapSharedShreddingUtils.buildColumnToNumColumns(shreddingFields, coreOptions);
+        this.fieldToColumnPlacementPolicy = new LinkedHashMap<>();
+        for (String field : shreddingFields) {
+            fieldToColumnPlacementPolicy.put(
+                    field, coreOptions.mapSharedShreddingColumnPlacementPolicy(field));
+        }
+        this.context = new MapSharedShreddingContext(fieldToMaxColumns);
     }
 
     @Override
@@ -43,7 +61,7 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
 
     @Override
     public boolean shouldCreateWritePlan() {
-        return !context.isEmpty();
+        return !fieldToMaxColumns.isEmpty();
     }
 
     @Override
@@ -58,6 +76,19 @@ public class MapSharedShreddingWritePlanFactory implements ShreddingWritePlanFac
 
     @Override
     public ShreddingWritePlan createWritePlan(List<InternalRow> sampleRows) {
-        return new MapSharedShreddingWritePlan(logicalRowType, context.computeNextK(), context);
+        checkArgument(shouldCreateWritePlan(), "MAP shared-shredding write plan is not active.");
+        return new MapSharedShreddingWritePlan(
+                logicalRowType, context.computeNextK(), fieldToColumnPlacementPolicy);
+    }
+
+    @Override
+    public void onFileCompleted(ShreddingWritePlan writePlan) {
+        checkArgument(
+                writePlan instanceof MapSharedShreddingWritePlan,
+                "Unexpected MAP shared-shredding write plan: %s",
+                writePlan.getClass().getName());
+        ((MapSharedShreddingWritePlan) writePlan)
+                .fileMaxRowWidths()
+                .forEach(context::reportFileStats);
     }
 }
