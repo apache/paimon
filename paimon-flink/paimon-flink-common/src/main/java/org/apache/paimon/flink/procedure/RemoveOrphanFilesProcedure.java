@@ -59,7 +59,11 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                         isOptional = true),
                 @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
                 @ArgumentHint(name = "parallelism", type = @DataTypeHint("INT"), isOptional = true),
-                @ArgumentHint(name = "mode", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "mode", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "table_batch_size",
+                        type = @DataTypeHint("INT"),
+                        isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -67,7 +71,8 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
             String olderThan,
             Boolean dryRun,
             Integer parallelism,
-            String mode)
+            String mode,
+            Integer tableBatchSize)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
         String databaseName = identifier.getDatabaseName();
@@ -87,7 +92,8 @@ public class RemoveOrphanFilesProcedure extends ProcedureBase {
                                     dryRun != null && dryRun,
                                     parallelism,
                                     databaseName,
-                                    tableName);
+                                    tableName,
+                                    tableBatchSize);
                     break;
                 case "LOCAL":
                     cleanOrphanFilesResult =
