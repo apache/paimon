@@ -28,7 +28,6 @@ import org.apache.paimon.predicate.Like;
 import org.apache.paimon.predicate.LikeOptimization;
 import org.apache.paimon.predicate.StartsWith;
 import org.apache.paimon.types.DataTypeFamily;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -43,11 +42,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Base reader for sorted global index files with manifest-level min/max pruning. */
 public abstract class SortedFileGlobalIndexReader<R extends Closeable>
@@ -59,10 +55,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
     private final Map<Path, R> readerCache;
     private final ExecutorService executor;
     private final long totalRowCount;
-    private final ReentrantReadWriteLock lifecycleLock;
-
-    // Guarded by lifecycleLock. A visit holds the read lock through both opening and reading.
-    private boolean closed;
 
     protected SortedFileGlobalIndexReader(
             List<GlobalIndexIOMeta> files,
@@ -80,7 +72,6 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         this.readerCache = new ConcurrentHashMap<>();
         this.executor = executor;
         this.totalRowCount = totalRowCount;
-        this.lifecycleLock = new ReentrantReadWriteLock();
     }
 
     @Override
@@ -316,25 +307,20 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
 
     @Override
     public void close() throws IOException {
-        // Wait for active visits, including readers which have not yet entered readerCache.
-        // Queued visits acquire the read lock later and must observe closed before opening a file.
-        lifecycleLock.writeLock().lock();
-        try {
-            if (closed) {
-                return;
-            }
-            closed = true;
+        IOException exception = null;
+        for (R reader : readerCache.values()) {
             try {
-                IOUtils.closeAll(readerCache.values());
-            } catch (IOException | RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new IOException(e);
-            } finally {
-                readerCache.clear();
+                reader.close();
+            } catch (IOException e) {
+                if (exception == null) {
+                    exception = e;
+                } else {
+                    exception.addSuppressed(e);
+                }
             }
-        } finally {
-            lifecycleLock.writeLock().unlock();
+        }
+        if (exception != null) {
+            throw exception;
         }
     }
 
@@ -429,7 +415,9 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
                 new ArrayList<>(selected.size());
         for (GlobalIndexIOMeta meta : selected) {
-            futures.add(CompletableFuture.supplyAsync(() -> visitFile(meta, visitor), executor));
+            futures.add(
+                    CompletableFuture.supplyAsync(
+                            () -> visitor.apply(getOrCreateReader(meta)), executor));
         }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .thenApply(v -> unionResults(futures));
@@ -440,16 +428,8 @@ public abstract class SortedFileGlobalIndexReader<R extends Closeable>
         return visitSelectedFiles(Optional.of(files), visitor);
     }
 
-    private Optional<GlobalIndexResult> visitFile(
-            GlobalIndexIOMeta meta, Function<R, Optional<GlobalIndexResult>> visitor) {
-        lifecycleLock.readLock().lock();
-        try {
-            checkState(!closed, "Global index reader is already closed.");
-            R reader = readerCache.computeIfAbsent(meta.filePath(), ignored -> openReader(meta));
-            return visitor.apply(reader);
-        } finally {
-            lifecycleLock.readLock().unlock();
-        }
+    private R getOrCreateReader(GlobalIndexIOMeta meta) {
+        return readerCache.computeIfAbsent(meta.filePath(), ignored -> openReader(meta));
     }
 
     private Optional<GlobalIndexResult> unionResults(
