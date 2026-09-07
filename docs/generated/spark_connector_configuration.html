@@ -141,6 +141,12 @@ under the License.
             <td>Only effective when 'write.merge-schema' is true. If true, widen an existing column type when the incoming data has a wider compatible type (e.g. INT -&gt; BIGINT, DECIMAL precision increase). Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.</td>
         </tr>
         <tr>
+            <td><h5>write.stream.commit-user</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The commit user of a Structured Streaming write. Paimon skips a micro-batch that a previous run of the same query already committed under this user, which is what makes a replayed micro-batch idempotent. By default it is derived from the checkpoint location of the query, so it is stable across restarts; set it explicitly only if the same query has to keep its identity across a change of checkpoint location.</td>
+        </tr>
+        <tr>
             <td><h5>write.use-v2-write</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

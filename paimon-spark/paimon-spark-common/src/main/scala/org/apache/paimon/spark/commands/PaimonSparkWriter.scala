@@ -44,12 +44,13 @@ import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.{Partitioner, TaskContext}
+import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
-import java.util.{Map => JMap}
+import java.util.{Collections, Map => JMap}
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -57,8 +58,10 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
-  extends WriteHelper {
+    batchId: Option[Long] = None,
+    commitUser: Option[String] = None)
+  extends WriteHelper
+  with Logging {
 
   private lazy val tableSchema = table.schema
 
@@ -99,7 +102,13 @@ case class PaimonSparkWriter(
     if (bucketNum.isPresent) Some(bucketNum.get().intValue()) else None
   }
 
-  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+  val writeBuilder: BatchWriteBuilder = {
+    val builder = table.newBatchWriteBuilder()
+    // A streaming write commits under a commit user that survives a restart, so that a replayed
+    // micro-batch can be recognised as already committed.
+    commitUser.foreach(builder.asInstanceOf[BatchWriteBuilderImpl].withCommitUser)
+    builder
+  }
 
   def withOverwrite(): PaimonSparkWriter = withOverwrite(java.util.Collections.emptyMap())
 
@@ -454,6 +463,16 @@ case class PaimonSparkWriter(
     writeBuilder.asInstanceOf[BatchWriteBuilderImpl].rowIdCheckConflict(rowIdCheckFromSnapshot)
   }
 
+  /**
+   * The commit identifier to deduplicate on, present only for a streaming write that has both a
+   * batch id and a commit user that is stable across restarts.
+   */
+  private def idempotentCommitIdentifier: Option[Long] =
+    for {
+      identifier <- batchId
+      _ <- commitUser
+    } yield identifier
+
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     commit(commitMessages, null)
   }
@@ -462,6 +481,13 @@ case class PaimonSparkWriter(
     if (postponeBatchWriteFixedBucket && directPostponeWriteBuilder == null) {
       if (stagedSparkSession == null) {
         throw new IllegalStateException("Postpone staged write has no SparkSession.")
+      }
+      idempotentCommitIdentifier.foreach {
+        identifier =>
+          logWarning(
+            s"Micro-batch $identifier is written to a postpone bucket table through a staged " +
+              "commit, which cannot deduplicate a replayed batch. A failure of this query may " +
+              "duplicate the batch.")
       }
       val finalOperation = Option(operation).getOrElse(Snapshot.Operation.WRITE)
       val finalMessages = new SparkPostponeStagedCommitter(
@@ -472,14 +498,29 @@ case class PaimonSparkWriter(
       postCommit(finalMessages)
       return
     }
-    val activeWriteBuilder =
-      Option(directPostponeWriteBuilder).getOrElse(writeBuilder)
-    val tableCommit = activeWriteBuilder.newCommit()
+    val tableCommit: InnerTableCommit =
+      if (directPostponeWriteBuilder != null) {
+        directPostponeWriteBuilder.newCommit()
+      } else {
+        writeBuilder.asInstanceOf[BatchWriteBuilderImpl].newCommit()
+      }
     if (operation != null) {
       tableCommit.withOperation(operation)
     }
     try {
-      tableCommit.commit(commitMessages.toList.asJava)
+      idempotentCommitIdentifier match {
+        case Some(identifier) =>
+          // Structured Streaming replays a micro-batch with its original batch id after a failure.
+          // Committing under a stable commit user lets Paimon skip a replay it already committed,
+          // instead of duplicating the whole batch. The files being committed were written by this
+          // very batch, so there is no need to list them to prove that they still exist.
+          tableCommit
+            .checkFilesExistence(false)
+            .filterAndCommit(
+              Collections.singletonMap(Long.box(identifier), commitMessages.toList.asJava))
+        case None =>
+          tableCommit.commit(commitMessages.toList.asJava)
+      }
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {
