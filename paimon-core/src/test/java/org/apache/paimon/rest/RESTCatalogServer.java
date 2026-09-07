@@ -107,8 +107,6 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
-import org.apache.paimon.rest.responses.ListSchemaResponse;
-import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -119,7 +117,6 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -169,7 +166,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -998,92 +994,13 @@ public class RESTCatalogServer {
 
     private MockResponse listSnapshots(Identifier identifier) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Iterator<Snapshot> snapshots = table.snapshotManager().snapshots();
-        List<Snapshot> snapshotList = new ArrayList<>();
-        while (snapshots.hasNext()) {
-            snapshotList.add(snapshots.next());
-        }
-        ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
-        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+        return RESTCatalogServerMetadataHandler.listSnapshots(table);
     }
 
     private MockResponse listSchemas(Identifier identifier, Map<String, String> parameters)
             throws Exception {
-        if (noPermissionTables.contains(identifier.getFullName())) {
-            throw new Catalog.TableNoPermissionException(identifier);
-        }
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
-            throw new Catalog.TableNotExistException(identifier);
-        }
         FileStoreTable table = getFileTable(identifier);
-        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
-        SchemaFilter filter = parseSchemaFilter(parameters);
-        List<TableSchema> all = schemaManager.listAll();
-        all.sort(Comparator.comparingLong(TableSchema::id).reversed());
-        List<ListSchemaResponse.SchemaItem> items;
-        if (filter.isLatest()) {
-            items =
-                    all.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(toSchemaItem(all.get(0)));
-        } else if (filter.isEarliest()) {
-            items =
-                    all.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(toSchemaItem(all.get(all.size() - 1)));
-        } else if (filter.schemaId() != null) {
-            long target = filter.schemaId();
-            items =
-                    all.stream()
-                            .filter(s -> s.id() == target)
-                            .findFirst()
-                            .map(s -> Collections.singletonList(toSchemaItem(s)))
-                            .orElse(Collections.emptyList());
-        } else {
-            items =
-                    all.stream()
-                            .filter(
-                                    s ->
-                                            filter.maxSchemaId() == null
-                                                    || s.id() <= filter.maxSchemaId())
-                            .filter(
-                                    s ->
-                                            filter.minSchemaId() == null
-                                                    || s.id() >= filter.minSchemaId())
-                            .map(RESTCatalogServer::toSchemaItem)
-                            .collect(Collectors.toList());
-        }
-        ListSchemaResponse response = new ListSchemaResponse(items);
-        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
-    }
-
-    private static SchemaFilter parseSchemaFilter(Map<String, String> parameters) {
-        if (parameters == null || parameters.isEmpty()) {
-            return SchemaFilter.all();
-        }
-        if ("true".equalsIgnoreCase(parameters.get("latest"))) {
-            return SchemaFilter.latest();
-        }
-        if ("true".equalsIgnoreCase(parameters.get("earliest"))) {
-            return SchemaFilter.earliest();
-        }
-        String schemaId = parameters.get("schemaId");
-        if (schemaId != null) {
-            return SchemaFilter.withId(Long.parseLong(schemaId));
-        }
-        String maxSchemaId = parameters.get("maxSchemaId");
-        String minSchemaId = parameters.get("minSchemaId");
-        Long max = maxSchemaId == null ? null : Long.parseLong(maxSchemaId);
-        Long min = minSchemaId == null ? null : Long.parseLong(minSchemaId);
-        if (max == null && min == null) {
-            return SchemaFilter.all();
-        }
-        return SchemaFilter.range(max, min);
-    }
-
-    private static ListSchemaResponse.SchemaItem toSchemaItem(TableSchema schema) {
-        return new ListSchemaResponse.SchemaItem(
-                schema.id(), schema.toSchema(), schema.timeMillis());
+        return RESTCatalogServerMetadataHandler.listSchemas(table, parameters);
     }
 
     private MockResponse listConsumers(Identifier identifier) throws Exception {
