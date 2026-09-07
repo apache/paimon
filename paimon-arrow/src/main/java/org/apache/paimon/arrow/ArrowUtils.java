@@ -325,7 +325,7 @@ public class ArrowUtils {
 
     private static long nonCastedTimestampToEpoch(Timestamp timestamp, int precision) {
         if (precision == 0) {
-            return timestamp.getMillisecond() / 1000;
+            return Math.floorDiv(timestamp.getMillisecond(), 1000L);
         } else if (precision >= 1 && precision <= 3) {
             return timestamp.getMillisecond();
         } else if (precision >= 4 && precision <= 6) {
