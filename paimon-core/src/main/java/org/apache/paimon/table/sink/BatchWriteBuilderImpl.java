@@ -36,7 +36,8 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final InnerTable table;
-    private final String commitUser;
+
+    private String commitUser;
 
     private Map<String, String> staticPartition;
     private @Nullable Long rowIdCheckFromSnapshot = null;
@@ -61,6 +62,19 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
         return table.newWriteSelector();
     }
 
+    /**
+     * Use a caller-provided commit user instead of the random one.
+     *
+     * <p>A batch job has no reason to do this, but an engine which replays a failed batch with a
+     * stable identifier (for example a Spark Structured Streaming micro-batch) needs a commit user
+     * that survives the replay, so that {@link StreamTableCommit#filterAndCommit} can recognise
+     * what has already been committed.
+     */
+    public BatchWriteBuilderImpl withCommitUser(String commitUser) {
+        this.commitUser = commitUser;
+        return this;
+    }
+
     @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
         this.staticPartition = staticPartition;
@@ -73,7 +87,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
-    public BatchTableCommit newCommit() {
+    public InnerTableCommit newCommit() {
         InnerTableCommit commit =
                 table.newCommit(commitUser)
                         .withOverwrite(staticPartition)

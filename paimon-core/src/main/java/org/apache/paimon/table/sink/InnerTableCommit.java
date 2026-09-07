@@ -54,6 +54,17 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit expireForEmptyCommit(boolean expireForEmptyCommit);
 
+    /**
+     * If this is set to true, {@link StreamTableCommit#filterAndCommit} verifies that every file it
+     * is about to commit still exists. By default it does.
+     *
+     * <p>The check guards a committable that was restored from an engine's state and may reference
+     * files deleted long ago. A caller which filters a committable it has just produced itself
+     * knows those files exist, and can skip a file listing proportional to the size of the
+     * committable.
+     */
+    InnerTableCommit checkFilesExistence(boolean checkFilesExistence);
+
     InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
     InnerTableCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
