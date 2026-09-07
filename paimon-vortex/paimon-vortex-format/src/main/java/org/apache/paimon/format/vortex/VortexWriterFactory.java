@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -40,6 +41,11 @@ public class VortexWriterFactory implements FormatWriterFactory, SupportsDirectW
 
     public VortexWriterFactory(Supplier<ArrowFormatCWriter> cWriterSupplier) {
         this.cWriterSupplier = cWriterSupplier;
+    }
+
+    @VisibleForTesting
+    Supplier<ArrowFormatCWriter> cWriterSupplier() {
+        return cWriterSupplier;
     }
 
     @Override
