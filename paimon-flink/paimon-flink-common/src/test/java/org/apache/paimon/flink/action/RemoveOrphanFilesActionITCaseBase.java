@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
@@ -402,6 +403,40 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
         assertThatCode(() -> executeSQL(withInvalidMode))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Unknown mode");
+    }
+
+    @Test
+    public void testDistributedCleanAbortsGloballyWhenManifestListIsMissing() throws Exception {
+        FileStoreTable table = createTableAndWriteData(tableName);
+        FileIO fileIO = table.fileIO();
+
+        List<Path> orphanFiles = new ArrayList<>();
+        for (int i = 0; i < 32; i++) {
+            Path orphanFile = getOrphanFilePath(table, "bucket-0/global-abort-orphan-" + i);
+            fileIO.writeFile(orphanFile, "orphan", true);
+            orphanFiles.add(orphanFile);
+        }
+        Thread.sleep(2000);
+
+        Snapshot latestSnapshot = table.snapshotManager().latestSnapshot();
+        Path manifestList =
+                table.store().pathFactory().toManifestListPath(latestSnapshot.baseManifestList());
+        assertThat(fileIO.exists(manifestList)).isTrue();
+        fileIO.deleteQuietly(manifestList);
+
+        String olderThan =
+                DateTimeUtils.formatLocalDateTime(
+                        DateTimeUtils.toLocalDateTime(System.currentTimeMillis()), 3);
+        String procedure =
+                String.format(
+                        "CALL sys.remove_orphan_files('%s.%s', '%s', false, 5, 'distributed')",
+                        database, tableName, olderThan);
+        ImmutableList<Row> result = ImmutableList.copyOf(executeSQL(procedure));
+
+        assertThat(result).containsOnly(Row.of("0"));
+        for (Path orphanFile : orphanFiles) {
+            assertThat(fileIO.exists(orphanFile)).isTrue();
+        }
     }
 
     @Test
