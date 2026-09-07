@@ -18,8 +18,16 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.BundleRecords;
+import org.apache.paimon.io.VectorizedBundleRecords;
+import org.apache.paimon.reader.BundleRecordIterator;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongIterator;
 
 import org.junit.jupiter.api.Test;
@@ -60,6 +68,97 @@ public class ColumnarRowIteratorTest {
                 rowIterator.next();
             }
             assertThat(rowIterator.returnedPosition()).isEqualTo(positions[rowIterator.index - 1]);
+        }
+    }
+
+    @Test
+    public void testIdentityMappingKeepsBundleIterator() {
+        HeapIntVector heapIntVector = new HeapIntVector(1);
+        VectorizedColumnBatch vectorizedColumnBatch =
+                new VectorizedColumnBatch(new ColumnVector[] {heapIntVector});
+        vectorizedColumnBatch.setNumRows(1);
+        ColumnarRowIterator rowIterator =
+                new TestingBundleColumnarRowIterator(vectorizedColumnBatch);
+        rowIterator.reset(0);
+
+        assertThat(rowIterator.mapping(null, new int[] {0})).isSameAs(rowIterator);
+    }
+
+    @Test
+    public void testNonIdentityMappingCopiesAndReordersIterator() {
+        HeapIntVector first = new HeapIntVector(1);
+        first.setInt(0, 1);
+        HeapIntVector second = new HeapIntVector(1);
+        second.setInt(0, 2);
+        VectorizedColumnBatch vectorizedColumnBatch =
+                new VectorizedColumnBatch(new ColumnVector[] {first, second});
+        vectorizedColumnBatch.setNumRows(1);
+        ColumnarRowIterator rowIterator =
+                new ColumnarRowIterator(
+                        new Path("test"), new ColumnarRow(vectorizedColumnBatch), null);
+        rowIterator.reset(0);
+
+        ColumnarRowIterator mapped = rowIterator.mapping(null, new int[] {1, 0});
+
+        assertThat(mapped).isNotSameAs(rowIterator);
+        assertThat(mapped.next().getInt(0)).isEqualTo(2);
+        assertThat(mapped.next()).isNull();
+    }
+
+    @Test
+    public void testIdentityPrefixMappingStillCopiesIterator() {
+        HeapIntVector first = new HeapIntVector(1);
+        first.setInt(0, 1);
+        HeapIntVector second = new HeapIntVector(1);
+        second.setInt(0, 2);
+        VectorizedColumnBatch vectorizedColumnBatch =
+                new VectorizedColumnBatch(new ColumnVector[] {first, second});
+        vectorizedColumnBatch.setNumRows(1);
+        ColumnarRowIterator rowIterator =
+                new ColumnarRowIterator(
+                        new Path("test"), new ColumnarRow(vectorizedColumnBatch), null);
+        rowIterator.reset(0);
+
+        ColumnarRowIterator mapped = rowIterator.mapping(null, new int[] {0});
+
+        assertThat(mapped).isNotSameAs(rowIterator);
+        assertThat(mapped.next().getFieldCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testPartitionMappingStillCopiesIterator() {
+        HeapIntVector dataVector = new HeapIntVector(1);
+        dataVector.setInt(0, 1);
+        VectorizedColumnBatch vectorizedColumnBatch =
+                new VectorizedColumnBatch(new ColumnVector[] {dataVector});
+        vectorizedColumnBatch.setNumRows(1);
+        ColumnarRowIterator rowIterator =
+                new TestingBundleColumnarRowIterator(vectorizedColumnBatch);
+        rowIterator.reset(0);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter partitionWriter = new BinaryRowWriter(partition);
+        partitionWriter.writeInt(0, 9);
+        partitionWriter.complete();
+        PartitionInfo partitionInfo =
+                new PartitionInfo(new int[] {-1, 1, 0}, RowType.of(DataTypes.INT()), partition);
+
+        ColumnarRowIterator mapped = rowIterator.mapping(partitionInfo, new int[] {0});
+
+        assertThat(mapped).isNotSameAs(rowIterator);
+        assertThat(mapped.next().getInt(0)).isEqualTo(9);
+    }
+
+    private static class TestingBundleColumnarRowIterator extends ColumnarRowIterator
+            implements BundleRecordIterator {
+
+        private TestingBundleColumnarRowIterator(VectorizedColumnBatch batch) {
+            super(new Path("test"), new ColumnarRow(batch), null);
+        }
+
+        @Override
+        public BundleRecords bundleRecords() {
+            return new VectorizedBundleRecords(batch(), null);
         }
     }
 }

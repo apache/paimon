@@ -86,6 +86,14 @@ class BaseAppendFileStoreWriteTest {
                         inputFiles,
                         (Map<String, IOExceptionSupplier<DeletionVector>>) null))
                 .thenReturn(reader);
+        doAnswer(
+                        invocation -> {
+                            assertThat(reader.batchReleased).isFalse();
+                            assertThat(reader.closed).isFalse();
+                            return null;
+                        })
+                .when(writer)
+                .writeBundle(any());
         when(writer.result()).thenReturn(outputFiles);
         TestingAppendWrite write = new TestingAppendWrite(rawRead, writer);
 
