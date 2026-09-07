@@ -290,11 +290,11 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
      *
      * <ul>
      *   <li>ConcurrentHashMap reader cache in LazyFilteredBTreeReader
-     *   <li>BlockCache.getBlock() check-then-act race under eviction pressure
+     *   <li>Shared block loading under eviction pressure
      *   <li>CacheManager eviction callbacks racing with concurrent reads
-     *   <li>BTreeIndexReader readLock contention across query types
+     *   <li>Concurrent BTreeIndexReader queries
      *   <li>LazyField initialization race for null bitmaps
-     *   <li>SegmentContainer.accessCount non-atomic increment under contention
+     *   <li>Concurrent access to the shared file cache index
      * </ul>
      */
     @TestTemplate
