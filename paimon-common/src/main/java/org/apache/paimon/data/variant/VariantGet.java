@@ -138,8 +138,16 @@ public class VariantGet {
                     break;
                 case DECIMAL:
                     BigDecimal decimal = v.getDecimal();
-                    int precision = decimal.precision();
+                    if (decimal.scale() < 0) {
+                        // stripTrailingZeros folds trailing zeros into a negative exponent,
+                        // and a negative scale is not a Paimon decimal
+                        decimal = decimal.setScale(0);
+                    }
                     int scale = decimal.scale();
+                    // precision() counts the digits of the unscaled value, so it is smaller than
+                    // the scale for a value below 0.1, which DecimalType rejects. The variant
+                    // writer caps both at MAX_DECIMAL16_PRECISION, so this stays in range.
+                    int precision = Math.max(decimal.precision(), scale);
                     input = Decimal.fromBigDecimal(decimal, precision, scale);
                     inputType = DataTypes.DECIMAL(precision, scale);
                     break;
