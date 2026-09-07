@@ -63,6 +63,7 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogContext catalogContext;
     private final boolean supportsVersionManagement;
     private final boolean supportsPartitionModification;
+    private final boolean supportsSchemaManagement;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
@@ -73,6 +74,28 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogContext catalogContext,
             boolean supportsVersionManagement,
             boolean supportsPartitionModification) {
+        this(
+                identifier,
+                uuid,
+                catalogLoader,
+                lockFactory,
+                lockContext,
+                catalogContext,
+                supportsVersionManagement,
+                supportsPartitionModification,
+                false);
+    }
+
+    public CatalogEnvironment(
+            @Nullable Identifier identifier,
+            @Nullable String uuid,
+            @Nullable CatalogLoader catalogLoader,
+            @Nullable CatalogLockFactory lockFactory,
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification,
+            boolean supportsSchemaManagement) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -81,10 +104,11 @@ public class CatalogEnvironment implements Serializable {
         this.catalogContext = catalogContext;
         this.supportsVersionManagement = supportsVersionManagement;
         this.supportsPartitionModification = supportsPartitionModification;
+        this.supportsSchemaManagement = supportsSchemaManagement;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, null, false, false);
+        return new CatalogEnvironment(null, null, null, null, null, null, false, false, false);
     }
 
     @Nullable
@@ -120,6 +144,10 @@ public class CatalogEnvironment implements Serializable {
 
     public boolean supportsVersionManagement() {
         return supportsVersionManagement;
+    }
+
+    public boolean supportsSchemaManagement() {
+        return supportsSchemaManagement;
     }
 
     @Nullable
@@ -253,7 +281,8 @@ public class CatalogEnvironment implements Serializable {
                 lockContext,
                 catalogContext,
                 supportsVersionManagement,
-                supportsPartitionModification);
+                supportsPartitionModification,
+                supportsSchemaManagement);
     }
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {

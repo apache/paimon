@@ -80,7 +80,9 @@ import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
@@ -2468,6 +2470,125 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         "schema "
                                 + secondSchemaId
                                 + " is still referenced by snapshots/tags/changelogs");
+    }
+
+    @Test
+    public void testSupportsSchemaManagement() {
+        assertThat(catalog.supportsSchemaManagement()).isTrue();
+    }
+
+    @Test
+    public void testListSchemasAll() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_all");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = local.latest().get().id();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("cc", "dd"), false);
+
+        List<TableSchema> all = catalog.listSchemas(identifier, SchemaFilter.all());
+        assertThat(all).hasSize(3);
+        all.sort(java.util.Comparator.comparingLong(TableSchema::id));
+        assertThat(all.get(0).id()).isEqualTo(firstSchemaId);
+        assertThat(all.get(2).id()).isEqualTo(firstSchemaId + 2);
+    }
+
+    @Test
+    public void testListSchemasLatestAndEarliest() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_latest_earliest");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = local.latest().get().id();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = local.latest().get().id();
+
+        List<TableSchema> latest = catalog.listSchemas(identifier, SchemaFilter.latest());
+        assertThat(latest).hasSize(1);
+        assertThat(latest.get(0).id()).isEqualTo(secondSchemaId);
+
+        List<TableSchema> earliest = catalog.listSchemas(identifier, SchemaFilter.earliest());
+        assertThat(earliest).hasSize(1);
+        assertThat(earliest.get(0).id()).isEqualTo(firstSchemaId);
+    }
+
+    @Test
+    public void testListSchemasById() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_by_id");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = local.latest().get().id();
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+
+        List<TableSchema> byId =
+                catalog.listSchemas(identifier, SchemaFilter.withId(firstSchemaId));
+        assertThat(byId).hasSize(1);
+        assertThat(byId.get(0).id()).isEqualTo(firstSchemaId);
+
+        List<TableSchema> missing = catalog.listSchemas(identifier, SchemaFilter.withId(9999L));
+        assertThat(missing).isEmpty();
+    }
+
+    @Test
+    public void testListSchemasByRange() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_by_range");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = local.latest().get().id();
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("cc", "dd"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("ee", "ff"), false);
+
+        List<TableSchema> range =
+                catalog.listSchemas(
+                        identifier, SchemaFilter.range(firstSchemaId + 2, firstSchemaId + 1));
+        assertThat(range).hasSize(2);
+        range.sort(java.util.Comparator.comparingLong(TableSchema::id));
+        assertThat(range.get(0).id()).isEqualTo(firstSchemaId + 1);
+        assertThat(range.get(1).id()).isEqualTo(firstSchemaId + 2);
+    }
+
+    @Test
+    public void testListSchemasTableNotExist() {
+        Identifier missing = Identifier.create("test_list_schemas", "missing_table");
+        assertThatThrownBy(() -> catalog.listSchemas(missing, SchemaFilter.all()))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+    }
+
+    @Test
+    public void testCatalogSchemaManagerBackedTableUsesRest() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_catalog_backed");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        // AbstractFileStoreTable should build a CatalogSchemaManager because
+        // RESTCatalog#supportsSchemaManagement is true.
+        assertThat(table.schemaManager().getClass().getSimpleName())
+                .isEqualTo("CatalogSchemaManager");
+        long firstSchemaId = table.schemaManager().latest().get().id();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        // The catalog-backed schema manager should observe the newest schema over REST.
+        assertThat(table.schemaManager().latest().get().id()).isEqualTo(firstSchemaId + 1);
+
+        // A rollback via the catalog-backed manager must reach the REST server.
+        table.schemaManager()
+                .rollbackTo(
+                        firstSchemaId,
+                        table.snapshotManager(),
+                        table.tagManager(),
+                        new org.apache.paimon.utils.ChangelogManager(
+                                table.fileIO(), table.location(), null));
+        assertThat(table.schemaManager().latest().get().id()).isEqualTo(firstSchemaId);
     }
 
     @Test

@@ -92,6 +92,7 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
+import org.apache.paimon.rest.responses.ListSchemaResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -103,6 +104,7 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -759,6 +761,43 @@ public class RESTApi {
                 resourcePaths.rollbackSchemaTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
+                restAuthFunction);
+    }
+
+    /**
+     * List schemas of a table filtered by the given {@link SchemaFilter}.
+     *
+     * <p>All schema read patterns (latest / earliest / by id / by range / all) share this single
+     * endpoint. The server is responsible for interpreting the filter and returning the matching
+     * schemas.
+     *
+     * @param identifier database name and table name.
+     * @param filter which schemas to return; see {@link SchemaFilter} for the allowed combinations.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public ListSchemaResponse listSchemas(Identifier identifier, SchemaFilter filter) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (filter.isLatest()) {
+            queryParams.put("latest", "true");
+        }
+        if (filter.isEarliest()) {
+            queryParams.put("earliest", "true");
+        }
+        if (filter.schemaId() != null) {
+            queryParams.put("schemaId", filter.schemaId().toString());
+        }
+        if (filter.maxSchemaId() != null) {
+            queryParams.put("maxSchemaId", filter.maxSchemaId().toString());
+        }
+        if (filter.minSchemaId() != null) {
+            queryParams.put("minSchemaId", filter.minSchemaId().toString());
+        }
+        return client.get(
+                resourcePaths.schemas(identifier.getDatabaseName(), identifier.getObjectName()),
+                queryParams,
+                ListSchemaResponse.class,
                 restAuthFunction);
     }
 

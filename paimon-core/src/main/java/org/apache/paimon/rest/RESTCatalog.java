@@ -59,9 +59,11 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListSchemaResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FormatTable;
@@ -476,6 +478,31 @@ public class RESTCatalog implements Catalog {
     @Override
     public boolean supportsVersionManagement() {
         return true;
+    }
+
+    @Override
+    public boolean supportsSchemaManagement() {
+        return true;
+    }
+
+    @Override
+    public List<TableSchema> listSchemas(Identifier identifier, SchemaFilter filter)
+            throws TableNotExistException {
+        try {
+            ListSchemaResponse response = api.listSchemas(identifier, filter);
+            if (response.getSchemas() == null || response.getSchemas().isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<TableSchema> result = new ArrayList<>(response.getSchemas().size());
+            for (ListSchemaResponse.SchemaItem item : response.getSchemas()) {
+                result.add(TableSchema.create(item.getSchemaId(), item.getSchema()));
+            }
+            return result;
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
     }
 
     @Override

@@ -31,6 +31,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaFilter;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -877,6 +879,53 @@ public interface Catalog extends AutoCloseable {
      */
     default void rollbackSchema(Identifier identifier, long schemaId)
             throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    // ==================== Schema management methods ==========================
+
+    /**
+     * Whether this catalog supports schema management for tables. If not, {@link
+     * #listSchemas(Identifier, SchemaFilter)} will throw an {@link UnsupportedOperationException}.
+     *
+     * <p>This is orthogonal to {@link #supportsVersionManagement()}: version management covers
+     * snapshot / tag / branch APIs, while schema management covers reading historical {@link
+     * TableSchema}s of a table. A catalog may reasonably support one without the other. Write-side
+     * operations on schemas ({@link #createTable(Identifier, Schema, boolean)}, {@link
+     * #alterTable(Identifier, List, boolean)} and {@link #rollbackSchema(Identifier, long)}) are
+     * already exposed by the corresponding methods on this interface.
+     */
+    default boolean supportsSchemaManagement() {
+        return false;
+    }
+
+    /**
+     * List schemas of a table, filtered by the given {@link SchemaFilter}.
+     *
+     * <p>All schema read patterns (latest / earliest / by id / by range / all) share this single
+     * method; callers select the desired subset by populating {@link SchemaFilter}. Implementations
+     * must interpret the filter fields consistently:
+     *
+     * <ul>
+     *   <li>{@link SchemaFilter#isLatest()} returns at most one schema, the latest one.
+     *   <li>{@link SchemaFilter#isEarliest()} returns at most one schema, the earliest one.
+     *   <li>{@link SchemaFilter#schemaId()} returns at most one schema with the given id.
+     *   <li>{@link SchemaFilter#maxSchemaId()} / {@link SchemaFilter#minSchemaId()} restrict the
+     *       returned range (inclusive).
+     *   <li>{@link SchemaFilter#all()} returns every schema.
+     * </ul>
+     *
+     * <p>The returned list is not required to be sorted; callers that need a specific order should
+     * sort by {@link TableSchema#id()} themselves.
+     *
+     * @param identifier path of the table
+     * @param filter which schemas to return, must not be {@code null}
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsSchemaManagement()}
+     */
+    default List<TableSchema> listSchemas(Identifier identifier, SchemaFilter filter)
+            throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 
