@@ -694,6 +694,60 @@ together, and keep writers paused until the call returns.
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
 
+## Capture LeRobot frames directly into Paimon
+
+`PaimonLeRobotWriter` implements the write-side surface used by LeRobot's
+recording loop without first creating a LeRobot Parquet/image dataset. Pass the
+same user feature mapping that would be passed to `LeRobotDataset.create`.
+The writer adds the standard `timestamp`, `frame_index`, `episode_index`,
+`index`, and `task_index` features itself.
+
+```python
+from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
+
+writer = PaimonLeRobotWriter(
+    conn,
+    "robot_data",
+    fps=30,
+    features=dataset_features,
+)
+
+# LeRobot's record_loop only needs writer.fps, writer.features, and
+# writer.add_frame(frame), so the writer can be passed as its dataset argument.
+record_loop(..., fps=30, dataset=writer)
+writer.save_episode()
+
+# Optional durability/visibility boundary before finalize.
+writer.flush()
+writer.finalize()
+```
+
+Like native LeRobot, `add_frame` requires every declared user feature plus a
+string `task`, and rejects caller-provided generated fields. Numeric features
+must be NumPy arrays (Torch tensors are converted) with the declared dtype and
+shape. Image metadata uses `(channels, height, width)`; image values may be CHW,
+HWC, or PIL. Images are encoded as PNG bytes and stored in Paimon `BLOB`
+columns; no LeRobot data directory or MP4 is created. `video` features remain
+unsupported.
+
+`save_episode` accepts the current episode and writes it to a long-lived Paimon
+batch writer. The default `episodes_per_commit=-1` keeps all completed episodes
+in that batch until `finalize()`. Set a positive threshold for periodic commits,
+or call `flush()` at an operational boundary. `save_episode`, `flush`, and
+`finalize` always return `None`. Calling `save_episode()` without any buffered
+frames raises `ValueError`, matching native LeRobot.
+
+Call `clear_episode_buffer()` before `save_episode()` to discard a re-recorded
+episode without advancing frame or episode indices. `finalize()` rejects an
+unfinished episode instead of silently dropping its frames.
+
+The writer creates a missing table and appends to an existing compatible table.
+Before writing, it requires the table columns, order, Arrow types, nullability,
+and LeRobot feature metadata to match. On resume, new `index` and
+`episode_index` values continue after the existing maxima, existing task
+mappings are retained, and the episode-local `frame_index` starts again at zero.
+A commit exception has an unknown result and is not automatically retried.
+
 ## Overwrite
 
 `overwrite` accepts the same input formats as `add` and replaces existing data
