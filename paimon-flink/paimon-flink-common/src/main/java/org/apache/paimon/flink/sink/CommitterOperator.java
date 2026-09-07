@@ -47,7 +47,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         implements OneInputStreamOperator<CommitT, CommitT>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
-    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
+    static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     /** Record all the inputs until commit. */
     private final Deque<CommitT> inputs = new ArrayDeque<>();
@@ -85,7 +85,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
 
     private transient long currentWatermark;
 
-    private transient boolean endInput;
+    private transient boolean completeEndInput;
 
     private transient String commitUser;
 
@@ -123,7 +123,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                 "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;
-        this.endInput = false;
+        this.completeEndInput = false;
         // each job can only have one user name and this name must be consistent across restarts
         // we cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint
@@ -149,7 +149,14 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                                 .getSpillingDirectoriesPaths());
         committer = committerFactory.create(committerContext);
 
-        committableStateManager.initializeState(committerContext, committer);
+        List<GlobalCommitT> pendingEndInputCommittables =
+                committableStateManager.initializeState(committerContext, committer);
+        for (GlobalCommitT committable : pendingEndInputCommittables) {
+            Preconditions.checkState(
+                    !committablesPerCheckpoint.containsKey(END_INPUT_CHECKPOINT_ID),
+                    "State manager returned multiple pending end-input committables.");
+            committablesPerCheckpoint.put(END_INPUT_CHECKPOINT_ID, committable);
+        }
     }
 
     @Override
@@ -170,7 +177,8 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         super.snapshotState(context);
         pollInputs();
         committer.snapshotState();
-        committableStateManager.snapshotState(committables(committablesPerCheckpoint));
+        committableStateManager.snapshotState(
+                committables(committablesPerCheckpoint), completeEndInput);
     }
 
     private List<GlobalCommitT> committables(NavigableMap<Long, GlobalCommitT> map) {
@@ -179,23 +187,24 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
 
     @Override
     public void endInput() throws Exception {
-        endInput = true;
         if (endInputWatermark != null) {
             currentWatermark = endInputWatermark;
         }
+
+        pollInputs();
+        completeEndInput = true;
 
         if (streamingCheckpointEnabled) {
             return;
         }
 
-        pollInputs();
         commitUpToCheckpoint(END_INPUT_CHECKPOINT_ID);
     }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         super.notifyCheckpointComplete(checkpointId);
-        commitUpToCheckpoint(endInput ? END_INPUT_CHECKPOINT_ID : checkpointId);
+        commitUpToCheckpoint(completeEndInput ? END_INPUT_CHECKPOINT_ID : checkpointId);
     }
 
     private void commitUpToCheckpoint(long checkpointId) throws Exception {

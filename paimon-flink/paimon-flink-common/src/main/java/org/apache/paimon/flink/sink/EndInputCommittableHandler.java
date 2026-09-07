@@ -19,21 +19,16 @@
 package org.apache.paimon.flink.sink;
 
 import java.io.Serializable;
-import java.util.List;
 
-/**
- * Helper interface for {@link CommitterOperator}. This interface manages operator states about
- * {@link org.apache.paimon.manifest.ManifestCommittable}.
- */
-public interface CommittableStateManager<GlobalCommitT> extends Serializable {
+/** Operations required to keep incomplete end-input committables pending during recovery. */
+public interface EndInputCommittableHandler<GlobalCommitT> extends Serializable {
+
+    /** Returns whether the committable belongs to end input. */
+    boolean isEndInput(GlobalCommitT committable);
 
     /**
-     * Initializes the state and returns restored committables which must remain pending in the
-     * operator.
+     * Merges two restored end-input committables without rebuilding them or refreshing watermark
+     * metadata.
      */
-    List<GlobalCommitT> initializeState(
-            Committer.Context context, Committer<?, GlobalCommitT> committer) throws Exception;
-
-    /** Snapshots pending committables together with the complete end-input state. */
-    void snapshotState(List<GlobalCommitT> committables, boolean completeEndInput) throws Exception;
+    GlobalCommitT merge(GlobalCommitT target, GlobalCommitT source);
 }
