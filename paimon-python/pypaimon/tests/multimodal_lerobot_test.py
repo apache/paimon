@@ -36,12 +36,14 @@ import pypaimon.multimodal as pmm
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.multimodal.source_utils import _SourceFileIO
+from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
     _companion_identifier,
     _load_dataset_metadata,
     _managed_table_options,
+    _metadata_table,
     _restore_pandas_metadata,
     _subtask_indices,
     _validated_episode_tables,
@@ -95,7 +97,158 @@ def _catalog_arrow(connection, name):
     return table, builder.new_read().to_arrow(plan.splits())
 
 
+def _catalog_metadata(connection, name):
+    return {
+        row["key"]: json.loads(row["value"])
+        for row in _catalog_rows(connection, name)
+    }
+
+
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_metadata_json_preserves_nested_values(self):
+        values = {
+            "name": "机器人",
+            "count": 2 ** 64,
+            "custom": {"labels": ["pick", None], "enabled": True},
+        }
+        table = _metadata_table(values)
+        self.assertEqual(pa.schema([("key", pa.string()), ("value", pa.string())]),
+                         table.schema)
+        self.assertEqual(values, {
+            row["key"]: json.loads(row["value"])
+            for row in table.to_pylist()
+        })
+
+    def test_invalid_training_tag_fails_before_catalog_access(self):
+        for tag_name in (None, 1, "", " ", "a/b", "a\\b", "a\x00b"):
+            with self.subTest(tag_name=tag_name):
+                connection = Mock()
+                with self.assertRaisesRegex(ValueError, "tag_name"):
+                    MultimodalConnection.create_lerobot_tag(
+                        connection, "robot", tag_name)
+                self.assertEqual([], connection.mock_calls)
+
+    def test_import_validates_tag_before_source_access(self):
+        connection = Mock()
+        with patch("pypaimon.multimodal.lerobot.api._resolved_source",
+                   side_effect=RuntimeError("source accessed")) as resolve:
+            for tag_name in (1, "", " ", "a/b", "a\\b", "a\x00b"):
+                with self.subTest(tag_name=tag_name):
+                    with self.assertRaisesRegex(ValueError, "tag_name"):
+                        load_from_lerobot(connection, "robot", "source",
+                                          tag_name=tag_name)
+            resolve.assert_not_called()
+            self.assertEqual([], connection.mock_calls)
+            with self.assertRaisesRegex(RuntimeError, "source accessed"):
+                load_from_lerobot(connection, "robot", "source", tag_name=None)
+            resolve.assert_called_once()
+
+    @patch("pypaimon.multimodal.lerobot.api._import_lerobot_dataset",
+           return_value=Mock())
+    def test_training_tag_uses_current_component_snapshots(self, _):
+        import pandas as pd
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            (source / "meta" / "episodes").mkdir(parents=True)
+            (source / "data").mkdir()
+            info = {
+                "codebase_version": "v3.0",
+                "total_frames": 1,
+                "total_episodes": 1,
+                "total_tasks": 1,
+                "fps": 30,
+                "data_path": "data/file.parquet",
+                "features": {
+                    name: {"dtype": dtype, "shape": [1]}
+                    for name, dtype in (
+                        ("index", "int64"), ("episode_index", "int64"),
+                        ("frame_index", "int64"), ("task_index", "int64"),
+                        ("timestamp", "float32"),
+                    )
+                },
+                "custom": {"labels": ["pick", None], "enabled": True},
+            }
+            (source / "meta" / "info.json").write_text(json.dumps(info))
+            stats = {"timestamp": {"min": [0.0], "max": [0.0]}}
+            (source / "meta" / "stats.json").write_text(json.dumps(stats))
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {"task_index": [0]}, index=pd.Index(["pick"], name="task"),
+            )), source / "meta" / "tasks.parquet")
+            pq.write_table(pa.table({
+                "episode_index": [0], "dataset_from_index": [0],
+                "dataset_to_index": [1], "tasks": [["pick"]], "length": [1],
+                "data/chunk_index": [0], "data/file_index": [0],
+            }), source / "meta" / "episodes" / "file.parquet")
+            frames = pa.table({
+                "index": [0], "episode_index": [0], "frame_index": [0],
+                "task_index": [0], "timestamp": pa.array([0], pa.float32()),
+            })
+            pq.write_table(frames, source / "data" / "file.parquet")
+            connection = pmm.connect(options={"warehouse": str(root / "wh")})
+            remote = "oss://source-bucket/robot"
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                    return_value=_RemoteLeRobotFileIO(source, remote)):
+                self.assertIsNone(connection.load_from_lerobot("robot", remote))
+
+            self.assertEqual(info, _catalog_metadata(connection, "robot__info"))
+            self.assertEqual(stats, _catalog_metadata(connection, "robot__stats"))
+            table = connection.get_table("robot")
+            self.assertEqual([], table.raw_table.tag_manager().list_tags())
+            table.add(frames)
+            snapshots = connection.create_lerobot_tag("robot", "training")
+            self.assertEqual({
+                "frames": 2, "info": 1, "stats": 1, "episodes": 1, "tasks": 1,
+            }, snapshots)
+            table.add(frames)
+            self.assertEqual(2, table.scan(tag_name="training").to_arrow().num_rows)
+            self.assertEqual(3, table.scan().to_arrow().num_rows)
+            for component, snapshot_id in snapshots.items():
+                name = "robot" if component == "frames" else "robot__" + component
+                self.assertEqual(snapshot_id, connection.catalog.get_tag(
+                    connection._identifier(name), "training").snapshot.id)
+
+            with patch.object(connection.catalog, "create_tag") as create_tag:
+                with self.assertRaisesRegex(ValueError, "already points"):
+                    connection.create_lerobot_tag("robot", "training")
+            create_tag.assert_not_called()
+
+            create_tag = connection.catalog.create_tag
+            attempts = []
+
+            def fail_second_component(*args, **kwargs):
+                attempts.append(args[0])
+                if len(attempts) == 2:
+                    raise RuntimeError("tag failed")
+                return create_tag(*args, **kwargs)
+
+            with patch.object(connection.catalog, "create_tag",
+                              side_effect=fail_second_component):
+                with self.assertRaisesRegex(RuntimeError, "tag failed"):
+                    connection.create_lerobot_tag("robot", "retry")
+            self.assertFalse(table.raw_table.tag_manager().tag_exists("retry"))
+            self.assertEqual(3, connection.create_lerobot_tag(
+                "robot", "retry")["frames"])
+            self.assertEqual(3, table.scan(tag_name="retry").to_arrow().num_rows)
+
+            connection.catalog.drop_table(connection._identifier("robot__tasks"))
+            with patch.object(connection.catalog, "create_tag") as create_tag:
+                with self.assertRaises(TableNotExistException):
+                    connection.create_lerobot_tag("robot", "incomplete")
+            create_tag.assert_not_called()
+
+            (source / "meta" / "stats.json").unlink()
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                    return_value=_RemoteLeRobotFileIO(source, remote)):
+                connection.load_from_lerobot("no_stats", remote, tag_name="ready")
+            with self.assertRaises(TableNotExistException):
+                connection.get_table("no_stats__stats")
+            self.assertEqual({"frames": 1, "info": 1, "episodes": 1, "tasks": 1},
+                             connection.create_lerobot_tag("no_stats", "training"))
 
     def test_self_contained_import_rejects_table_branches(self):
         with self.assertRaisesRegex(ValueError, "does not support"):
@@ -691,13 +844,16 @@ class LeRobotValidationTest(unittest.TestCase):
                 b"\xff",
                 metadata["tasks_table"].column("native_bytes")[0].as_py(),
             )
-            stored_stats = json.loads(metadata["stats_json"])
+            stored_stats = {
+                row["key"]: json.loads(row["value"])
+                for row in metadata["stats_table"].to_pylist()
+            }
             self.assertTrue(np.isnan(stored_stats["mean"]))
             self.assertTrue(np.isinf(stored_stats["max"]))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_invalid_fps_creates_no_snapshot_or_manifest(self):
+    def test_invalid_fps_creates_no_table(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_fps_"))
         try:
             source = temp_dir / "source"
@@ -952,10 +1108,10 @@ class LeRobotImportTest(unittest.TestCase):
     def test_import_infers_schema_and_preserves_episodes(self):
         import pandas as pd
 
-        version_id = self.connection.load_from_lerobot(
+        result = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
-        self.assertEqual(1, version_id)
+        self.assertIsNone(result)
 
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
@@ -970,8 +1126,6 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual("BIGINT NOT NULL", types["episode_index"])
         self.assertEqual("BLOB NOT NULL", types["observation.image"])
         self.assertNotIn("dataset_id", types)
-        self.assertNotIn("metadata_version", types)
-        self.assertNotIn("version_id", types)
         self.assertNotIn("task", types)
 
         rows = table.scan().select([
@@ -995,31 +1149,21 @@ class LeRobotImportTest(unittest.TestCase):
                          rows[4]["observation.matrix"])
         self.assertAlmostEqual(0.2, rows[4]["timestamp"], places=6)
         self.assertEqual(1.0, rows[4]["reward"])
-        manifests = _catalog_rows(self.connection, "robot_data__versions")
-        self.assertEqual(1, len(manifests))
-        manifest = manifests[0]
-        self.assertEqual(version_id, manifest["version_id"])
-        self.assertEqual("v3.0", json.loads(
-            manifest["info_json"])["codebase_version"])
-        self.assertIsNotNone(manifest["stats_json"])
         self.assertEqual(
-            {"version_id", "info_json", "stats_json", "has_subtasks"},
-            set(manifest))
-        self.assertFalse(manifest["has_subtasks"])
-        tag = str(manifest["version_id"])
-        self.assertEqual(
-            1,
-            self.connection.catalog.get_tag(
-                table.identifier, tag).snapshot.id,
+            json.loads((self.image_source / "meta" / "info.json").read_text()),
+            _catalog_metadata(self.connection, "robot_data__info"),
         )
-        for name, expected_snapshot in (
-                ("robot_data__episodes", 1),
-                ("robot_data__tasks", 1)):
-            self.assertEqual(
-                expected_snapshot,
-                self.connection.catalog.get_tag(
-                    self.connection._identifier(name), tag).snapshot.id,
-            )
+        self.assertEqual(
+            json.loads((self.image_source / "meta" / "stats.json").read_text()),
+            _catalog_metadata(self.connection, "robot_data__stats"),
+        )
+        for name in ("robot_data__info", "robot_data__stats"):
+            fields = self.connection.catalog.get_table(
+                self.connection._identifier(name)).fields
+            self.assertEqual({"key": "STRING", "value": "STRING"}, {
+                field.name: str(field.type) for field in fields
+            })
+        self.assertEqual([], table.raw_table.tag_manager().list_tags())
 
         episodes = _catalog_rows(self.connection, "robot_data__episodes")
         episode_fields = {
@@ -1027,7 +1171,6 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection._identifier(
                     "robot_data__episodes")).fields
         }
-        self.assertNotIn("version_id", episode_fields)
         source_episode_schema = pq.read_schema(next(
             (self.image_source / "meta" / "episodes").rglob("*.parquet")))
         self.assertTrue(_target_schema(
@@ -1049,7 +1192,6 @@ class LeRobotImportTest(unittest.TestCase):
             field.name for field in self.connection.catalog.get_table(
                 self.connection._identifier("robot_data__tasks")).fields
         }
-        self.assertNotIn("version_id", task_fields)
         self.assertTrue(_target_schema(
             self.connection.catalog.get_table(self.connection._identifier(
                 "robot_data__tasks"))
@@ -1163,8 +1305,8 @@ class LeRobotImportTest(unittest.TestCase):
         ))
         pq.write_table(subtasks, source / "meta" / "subtasks.parquet")
 
-        version_id = self.connection.load_from_lerobot(
-            "with_subtasks", source)
+        result = self.connection.load_from_lerobot(
+            "with_subtasks", source, tag_name="training")
 
         frames = self.connection.get_table("with_subtasks")
         self.assertNotIn("subtask", [
@@ -1188,13 +1330,12 @@ class LeRobotImportTest(unittest.TestCase):
             _restore_pandas_metadata(
                 subtasks_table, subtasks_arrow).to_pandas(),
         )
-        self.assertTrue(_catalog_rows(
-            self.connection, "with_subtasks__versions")[0]["has_subtasks"])
+        self.assertIsNone(result)
         self.assertEqual(
             1,
             self.connection.catalog.get_tag(
                 self.connection._identifier("with_subtasks__subtasks"),
-                str(version_id),
+                "training",
             ).snapshot.id,
         )
 
@@ -1209,8 +1350,9 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertEqual([
             "robot",
             "robot__episodes",
+            "robot__info",
+            "robot__stats",
             "robot__tasks",
-            "robot__versions",
         ], sorted(table_names))
 
     def test_import_reuses_validated_episode_metadata(self):
@@ -1271,7 +1413,7 @@ class LeRobotImportTest(unittest.TestCase):
                     self.connection.load_from_lerobot(table_name, source)
                 self.connection.get_table(table_name)
                 self.assertEqual([], _catalog_rows(
-                    self.connection, table_name + "__versions"))
+                    self.connection, table_name + "__info"))
 
     def test_task_text_remains_in_published_task_mapping(self):
         source = self.temp_dir / "reordered_tasks"
@@ -1320,7 +1462,7 @@ class LeRobotImportTest(unittest.TestCase):
                 "extra_episode_task", source)
         self.connection.get_table("extra_episode_task")
         self.assertEqual([], _catalog_rows(
-            self.connection, "extra_episode_task__versions"))
+            self.connection, "extra_episode_task__info"))
 
     def test_nonempty_dataset_cannot_publish_without_tasks(self):
         source = self.temp_dir / "missing_tasks"
@@ -1347,7 +1489,7 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.load_from_lerobot("missing_tasks", source)
         self.connection.get_table("missing_tasks")
         self.assertEqual([], _catalog_rows(
-            self.connection, "missing_tasks__versions"))
+            self.connection, "missing_tasks__info"))
 
     def test_oss_source_streams_parquet_and_preserves_episodes(self):
         source = "oss://source-bucket/robot-images"
@@ -1356,13 +1498,13 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot.source._SourceFileIO",
                 return_value=source_file_io):
-            version_id = self.connection.load_from_lerobot(
+            result = self.connection.load_from_lerobot(
                 "oss_images",
                 source,
                 batch_size=2,
             )
 
-        self.assertEqual(1, version_id)
+        self.assertIsNone(result)
         table = self.connection.get_table("oss_images")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task_index"
@@ -1433,14 +1575,12 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog,
                 "create_tag",
                 side_effect=NotImplementedError):
-            version_id = self.connection.load_from_lerobot(
-                "tag_fallback", self.image_source)
+            result = self.connection.load_from_lerobot(
+                "tag_fallback", self.image_source, tag_name="training")
 
-        manifest = _catalog_rows(
-            self.connection, "tag_fallback__versions")[0]
-        tag = str(manifest["version_id"])
+        tag = "training"
         table = self.connection.get_table("tag_fallback")
-        self.assertEqual(1, version_id)
+        self.assertIsNone(result)
         self.assertEqual(
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
             table.raw_table.tag_manager().get(tag).id,
@@ -1461,27 +1601,27 @@ class LeRobotImportTest(unittest.TestCase):
                 self.connection.catalog,
                 "create_tag",
                 side_effect=create_then_lose_response):
-            version_id = self.connection.load_from_lerobot(
-                "tag_response_loss", self.image_source)
+            result = self.connection.load_from_lerobot(
+                "tag_response_loss", self.image_source, tag_name="training")
 
         self.assertTrue(lost[0])
-        self.assertEqual(1, version_id)
-        self.assertEqual(
-            [1],
-            [row["version_id"] for row in _catalog_rows(
-                self.connection, "tag_response_loss__versions")])
+        self.assertIsNone(result)
+        self.assertEqual(1, self.connection.catalog.get_tag(
+            self.connection._identifier("tag_response_loss"),
+            "training").snapshot.id)
 
-    def test_tag_failure_remains_unpublished(self):
+    def test_tag_failure_leaves_imported_data(self):
         with patch(
                 "pypaimon.multimodal.lerobot.metadata._create_tag",
                 side_effect=RuntimeError("tag failed")):
             with self.assertRaisesRegex(RuntimeError, "tag failed"):
                 self.connection.load_from_lerobot(
-                    "failed_publish", self.image_source)
+                    "failed_publish", self.image_source, tag_name="training")
 
-        self.connection.get_table("failed_publish")
-        self.assertEqual([], _catalog_rows(
-            self.connection, "failed_publish__versions"))
+        self.assertEqual(5, self.connection.get_table(
+            "failed_publish").scan().to_arrow().num_rows)
+        self.assertEqual("v3.0", _catalog_metadata(
+            self.connection, "failed_publish__info")["codebase_version"])
 
     def test_existing_companion_is_rejected(self):
         self.connection.load_from_lerobot(
@@ -1508,9 +1648,9 @@ class LeRobotImportTest(unittest.TestCase):
             self.connection.catalog.get_table(
                 self.connection._identifier("invalid_options"))
 
-        version_id = self.connection.load_from_lerobot(
+        result = self.connection.load_from_lerobot(
             "invalid_options", self.image_source)
-        self.assertEqual(1, version_id)
+        self.assertIsNone(result)
 
     def test_target_open_failure_leaves_created_table(self):
         original_get = self.connection.get_table
@@ -1544,14 +1684,12 @@ class LeRobotImportTest(unittest.TestCase):
                     api,
                     "_open_resolved_dataset",
                     side_effect=open_with_failing_close):
-                version_id = self.connection.load_from_lerobot(
+                result = self.connection.load_from_lerobot(
                     "close_failure", self.image_source)
 
-        self.assertEqual(1, version_id)
-        self.assertEqual(
-            [1],
-            [row["version_id"] for row in _catalog_rows(
-                self.connection, "close_failure__versions")])
+        self.assertIsNone(result)
+        self.assertEqual("v3.0", _catalog_metadata(
+            self.connection, "close_failure__info")["codebase_version"])
 
     def test_source_close_failure_does_not_override_success(self):
         source = "oss://source-bucket/robot-images"
@@ -1563,14 +1701,12 @@ class LeRobotImportTest(unittest.TestCase):
             with patch(
                     "pypaimon.multimodal.lerobot.source._SourceFileIO",
                     return_value=source_file_io):
-                version_id = self.connection.load_from_lerobot(
+                result = self.connection.load_from_lerobot(
                     "source_close_failure", source)
 
-        self.assertEqual(1, version_id)
-        self.assertEqual(
-            [1],
-            [row["version_id"] for row in _catalog_rows(
-                self.connection, "source_close_failure__versions")])
+        self.assertIsNone(result)
+        self.assertEqual("v3.0", _catalog_metadata(
+            self.connection, "source_close_failure__info")["codebase_version"])
 
     def test_existing_target_is_rejected(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
@@ -1613,16 +1749,16 @@ class LeRobotImportTest(unittest.TestCase):
                             "concurrent", self.image_source)
                 finally:
                     release.set()
-                version_id = future.result(timeout=30)
+                result = future.result(timeout=30)
 
-        self.assertEqual(1, version_id)
+        self.assertIsNone(result)
         self.assertEqual(
             5,
             self.connection.get_table(
                 "concurrent").scan().to_arrow().num_rows,
         )
 
-    def test_concurrent_append_cannot_enter_published_version(self):
+    def test_concurrent_append_rejects_initial_import(self):
         from pypaimon.multimodal.lerobot import api
 
         original_write = api._write_dataset
@@ -1660,7 +1796,7 @@ class LeRobotImportTest(unittest.TestCase):
 
         self.connection.get_table("concurrent_append")
         self.assertEqual([], _catalog_rows(
-            self.connection, "concurrent_append__versions"))
+            self.connection, "concurrent_append__info"))
 
 
 if __name__ == "__main__":

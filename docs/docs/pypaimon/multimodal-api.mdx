@@ -616,32 +616,39 @@ orphan files for normal Paimon cleanup.
 ## Load LeRobot Dataset v3
 
 `load_from_lerobot` imports a local directory, FileIO URI, or Hugging Face
-repository. It derives the schema from `meta/info.json`, writes one row per
-frame, and creates a LeRobot dataset backed by the frame table,
-`<table>__versions`, `<table>__episodes`, `<table>__tasks`, and an optional
-`<table>__subtasks`. Task text remains in the metadata table; frames retain
-`task_index`. After all components are committed and tagged with the same
-numeric `version_id`, one row is appended to `<table>__versions` to publish the
-version.
+repository. It derives the schema from `meta/info.json` and writes one row per
+frame. The import creates `<table>__episodes`, `<table>__tasks`, `<table>__info`,
+and optional `<table>__stats` and `<table>__subtasks` companion tables. Task text
+remains in the task table; frames retain `task_index`.
+
+Info and stats use `key STRING, value STRING`: each top-level info property or
+stats feature becomes one row. Each value is JSON-encoded, preserving nested
+objects, arrays, nulls, and scalar types. Decode it with `json.loads`; for example,
+`fps` stores `30`, while `codebase_version` stores `"v3.0"` (including quotes).
+Statistics may contain `NaN` and `Infinity`, supported by Python's JSON decoder.
+Missing or empty stats create no stats table. The frame table's
+`pypaimon.lerobot.<component>-table` options identify the components created.
 
 ```shell
 pip install 'pypaimon[lerobot]'
 ```
 
 ```python
-version_id = conn.load_from_lerobot(
+conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
+    tag_name="initial-import",  # Optional: tag all imported component snapshots.
 )
-print(version_id)
 ```
 
-The returned `version_id` is the common tag name for all dataset components.
+The call returns `None` on success. Omitting `tag_name` imports the tables
+without creating tags. The one-time importer requires a new target table and
+a non-empty source dataset; subsequent table edits use the normal Paimon APIs.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
-version_id = conn.load_from_lerobot(
+conn.load_from_lerobot(
     "robot_data",
     "oss://source-bucket/lerobot_dataset",
     source_options={
@@ -652,11 +659,37 @@ version_id = conn.load_from_lerobot(
 )
 ```
 
-A row in `<table>__versions` identifies a published release. Readers must first
-resolve that row, then read every required component through its matching tag;
-a missing tag is an error and must not fall back to the latest snapshot.
-The component tags are immutable and must be retained or deleted together.
-The one-time importer requires a new target table.
+Before training, finish any related data/metadata updates and pause writes to
+this table group. Create a common named tag over the current component snapshots:
+
+```python
+tag = "train-2026-09-07"
+snapshots = conn.create_lerobot_tag("robot_data", tag)
+frames = conn.get_table("robot_data").scan(tag_name=tag).to_arrow()
+
+# Companion tables are ordinary Paimon tables, read with the same tag.
+info_table = conn.catalog.get_table("default.robot_data__info").copy(
+    {"scan.tag-name": tag})
+builder = info_table.new_read_builder()
+info_rows = builder.new_read().to_arrow(builder.new_scan().plan().splits())
+
+import json
+info = {
+    row["key"]: json.loads(row["value"])
+    for row in info_rows.to_pylist()
+}
+```
+
+`create_lerobot_tag` returns component names mapped to snapshot IDs; these IDs
+may differ across tables. Later appends do not change tagged reads. Read every
+required component (including training statistics) through the same tag, and
+never fall back to latest if a tag is missing.
+
+Cross-table tagging is not atomic. Use a tag only after the creation call
+succeeds. A failure may leave partial tags; retry with writes still paused and
+unchanged snapshots, or choose a new name after repairing the group. Existing
+tags are never moved to different snapshots. Retain or delete component tags
+together, and keep writers paused until the call returns.
 
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
