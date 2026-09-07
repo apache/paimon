@@ -204,5 +204,13 @@ All data types supported by Paimon are as follows:
           <code>Note: Requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. See <a href="../multimodal-table/blob">Blob Type</a> for details.</code>
       </td>
     </tr>
+    <tr>
+      <td><code>VECTOR&lt;t, n&gt;</code></td>
+      <td><code>Data type of a fixed-length dense vector.</code><br><br>
+          <code>Paimon supports defining columns of type VECTOR&lt;t, n&gt;, where t is the element type and n is the vector dimension. t must be one of BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE. n must have a value between 1 and 2,147,483,647 (both inclusive). If a vector value is not null, its elements cannot be null.</code><br><br>
+          <code>A VECTOR column cannot be used as a primary key column, a partition column, or for sorting.</code><br><br>
+          <code>Note: Dedicated vector file storage requires 'vector.file.format', 'row-tracking.enabled' and 'data-evolution.enabled'. See <a href="../multimodal-table/vector">Vector Storage</a> for details.</code>
+      </td>
+    </tr>
     </tbody>
 </table>
