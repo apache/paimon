@@ -460,6 +460,59 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testVideoFrameFieldValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.BLOB()),
+                        new DataField(2, "other_video", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+
+        TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video,other_video");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("video-frame-field")
+                .hasMessageContaining("blob-descriptor-field");
+    }
+
+    @Test
+    public void testVideoFrameRejectsNestedAndPrimaryKeyFields() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.ARRAY(DataTypes.BLOB())));
+        TableSchema nested =
+                new TableSchema(1, nestedFields, 10, emptyList(), emptyList(), options, "");
+        assertThatThrownBy(() -> validateTableSchema(nested))
+                .hasMessageContaining("must be a scalar BLOB field");
+
+        options.put(BUCKET.key(), "1");
+        List<DataField> scalarFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.BLOB()));
+        TableSchema primaryKey =
+                new TableSchema(1, scalarFields, 10, emptyList(), singletonList("id"), options, "");
+        assertThatThrownBy(() -> validateTableSchema(primaryKey))
+                .hasMessageContaining("only supports append-only tables");
+    }
+
+    @Test
     public void testPrimaryKeyInlineBlobDoesNotTriggerManagedRestrictions() {
         // Partial-update supports scalar blob-descriptor-field, managed blob-field, and
         // blob-view-field on primary-key tables.
@@ -767,6 +820,35 @@ class SchemaValidationTest {
                                                 emptyList())))
                 .hasMessage(
                         "Primary-key managed BLOB tables do not support 'pk-clustering-override'.");
+    }
+
+    @Test
+    public void testQueryAuthOnlyOnFileStoreTables() {
+        for (String type : Arrays.asList("format-table", "object-table")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
+            options.put(CoreOptions.TYPE.key(), type);
+            assertThatThrownBy(() -> validateTableSchema(queryAuthSchema(options)))
+                    .hasMessageContaining(CoreOptions.QUERY_AUTH_ENABLED.key());
+        }
+
+        for (String type : Arrays.asList("table", "materialized-table")) {
+            Map<String, String> options = new HashMap<>();
+            options.put(CoreOptions.QUERY_AUTH_ENABLED.key(), "true");
+            options.put(CoreOptions.TYPE.key(), type);
+            validateTableSchema(queryAuthSchema(options));
+        }
+    }
+
+    private TableSchema queryAuthSchema(Map<String, String> options) {
+        return new TableSchema(
+                1,
+                singletonList(new DataField(0, "id", DataTypes.INT())),
+                10,
+                emptyList(),
+                emptyList(),
+                options,
+                "");
     }
 
     private TableSchema primaryKeyBlobSchema(
@@ -1358,6 +1440,32 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining("primary-key");
+    }
+
+    @Test
+    void testNestedFieldDataEvolutionRequiresDataEvolution() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "nest",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(2, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(3, "b", DataTypes.STRING()))));
+        TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key())
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_ENABLED.key());
+
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
     }
 
     @Test

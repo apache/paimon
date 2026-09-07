@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
@@ -30,11 +31,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -43,6 +46,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -194,6 +198,274 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 3L, 4L, 5L);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsConjunctionFusesCoarseCandidatesBeforeOneExactPass() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(new DataField(0, "text", DataTypes.STRING())));
+        AtomicInteger coarseCalls = new AtomicInteger();
+        AtomicInteger exactCalls = new AtomicInteger();
+        List<Object> coarseLiterals = new ArrayList<>();
+        List<Object> exactLiterals = new ArrayList<>();
+        RoaringNavigableMap64[] exactCandidates = new RoaringNavigableMap64[1];
+        ContainsRefiningGlobalIndexReader reader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        coarseCalls.incrementAndGet();
+                        coarseLiterals.addAll(literals);
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2, 3)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        exactCalls.incrementAndGet();
+                        exactLiterals.addAll(literals);
+                        exactCandidates[0] = candidates.results();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+                            FieldRef fieldRef, Object literal) {
+                        throw new AssertionError(
+                                "The fused path must not run independent exact scans.");
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.singletonList(reader));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.contains(0, BinaryString.fromString("first")),
+                        builder.contains(0, BinaryString.fromString("second")));
+
+        Optional<GlobalIndexResult> result = evaluator.evaluate(predicate);
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 2L);
+        assertThat(coarseCalls).hasValue(1);
+        assertThat(exactCalls).hasValue(1);
+        assertThat(coarseLiterals)
+                .containsExactly(
+                        BinaryString.fromString("first"), BinaryString.fromString("second"));
+        assertThat(exactLiterals)
+                .containsExactly(
+                        BinaryString.fromString("first"), BinaryString.fromString("second"));
+        assertBitmapContainsExactly(exactCandidates[0], 2L, 3L);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsRefinementDoesNotDeadlockWithSingleExecutorPermit() throws Exception {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "text", DataTypes.STRING()),
+                                new DataField(1, "number", DataTypes.INT())));
+        executor = Executors.newSingleThreadExecutor();
+        ExecutorService limitedExecutor = new SemaphoredDelegatingExecutor(executor, 1, false);
+        ContainsRefiningGlobalIndexReader reader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return CompletableFuture.supplyAsync(
+                                () -> Optional.of(resultOf(1, 2)), limitedExecutor);
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return CompletableFuture.supplyAsync(
+                                () -> Optional.of(resultOf(1)), limitedExecutor);
+                    }
+                };
+        GlobalIndexReader siblingReader =
+                new StubGlobalIndexReader(null) {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+                            FieldRef fieldRef, Object literal) {
+                        return CompletableFuture.supplyAsync(
+                                () -> Optional.of(resultOf(1, 2)), limitedExecutor);
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(fieldId == 0 ? reader : siblingReader));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.contains(0, BinaryString.fromString("first")),
+                        builder.contains(0, BinaryString.fromString("second")),
+                        builder.equal(1, 42));
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluateAsync(predicate).get(10, TimeUnit.SECONDS);
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 1L);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsRefinementSurvivesUnionAndOffsetWrappers() {
+        RoaringNavigableMap64[] localCandidates = new RoaringNavigableMap64[1];
+        ContainsRefiningGlobalIndexReader delegate =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        localCandidates[0] = candidates.results();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1)));
+                    }
+                };
+        ContainsRefiningGlobalIndexReader wrapped =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(new OffsetGlobalIndexReader(delegate, 10L, 19L)));
+        FieldRef fieldRef = new FieldRef(0, "text", DataTypes.STRING());
+
+        Optional<GlobalIndexResult> coarse =
+                wrapped.visitContainsCandidates(
+                                fieldRef,
+                                Collections.singletonList(BinaryString.fromString("first")),
+                                resultOf(11, 13, 99))
+                        .join();
+        Optional<GlobalIndexResult> exact =
+                wrapped.visitContainsConjunction(
+                                fieldRef,
+                                Collections.singletonList(BinaryString.fromString("first")),
+                                resultOf(11, 13, 99))
+                        .join();
+
+        assertThat(coarse).isPresent();
+        assertBitmapContainsExactly(coarse.get().results(), 11L, 13L);
+        assertBitmapContainsExactly(localCandidates[0], 1L, 3L);
+        assertThat(exact).isPresent();
+        assertBitmapContainsExactly(exact.get().results(), 11L);
+    }
+
+    @Test
+    void testContainsCoarseUsesExactSiblingCandidates() {
+        RowType rowType = rowType();
+        AtomicInteger coarseCalls = new AtomicInteger();
+        AtomicInteger exactCalls = new AtomicInteger();
+        RoaringNavigableMap64[] coarseCandidates = new RoaringNavigableMap64[1];
+        ContainsRefiningGlobalIndexReader containsReader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        coarseCalls.incrementAndGet();
+                        coarseCandidates[0] = candidates.results();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2, 3)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        exactCalls.incrementAndGet();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2)));
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? containsReader
+                                                : readerReturning(resultOf(2, 3, 4))));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluate(
+                        PredicateBuilder.and(
+                                builder.contains(0, BinaryString.fromString("needle")),
+                                builder.equal(1, 42)));
+
+        assertThat(result).isPresent();
+        assertBitmapContainsExactly(result.get().results(), 2L);
+        assertBitmapContainsExactly(coarseCandidates[0], 2L, 3L, 4L);
+        assertThat(coarseCalls).hasValue(1);
+        assertThat(exactCalls).hasValue(1);
+        evaluator.close();
+    }
+
+    @Test
+    void testContainsCoarseIsSkippedWhenExactSiblingIsEmpty() {
+        RowType rowType = rowType();
+        AtomicInteger coarseCalls = new AtomicInteger();
+        AtomicInteger exactCalls = new AtomicInteger();
+        ContainsRefiningGlobalIndexReader containsReader =
+                new StubContainsRefiningGlobalIndexReader() {
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        coarseCalls.incrementAndGet();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+                            FieldRef fieldRef,
+                            List<Object> literals,
+                            GlobalIndexResult candidates) {
+                        exactCalls.incrementAndGet();
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1)));
+                    }
+                };
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId ->
+                                Collections.singletonList(
+                                        fieldId == 0
+                                                ? containsReader
+                                                : readerReturning(resultOf())));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Optional<GlobalIndexResult> result =
+                evaluator.evaluate(
+                        PredicateBuilder.and(
+                                builder.contains(0, BinaryString.fromString("needle")),
+                                builder.equal(1, 42)));
+
+        assertThat(result).isPresent();
+        assertThat(result.get().results()).isEmpty();
+        assertThat(coarseCalls).hasValue(0);
+        assertThat(exactCalls).hasValue(0);
         evaluator.close();
     }
 
@@ -1188,5 +1460,13 @@ class GlobalIndexEvaluatorTest {
 
         @Override
         public void close() throws IOException {}
+    }
+
+    private abstract static class StubContainsRefiningGlobalIndexReader
+            extends StubGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
+
+        private StubContainsRefiningGlobalIndexReader() {
+            super(null);
+        }
     }
 }

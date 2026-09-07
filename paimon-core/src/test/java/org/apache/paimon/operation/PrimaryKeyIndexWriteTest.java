@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -222,7 +223,7 @@ class PrimaryKeyIndexWriteTest {
     private TableSchema createSchema(Map<String, String> options, RowType rowType)
             throws Exception {
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         return schemaManager.createTable(
                 new Schema(
                         rowType.getFields(),

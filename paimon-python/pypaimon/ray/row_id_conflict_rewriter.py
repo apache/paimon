@@ -236,6 +236,7 @@ def _rewrite_updates(
     candidates = [
         item for item in staged
         if _is_rewrite_candidate(
+            table,
             item,
             current_exact_ranges,
             latest_snapshot.next_row_id,
@@ -265,7 +266,8 @@ def _rewrite_updates(
     rewritten_messages = []
     groups: Dict[Tuple[str, ...], List[_StagedFile]] = {}
     for candidate in candidates:
-        groups.setdefault(tuple(candidate.file.write_cols), []).append(
+        groups.setdefault(tuple(_partial_file_write_cols(
+            table, candidate.file)), []).append(
             candidate
         )
     for columns, files in groups.items():
@@ -398,22 +400,35 @@ def _find_row_id_conflict(error) -> Optional[RowIdExistenceConflict]:
 
 
 def _is_rewrite_candidate(
+        table,
         item: _StagedFile,
         current_exact_ranges,
         next_row_id: int,
 ) -> bool:
     file = item.file
+    write_cols = _partial_file_write_cols(table, file)
     return (
         _is_normal_row_id_file(file)
         and file.first_row_id < next_row_id
-        and bool(file.write_cols)
+        and bool(write_cols)
         and not any(
             SpecialFields.is_system_field(name)
-            for name in file.write_cols
+            for name in write_cols
         )
         and _range_key(item.message.partition, item.message.bucket, file)
         not in current_exact_ranges
     )
+
+
+def _partial_file_write_cols(table, file: DataFileMeta):
+    schema = (
+        table.table_schema
+        if file.schema_id == table.table_schema.id
+        else table.schema_manager.get_schema(file.schema_id)
+    )
+    if schema is None:
+        raise RuntimeError(f"Schema {file.schema_id} not found")
+    return schema.partial_file_write_cols(file.write_cols)
 
 
 def _ranges_are_still_covered(current_files, candidates) -> bool:

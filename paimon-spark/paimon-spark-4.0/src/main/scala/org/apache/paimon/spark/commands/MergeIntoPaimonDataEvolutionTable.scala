@@ -27,9 +27,10 @@ import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
+import org.apache.paimon.options.Options
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
-import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -45,8 +46,9 @@ import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
+import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, CreateNamedStruct, EqualTo, Expression, ExprId, GetStructField, If, IsNull, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -61,6 +63,7 @@ import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import scala.util.control.NonFatal
 
 /** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
@@ -150,30 +153,128 @@ case class MergeIntoPaimonDataEvolutionTable(
    *
    * without any extra shuffle, join, or sort.
    */
-  private lazy val isSelfMergeOnRowId: Boolean = {
-    if (!isPaimonTable(sourceTable)) {
-      false
-    } else if (
-      !originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
-    ) {
-      false
+  private case class SelfMergeSpec(residualCondition: Option[Expression])
+
+  private def passthroughSourceRelation(plan: LogicalPlan): Option[DataSourceV2Relation] = {
+    EliminateSubqueryAliases(plan) match {
+      case relation: DataSourceV2Relation if isPaimonRelationWithoutTimeTravel(relation) =>
+        Some(relation)
+      case Project(projectList, child) if isPassthroughProject(projectList, child) =>
+        passthroughSourceRelation(child)
+      case _ =>
+        None
+    }
+  }
+
+  private def isPaimonRelationWithoutTimeTravel(relation: DataSourceV2Relation): Boolean =
+    relation.table match {
+      case sparkTable: SparkTable =>
+        !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(sparkTable.getTable.options()))
+      case _ => false
+    }
+
+  private def isPassthroughProject(projectList: Seq[Expression], child: LogicalPlan): Boolean = {
+    val childAttributes = child.output ++ child.metadataOutput
+
+    def isChildAttribute(attr: AttributeReference): Boolean =
+      childAttributes.exists(_.exprId == attr.exprId)
+
+    projectList.forall {
+      case attr: AttributeReference => isChildAttribute(attr)
+      case alias: Alias =>
+        alias.child match {
+          case attr: AttributeReference =>
+            resolver(alias.name, attr.name) && isChildAttribute(attr)
+          case _ => false
+        }
+      case _ => false
+    }
+  }
+
+  private lazy val sameSourceAndTargetTable: Boolean =
+    passthroughSourceRelation(sourceTable)
+      .exists(sourceRelation => originalTargetRelation.name.equals(sourceRelation.name))
+
+  private def isTargetRowId(attr: AttributeReference): Boolean = {
+    attr.name == ROW_ID_NAME && (originalTargetRelation.output ++
+      originalTargetRelation.metadataOutput).exists(_.exprId == attr.exprId)
+  }
+
+  private def isSourceRowId(attr: AttributeReference): Boolean = {
+    attr.name == ROW_ID_NAME && (sourceTable.output ++ sourceTable.metadataOutput)
+      .exists(_.exprId == attr.exprId)
+  }
+
+  private def isRowIdEquality(expression: Expression): Boolean = expression match {
+    case EqualTo(left: AttributeReference, right: AttributeReference) =>
+      (isTargetRowId(left) && isSourceRowId(right)) ||
+      (isSourceRowId(left) && isTargetRowId(right))
+    case _ => false
+  }
+
+  private lazy val isExactSelfMergeOnRowId: Boolean =
+    sameSourceAndTargetTable && isRowIdEquality(matchedCondition)
+
+  private lazy val selfMergeSpec: Option[SelfMergeSpec] = {
+    if (!sameSourceAndTargetTable) {
+      None
     } else {
-      matchedCondition match {
-        case EqualTo(left: AttributeReference, right: AttributeReference)
-            if left.name == ROW_ID_NAME && right.name == ROW_ID_NAME =>
-          true
-        case _ => false
+      val conjuncts = splitConjunctivePredicates(matchedCondition)
+      val rowIdEqualities = conjuncts.filter(isRowIdEquality)
+      val residualConditions = conjuncts.filterNot(isRowIdEquality)
+      val partitionRowType = table.schema().logicalPartitionType()
+      val targetOnlyResidualConditions = residualConditions.filter {
+        condition => canEvaluate(condition, targetTable) && canEvaluateWithinJoin(condition)
+      }
+      val allResidualConditionsArePartitionPredicates =
+        extractMergePartitionFilters(targetOnlyResidualConditions, partitionRowType).size ==
+          residualConditions.size && residualConditions.forall(canConvertToPaimonPredicate)
+
+      if (rowIdEqualities.size != 1 || !allResidualConditionsArePartitionPredicates) {
+        None
+      } else {
+        Some(SelfMergeSpec(residualConditions.reduceOption(And)))
       }
     }
   }
 
+  private lazy val useSelfMergeShortcut: Boolean =
+    selfMergeSpec.isDefined && notMatchedActions.isEmpty && notMatchedBySourceActions.isEmpty
+
   assert(
-    !(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
+    !(isExactSelfMergeOnRowId &&
+      (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
     "Self-Merge on _ROW_ID only supports WHEN MATCHED actions. WHEN NOT MATCHED and " +
       "WHEN NOT MATCHED BY SOURCE are not supported."
   )
 
   private lazy val targetRelation: DataSourceV2Relation = matchedUpdateScanTarget._2
+
+  private lazy val sourceToTargetAttributes: Map[ExprId, AttributeReference] = {
+    val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
+    val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
+    sourceAttrs.flatMap {
+      source =>
+        targetAttrs.find(target => resolver(target.name, source.name)).map(source.exprId -> _)
+    }.toMap
+  }
+
+  private def rewriteSourceToTarget(expression: Expression): Expression = {
+    expression.transform {
+      case attr: AttributeReference if sourceToTargetAttributes.contains(attr.exprId) =>
+        sourceToTargetAttributes(attr.exprId)
+    }
+  }
+
+  private def rewriteToTargetOnly(expression: Expression): Option[Expression] = {
+    val rewritten = rewriteSourceToTarget(expression)
+    val targetExprIds = targetRelation.output.map(_.exprId).toSet
+    if (rewritten.references.forall(attr => targetExprIds.contains(attr.exprId))) {
+      Some(rewritten)
+    } else {
+      None
+    }
+  }
 
   lazy val tableSchema: StructType = targetSparkTable.schema
 
@@ -190,7 +291,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     if (readSnapshot != null) {
       snapshotReader.withSnapshot(readSnapshot)
     }
-    pushDownMergePartitionFilter(snapshotReader)
+    pushDownMergeFilters(snapshotReader)
     val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
@@ -305,10 +406,17 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
-  private def pushDownMergePartitionFilter(snapshotReader: SnapshotReader): Unit = {
+  private def pushDownMergeFilters(snapshotReader: SnapshotReader): Unit = {
+    val predicates = Seq(mergePartitionPredicate, selfMergeActionPredicate).flatten
+    if (predicates.nonEmpty) {
+      snapshotReader.withFilter(PredicateBuilder.and(predicates: _*))
+    }
+  }
+
+  private def mergePartitionPredicate: Option[Predicate] = {
     val partitionRowType = table.schema().logicalPartitionType()
     if (partitionRowType.getFieldCount == 0) {
-      return
+      return None
     }
 
     // matchedCondition comes from MergeIntoTable.mergeCondition, which is the MERGE ON condition.
@@ -318,12 +426,42 @@ case class MergeIntoPaimonDataEvolutionTable(
       .getOrElse(Seq.empty)
 
     if (partitionPredicates.nonEmpty) {
-      val filter = convertConditionToPaimonPredicate(
+      convertConditionToPaimonPredicate(
         partitionPredicates.reduce(And),
         targetRelation.output,
         rowType,
         ignorePartialFailure = true)
-      filter.foreach(snapshotReader.withFilter)
+    } else {
+      None
+    }
+  }
+
+  private def selfMergeActionPredicate: Option[Predicate] = {
+    if (
+      !useSelfMergeShortcut ||
+      !table.coreOptions().dataEvolutionMergeIntoFilePruning() ||
+      matchedActions.isEmpty ||
+      matchedActions.exists(_.condition.isEmpty)
+    ) {
+      return None
+    }
+
+    val actionCondition = matchedActions.flatMap(_.condition).reduce(Or)
+    if (!actionCondition.deterministic) {
+      return None
+    }
+
+    rewriteToTargetOnly(actionCondition).flatMap {
+      targetOnlyCondition =>
+        try {
+          convertConditionToPaimonPredicate(
+            targetOnlyCondition,
+            targetRelation.output,
+            rowType,
+            ignorePartialFailure = false)
+        } catch {
+          case NonFatal(_) => None
+        }
     }
   }
 
@@ -340,6 +478,18 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
   }
 
+  private def canConvertToPaimonPredicate(expression: Expression): Boolean = {
+    try {
+      convertConditionToPaimonPredicate(
+        expression,
+        targetRelation.output,
+        rowType,
+        ignorePartialFailure = false).isDefined
+    } catch {
+      case NonFatal(_) => false
+    }
+  }
+
   private def targetRelatedSplits(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
@@ -347,8 +497,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
     // Self-Merge shortcut:
-    // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
-    if (isSelfMergeOnRowId) {
+    // Snapshot-level merge filters have already removed unrelated splits. MergeRows preserves
+    // rows in the remaining splits which do not satisfy any matched action condition.
+    if (useSelfMergeShortcut) {
       return tableSplits
     }
 
@@ -473,7 +624,77 @@ case class MergeIntoPaimonDataEvolutionTable(
       AttributeReference(MERGE_DELETED_NAME, BooleanType, nullable = false)()
     // Row metadata, _FIRST_ROW_ID added by addFirstRowId, and the delete marker.
     val fixedMergeOutputColumnCount = metadataColumns.size + 2
-    val mergeOutput = (updateColumnsSorted ++ metadataColumns ++ rawBlobMarkerAttributes) :+
+
+    // Sub-field-level pruning: for a struct column whose SET only touches some sub-fields, only the
+    // changed leaves are written (an incremental column-group file containing the partial struct);
+    // the rest are copied from the target. Falls back to whole-column write when the changed leaves
+    // cannot be safely determined, so behaviour never regresses.
+    val matchedUpdateActions = matchedActions.collect { case ua: UpdateAction => ua }
+    // Gated by data-evolution.nested-field.enabled (default off): when disabled, no column is
+    // pruned, so every struct column is rewritten whole (behaviour identical to before this
+    // feature). When enabled, struct columns whose SET only touches some sub-fields are pruned.
+    val nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled()
+    val prunedByExprId: Map[ExprId, (Seq[Seq[String]], StructType)] =
+      if (!nestedFieldEnabled) Map.empty
+      else
+        updateColumnsSorted.flatMap {
+          attr =>
+            if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
+              None
+            } else {
+              attr.dataType match {
+                case st: StructType =>
+                  val perAction = matchedUpdateActions.flatMap {
+                    ua =>
+                      ua.assignments
+                        .find(
+                          a => isModifiedAssignment(a) && assignmentKeyAttribute(a).sameRef(attr))
+                        .map(a => changedLeaves(a.value, st, attr))
+                  }
+                  if (perAction.isEmpty || perAction.exists(_.isEmpty)) {
+                    None
+                  } else {
+                    val actionOrderedUnion = perAction.flatten.flatten.map(_._1).distinct
+                    // The reader composes a split struct only one level deep, so only prune when
+                    // every change addresses a direct sub-field of the top-level struct (depth 1).
+                    // A deeper change (e.g. nest.inner.x) would split an inner struct across files,
+                    // which the read path does not support, so fall back to a whole-column write.
+                    // Prune only when the changed direct sub-fields are a strict subset of all of
+                    // them (otherwise the whole column is rewritten anyway).
+                    val allDepthOne = actionOrderedUnion.forall(_.size == 1)
+                    if (
+                      actionOrderedUnion.isEmpty || !allDepthOne ||
+                      actionOrderedUnion.size >= st.fields.length
+                    ) {
+                      None
+                    } else {
+                      // actionOrderedUnion reflects the order the SET clauses were written in,
+                      // which need not match st's field declaration order. buildPrunedStruct /
+                      // prunedStructType always lay the physical output struct out in st's
+                      // declaration order (they use the path set only as a filter, not an
+                      // ordering), so canonicalize here once and reuse this exact order for
+                      // writePaths below - otherwise the persisted writeType/writeCols order can
+                      // disagree with the physical column order and a reader would decode values
+                      // under the wrong field names.
+                      val fieldOrder = st.fieldNames.zipWithIndex.toMap
+                      val union = actionOrderedUnion.sortBy(p => fieldOrder(p.head))
+                      Some(attr.exprId -> (union, prunedStructType(st, union)))
+                    }
+                  }
+                case _ => None
+              }
+            }
+        }.toMap
+
+    val prunedUpdateColumns = updateColumnsSorted.map {
+      attr =>
+        prunedByExprId.get(attr.exprId) match {
+          case Some((_, prunedType)) =>
+            AttributeReference(attr.name, prunedType, attr.nullable)()
+          case None => attr
+        }
+    }
+    val mergeOutput = (prunedUpdateColumns ++ metadataColumns ++ rawBlobMarkerAttributes) :+
       deletedAttribute
 
     val targetMatchedActions = matchedActions.map {
@@ -520,7 +741,32 @@ case class MergeIntoPaimonDataEvolutionTable(
           ) {
             Literal(null, attr.dataType)
           } else {
-            assignmentValue(action, attr)
+            prunedByExprId.get(attr.exprId) match {
+              case Some((paths, prunedType)) =>
+                val st = attr.dataType.asInstanceOf[StructType]
+                val actionMap =
+                  changedLeaves(assignmentValue(action, attr), st, attr)
+                    .getOrElse(Seq.empty)
+                    .toMap
+                val built = buildPrunedStruct(
+                  st,
+                  Nil,
+                  paths,
+                  p => actionMap.getOrElse(p, passthroughExpr(attr, st, p)))
+                if (actionMap.isEmpty) {
+                  // This action's assignment doesn't touch any leaf of this column (e.g. a
+                  // different WHEN MATCHED clause set it, or the rebuild was a no-op), so this is
+                  // a pure passthrough of attr - same guard as copyOutput below, a NULL source
+                  // struct must stay NULL rather than becoming a non-null struct of null leaves.
+                  If(IsNull(attr), Literal(null, prunedType), built)
+                } else {
+                  // At least one leaf was explicitly set by this action: the struct must
+                  // materialize even if attr was NULL (e.g. `SET nest.a = 5` on a previously NULL
+                  // nest), or the explicit assignment would be silently discarded.
+                  built
+                }
+              case None => assignmentValue(action, attr)
+            }
           }
       }
       val metadata = metadataColumns.map(attr => assignmentValue(action, attr))
@@ -542,7 +788,14 @@ case class MergeIntoPaimonDataEvolutionTable(
           if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
             Literal(null, attr.dataType)
           } else {
-            attr
+            prunedByExprId.get(attr.exprId) match {
+              case Some((paths, prunedType)) =>
+                val st = attr.dataType.asInstanceOf[StructType]
+                val built = buildPrunedStruct(st, Nil, paths, p => passthroughExpr(attr, st, p))
+                // Same NULL guard as updateOutput: a copied-through NULL struct must stay NULL.
+                If(IsNull(attr), Literal(null, prunedType), built)
+              case None => attr
+            }
           }
       }
       val deletedLiteral = if (deleted) TrueLiteral else FalseLiteral
@@ -583,7 +836,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     def matchedActionInstructions(actions: Seq[MergeAction]): Seq[MergeRows.Instruction] =
       actions.map(matchedActionInstruction) ++ keepCopyInstructions
 
-    val targetActionOutput: Dataset[Row] = if (isSelfMergeOnRowId) {
+    val targetActionOutput: Dataset[Row] = if (useSelfMergeShortcut) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.
@@ -602,38 +855,25 @@ case class MergeIntoPaimonDataEvolutionTable(
         targetAttrsDedup.filter(a => neededNames.exists(n => resolver(n, a.name)))
       val readPlan = touchedFileTargetRelation.copy(output = allReadFieldsOnTarget)
 
-      // Build mapping: source exprId -> target attr (matched by column name).
-      val sourceToTarget = {
-        val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
-        val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
-        sourceAttrs.flatMap {
-          s => targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
-        }.toMap
-      }
-
-      def rewriteSourceToTarget(
-          expr: Expression,
-          m: Map[ExprId, AttributeReference]): Expression = {
-        expr.transform {
-          case a: AttributeReference if m.contains(a.exprId) => m(a.exprId)
-        }
-      }
-
       val rewrittenMatchedActions: Seq[MergeAction] = targetMatchedActions.map {
         case action: UpdateAction =>
-          val newCond = action.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
-          val newAssignments = action.assignments.map {
-            a => Assignment(a.key, rewriteSourceToTarget(a.value, sourceToTarget))
-          }
+          val newCond = action.condition.map(rewriteSourceToTarget)
+          val newAssignments =
+            action.assignments.map(a => Assignment(a.key, rewriteSourceToTarget(a.value)))
           action.copy(condition = newCond, assignments = newAssignments)
         case DeleteAction(condition) =>
-          DeleteAction(condition.map(c => rewriteSourceToTarget(c, sourceToTarget)))
+          DeleteAction(condition.map(rewriteSourceToTarget))
         case other =>
           throw new UnsupportedOperationException(s"Unsupported matched action: $other.")
       }
 
+      // The shortcut removes the source scan and join. A target row has a matching source only
+      // when the residual ON condition holds.
+      val sourceRowPresentCondition =
+        selfMergeSpec.flatMap(_.residualCondition).getOrElse(TrueLiteral)
+
       val mergeRows = MergeRows(
-        isSourceRowPresent = TrueLiteral,
+        isSourceRowPresent = sourceRowPresentCondition,
         isTargetRowPresent = TrueLiteral,
         matchedInstructions = matchedActionInstructions(rewrittenMatchedActions),
         notMatchedInstructions = Nil,
@@ -690,6 +930,18 @@ case class MergeIntoPaimonDataEvolutionTable(
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
+    // dotted write paths: a whole column -> its name; a pruned struct -> "col.subfield..." leaves
+    val writePaths = updateColumnsSorted.flatMap {
+      attr =>
+        prunedByExprId.get(attr.exprId) match {
+          case Some((paths, _)) => paths.map(p => (attr.name +: p).mkString("."))
+          case None => Seq(attr.name)
+        }
+    }
+    val writeType =
+      if (nestedFieldEnabled) table.rowType().projectByPaths(writePaths.asJava)
+      else table.rowType().project(writePaths.asJava)
+
     val writePartialFields = updateColumnsSorted.nonEmpty
     val shouldPersistOutput = writePartialFields && hasMatchedDeleteActions
     val output: Dataset[Row] =
@@ -702,7 +954,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           val dataEvolutionWriter = DataEvolutionPaimonWriter(table, dataSplits)
           val partialCommit = dataEvolutionWriter.writePartialFields(
             reorderPartialWriteColumns(output),
-            updateColumnsSorted.map(_.name),
+            writeType,
             rawBlobUpdateColumns
               .map(attr => attr.name -> rawBlobMarkerNamesByColumn(attr.name))
               .toMap
@@ -1115,6 +1367,135 @@ object MergeIntoPaimonDataEvolutionTable {
 
   private def quotedColumn(name: String) = {
     col("`" + name.replace("`", "``") + "`")
+  }
+
+  /**
+   * For an aligned UPDATE value of a struct column, return the changed leaf paths (relative to the
+   * column) paired with their new value expression, or `None` if the value is not a recognizable
+   * named-struct rebuild (in which case the whole column must be written).
+   */
+  private[commands] def changedLeaves(
+      value: Expression,
+      structType: StructType,
+      base: Expression): Option[Seq[(Seq[String], Expression)]] = {
+    val out = mutable.LinkedHashMap.empty[Seq[String], Expression]
+    if (collectChanges(value, structType, base, Nil, out)) Some(out.toSeq) else None
+  }
+
+  private def collectChanges(
+      value: Expression,
+      structType: StructType,
+      base: Expression,
+      prefix: Seq[String],
+      out: mutable.LinkedHashMap[Seq[String], Expression]): Boolean = {
+    value match {
+      case cns: CreateNamedStruct =>
+        val pairs = cns.children.grouped(2).toSeq
+        if (pairs.exists(_.size != 2)) {
+          return false
+        }
+        var ok = true
+        pairs.foreach {
+          pair =>
+            val nameExpr = pair.head
+            val v = pair(1)
+            nameExpr match {
+              case Literal(nameVal, _) if nameVal != null =>
+                val name = nameVal.toString
+                val ordinalOpt = {
+                  val i = structType.fieldNames.indexOf(name)
+                  if (i >= 0) Some(i) else None
+                }
+                ordinalOpt match {
+                  case Some(ordinal) =>
+                    val fieldType = structType(ordinal).dataType
+                    val passthrough = GetStructField(base, ordinal, Some(name))
+                    if (!v.semanticEquals(passthrough)) {
+                      (fieldType, v) match {
+                        case (st: StructType, inner: CreateNamedStruct) =>
+                          ok = collectChanges(
+                            inner,
+                            st,
+                            GetStructField(base, ordinal, Some(name)),
+                            prefix :+ name,
+                            out) && ok
+                        case _ =>
+                          out.put(prefix :+ name, v)
+                      }
+                    }
+                  case None => ok = false
+                }
+              case _ => ok = false
+            }
+        }
+        ok
+      case _ => false
+    }
+  }
+
+  /** Build a Spark StructType containing only the given (possibly nested) leaf paths. */
+  private[commands] def prunedStructType(
+      structType: StructType,
+      paths: Seq[Seq[String]]): StructType = {
+    val byHead = paths.filter(_.nonEmpty).groupBy(_.head)
+    val fields = structType.fields.filter(f => byHead.contains(f.name)).map {
+      f =>
+        val sub = byHead(f.name)
+        if (sub.exists(_.size == 1)) {
+          f
+        } else {
+          f.copy(dataType = prunedStructType(f.dataType.asInstanceOf[StructType], sub.map(_.tail)))
+        }
+    }
+    StructType(fields)
+  }
+
+  /** Build a named_struct over the given leaf paths; each terminal leaf value comes from valueFn. */
+  private[commands] def buildPrunedStruct(
+      structType: StructType,
+      prefix: Seq[String],
+      paths: Seq[Seq[String]],
+      valueFn: Seq[String] => Expression): CreateNamedStruct = {
+    val byHead = paths.filter(_.nonEmpty).groupBy(_.head)
+    val args = structType.fields.flatMap {
+      f =>
+        byHead.get(f.name) match {
+          case None => Seq.empty[Expression]
+          case Some(sub) =>
+            val fieldPath = prefix :+ f.name
+            val expr =
+              if (sub.exists(_.size == 1)) {
+                valueFn(fieldPath)
+              } else {
+                buildPrunedStruct(
+                  f.dataType.asInstanceOf[StructType],
+                  fieldPath,
+                  sub.map(_.tail),
+                  valueFn)
+              }
+            Seq(Literal(f.name): Expression, expr)
+        }
+    }
+    CreateNamedStruct(args.toSeq)
+  }
+
+  /** Read a (possibly nested) leaf from a base expression via GetStructField chain. */
+  private[commands] def passthroughExpr(
+      base: Expression,
+      structType: StructType,
+      path: Seq[String]): Expression = {
+    if (path.isEmpty) {
+      base
+    } else {
+      val head = path.head
+      val ordinal = structType.fieldIndex(head)
+      val child = GetStructField(base, ordinal, Some(head))
+      if (path.tail.isEmpty) {
+        child
+      } else {
+        passthroughExpr(child, structType(ordinal).dataType.asInstanceOf[StructType], path.tail)
+      }
+    }
   }
 
   private def sameAttributeReference(left: Expression, right: Expression): Boolean = {

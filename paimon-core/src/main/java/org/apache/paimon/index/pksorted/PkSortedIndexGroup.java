@@ -30,7 +30,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-/** The single payload which indexes one complete data level. */
+/**
+ * One validated payload which indexes an immutable source group at one data level.
+ * Snapshot-specific active coverage is validated by {@link PkSortedBucketIndexState}.
+ */
 public final class PkSortedIndexGroup {
 
     private final int dataLevel;

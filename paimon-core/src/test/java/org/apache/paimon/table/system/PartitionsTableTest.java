@@ -29,8 +29,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -76,7 +76,7 @@ public class PartitionsTableTest extends TableTestBase {
                         .option("bucket", "1")
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), schema);
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
         Identifier filesTableId =

@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -55,7 +56,7 @@ public class PostponeFixedBucketChannelComputerTest {
                         new String[] {"pt", "k", "v"});
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         TableSchema schema =
                 schemaManager.createTable(
                         new Schema(
@@ -96,7 +97,7 @@ public class PostponeFixedBucketChannelComputerTest {
                         new String[] {"k", "v"});
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         TableSchema schema =
                 schemaManager.createTable(
                         new Schema(
@@ -138,7 +139,7 @@ public class PostponeFixedBucketChannelComputerTest {
                         new String[] {"k", "v"});
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         TableSchema schema =
                 schemaManager.createTable(
                         new Schema(
@@ -175,7 +176,7 @@ public class PostponeFixedBucketChannelComputerTest {
                         new String[] {"pt", "k"});
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "-2");
         options.put("postpone.batch-write-fixed-bucket.max-parallelism", "2");

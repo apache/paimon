@@ -25,6 +25,7 @@ import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -138,7 +139,7 @@ public class CdcRecordStoreWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -199,7 +200,7 @@ public class CdcRecordStoreWriteOperatorTest {
         actual = runner.poll(1);
         assertThat(actual).isNull();
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v1", DataTypes.BIGINT()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
@@ -401,7 +402,7 @@ public class CdcRecordStoreWriteOperatorTest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }

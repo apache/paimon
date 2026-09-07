@@ -31,14 +31,17 @@ import scala.collection.JavaConverters._
 class ObjectTableScanBuilder(val table: ObjectTable) extends PaimonBaseScanBuilder {
 
   override def build(): ObjectTableScan =
-    ObjectTableScan(table, requiredSchema)
+    ObjectTableScan(table, requiredSchema, pushedDataFilters)
 }
 
 /** Scan implementation for [[ObjectTable]] */
-case class ObjectTableScan(table: ObjectTable, requiredSchema: StructType) extends BaseScan {
+case class ObjectTableScan(
+    table: ObjectTable,
+    requiredSchema: StructType,
+    pushedDataFilters: Seq[Predicate])
+  extends BaseScan {
 
   override val pushedPartitionFilters: Seq[PartitionPredicate] = Nil
-  override val pushedDataFilters: Seq[Predicate] = Nil
   override val pushedLimit: Option[Int] = None
 
   protected def getInputSplits: Array[Split] = {

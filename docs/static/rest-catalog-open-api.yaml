@@ -984,6 +984,9 @@ paths:
       tags:
         - partition
       summary: Create partitions
+      description: >
+        Creates partitions with optional position-aligned options. The server validates and stores
+        the partitions, options, and statistics atomically.
       operationId: createPartitions
       parameters:
         - name: prefix
@@ -1014,6 +1017,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreatePartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -1022,6 +1027,12 @@ paths:
           $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+        "501":
+          description: The catalog provider does not support partition options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
     post:
       tags:
@@ -2497,6 +2508,13 @@ components:
         replaceStatistics:
           description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces.
           type: [ boolean, "null" ]
+        partitionOptions:
+          description: Optional options aligned with partitionSpecs by position. The list must have the same length as partitionSpecs; use an empty object when a partition has no options. A custom location is stored under the path key.
+          type: [ array, "null" ]
+          items:
+            type: object
+            additionalProperties:
+              type: string
     CreatePartitionsResponse:
       type: object
       required:

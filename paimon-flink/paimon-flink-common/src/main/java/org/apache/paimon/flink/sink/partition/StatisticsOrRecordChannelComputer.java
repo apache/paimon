@@ -186,7 +186,7 @@ public class StatisticsOrRecordChannelComputer implements ChannelComputer<Statis
             if (assignment == null) {
                 int defaultSubtaskCount =
                         Math.min(numChannels, DEFAULT_SUBTASK_COUNT_FOR_UNKNOWN_PARTITION);
-                int startChannel = Math.abs(partitionKey.hashCode()) % numChannels;
+                int startChannel = ChannelComputer.startChannel(partitionKey, numChannels);
                 List<Integer> subtasks = new ArrayList<>(defaultSubtaskCount);
                 List<Long> weights = new ArrayList<>(defaultSubtaskCount);
                 for (int i = 0; i < defaultSubtaskCount; i++) {

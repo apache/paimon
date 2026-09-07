@@ -16,3 +16,4 @@
 org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory
 org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory
 org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory
+org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory

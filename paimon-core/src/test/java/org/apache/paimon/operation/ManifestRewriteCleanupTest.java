@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.CollectedDeletes;
@@ -32,6 +33,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestAvroReader;
 import org.apache.paimon.manifest.ManifestAvroWriter;
+import org.apache.paimon.manifest.ManifestAvroWriter.EncodedBlockMeta;
 import org.apache.paimon.manifest.ManifestAvroWriter.EncodedEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -39,11 +41,13 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestFileMetaTestBase;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.testutils.assertj.PaimonAssertions;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +57,8 @@ import org.mockito.AdditionalAnswers;
 import org.mockito.ArgumentMatchers;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.AbstractList;
 import java.util.ArrayList;
@@ -60,6 +66,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +80,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 /** Tests cleanup when manifest rewrites fail with {@link Error}. */
 class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
@@ -282,12 +295,121 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
                                         PARTITION_TYPE,
                                         1));
 
-        assertThat(thrown).isSameAs(primaryFailure);
+        assertThat(thrown)
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                primaryFailure.getClass(), primaryFailure.getMessage()));
         assertThat(thrown.getSuppressed())
                 .extracting(Throwable::getMessage)
                 .containsExactly("delete failure 1");
         assertThat(fileIO.deleteAttempts()).isEqualTo(1);
         assertNoManifestLeak(manifestCount);
+    }
+
+    @Test
+    void testParallelBlockRewriteQuiescesBeforeReleasingDeletes() throws Exception {
+        ManifestFileMeta first = makeManifest(makeEntry(true, "first"));
+        ManifestFileMeta slow = makeManifest(makeEntry(true, "slow"));
+        List<ManifestFileMeta> input = Arrays.asList(first, slow);
+        int manifestCount = manifestFileCount();
+
+        AssertionError writerFailure = new AssertionError("block writer failure");
+        RuntimeException planningFailure = new RuntimeException("planning failure");
+        CountDownLatch slowWorkerStarted = new CountDownLatch(1);
+        CountDownLatch slowWorkerInterrupted = new CountDownLatch(1);
+        CountDownLatch allowSlowWorkerToExit = new CountDownLatch(1);
+        AtomicBoolean slowWorkerExited = new AtomicBoolean();
+        AtomicBoolean deletesReleased = new AtomicBoolean();
+        AtomicBoolean releaseObservedWorkerExit = new AtomicBoolean();
+
+        CollectedDeletes deletes = mock(CollectedDeletes.class);
+        when(deletes.isEmpty()).thenReturn(false);
+        when(deletes.useRowIdFilter()).thenReturn(false);
+        doAnswer(
+                        invocation -> {
+                            ProjectedManifestEntry entry = invocation.getArgument(0);
+                            if ("first".equals(entry.file().fileName())) {
+                                await(slowWorkerStarted);
+                                return true;
+                            }
+                            slowWorkerStarted.countDown();
+                            try {
+                                awaitIgnoringInterrupts(
+                                        allowSlowWorkerToExit, slowWorkerInterrupted);
+                            } finally {
+                                slowWorkerExited.set(true);
+                            }
+                            throw planningFailure;
+                        })
+                .when(deletes)
+                .copyable(
+                        ArgumentMatchers.any(ProjectedManifestEntry.class),
+                        ArgumentMatchers.any(ReusableIdentifier.class),
+                        ArgumentMatchers.eq(false));
+        doAnswer(
+                        invocation -> {
+                            deletesReleased.set(true);
+                            releaseObservedWorkerExit.set(slowWorkerExited.get());
+                            return null;
+                        })
+                .when(deletes)
+                .release();
+
+        ManifestFile spyManifestFile = spy(manifestFile);
+        ManifestAvroWriter activeWriter = spy(manifestFile.createAvroWriter());
+        doReturn(activeWriter).when(spyManifestFile).createAvroWriter();
+        doAnswer(
+                        invocation -> {
+                            activeWriter.write(makeEntry(true, "partial"));
+                            throw writerFailure;
+                        })
+                .when(activeWriter)
+                .writeEncodedBlock(
+                        ArgumentMatchers.any(AvroRawBlock.class),
+                        ArgumentMatchers.any(EncodedBlockMeta.class));
+        fileIO.failDeletes();
+
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        Future<Throwable> rewriteResult =
+                caller.submit(
+                        () -> {
+                            try {
+                                return catchThrowable(
+                                        () ->
+                                                invokeBlockRewrite(
+                                                        input, spyManifestFile, deletes, 2));
+                            } finally {
+                                deletes.release();
+                            }
+                        });
+
+        try {
+            assertThat(slowWorkerStarted.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(slowWorkerInterrupted.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(slowWorkerExited).isFalse();
+            assertThat(deletesReleased).isFalse();
+            assertThat(rewriteResult.isDone()).isFalse();
+
+            allowSlowWorkerToExit.countDown();
+            Throwable thrown = rewriteResult.get(3, TimeUnit.SECONDS);
+
+            assertThat(thrown).isSameAs(writerFailure);
+            assertThat(slowWorkerExited).isTrue();
+            assertThat(deletesReleased).isTrue();
+            assertThat(releaseObservedWorkerExit).isTrue();
+            assertThat(thrown.getSuppressed())
+                    .extracting(Throwable::getMessage)
+                    .containsExactly(
+                            "Failed to plan manifest rewrite for " + slow.fileName(),
+                            "delete failure 1");
+            assertThat(thrown.getSuppressed()[0].getCause()).isSameAs(planningFailure);
+            assertThat(fileIO.deleteAttempts()).isEqualTo(1);
+            assertNoManifestLeak(manifestCount);
+        } finally {
+            allowSlowWorkerToExit.countDown();
+            caller.shutdownNow();
+            assertThat(caller.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test
@@ -388,6 +510,69 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
         assertNoManifestLeak(manifestCount);
     }
 
+    private void invokeBlockRewrite(
+            List<ManifestFileMeta> input,
+            ManifestFile rewriteManifestFile,
+            CollectedDeletes deletes,
+            int parallelism)
+            throws Exception {
+        Method rewriteManifests =
+                ManifestFileBlockMerger.class.getDeclaredMethod(
+                        "rewriteManifests",
+                        List.class,
+                        ManifestFile.class,
+                        RowType.class,
+                        CollectedDeletes.class,
+                        boolean.class,
+                        Filter.class,
+                        List.class,
+                        Integer.class);
+        rewriteManifests.setAccessible(true);
+        try {
+            rewriteManifests.invoke(
+                    null,
+                    input,
+                    rewriteManifestFile,
+                    PARTITION_TYPE,
+                    deletes,
+                    false,
+                    null,
+                    null,
+                    parallelism);
+        } catch (InvocationTargetException e) {
+            Throwable failure = e.getCause();
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            if (failure instanceof Exception) {
+                throw (Exception) failure;
+            }
+            throw new RuntimeException(failure);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(3, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for the parallel planning worker.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void awaitIgnoringInterrupts(CountDownLatch latch, CountDownLatch interrupted) {
+        while (true) {
+            try {
+                latch.await();
+                return;
+            } catch (InterruptedException e) {
+                interrupted.countDown();
+            }
+        }
+    }
+
     private ManifestEntryRunMergePlan runMergePlan(
             ManifestFileMeta input,
             CollectedDeletes deletes,
@@ -462,7 +647,7 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
         Path tablePath = new Path(tempDir.toString());
         return new ManifestFile.Factory(
                         fileIO,
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         PARTITION_TYPE,
                         avro,
                         "zstd",

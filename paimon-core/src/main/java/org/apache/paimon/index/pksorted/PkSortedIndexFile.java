@@ -46,7 +46,7 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builds source-backed sorted-index payloads for ordered physical data files. */
+/** Builds source-backed scalar-index payloads for ordered physical data files. */
 public class PkSortedIndexFile extends IndexFile {
 
     public PkSortedIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
@@ -66,7 +66,8 @@ public class PkSortedIndexFile extends IndexFile {
             sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
         }
         checkArgument(
-                sourceRowCount > 0, "A sorted index group must reference at least one source row.");
+                sourceRowCount > 0,
+                "A source-backed index group must reference at least one source row.");
 
         TrackingFileWriter fileWriter = new TrackingFileWriter();
         GlobalIndexSingleColumnWriter writer = null;
@@ -78,7 +79,7 @@ public class PkSortedIndexFile extends IndexFile {
                 Entry entry = sortedEntries.next();
                 checkArgument(
                         entry.rowId >= 0 && entry.rowId < sourceRowCount,
-                        "Row id %s is outside sorted index group row range [0, %s).",
+                        "Row id %s is outside source-backed index group row range [0, %s).",
                         entry.rowId,
                         sourceRowCount);
                 writer.write(entry.value, entry.rowId);
@@ -87,12 +88,12 @@ public class PkSortedIndexFile extends IndexFile {
             List<ResultEntry> results = writer.finish(sourceRowCount);
             checkArgument(
                     results.size() == 1,
-                    "Sorted index build must produce exactly one payload file, but produced %s.",
+                    "Source-backed index build must produce exactly one payload file, but produced %s.",
                     results.size());
             ResultEntry result = results.get(0);
             checkArgument(
                     result.rowCount() == sourceRowCount,
-                    "Sorted payload row count %s does not match source row count %s.",
+                    "Source-backed payload row count %s does not match source row count %s.",
                     result.rowCount(),
                     sourceRowCount);
             byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles).serialize();
@@ -138,7 +139,7 @@ public class PkSortedIndexFile extends IndexFile {
         return (GlobalIndexSingleColumnWriter) writer;
     }
 
-    /** One sorted normalized key and its zero-based source-row ordinal. */
+    /** One index value and its zero-based source-row ordinal. */
     public static final class Entry {
 
         @Nullable private final Object value;

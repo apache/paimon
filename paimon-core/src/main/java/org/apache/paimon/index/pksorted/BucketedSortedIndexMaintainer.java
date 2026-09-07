@@ -45,7 +45,7 @@ import java.util.concurrent.Future;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Maintains one bucket-local source-backed sorted-index definition. */
+/** Maintains one bucket-local source-backed scalar-index definition. */
 public class BucketedSortedIndexMaintainer {
 
     private static final Logger LOG = LoggerFactory.getLogger(BucketedSortedIndexMaintainer.class);
@@ -367,7 +367,7 @@ public class BucketedSortedIndexMaintainer {
         try {
             indexFile.delete(payload);
         } catch (RuntimeException e) {
-            LOG.warn("Failed to delete unpublished primary-key sorted index payload.", e);
+            LOG.warn("Failed to delete unpublished primary-key scalar index payload.", e);
         }
     }
 
@@ -531,7 +531,7 @@ public class BucketedSortedIndexMaintainer {
         IndexFileMeta build(List<DataFileMeta> sourceFiles) throws Exception;
     }
 
-    /** Sorted-index changes for append and compact snapshot routing. */
+    /** Scalar-index changes for append and compact snapshot routing. */
     public static final class SortedIndexCommit {
 
         private final Optional<SortedIndexIncrement> appendIncrement;

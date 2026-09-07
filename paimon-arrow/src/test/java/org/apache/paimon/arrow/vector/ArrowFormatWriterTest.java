@@ -34,11 +34,17 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantCastArgs;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
@@ -68,6 +74,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -365,7 +373,8 @@ public class ArrowFormatWriterTest {
     @Test
     public void testWriteVariant() {
         RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
-        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        Variant variant = new BufferOnlyVariant(expected);
         try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
             writer.write(GenericRow.of(variant));
             writer.flush();
@@ -375,8 +384,156 @@ public class ArrowFormatWriterTest {
             VarBinaryVector valueVector = (VarBinaryVector) variantVector.getChild(Variant.VALUE);
             VarBinaryVector metadataVector =
                     (VarBinaryVector) variantVector.getChild(Variant.METADATA);
-            assertThat(valueVector.getObject(0)).isEqualTo(variant.value());
-            assertThat(metadataVector.getObject(0)).isEqualTo(variant.metadata());
+            assertThat(valueVector.getObject(0)).isEqualTo(expected.value());
+            assertThat(metadataVector.getObject(0)).isEqualTo(expected.metadata());
+        }
+    }
+
+    @Test
+    public void testReadVariantUsesArrowBuffers() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant prefix = GenericVariant.fromJson("null");
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(prefix));
+            writer.write(GenericRow.of(expected));
+            writer.flush();
+
+            Iterator<InternalRow> rows =
+                    new ArrowBatchReader(rowType, true)
+                            .readBatch(writer.getVectorSchemaRoot())
+                            .iterator();
+            rows.next();
+            Variant actual = rows.next().getVariant(0);
+
+            assertThat(actual).isInstanceOf(GenericVariant.class);
+            assertThat(actual.valueBuffer().isDirect()).isTrue();
+            assertThat(actual.metadataBuffer().isDirect()).isTrue();
+            assertThat(actual.value()).isEqualTo(expected.value());
+            assertThat(actual.metadata()).isEqualTo(expected.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteColumnarInput() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant prefix = GenericVariant.fromJson("null");
+        HeapBytesVector values = new HeapBytesVector(2);
+        values.appendByteArray(prefix.value(), 0, prefix.value().length);
+        values.appendByteArray(variant.value(), 0, variant.value().length);
+        HeapBytesVector metadata = new HeapBytesVector(2);
+        metadata.appendByteArray(prefix.metadata(), 0, prefix.metadata().length);
+        metadata.appendByteArray(variant.metadata(), 0, variant.metadata().length);
+        HeapRowVector columnarVariant = new HeapRowVector(2, values, metadata);
+        columnarVariant.appendRow();
+        columnarVariant.appendRow();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(new ColumnVector[] {columnarVariant}, null, 1, 1);
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            assertThat(((VarBinaryVector) variantVector.getChild(Variant.VALUE)).getObject(0))
+                    .isEqualTo(variant.value());
+            assertThat(((VarBinaryVector) variantVector.getChild(Variant.METADATA)).getObject(0))
+                    .isEqualTo(variant.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteColumnarInputWithTwoFieldShreddingSchema() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        RowType shreddingSchemas =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0,
+                                        "v",
+                                        PaimonShreddingUtils.variantShreddingSchema(
+                                                DataTypes.VARIANT()))));
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        HeapBytesVector values = new HeapBytesVector(1);
+        values.appendByteArray(expected.value(), 0, expected.value().length);
+        HeapBytesVector metadata = new HeapBytesVector(1);
+        metadata.appendByteArray(expected.metadata(), 0, expected.metadata().length);
+        HeapRowVector columnarVariant = new HeapRowVector(1, values, metadata);
+        columnarVariant.appendRow();
+
+        try (ArrowFormatWriter writer =
+                new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
+            writer.write(new ColumnVector[] {columnarVariant}, null, 0, 1);
+            writer.flush();
+
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            Iterator<InternalRow> physicalRows =
+                    new ArrowBatchReader(shreddingSchemas, true)
+                            .readBatch(writer.getVectorSchemaRoot())
+                            .iterator();
+            Variant actual =
+                    PaimonShreddingUtils.assembleVariant(
+                            physicalRows.next().getRow(0, physicalVariantType.getFieldCount()),
+                            variantSchema);
+            assertThat(actual.toJson()).isEqualTo(expected.toJson());
+
+            assertThatThrownBy(
+                            () ->
+                                    new ArrowBatchReader(rowType, true)
+                                            .readBatch(writer.getVectorSchemaRoot()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("raw Variant Arrow layout");
+        }
+    }
+
+    private static class BufferOnlyVariant implements Variant {
+
+        private final GenericVariant delegate;
+
+        private BufferOnlyVariant(GenericVariant delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public byte[] metadata() {
+            throw new AssertionError("Arrow writer should consume metadataBuffer");
+        }
+
+        @Override
+        public ByteBuffer metadataBuffer() {
+            return delegate.metadataBuffer();
+        }
+
+        @Override
+        public byte[] value() {
+            throw new AssertionError("Arrow writer should consume valueBuffer");
+        }
+
+        @Override
+        public ByteBuffer valueBuffer() {
+            return delegate.valueBuffer();
+        }
+
+        @Override
+        public String toJson(ZoneId zoneId) {
+            return delegate.toJson(zoneId);
+        }
+
+        @Override
+        public Object variantGet(String path, DataType dataType, VariantCastArgs castArgs) {
+            return delegate.variantGet(path, dataType, castArgs);
+        }
+
+        @Override
+        public long sizeInBytes() {
+            return delegate.sizeInBytes();
+        }
+
+        @Override
+        public Variant copy() {
+            return delegate.copy();
         }
     }
 
@@ -395,17 +552,50 @@ public class ArrowFormatWriterTest {
                                         "v",
                                         PaimonShreddingUtils.variantShreddingSchema(
                                                 expectedSchema))));
-        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant mixed = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\",\"c\":3}");
+        GenericVariant fullyTyped = GenericVariant.fromJson("{\"a\":2,\"b\":\"y\"}");
 
         try (ArrowFormatWriter writer =
                 new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
-            writer.write(GenericRow.of(variant));
+            writer.write(GenericRow.of(new BufferOnlyVariant(mixed)));
+            writer.write(GenericRow.of(new BufferOnlyVariant(fullyTyped)));
             writer.flush();
 
             StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
             assertThat(variantVector.isNull(0)).isFalse();
             assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
                     .isNotNull();
+
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            ArrowBatchReader reader = new ArrowBatchReader(shreddingSchemas, true);
+            Iterator<InternalRow> rows = reader.readBatch(writer.getVectorSchemaRoot()).iterator();
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(mixed.toJson());
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(fullyTyped.toJson());
+
+            ArrowBatchReader readerWithoutShreddingSchema = new ArrowBatchReader(rowType, true);
+            assertThatThrownBy(
+                            () ->
+                                    readerWithoutShreddingSchema
+                                            .readBatch(writer.getVectorSchemaRoot())
+                                            .iterator()
+                                            .next()
+                                            .getVariant(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("shredding read plan");
         }
     }
 

@@ -79,6 +79,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
     @Override
     public void write(T row) throws IOException {
         try {
+            beforeWrite(row);
             // Open the current writer if write the first record or roll over happen before.
             if (currentWriter == null) {
                 openCurrentWriter();
@@ -87,9 +88,10 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
             currentWriter.write(row);
             recordCount += 1;
             currentFileRecordCount += 1;
+            afterWrite(row);
 
             if (rollingFile(false)) {
-                closeCurrentWriter();
+                onRollingCondition(row);
             }
         } catch (Throwable e) {
             LOG.warn(
@@ -133,6 +135,22 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         currentWriter = writerFactory.get();
     }
 
+    /** Hook for rolling policies which need to close at a record boundary before writing. */
+    protected void beforeWrite(T row) throws IOException {}
+
+    /** Hook for rolling policies which track the record most recently written. */
+    protected void afterWrite(T row) {}
+
+    /** Handles a reached size or row target. The default policy rolls immediately. */
+    protected void onRollingCondition(T row) throws IOException {
+        closeCurrentWriter();
+    }
+
+    /** Returns whether this rolling writer currently owns an open file writer. */
+    protected boolean hasCurrentWriter() {
+        return currentWriter != null;
+    }
+
     protected void closeCurrentWriter() throws IOException {
         if (currentWriter == null) {
             return;
@@ -146,7 +164,11 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         results.add(currentWriter.result());
         currentWriter = null;
         currentFileRecordCount = 0;
+        onCurrentWriterClosed();
     }
+
+    /** Hook for rolling policies to reset state tied to the file which was just closed. */
+    protected void onCurrentWriterClosed() {}
 
     @Override
     public long recordCount() {

@@ -43,9 +43,9 @@ import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketWriter;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.SpecialFields;
@@ -594,7 +594,7 @@ class PrimaryKeyManagedBlobStoreTest {
                         ? FirstRowMergeFunction.factory(Options.fromMap(options))
                         : DeduplicateMergeFunction.factory();
         TableSchema schema =
-                new SchemaManager(fileIO, tablePath)
+                new FileSystemSchemaManager(fileIO, tablePath)
                         .createTable(
                                 new Schema(
                                         valueFields,

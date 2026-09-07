@@ -99,7 +99,9 @@ Lookup will cache data on the memory and local disk, you can use the following o
 </table>
 
 Lookup changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
-changelog for the same record.
+changelog for the same record. It also supports `changelog-producer.ignore-update-before` to exclude UPDATE_BEFORE (-U)
+records and `changelog-producer.ignore-delete` to exclude DELETE (-D) records from changelog files. These options are
+useful when downstream consumers only need the latest state (e.g. upsert sinks) and do not require retraction.
 
 (Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
 important for performance).
@@ -128,7 +130,8 @@ efficient as the input changelog producer and the latency to produce changelog m
 :::
 
 Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
-changelog for the same record.
+changelog for the same record. It also supports `changelog-producer.ignore-update-before` and
+`changelog-producer.ignore-delete` to filter out -U and -D records from changelog files respectively.
 
 ## Changelog Merging
 

@@ -381,7 +381,10 @@ public final class ManifestAvroReader implements AutoCloseable {
         /** Returns an independently owned block which remains valid after this reader advances. */
         public RawBlock stableCopy() {
             return new RawBlock(
-                    decoderContext, rawBlockCopySupported, block.stableCopy(), blockOrdinal);
+                    new DecoderContext(decoderContext.decoder.copy()),
+                    rawBlockCopySupported,
+                    block.stableCopy(),
+                    blockOrdinal);
         }
     }
 

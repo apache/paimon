@@ -251,7 +251,10 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         List<DataField> physicalFields =
                 fileFieldsCache.computeIfAbsent(
                         Pair.of(file.schemaId(), file.writeCols()),
-                        key -> fileFields(schemaLoader, file));
+                        key -> {
+                            TableSchema fileSchema = schemaLoader.apply(file.schemaId());
+                            return fileFields(fileSchema, file);
+                        });
         long[] columnSequences = file.columnMaxSequenceNumbers();
         long indexedMaxSequence = Long.MIN_VALUE;
         for (int position = 0; position < physicalFields.size(); position++) {

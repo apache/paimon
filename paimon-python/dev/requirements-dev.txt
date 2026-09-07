@@ -21,6 +21,8 @@
 duckdb==1.3.2
 flake8==4.0.1
 pytest~=7.0
+# HDF5 ingestion tests run in the supported h5py wheel lanes (Python 3.8+).
+h5py>=3,<4; python_version >= "3.8"
 # merge_into needs Dataset.join (added in Ray 2.50). Python 3.8 has no 2.50 wheel.
 ray>=2.10.0; python_version < "3.9"
 ray>=2.50.0; python_version >= "3.9"

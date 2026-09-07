@@ -32,6 +32,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.datagen.DataGenerator;
 import org.apache.paimon.datagen.RandomGeneratorVisitor;
 import org.apache.paimon.datagen.RowDataGenerator;
@@ -274,6 +276,23 @@ public class InternalRowUtilsTest {
         assertThat(InternalRowUtils.equals(row, copied, rowType)).isTrue();
         assertThat(InternalRowUtils.hash(row, rowType))
                 .isEqualTo(InternalRowUtils.hash(copied, rowType));
+    }
+
+    @Test
+    public void testCopyVariantDetachesBufferStorage() {
+        RowType rowType = RowType.builder().field("v", DataTypes.VARIANT()).build();
+        GenericVariant expected = GenericVariant.fromJson("null");
+        byte[] value = expected.value().clone();
+        GenericVariant variant =
+                new GenericVariant(java.nio.ByteBuffer.wrap(value), expected.metadataBuffer());
+        GenericRow row = GenericRow.of(variant);
+
+        GenericRow copied = (GenericRow) InternalRowUtils.copyInternalRow(row, rowType);
+        Variant copiedVariant = copied.getVariant(0);
+        value[0] = GenericVariant.fromJson("true").value()[0];
+
+        assertThat(copiedVariant).isNotSameAs(variant);
+        assertThat(copiedVariant.toJson()).isEqualTo("null");
     }
 
     @Test

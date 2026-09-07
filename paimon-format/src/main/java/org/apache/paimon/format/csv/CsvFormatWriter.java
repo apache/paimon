@@ -104,7 +104,8 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
 
         // Optimized escaping with early exit checks
         boolean needsQuoting =
-                field.indexOf(csvOptions.fieldDelimiter().charAt(0)) >= 0
+                field.equals(csvOptions.nullLiteral())
+                        || field.indexOf(csvOptions.fieldDelimiter().charAt(0)) >= 0
                         || field.indexOf(csvOptions.lineDelimiter().charAt(0)) >= 0
                         || field.indexOf(quote.charAt(0)) >= 0
                         || (escapable && field.indexOf(escape.charAt(0)) >= 0);

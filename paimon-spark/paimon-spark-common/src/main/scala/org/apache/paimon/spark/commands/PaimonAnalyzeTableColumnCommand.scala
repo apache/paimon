@@ -31,7 +31,7 @@ import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{DataType, Decimal, DecimalType, TimestampType}
+import org.apache.spark.sql.types.{DataType, Decimal, DecimalType, TimestampNTZType, TimestampType}
 
 import java.util
 
@@ -162,6 +162,8 @@ case class PaimonAnalyzeTableColumnCommand(
       case _: TimestampType =>
         val l = o.asInstanceOf[Long]
         org.apache.paimon.data.Timestamp.fromSQLTimestamp(DateTimeUtils.toJavaTimestamp(l))
+      case _: TimestampNTZType =>
+        org.apache.paimon.data.Timestamp.fromMicros(o.asInstanceOf[Long])
       case _ => o
     }
   }

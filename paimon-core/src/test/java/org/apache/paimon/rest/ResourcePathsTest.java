@@ -18,9 +18,13 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.ResourceType;
+
 import org.junit.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link ResourcePaths}. */
 public class ResourcePathsTest {
@@ -38,5 +42,33 @@ public class ResourcePathsTest {
         assertEquals(
                 "/v1/paimon%2Faaaa/databases/test_db/tables/test_table%24snapshot",
                 resourcePaths.table(database, objectName));
+    }
+
+    @Test
+    public void testPermissionManagementUsesPrefix() {
+        ResourcePaths resourcePaths = new ResourcePaths("catalog/id");
+        assertEquals("/v1/catalog%2Fid/permissions", resourcePaths.permissions());
+        assertEquals("/v1/catalog%2Fid/permissions/grant", resourcePaths.grantPermission());
+        assertEquals("/v1/catalog%2Fid/permissions/revoke", resourcePaths.revokePermission());
+    }
+
+    @Test
+    public void testPoliciesAreNestedUnderAttachmentResource() {
+        ResourcePaths paths = new ResourcePaths("catalog/id");
+        PermissionResource catalog =
+                new PermissionResource(ResourceType.CATALOG, null, null, null, null);
+        PermissionResource database =
+                new PermissionResource(ResourceType.DATABASE, "sales db", null, null, null);
+        PermissionResource table =
+                new PermissionResource(ResourceType.TABLE, "sales db", "orders/all", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> paths.policies(catalog));
+        assertThrows(IllegalArgumentException.class, () -> paths.policies(database));
+        assertEquals(
+                "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies",
+                paths.policies(table));
+        assertEquals(
+                "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies/drop",
+                paths.dropPolicy(table));
     }
 }

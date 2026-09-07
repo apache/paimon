@@ -169,9 +169,13 @@ public class RequestJacksonCompatibilityTest {
                             CreatePartitionsRequest.class,
                             CreateTableRequest.class,
                             CreateViewRequest.class,
+                            DropPolicyRequest.class,
+                            GrantPermissionRequest.class,
+                            PolicyRequest.class,
                             RegisterTableRequest.class,
                             RenameTableRequest.class,
                             ReplaceTableRequest.class,
+                            RevokePermissionRequest.class,
                             RollbackTableRequest.class)
                     .collect(Collectors.toSet());
 

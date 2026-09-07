@@ -51,6 +51,22 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
     }
   }
 
+  test("Push down aggregate - metadata column") {
+    withTable("T") {
+      spark.sql(
+        """
+          |CREATE TABLE T (c1 INT, c2 STRING) TBLPROPERTIES ('bucket-key'='c1', 'bucket'='3')
+          |""".stripMargin)
+      spark.sql(
+        "INSERT INTO T VALUES (1, 'x1'), (2, 'x2'), (3, 'x3'), (4, 'x4'), (5, 'x5'), (6, 'x6')")
+
+      runAndCheckAggregate(
+        "SELECT MIN(__paimon_bucket), MAX(__paimon_bucket) FROM T",
+        Row(0, 2) :: Nil,
+        2)
+    }
+  }
+
   test("Push down aggregate - append table without partitions") {
     withTable("T") {
       spark.sql("CREATE TABLE T (c1 INT, c2 STRING, c3 DOUBLE, c4 DATE)")

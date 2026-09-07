@@ -18,7 +18,7 @@
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
@@ -40,6 +40,40 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
+_RECORD_BATCH_READER_FROM_STREAM = getattr(
+    pyarrow.ipc.RecordBatchReader, "from_stream", None)
+
+
+class _ClosableArrowBatchReader:
+
+    def __init__(self, reader, batch_iterator):
+        self._reader = reader
+        self._batch_iterator = batch_iterator
+
+    def __getattr__(self, name):
+        return getattr(self._reader, name)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self._reader.read_next_batch()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        try:
+            close = getattr(self._batch_iterator, "close", None)
+            if close is not None:
+                close()
+        finally:
+            close = getattr(self._reader, "close", None)
+            if close is not None:
+                close()
 
 
 class _RemainingRows:
@@ -152,12 +186,32 @@ class TableRead:
 
     def to_arrow_batch_reader(self, splits: List[Split],
                               blob_parallelism: Optional[int] = None) -> pyarrow.ipc.RecordBatchReader:
+        reader, _ = self._new_arrow_batch_reader(splits, blob_parallelism)
+        return reader
+
+    def _to_managed_arrow_batch_reader(
+            self,
+            splits: List[Split],
+            blob_parallelism: Optional[int] = None):
+        reader, batch_iterator = self._new_arrow_batch_reader(
+            splits, blob_parallelism)
+        if (_RECORD_BATCH_READER_FROM_STREAM is not None
+                and hasattr(reader, "close")):
+            return _RECORD_BATCH_READER_FROM_STREAM(reader)
+        return _ClosableArrowBatchReader(reader, batch_iterator)
+
+    def _new_arrow_batch_reader(
+            self,
+            splits: List[Split],
+            blob_parallelism: Optional[int] = None):
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
         batch_iterator = self._arrow_batch_generator(splits, schema, effective_bp)
-        return pyarrow.ipc.RecordBatchReader.from_batches(schema, batch_iterator)
+        reader_type = pyarrow.ipc.RecordBatchReader
+        reader = reader_type.from_batches(schema, batch_iterator)
+        return reader, batch_iterator
 
     @staticmethod
     def _add_row_kind_to_schema(schema: pyarrow.Schema) -> pyarrow.Schema:
@@ -654,12 +708,96 @@ class TableRead:
         streaming: bool = False,
         prefetch_concurrency: int = 1,
         *,
+        batch_format: str = "row",
+        batch_size: Optional[int] = None,
+        to_tensor_fn: Optional[Callable] = None,
         shuffle: bool = False,
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
     ) -> "torch.utils.data.Dataset":
-        """Wrap Paimon table data to PyTorch Dataset."""
+        """Wrap Paimon table data in a PyTorch Dataset.
+
+        Args:
+            splits: Splits to read.
+            streaming: Whether to return an iterable dataset. Non-streaming
+                eligible data-evolution reads fetch map-style batches lazily
+                by row ID.
+            prefetch_concurrency: Reader threads per DataLoader worker in row
+                format.
+            batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
+                formats require streaming.
+            batch_size: Rows per batch; ``None`` preserves reader batches.
+            to_tensor_fn: Optional RecordBatch converter for Torch batches.
+            shuffle: Whether to shuffle rows; supported only in row format.
+            auto_detect_rank: Whether streaming reads shard by DDP rank.
+            sharding_rank: Explicit rank in the intended DDP process group.
+            sharding_world_size: Explicit size of that process group.
+        """
+        valid_batch_formats = {"row", "pyarrow", "torch"}
+        if batch_format not in valid_batch_formats:
+            raise ValueError(
+                "batch_format must be one of %s, got %r"
+                % (sorted(valid_batch_formats), batch_format)
+            )
+        if (
+            auto_detect_rank
+            or sharding_rank is not None
+            or sharding_world_size is not None
+        ) and not streaming:
+            raise ValueError("distributed sharding requires streaming=True")
+        if batch_size is not None and (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise ValueError("batch_size must be a positive int or None")
+        if batch_format == "row":
+            if batch_size is not None:
+                raise ValueError(
+                    "batch_size requires batch_format='pyarrow' or 'torch'"
+                )
+            if to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+        else:
+            if not streaming:
+                raise ValueError(
+                    "batch_format=%r requires streaming=True" % batch_format
+                )
+            if shuffle:
+                raise ValueError(
+                    "shuffle=True only supports batch_format='row'"
+                )
+            if batch_format == "pyarrow" and to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+            if to_tensor_fn is not None and not callable(to_tensor_fn):
+                raise ValueError("to_tensor_fn must be callable")
+            if (
+                isinstance(prefetch_concurrency, bool)
+                or not isinstance(prefetch_concurrency, int)
+                or prefetch_concurrency != 1
+            ):
+                raise ValueError(
+                    "batch formats require prefetch_concurrency=1"
+                )
+
+            from pypaimon.read.datasource.torch_dataset import (
+                TorchBatchIterDataset,
+            )
+            return TorchBatchIterDataset(
+                self,
+                splits,
+                batch_format=batch_format,
+                batch_size=batch_size,
+                to_tensor_fn=to_tensor_fn,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+            )
+
         if shuffle:
             if not streaming:
                 raise ValueError("shuffle=True only supports streaming=True")
@@ -672,12 +810,22 @@ class TableRead:
                 seed=seed,
                 buffer_size=buffer_size,
                 max_buffer_input_splits=max_buffer_input_splits,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
             )
             return dataset
 
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
-            dataset = TorchIterDataset(self, splits, prefetch_concurrency)
+            dataset = TorchIterDataset(
+                self,
+                splits,
+                prefetch_concurrency,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+            )
             return dataset
         else:
             from pypaimon.read.datasource.torch_dataset import TorchDataset

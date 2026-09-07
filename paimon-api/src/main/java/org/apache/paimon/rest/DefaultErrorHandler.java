@@ -52,7 +52,7 @@ public class DefaultErrorHandler extends ErrorHandler {
         }
         switch (code) {
             case 400:
-                throw new BadRequestException(String.format("%s", message));
+                throw new BadRequestException("%s", message);
             case 401:
                 throw new NotAuthorizedException("Not authorized: %s", message);
             case 403:
@@ -69,7 +69,7 @@ public class DefaultErrorHandler extends ErrorHandler {
             case 500:
                 throw new ServiceFailureException("Server error: %s", message);
             case 501:
-                throw new NotImplementedException(message);
+                throw new NotImplementedException("%s", message);
             case 503:
                 throw new ServiceUnavailableException("Service unavailable: %s", message);
             default:

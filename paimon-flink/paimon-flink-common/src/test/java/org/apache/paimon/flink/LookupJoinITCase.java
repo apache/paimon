@@ -302,6 +302,36 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testAsyncLookupWithDynamicPartitionProjection(boolean primaryKey) throws Exception {
+        sql(
+                "CREATE TABLE ASYNC_DIM (i INT, j INT, dt STRING%s) "
+                        + "PARTITIONED BY (`dt`) WITH ("
+                        + "'lookup.cache' = 'memory', "
+                        + "'continuous.discovery-interval' = '1 ms')",
+                primaryKey ? ", PRIMARY KEY (dt, i, j) NOT ENFORCED" : "");
+        sql(
+                "INSERT INTO ASYNC_DIM VALUES "
+                        + "(1, 11, '2026-08-25'), "
+                        + "(1, 12, '2026-08-25'), "
+                        + "(2, 21, '2026-08-25')");
+
+        String query =
+                "SELECT T.i, D.j FROM T LEFT JOIN ASYNC_DIM "
+                        + "/*+ OPTIONS("
+                        + "'scan.partitions' = 'max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.async' = 'true') */ "
+                        + "FOR SYSTEM_TIME AS OF T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2)");
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(Row.of(1, 11), Row.of(1, 12), Row.of(2, 21));
+        iterator.close();
+    }
+
     @Test
     public void testLookupMaxPtDynamicBucketTable() throws Exception {
         sql(

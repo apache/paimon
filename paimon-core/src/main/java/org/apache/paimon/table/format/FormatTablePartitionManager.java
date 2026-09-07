@@ -66,7 +66,7 @@ public interface FormatTablePartitionManager extends Serializable {
      * whole batch is rejected when any partition already exists, so such a request is never split.
      */
     default void createPartitions(List<Map<String, String>> partitions, boolean ignoreIfExists) {
-        createPartitions(partitions, ignoreIfExists, null, false);
+        createPartitions(partitions, ignoreIfExists, null, false, null);
     }
 
     /**
@@ -78,7 +78,7 @@ public interface FormatTablePartitionManager extends Serializable {
      * holds or add to it, and is ignored when {@code statistics} is null. A field reported as
      * unknown says nothing about itself and leaves the stored one as it was, so a measurement that
      * could not take a number does not erase the last one that could. Reporting never unregisters a
-     * partition.
+     * partition. {@code partitionOptions}, when present, align with {@code partitions} by position.
      *
      * <p>This is the method an implementation provides, so that none can report nothing by
      * accident: a decorator that forwards only the two-argument form would otherwise drop every
@@ -88,7 +88,8 @@ public interface FormatTablePartitionManager extends Serializable {
             List<Map<String, String>> partitions,
             boolean ignoreIfExists,
             @Nullable List<PartitionStatistics> statistics,
-            boolean replaceStatistics);
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions);
 
     /** Unregister partitions. Metadata only; missing partitions are ignored. */
     void dropPartitions(List<Map<String, String>> partitions);

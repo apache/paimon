@@ -35,8 +35,8 @@ import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -518,7 +518,7 @@ public class FallbackReadFileStoreTableTest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
@@ -563,7 +563,7 @@ public class FallbackReadFileStoreTableTest {
     private AppendOnlyFileStoreTable createTable() throws Exception {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
@@ -579,7 +579,7 @@ public class FallbackReadFileStoreTableTest {
         return new AppendOnlyFileStoreTable(
                         fileIO,
                         tablePath,
-                        new SchemaManager(fileIO, tablePath, branchName).latest().get())
+                        new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get())
                 .copy(options.toMap());
     }
 }

@@ -33,7 +33,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -294,7 +294,7 @@ public class ManifestFileSorterBenchmark {
                         null);
         return new ManifestFile.Factory(
                         fileIO,
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         PARTITION_TYPE,
                         FileFormat.fromIdentifier("avro", new Options()),
                         "zstd",

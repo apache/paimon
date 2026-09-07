@@ -53,6 +53,19 @@ public abstract class TwoPhaseOutputStream extends PositionOutputStream {
          */
         void discard(FileIO fileIO) throws IOException;
 
+        /**
+         * Discards staged resources without deleting {@link #targetPath()}.
+         *
+         * <p>This is used when a commit may have taken effect and its target must therefore be
+         * preserved. The default delegates to {@link #clean}. Override this method if a failed or
+         * uncertain commit can leave staged resources that {@code clean} does not release.
+         *
+         * @throws IOException if an I/O error occurs during cleanup
+         */
+        default void discardStaging(FileIO fileIO) throws IOException {
+            clean(fileIO);
+        }
+
         Path targetPath();
 
         /**

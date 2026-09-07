@@ -116,5 +116,41 @@ class SchemaPrimaryKeyNullabilityTest(unittest.TestCase):
             )
 
 
+class DataFileFieldsTest(unittest.TestCase):
+
+    @staticmethod
+    def _schema(optimized):
+        options = {'data-evolution.enabled': 'true'}
+        if optimized:
+            options['data-evolution.write-cols-optimization.enabled'] = 'true'
+        return TableSchema(
+            id=0,
+            fields=[
+                DataField(0, 'id', AtomicType('INT')),
+                DataField(1, 'blob', AtomicType('BLOB')),
+                DataField(2, 'name', AtomicType('STRING')),
+            ],
+            options=options,
+        )
+
+    def test_null_write_cols_uses_legacy_meaning_without_option(self):
+        schema = self._schema(False)
+        self.assertEqual(
+            ['id', 'blob', 'name'],
+            [field.name for field in schema.data_file_fields(None)],
+        )
+        self.assertIsNone(schema.partial_file_write_cols(None))
+
+    def test_null_write_cols_resolves_non_dedicated_fields_with_option(self):
+        schema = self._schema(True)
+        self.assertEqual(
+            ['id', 'name'],
+            [field.name for field in schema.data_file_fields(None)],
+        )
+        self.assertEqual(
+            ['id', 'name'], schema.partial_file_write_cols(None)
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

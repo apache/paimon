@@ -104,7 +104,7 @@ public class InferVariantShreddingSchema {
                     observedSchema =
                             mergeSchema(
                                     observedSchema,
-                                    schemaOf((GenericVariant) variant, maxSchemaDepth));
+                                    schemaOf(GenericVariant.fromVariant(variant), maxSchemaDepth));
                 }
             }
             columns.put(path, new ColumnEvidence(rootValueCount, observedSchema));

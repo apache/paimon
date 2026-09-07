@@ -112,6 +112,29 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testLatestSnapshotWithConcurrentExpiration() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new LatestSnapshotRaceManager(localFileIO, new Path(tempDir.toString()), millis);
+        Snapshot snapshot = createSnapshotWithMillis(0, millis);
+        localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(0), snapshot.toJson());
+
+        assertThat(snapshotManager.latestSnapshotFromFileSystem().id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLatestSnapshotStillFailsWhenNoNewerSnapshotExists() {
+        SnapshotManager snapshotManager =
+                Mockito.spy(newSnapshotManager(LocalFileIO.create(), new Path(tempDir.toString())));
+        Mockito.doReturn(1L).when(snapshotManager).latestSnapshotIdFromFileSystem();
+
+        assertThatThrownBy(snapshotManager::latestSnapshotFromFileSystem)
+                .hasMessageContaining("Snapshot file")
+                .hasMessageContaining("does not exist");
+    }
+
+    @Test
     public void testRepairEarliestSnapshot() throws IOException {
         FileIO fileIO = LocalFileIO.create();
         SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
@@ -900,6 +923,34 @@ public class SnapshotManagerTest {
                     throw new RuntimeException(e);
                 }
                 deleteEarliestSnapshot = true;
+            }
+            return snapshotId;
+        }
+    }
+
+    /** Simulates a commit and expiration between finding and reading the latest snapshot. */
+    private static class LatestSnapshotRaceManager extends SnapshotManager {
+        private final long millis;
+        private boolean expireLatestSnapshot = true;
+
+        private LatestSnapshotRaceManager(FileIO fileIO, Path tablePath, long millis) {
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
+            this.millis = millis;
+        }
+
+        @Override
+        public @Nullable Long latestSnapshotIdFromFileSystem() {
+            Long snapshotId = super.latestSnapshotIdFromFileSystem();
+            if (snapshotId != null && expireLatestSnapshot) {
+                Snapshot nextSnapshot = createSnapshotWithMillis(snapshotId + 1, millis + 1000);
+                try {
+                    fileIO().tryToWriteAtomic(
+                                    snapshotPath(nextSnapshot.id()), nextSnapshot.toJson());
+                    fileIO().delete(snapshotPath(snapshotId), true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                expireLatestSnapshot = false;
             }
             return snapshotId;
         }

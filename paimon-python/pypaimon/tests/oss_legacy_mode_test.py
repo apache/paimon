@@ -28,7 +28,10 @@ import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.filesystem.pyarrow_file_io import (
+    LegacyOssDirectoryListingError,
+    PyArrowFileIO,
+)
 
 
 TABLE_PATH = "oss://test-bucket/db-uuid.db/tbl-uuid"
@@ -235,7 +238,7 @@ class OssLegacyModeTest(unittest.TestCase):
         """Fail fast instead of the misleading raw NoSuchKey selector error."""
         file_io = self._new_file_io(legacy=True)
 
-        with self.assertRaises(RuntimeError) as ctx:
+        with self.assertRaises(LegacyOssDirectoryListingError) as ctx:
             file_io.list_status(TABLE_PATH)
         self.assertIn("pyarrow >= 16", str(ctx.exception))
         file_io.filesystem.get_file_info.assert_not_called()

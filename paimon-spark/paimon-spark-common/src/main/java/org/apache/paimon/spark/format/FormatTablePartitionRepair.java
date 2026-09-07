@@ -94,7 +94,14 @@ public class FormatTablePartitionRepair {
     private static List<Map<String, String>> listFilesystemPartitionSpecs(FormatTable formatTable) {
         // Raw directory names rather than the table scan: the scan casts each value to its column
         // type and back (month=01 -> 1), producing specs that no longer name the real directory,
-        // while the write path registers the raw value.
+        // while the write path registers the raw value. That is also why no partition type is
+        // passed below: it would re-enable the cast this discovery deliberately avoids.
+        //
+        // The default partition name is still needed. In a value-only layout the null partition is
+        // a bare "__DEFAULT_PARTITION__" directory, which the generic hidden-directory rule ("_"
+        // prefix) skips unless the listing knows the name is meaningful. Without it a repair never
+        // registers the null partition, and a SYNC/DROP sees it as registered-but-deleted and
+        // unregisters a partition that still holds data.
         boolean onlyValueInPath =
                 new CoreOptions(formatTable.options()).formatTablePartitionOnlyValueInPath();
         List<Pair<LinkedHashMap<String, String>, Path>> found =
@@ -103,7 +110,10 @@ public class FormatTablePartitionRepair {
                         new Path(formatTable.location()),
                         formatTable.partitionKeys().size(),
                         formatTable.partitionKeys(),
-                        onlyValueInPath);
+                        onlyValueInPath,
+                        null,
+                        null,
+                        formatTable.defaultPartName());
         List<Map<String, String>> specs = new ArrayList<>(found.size());
         for (Pair<LinkedHashMap<String, String>, Path> pair : found) {
             PartitionPathUtils.validatePartitionSpecForPath(pair.getKey(), onlyValueInPath);
@@ -142,9 +152,13 @@ public class FormatTablePartitionRepair {
             boolean dropPartitions,
             @Nullable FormatTablePartitionStatsCollector statsCollector) {
         Set<Map<String, String>> registeredPartitions = new HashSet<>();
+        Set<Map<String, String>> customLocationPartitions = new HashSet<>();
         for (Partition partition :
                 partitionManager.listPartitions(Collections.<String, String>emptyMap(), null)) {
             registeredPartitions.add(partition.spec());
+            if (hasCustomLocation(partition)) {
+                customLocationPartitions.add(partition.spec());
+            }
         }
 
         Set<Map<String, String>> filesystemSet = new HashSet<>(filesystemPartitions);
@@ -161,7 +175,8 @@ public class FormatTablePartitionRepair {
         List<Map<String, String>> dropDiff = new ArrayList<>();
         if (dropPartitions) {
             for (Map<String, String> partition : registeredPartitions) {
-                if (!filesystemSet.contains(partition)) {
+                if (!filesystemSet.contains(partition)
+                        && !customLocationPartitions.contains(partition)) {
                     dropDiff.add(partition);
                 }
             }
@@ -177,14 +192,15 @@ public class FormatTablePartitionRepair {
             // exists to correct. Without ADD it stays inside the already registered set.
             List<Map<String, String>> measured = new ArrayList<>();
             for (Map<String, String> partition : filesystemPartitions) {
-                if (addPartitions || registeredPartitions.contains(partition)) {
+                if ((addPartitions || registeredPartitions.contains(partition))
+                        && !customLocationPartitions.contains(partition)) {
                     measured.add(partition);
                 }
             }
             sortByCanonicalPath(measured, partitionKeys);
             if (!measured.isEmpty()) {
                 partitionManager.createPartitions(
-                        measured, true, statsCollector.collect(measured), true);
+                        measured, true, statsCollector.collect(measured), true, null);
             }
         } else if (!addDiff.isEmpty()) {
             partitionManager.createPartitions(addDiff, true);
@@ -193,6 +209,17 @@ public class FormatTablePartitionRepair {
             partitionManager.dropPartitions(dropDiff);
         }
         return addDiff.size() + dropDiff.size();
+    }
+
+    private static boolean hasCustomLocation(Partition partition) {
+        Map<String, String> options = partition.options();
+        if (options == null || !options.containsKey(CoreOptions.PATH.key())) {
+            return false;
+        }
+        if (options.get(CoreOptions.PATH.key()) == null) {
+            throw new IllegalStateException("Partition path option must not be null.");
+        }
+        return true;
     }
 
     /** Sort partitions by their canonical path for a stable, deterministic apply order. */

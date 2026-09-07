@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -32,6 +33,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -294,6 +296,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         DataTableStreamScan scan =
                 new DataTableStreamScan(
                         tableSchema,
+                        schemaManager(),
                         coreOptions(),
                         newSnapshotReader(),
                         snapshotManager(),
@@ -371,6 +374,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        if (new CoreOptions(tableSchema.options())
+                        .toConfiguration()
+                        .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // turning the mirror on here publishes the schemas already on disk, which no commit
+            // has judged under these options
+            SchemaValidation.validateHistoricalIcebergTypes(
+                    () -> schemaManager().listAll(), new CoreOptions(newTableSchema.options()));
+        }
 
         return copy(newTableSchema);
     }
@@ -415,7 +427,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, currentBranch());
+        return new FileSystemSchemaManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -454,7 +466,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 store().newSnapshotDeletion(),
-                store().newTagManager());
+                store().newTagManager(),
+                store().options().scanManifestParallelism());
     }
 
     @Override
@@ -774,7 +787,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), targetBranch).latest();
+                new FileSystemSchemaManager(fileIO(), location(), targetBranch).latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 

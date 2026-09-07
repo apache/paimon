@@ -28,8 +28,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.NestedProjectedRow;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /** Factory for creating {@link RowFormatReader}. */
@@ -38,11 +36,11 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
     private static final int TAIL_PREFETCH_SIZE = 64 * 1024;
 
     private final RowType rowType;
-    @Nullable private final NestedProjectedRow projection;
+    private final RowType projectedRowType;
 
-    public RowFormatReaderFactory(RowType rowType, @Nullable NestedProjectedRow projection) {
+    public RowFormatReaderFactory(RowType rowType, RowType projectedRowType) {
         this.rowType = rowType;
-        this.projection = projection;
+        this.projectedRowType = projectedRowType;
     }
 
     @Override
@@ -77,7 +75,15 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
             }
 
             return new RowFormatReader(
-                    in, path, footer, blockIndex, rowType, projection, context.selection());
+                    in,
+                    path,
+                    footer,
+                    blockIndex,
+                    rowType,
+                    // Each reader needs its own wrapper: it is mutated in place per row,
+                    // so sharing one instance across readers corrupts interleaved reads.
+                    NestedProjectedRow.create(rowType, projectedRowType),
+                    context.selection());
         } catch (Throwable t) {
             IOUtils.closeQuietly(in);
             throw t;

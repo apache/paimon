@@ -18,15 +18,22 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -408,5 +415,36 @@ public class TestZOrderByteUtil {
                             Arrays.toString(bBytes),
                             byteCompare));
         }
+    }
+
+    @Test
+    public void testBooleanDistinctFromNullSentinel() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BOOLEAN(), DataTypes.BOOLEAN()},
+                        new String[] {"a", "b"});
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        byte[] nullBytes = zvalue(indexer, null);
+        byte[] falseBytes = zvalue(indexer, false);
+        byte[] trueBytes = zvalue(indexer, true);
+
+        // The three states have to be pairwise distinct, and NULL is the all-zero sentinel, so
+        // the unsigned order it puts them in is NULL, then FALSE, then TRUE.
+        Comparator<byte[]> unsigned = UnsignedBytes.lexicographicalComparator();
+        assertThat(unsigned.compare(nullBytes, falseBytes)).isNegative();
+        assertThat(unsigned.compare(falseBytes, trueBytes)).isNegative();
+        assertThat(nullBytes).isNotEqualTo(falseBytes);
+        assertThat(falseBytes).isNotEqualTo(trueBytes);
+        assertThat(nullBytes).isNotEqualTo(trueBytes);
+    }
+
+    /** {@code index()} hands back its internal buffer, so each result is copied out of it. */
+    private static byte[] zvalue(ZIndexer indexer, Boolean value) {
+        GenericRow row = new GenericRow(2);
+        row.setField(0, value);
+        row.setField(1, value);
+        return indexer.index(row).clone();
     }
 }

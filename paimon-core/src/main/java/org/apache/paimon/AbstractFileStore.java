@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPreCommitValidation;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -302,6 +303,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 options.dataEvolutionEnabled(),
+                                options.dataEvolutionNestedFieldEnabled(),
                                 options.pkClusteringOverride(),
                                 newIndexFileHandler(),
                                 snapshotManager,
@@ -344,7 +346,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
@@ -357,7 +360,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     @Override
@@ -375,7 +379,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                options.scanManifestParallelism());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -393,6 +398,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         List<CommitPreCallback> callbacks = new ArrayList<>();
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergPreCommitValidation(table));
         }
         return callbacks;
     }

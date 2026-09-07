@@ -34,6 +34,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.responses.GetTagResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -886,7 +887,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        SchemaManager schemaManager = new SchemaManager(fileIO(tablePath), tablePath, branchName);
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(fileIO(tablePath), tablePath, branchName);
 
         // in order to improve the performance, check the schema-0 firstly.
         boolean schemaZeroExists = schemaManager.schemaExists(0);
@@ -900,7 +902,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
         Optional<TableSchema> schema =
-                new SchemaManager(fileIO(tablePath), tablePath, branchName).latest();
+                new FileSystemSchemaManager(fileIO(tablePath), tablePath, branchName).latest();
         if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
             schema =
                     schema.map(

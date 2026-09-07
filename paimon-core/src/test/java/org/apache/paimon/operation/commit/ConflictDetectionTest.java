@@ -1582,6 +1582,7 @@ class ConflictDetectionTest {
                 BucketMode.HASH_FIXED,
                 false,
                 dataEvolutionEnabled,
+                false,
                 pkClusteringOverride,
                 null,
                 snapshotManager,

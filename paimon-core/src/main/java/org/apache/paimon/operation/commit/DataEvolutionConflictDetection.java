@@ -72,6 +72,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final String tableName;
     private final String commitUser;
     private final SnapshotManager snapshotManager;
+    private final boolean nestedFieldEnabled;
 
     private @Nullable Long rowIdCheckFromSnapshot;
     private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
@@ -83,6 +84,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             FileStorePathFactory pathFactory,
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
+            boolean nestedFieldEnabled,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -98,6 +100,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
+        this.nestedFieldEnabled = nestedFieldEnabled;
     }
 
     @Override
@@ -132,7 +135,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         if (!shouldCheckRowIdFromSnapshot(commitKind)) {
             return null;
         }
-        return rowIdConflictCheckStrategy().createChecker(schemaManager, deltaFiles);
+        return rowIdConflictCheckStrategy()
+                .createChecker(schemaManager, deltaFiles, nestedFieldEnabled);
     }
 
     private RowIdConflictCheckStrategy rowIdConflictCheckStrategy() {
@@ -402,7 +406,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         boolean appliesTo(CommitKind commitKind);
 
         RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles);
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled);
 
         boolean shouldCheckHistoricalEntry(FileKind kind);
     }
@@ -419,10 +425,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             return RowIdColumnConflictChecker.fromDataFiles(
                     schemaManager,
-                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()));
+                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()),
+                    nestedFieldEnabled);
         }
 
         @Override
@@ -443,7 +452,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             // Materializing deletion vectors rewrites complete row ranges. A concurrent ADD in a
             // deleted normal-file range can otherwise restore logically deleted rows.
             List<DataFileMeta> deletedNormalFiles =

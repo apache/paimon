@@ -61,6 +61,7 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.apache.spark.sql.functions;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -144,6 +145,71 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         SortedGlobalIndexWriter indexWriter =
                 new SortedGlobalIndexWriter(table, indexType, options)
                         .withIndexField(indexField.name());
+        final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
+        if (keyExtractor.isIdentity()) {
+            List<SortedBuildTask> buildTasks = new ArrayList<>();
+            List<Dataset<Row>> taskInputs = new ArrayList<>();
+            for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
+                    partitionRangeSplits.entrySet()) {
+                byte[] partitionBytes =
+                        binaryRowSerializer.serializeToBytes(partitionEntry.getKey());
+                for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
+                    Range range = entry.getKey();
+                    List<Split> rangeSplits = entry.getValue();
+                    if (rangeSplits.isEmpty()) {
+                        continue;
+                    }
+
+                    long taskId = buildTasks.size();
+                    buildTasks.add(new SortedBuildTask(taskId, range, partitionBytes));
+                    Dataset<Row> source =
+                            PaimonUtils.createDataset(
+                                    spark,
+                                    ScanPlanHelper$.MODULE$.createNewScanPlan(
+                                            rangeSplits.toArray(new Split[0]), relation));
+                    Dataset<Row> selected =
+                            source.select(
+                                            readType.getFieldNames().stream()
+                                                    .map(functions::col)
+                                                    .toArray(Column[]::new))
+                                    .withColumn(taskIdField, functions.lit(taskId).cast("long"));
+                    taskInputs.add(
+                            selected.select(
+                                    functions.col(taskIdField),
+                                    functions.col(indexField.name()),
+                                    functions.col(SpecialFields.ROW_ID.name())));
+                }
+            }
+
+            if (!buildTasks.isEmpty()) {
+                int partitionNum =
+                        calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
+                Dataset<Row> partitioned =
+                        combineAndSortBuildTaskInputs(
+                                taskInputs, partitionNum, taskIdField, indexField.name());
+                Map<Long, SortedBuildTask> buildTasksById = new HashMap<>();
+                for (SortedBuildTask task : buildTasks) {
+                    buildTasksById.put(task.taskId, task);
+                }
+                JavaRDD<byte[]> written =
+                        partitioned
+                                .javaRDD()
+                                .map(row -> (InternalRow) (new SparkRow(normalizedReadType, row)))
+                                .mapPartitions(
+                                        (FlatMapFunction<Iterator<InternalRow>, byte[]>)
+                                                iter ->
+                                                        buildSortedIndexes(
+                                                                iter,
+                                                                serializedWriter,
+                                                                buildTasksById,
+                                                                partitionKeyNum,
+                                                                scanSnapshotId));
+                allMessages.addAll(CommitMessageSerializer.deserializeAll(written.collect()));
+            }
+            addDeletedIndexMessages(allMessages, scanResult.deletedIndexEntries());
+            return allMessages;
+        }
+
         for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                 partitionRangeSplits.entrySet()) {
             for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
@@ -153,48 +219,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                     continue;
                 }
 
-                final byte[] serializedWriter = InstantiationUtil.serializeObject(indexWriter);
                 final byte[] partitionBytes =
                         binaryRowSerializer.serializeToBytes(partitionEntry.getKey());
-                if (keyExtractor.isIdentity()) {
-                    int partitionNum = Math.max((int) (range.count() / recordsPerRange), 1);
-                    partitionNum = Math.min(partitionNum, maxParallelism);
-
-                    Dataset<Row> source =
-                            PaimonUtils.createDataset(
-                                    spark,
-                                    ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                            rangeSplits.toArray(new Split[0]), relation));
-                    Dataset<Row> selected =
-                            source.select(
-                                    readType.getFieldNames().stream()
-                                            .map(functions::col)
-                                            .toArray(Column[]::new));
-                    Column[] sortFields =
-                            new Column[] {
-                                functions.col(indexField.name()),
-                                functions.col(SpecialFields.ROW_ID.name())
-                            };
-                    Dataset<Row> partitioned =
-                            selected.repartitionByRange(partitionNum, sortFields)
-                                    .sortWithinPartitions(sortFields);
-                    JavaRDD<byte[]> written =
-                            partitioned
-                                    .javaRDD()
-                                    .map(row -> (InternalRow) (new SparkRow(readType, row)))
-                                    .mapPartitions(
-                                            (FlatMapFunction<Iterator<InternalRow>, byte[]>)
-                                                    iter ->
-                                                            buildSortedIndex(
-                                                                    iter,
-                                                                    serializedWriter,
-                                                                    range,
-                                                                    partitionKeyNum,
-                                                                    partitionBytes,
-                                                                    scanSnapshotId));
-                    allMessages.addAll(CommitMessageSerializer.deserializeAll(written.collect()));
-                    continue;
-                }
 
                 Map<Range, List<Split>> shardedSplits =
                         shardSplitsByRowRange(
@@ -256,7 +282,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)
                                                 iter ->
-                                                        buildSortedIndexes(
+                                                        buildShardedSortedIndexes(
                                                                 iter,
                                                                 serializedWriter,
                                                                 taskRanges,
@@ -267,8 +293,34 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 allMessages.addAll(CommitMessageSerializer.deserializeAll(commitBytes));
             }
         }
-        for (IndexManifestEntry entry : scanResult.deletedIndexEntries()) {
-            allMessages.add(
+        addDeletedIndexMessages(allMessages, scanResult.deletedIndexEntries());
+        return allMessages;
+    }
+
+    static Dataset<Row> combineAndSortBuildTaskInputs(
+            List<Dataset<Row>> taskInputs,
+            int partitionNum,
+            String taskIdField,
+            String indexField) {
+        Dataset<Row> combined = taskInputs.get(0);
+        for (int i = 1; i < taskInputs.size(); i++) {
+            combined = combined.union(taskInputs.get(i));
+        }
+
+        Column[] sortFields =
+                new Column[] {
+                    functions.col(taskIdField),
+                    functions.col(indexField),
+                    functions.col(SpecialFields.ROW_ID.name())
+                };
+        return combined.repartitionByRange(partitionNum, sortFields)
+                .sortWithinPartitions(sortFields);
+    }
+
+    private static void addDeletedIndexMessages(
+            List<CommitMessage> messages, List<IndexManifestEntry> deletedIndexEntries) {
+        for (IndexManifestEntry entry : deletedIndexEntries) {
+            messages.add(
                     new CommitMessageImpl(
                             entry.partition(),
                             entry.bucket(),
@@ -277,28 +329,40 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                     Collections.singletonList(entry.indexFile())),
                             CompactIncrement.emptyIncrement()));
         }
-        return allMessages;
-    }
-
-    private static Iterator<byte[]> buildSortedIndex(
-            Iterator<InternalRow> input,
-            byte[] serializedWriter,
-            Range range,
-            int partitionKeyNum,
-            byte[] partitionBytes,
-            long scanSnapshotId)
-            throws IOException, ClassNotFoundException {
-        final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
-        BinaryRow partition = binaryRowSerializer.deserializeFromBytes(partitionBytes);
-        SortedGlobalIndexWriter writer =
-                InstantiationUtil.deserializeObject(
-                        serializedWriter, SortedGlobalIndexWriter.class.getClassLoader());
-        return CommitMessageSerializer.serializeAll(
-                        writer.buildForSinglePartition(range, partition, input, scanSnapshotId))
-                .iterator();
     }
 
     private static Iterator<byte[]> buildSortedIndexes(
+            Iterator<InternalRow> input,
+            byte[] serializedWriter,
+            Map<Long, SortedBuildTask> buildTasksById,
+            int partitionKeyNum,
+            long scanSnapshotId)
+            throws IOException, ClassNotFoundException {
+        final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
+        SortedGlobalIndexWriter writer =
+                InstantiationUtil.deserializeObject(
+                        serializedWriter, SortedGlobalIndexWriter.class.getClassLoader());
+        SortedTaskInput taskInput = new SortedTaskInput(input, writer.keyExtractor().keyType());
+        List<byte[]> results = new ArrayList<>();
+        while (taskInput.hasTask()) {
+            long taskId = taskInput.taskId();
+            SortedBuildTask task = buildTasksById.get(taskId);
+            if (task == null) {
+                throw new IllegalArgumentException("Unknown sorted index build task id: " + taskId);
+            }
+            BinaryRow partition = binaryRowSerializer.deserializeFromBytes(task.partition);
+            results.addAll(
+                    CommitMessageSerializer.serializeAll(
+                            writer.buildForSinglePartition(
+                                    task.rowRange,
+                                    partition,
+                                    taskInput.consumeTask(taskId),
+                                    scanSnapshotId)));
+        }
+        return results.iterator();
+    }
+
+    private static Iterator<byte[]> buildShardedSortedIndexes(
             Iterator<InternalRow> input,
             byte[] serializedWriter,
             Map<Long, Range> taskRanges,
@@ -330,6 +394,22 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         return results.iterator();
     }
 
+    static int calculateParallelism(
+            List<SortedBuildTask> buildTasks, long recordsPerRange, int maxParallelism) {
+        long totalRecords = 0;
+        for (SortedBuildTask task : buildTasks) {
+            long count = task.rowRange.count();
+            if (Long.MAX_VALUE - totalRecords < count) {
+                totalRecords = Long.MAX_VALUE;
+            } else {
+                totalRecords += count;
+            }
+        }
+
+        long parallelism = Math.max(totalRecords / recordsPerRange, 1);
+        return (int) Math.min(parallelism, maxParallelism);
+    }
+
     private static String buildTaskIdFieldName(RowType readType) {
         String fieldName = BUILD_TASK_ID_FIELD;
         while (readType.containsField(fieldName)) {
@@ -347,6 +427,22 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 new DataField(BUILD_TASK_ID_FIELD_ID, taskIdField, DataTypes.BIGINT().notNull()),
                 new DataField(sourceField.id(), sourceField.name(), keyType),
                 readType.getField(SpecialFields.ROW_ID.name()));
+    }
+
+    /** Metadata for one sorted index build range. */
+    static class SortedBuildTask implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final long taskId;
+        private final Range rowRange;
+        private final byte[] partition;
+
+        SortedBuildTask(long taskId, Range rowRange, byte[] partition) {
+            this.taskId = taskId;
+            this.rowRange = rowRange;
+            this.partition = partition;
+        }
     }
 
     /** Groups a partition already sorted by task id, normalized key and row id. */

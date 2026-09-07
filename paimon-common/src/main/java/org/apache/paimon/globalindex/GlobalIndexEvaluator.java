@@ -60,12 +60,20 @@ public class GlobalIndexEvaluator implements Closeable {
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
+    private final ContainsRefinementEvaluator containsRefinementEvaluator;
 
     public GlobalIndexEvaluator(
             RowType rowType, IntFunction<Collection<GlobalIndexReader>> readersFunction) {
         this.rowType = rowType;
         this.readersFunction = readersFunction;
         this.indexReadersCache = new ConcurrentHashMap<>();
+        this.containsRefinementEvaluator =
+                new ContainsRefinementEvaluator(
+                        rowType,
+                        fieldId ->
+                                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply),
+                        this::visitAsync,
+                        this::combineResults);
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
@@ -174,6 +182,11 @@ public class GlobalIndexEvaluator implements Closeable {
             CompoundPredicate predicate) {
         List<Predicate> children =
                 pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+        CompletableFuture<Optional<Evaluation>> refined =
+                containsRefinementEvaluator.evaluate(children, predicate);
+        if (refined != null) {
+            return refined;
+        }
         List<CompletableFuture<Optional<Evaluation>>> childFutures =
                 new ArrayList<>(children.size());
         for (Predicate child : children) {
@@ -232,7 +245,7 @@ public class GlobalIndexEvaluator implements Closeable {
         private final GlobalIndexResult result;
         private final Set<Integer> contributingFieldIds;
 
-        private Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
+        Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
             this.result = result;
             this.contributingFieldIds =
                     Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));

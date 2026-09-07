@@ -153,7 +153,6 @@ public class DataOutputSerializer implements DataOutputView, MemorySegmentWritab
         for (int i = 0; i < sLen; i++) {
             writeByte(s.charAt(i));
         }
-        this.position += sLen;
     }
 
     @Override

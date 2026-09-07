@@ -27,10 +27,13 @@ import java.util.function.Function;
 
 /** Cache interface in Paimon. */
 public interface Cache {
+
     @Nullable
     CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier);
 
     void put(CacheKey key, CacheValue value);
+
+    boolean contains(CacheKey key);
 
     void invalidate(CacheKey key);
 

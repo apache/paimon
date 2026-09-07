@@ -99,6 +99,34 @@ class OptionUtilsTest extends AnyFunSuite {
     assert(exception.getMessage.contains(METASTORE_PARTITIONED_TABLE.key()))
   }
 
+  test("resolve format table implementation option precedence") {
+    val ident = Identifier.create("test_db", "format_table")
+    val catalogOptions =
+      Map(s"table-default.${FORMAT_TABLE_IMPLEMENTATION.key()}" -> "engine").asJava
+
+    assert(
+      !OptionUtils.usePaimonFormatTableImplementation(
+        "test_catalog",
+        ident,
+        catalogOptions,
+        Collections.emptyMap()))
+    assert(
+      OptionUtils.usePaimonFormatTableImplementation(
+        "test_catalog",
+        ident,
+        catalogOptions,
+        Map(FORMAT_TABLE_IMPLEMENTATION.key() -> "paimon").asJava))
+
+    SQLConf.withExistingConf(engineSQLConf) {
+      assert(
+        !OptionUtils.usePaimonFormatTableImplementation(
+          "test_catalog",
+          ident,
+          Collections.emptyMap(),
+          Map(FORMAT_TABLE_IMPLEMENTATION.key() -> "paimon").asJava))
+    }
+  }
+
   private def engineSQLConf: SQLConf = {
     val sqlConf = new SQLConf
     sqlConf.setConfString(

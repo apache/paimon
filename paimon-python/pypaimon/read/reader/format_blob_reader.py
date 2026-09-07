@@ -16,16 +16,22 @@
 # under the License.
 
 import struct
+from threading import Lock
 from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
 import pyarrow.dataset as ds
+from cachetools import LRUCache
 from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.video_format_reader import (
+    VideoFileMeta,
+    VideoFrameRecordIterator,
+)
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
@@ -37,6 +43,24 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+
+
+_BLOB_INDEX_CACHE = LRUCache(maxsize=16)
+_BLOB_INDEX_CACHE_LOCK = Lock()
+
+
+def _decode_blob_index(index_bytes):
+    """Decode BLOB lengths and their relative file offsets."""
+    blob_lengths = tuple(DeltaVarintCompressor.decompress(index_bytes))
+    blob_offsets = []
+    offset = 0
+    for length in blob_lengths:
+        if length < 0:
+            blob_offsets.append(-1)
+        else:
+            blob_offsets.append(offset)
+            offset += length
+    return blob_lengths, tuple(blob_offsets)
 
 
 class FormatBlobReader(RecordBatchReader):
@@ -53,6 +77,8 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_as_descriptor = blob_as_descriptor
         self._batch_size = batch_size
         self._blob_parallelism = blob_parallelism
+        self._is_video = file_path.endswith('.video')
+        self._video_meta = None
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -96,7 +122,11 @@ class FormatBlobReader(RecordBatchReader):
             if (
                 not self._is_array_blob
                 and not self._is_map_blob
-                and (self._blob_as_descriptor or self._blob_parallelism > 1)
+                and (
+                    self._is_video
+                    or self._blob_as_descriptor
+                    or self._blob_parallelism > 1
+                )
             ):
                 self._input_stream.close()
                 self._input_stream = None
@@ -113,13 +143,21 @@ class FormatBlobReader(RecordBatchReader):
             if self.returned:
                 return None
             self.returned = True
-            batch_iterator = BlobRecordIterator(
-                self._file_io, self.file_path, self.blob_lengths,
-                self.blob_offsets, self._data_field, self._input_stream,
-                blob_as_descriptor=(
-                    self._blob_as_descriptor or self._blob_parallelism > 1
+            if self._is_video:
+                batch_iterator = VideoFrameRecordIterator(
+                    self._file_io,
+                    self.file_path,
+                    self._video_meta,
+                    self._data_field,
                 )
-            )
+            else:
+                batch_iterator = BlobRecordIterator(
+                    self._file_io, self.file_path, self.blob_lengths,
+                    self.blob_offsets, self._data_field, self._input_stream,
+                    blob_as_descriptor=(
+                        self._blob_as_descriptor or self._blob_parallelism > 1
+                    )
+                )
             self._blob_iterator = iter(batch_iterator)
         read_size = self._batch_size
         if start_idx is not None and end_idx is not None:
@@ -167,7 +205,7 @@ class FormatBlobReader(RecordBatchReader):
                             raise RuntimeError(
                                 "Blob placeholder is not supported by FormatBlobReader yet."
                             )
-                        elif self._blob_as_descriptor:
+                        elif self._is_video or self._blob_as_descriptor:
                             pydict_data[field_name].append(blob.to_descriptor().serialize())
                         elif self._blob_parallelism > 1:
                             idx = len(pydict_data[field_name])
@@ -289,7 +327,57 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream.close()
             self._input_stream = None
 
+    @property
+    def record_count(self) -> int:
+        if self._is_video:
+            return self._video_meta.record_count
+        return len(self.blob_lengths)
+
+    def read_values_at(self, positions: List[int]) -> List[object]:
+        """Read logical BLOB values by position without exposing format internals."""
+        if self._is_video:
+            iterator = VideoFrameRecordIterator(
+                self._file_io,
+                self.file_path,
+                self._video_meta,
+                self._data_field,
+            )
+            values = []
+            for position in positions:
+                iterator.current_position = position
+                values.append(next(iterator).values[0])
+            return values
+
+        blob_lengths = [self.blob_lengths[position] for position in positions]
+        blob_offsets = [self.blob_offsets[position] for position in positions]
+        iterator = BlobRecordIterator(
+            self._file_io,
+            self.file_path,
+            blob_lengths,
+            blob_offsets,
+            self._data_field,
+            self._input_stream,
+            blob_as_descriptor=(
+                self._blob_as_descriptor or self._blob_parallelism > 1
+            ),
+        )
+        return [row.values[0] for row in iterator]
+
     def _read_index(self) -> None:
+        if self._is_video:
+            self._video_meta = VideoFileMeta(
+                self._input_stream, self._file_size
+            )
+            return
+
+        with _BLOB_INDEX_CACHE_LOCK:
+            cached_index = _BLOB_INDEX_CACHE.get(self.file_path)
+        if cached_index is not None:
+            blob_lengths, blob_offsets = cached_index
+            self.blob_lengths = list(blob_lengths)
+            self.blob_offsets = list(blob_offsets)
+            return
+
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -313,21 +401,18 @@ class FormatBlobReader(RecordBatchReader):
         if len(index_bytes) != index_length:
             raise IOError("Invalid blob file: cannot read index")
 
-        # Decompress blob lengths and compute offsets
-        blob_lengths = DeltaVarintCompressor.decompress(index_bytes)
-        blob_offsets = []
-        offset = 0
-        for length in blob_lengths:
-            if length < 0:
-                blob_offsets.append(-1)
-            else:
-                blob_offsets.append(offset)
-                offset += length
-        self.blob_lengths = blob_lengths
-        self.blob_offsets = blob_offsets
+        blob_lengths, blob_offsets = _decode_blob_index(index_bytes)
+        with _BLOB_INDEX_CACHE_LOCK:
+            _BLOB_INDEX_CACHE[self.file_path] = blob_lengths, blob_offsets
+        self.blob_lengths = list(blob_lengths)
+        self.blob_offsets = list(blob_offsets)
 
     def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
         if row_indices is None:
+            return
+
+        if self._is_video:
+            self._video_meta.select(row_indices)
             return
 
         selected_lengths = []

@@ -35,6 +35,36 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
     assert(restored.totalSplits.contains(2L))
   }
 
+  test("round trip an empty snapshot cursor") {
+    val offset = PaimonSourceOffset.withTotalSplits(
+      snapshotId = 4L,
+      index = PaimonSourceOffset.INIT_OFFSET_INDEX,
+      scanSnapshot = false,
+      totalSplits = 0L)
+
+    val restored = PaimonSourceOffset(offset.json())
+
+    assert(restored.emptySnapshotCompleted)
+    assert(restored.snapshotId == 4L)
+    assert(restored.index == PaimonSourceOffset.INIT_OFFSET_INDEX)
+    assert(!restored.scanSnapshot)
+  }
+
+  test("copying an empty snapshot cursor with a different index clears its marker") {
+    val offset = PaimonSourceOffset.withTotalSplits(
+      snapshotId = 4L,
+      index = PaimonSourceOffset.INIT_OFFSET_INDEX,
+      scanSnapshot = false,
+      totalSplits = 0L)
+
+    val copied = offset.copy(index = 0L)
+    val restored = PaimonSourceOffset(copied.json())
+
+    assert(copied.index == 0L)
+    assert(copied.totalSplits.isEmpty)
+    assert(restored.totalSplits.isEmpty)
+  }
+
   test("copy and Java serialization preserve total splits") {
     val offset = offsetWithTotalSplits(scanSnapshot = true)
 
