@@ -86,12 +86,27 @@ def filter_batch(
         return batch
     datafusion = _load_datafusion()
     rewritten = condition if _pre_rewritten else rewrite_condition(condition)
-    ctx = datafusion.SessionContext()
-    ctx.register_record_batches("_batch", [batch.to_batches()])
+    config = datafusion.SessionConfig().set(
+        "datafusion.optimizer.enable_round_robin_repartition", "false"
+    )
+    ctx = datafusion.SessionContext(config)
+    input_batches = batch.to_batches()
+    # Use one batch per partition and rebuild from partitioned batches so
+    # DataFusion neither concatenates 32-bit offsets nor reorders the input.
+    ctx.register_record_batches(
+        "_batch", [[record_batch] for record_batch in input_batches]
+    )
     result = ctx.sql(
         f'SELECT * FROM _batch WHERE {rewritten}'
     )
-    return result.to_arrow_table()
+    output_batches = [
+        record_batch
+        for partition in result.collect_partitioned()
+        for record_batch in partition
+    ]
+    if not output_batches:
+        return batch.schema.empty_table()
+    return pa.Table.from_batches(output_batches)
 
 
 def apply_condition(
