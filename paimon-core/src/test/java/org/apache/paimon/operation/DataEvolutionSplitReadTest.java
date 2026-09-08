@@ -32,9 +32,11 @@ import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
@@ -45,12 +47,15 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -62,6 +67,91 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DataEvolutionSplitReadTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testPredicateReusesCurrentSchemaAndLoadsOlderSchema(boolean evolved) throws Exception {
+        LocalFileIO fileIO = new LocalFileIO();
+        Path tableRoot = new Path(tempDir.toUri().toString());
+        CoreOptions options = new CoreOptions(new Options());
+        FileStorePathFactory paths =
+                new FileStorePathFactory(
+                        tableRoot,
+                        RowType.of(),
+                        options.partitionDefaultName(),
+                        "parquet",
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
+        SchemaManager manager = new FileSystemSchemaManager(fileIO, tableRoot);
+        TableSchema original =
+                manager.createTable(
+                        Schema.newBuilder()
+                                .column("f0", DataTypes.INT())
+                                .column("f1", DataTypes.STRING())
+                                .build());
+        TableSchema current =
+                evolved
+                        ? manager.commitChanges(SchemaChange.addColumn("extra", DataTypes.INT()))
+                        : original;
+        Path bucket = paths.bucketPath(EMPTY_ROW, 0);
+        fileIO.mkdirs(bucket);
+        Path file = new Path(bucket, "data-0.parquet");
+        writeFormatFile(fileIO, file, original.logicalRowType(), 100, "parquet");
+        AtomicInteger fetched = new AtomicInteger();
+        SchemaManager readManager =
+                new FileSystemSchemaManager(fileIO, tableRoot) {
+                    @Override
+                    public TableSchema schema(long id) {
+                        fetched.incrementAndGet();
+                        return super.schema(id);
+                    }
+                };
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath(bucket.toString())
+                        .withDataFiles(
+                                Collections.singletonList(
+                                        createFile(
+                                                "data-0.parquet",
+                                                fileIO.getFileSize(file),
+                                                10,
+                                                100,
+                                                1)))
+                        .rawConvertible(false)
+                        .build();
+        DataEvolutionSplitRead read =
+                new DataEvolutionSplitRead(
+                        fileIO, readManager, current, current.logicalRowType(), options, paths);
+        read.withFilter(new PredicateBuilder(current.logicalRowType()).greaterOrEqual(0, 1000));
+        List<Integer> actual = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                read.createReader(
+                        new IndexedSplit(
+                                split,
+                                Arrays.asList(new Range(12, 12), new Range(42, 42)),
+                                null))) {
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getInt(0));
+                        if (evolved) {
+                            assertTrue(row.isNullAt(2));
+                        }
+                    });
+        }
+        assertEquals(Arrays.asList(1002, 1032), actual);
+        assertEquals(evolved ? 1 : 0, fetched.get());
+    }
 
     @Test
     public void testDifferentRowIdRange() {

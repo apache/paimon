@@ -151,6 +151,15 @@ public class CachingFileIO implements FileIO {
     }
 
     @Override
+    public SeekableInputStream newInputStream(Path path, long fileSize) throws IOException {
+        if (!whitelist.contains(FileType.classify(path)) || FileType.isMutable(path)) {
+            return delegate.newInputStream(path, fileSize);
+        }
+        // Keep the existing cache namespace and mutable-file validation semantics.
+        return newInputStream(path);
+    }
+
+    @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         return delegate.getFileStatus(path);
     }
