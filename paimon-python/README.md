@@ -44,17 +44,29 @@ pip install 'pypaimon[lerobot]'
 import pypaimon.multimodal as pmm
 
 connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
-version_id = connection.load_from_lerobot(
+connection.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(version_id)
 ```
 
 The source dataset must be non-empty. Its schema comes from `meta/info.json`.
 Each frame becomes one row; media uses BLOB columns. The import creates frame,
-Episode, task, and version tables and tags the three component tables with the
-returned `version_id`.
+Episode, task, info, and optional stats/subtask tables. Info and stats use
+`key STRING, value STRING` rows, with each value JSON-encoded to preserve
+nested metadata. Decode values with `json.loads`.
+
+Before training, pause writes and create a shared tag:
+
+```python
+connection.create_lerobot_tag("robot_data", "train-2026-09-07")
+frames = connection.get_table("robot_data").scan(
+    tag_name="train-2026-09-07").to_arrow()
+```
+
+Read every metadata component with the same tag. Use the tag only after creation
+succeeds; cross-table tagging is not atomic. Alternatively, pass `tag_name` to
+`load_from_lerobot` to tag the imported snapshots immediately.
 
 # HDF5 to multimodal tables
 

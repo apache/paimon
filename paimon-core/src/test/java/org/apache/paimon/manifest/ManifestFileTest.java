@@ -44,6 +44,9 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -56,6 +59,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
@@ -434,8 +438,10 @@ public class ManifestFileTest {
         }
     }
 
-    @Test
-    void testProjectedScanRejectsUnsupportedFormatIdentifier() throws Exception {
+    @ParameterizedTest
+    @MethodSource("reorderedManifestFieldOrders")
+    void testProjectedScanRejectsUnsupportedFormatIdentifier(
+            int[] fieldOrder, boolean reorderNestedFields) throws Exception {
         ManifestEntry entry = gen.next();
         ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
         ManifestFileMeta manifest =
@@ -443,20 +449,13 @@ public class ManifestFileTest {
         Path path = new Path(new Path(tempDir.toUri()), "manifest/" + manifest.fileName());
         LocalFileIO fileIO = LocalFileIO.create();
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
-        InternalRow valid = serializer.toRow(entry);
+        GenericRow invalid = (GenericRow) serializer.toRow(entry);
+        invalid.setField(0, 1);
+        RowType writerType = reorderedManifestType(fieldOrder, reorderNestedFields);
 
         try (PositionOutputStream out = fileIO.newOutputStream(path, true);
-                FormatWriter writer =
-                        avro.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE)
-                                .create(out, "zstd")) {
-            writer.addElement(
-                    GenericRow.of(
-                            1,
-                            valid.getByte(1),
-                            valid.getBinary(2),
-                            valid.getInt(3),
-                            valid.getInt(4),
-                            valid.getRow(5, DataFileMeta.SCHEMA.getFieldCount())));
+                FormatWriter writer = avro.createWriterFactory(writerType).create(out, "zstd")) {
+            writer.addElement(reorderRow(invalid, ManifestEntry.MANIFEST_ROW_TYPE, writerType));
         }
 
         try (CloseableIterator<ProjectedManifestEntry> entries =
@@ -464,6 +463,18 @@ public class ManifestFileTest {
                         manifest.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
             assertThat(entries.hasNext()).isTrue();
             assertThatThrownBy(entries::next)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("not compatible");
+        }
+
+        // An unprojected version must still be checked even when every row is filtered out.
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(
+                                new RowType(false, Collections.emptyList()),
+                                null,
+                                new BucketFilter(false, null, bucket -> false, null))) {
+            assertThatThrownBy(rows::hasNext)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("not compatible");
         }
@@ -575,49 +586,162 @@ public class ManifestFileTest {
         assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
     }
 
-    @Test
-    void testAvroReaderRejectsReorderedTopLevelFields() throws Exception {
-        ManifestEntry entry = gen.next();
-        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
-        RowType reorderedType =
-                new RowType(
-                        false,
-                        Arrays.asList(
-                                fields.get(0),
-                                fields.get(5),
-                                fields.get(1),
-                                fields.get(2),
-                                fields.get(3),
-                                fields.get(4)));
+    @ParameterizedTest
+    @MethodSource("reorderedManifestFieldOrders")
+    void testAvroReaderSupportsReorderedWriterFields(int[] fieldOrder, boolean reorderNestedFields)
+            throws Exception {
+        List<ManifestEntry> entries = generateData();
+        RowType writerType = reorderedManifestType(fieldOrder, reorderNestedFields);
         Path path = new Path(new Path(tempDir.toUri()), "reordered-manifest.avro");
         LocalFileIO fileIO = LocalFileIO.create();
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
-
         try (PositionOutputStream out = fileIO.newOutputStream(path, false);
-                FormatWriter writer = avro.createWriterFactory(reorderedType).create(out, "zstd")) {
-            InternalRow row = serializer.toRow(entry);
-            writer.addElement(
-                    GenericRow.of(
-                            row.getInt(0),
-                            row.getRow(5, DataFileMeta.SCHEMA.getFieldCount()),
-                            row.getByte(1),
-                            row.getBinary(2),
-                            row.getInt(3),
-                            row.getInt(4)));
+                FormatWriter writer = avro.createWriterFactory(writerType).create(out, "zstd")) {
+            for (ManifestEntry entry : entries) {
+                writer.addElement(
+                        reorderRow(
+                                serializer.toRow(entry),
+                                ManifestEntry.MANIFEST_ROW_TYPE,
+                                writerType));
+            }
         }
 
-        assertThatThrownBy(
-                        () -> {
-                            try (ManifestAvroReader reader =
-                                            new ManifestAvroReader(fileIO.newInputStream(path));
-                                    CloseableIterator<InternalRow> rows =
-                                            reader.read(
-                                                    ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
-                                rows.hasNext();
+        boolean rawCopySupported =
+                !reorderNestedFields && Arrays.equals(fieldOrder, new int[] {0, 1, 2, 3, 4, 5});
+        List<InternalRow> retained = new ArrayList<>();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows =
+                        reader.read(ManifestEntry.MANIFEST_ROW_TYPE, null, null)) {
+            assertThat(reader.rawBlockCopySupported()).isEqualTo(rawCopySupported);
+            while (rows.hasNext()) {
+                retained.add(rows.next());
+            }
+        }
+        assertThat(retained.stream().map(serializer::fromRow).collect(Collectors.toList()))
+                .containsExactlyElementsOf(entries);
+
+        // Raw blocks must also decode into canonical rows, including when reusing a row.
+        List<ManifestEntry> decoded = new ArrayList<>();
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path))) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RawBlock block = reader.next().stableCopy();
+                assertThat(block.rawBlockCopySupported()).isEqualTo(rawCopySupported);
+                ManifestAvroReader.RowIterator rows = block.toRows(ManifestEntry.MANIFEST_ROW_TYPE);
+                while (rows.hasNext()) {
+                    decoded.add(serializer.fromRow(rows.next()));
+                }
+            }
+        }
+        assertThat(decoded).containsExactlyElementsOf(entries);
+
+        ManifestEntry selected = entries.get(0);
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        DEFAULT_PART_TYPE, Collections.singletonList(selected.partition()));
+        BucketFilter bucketFilter =
+                new BucketFilter(
+                        false,
+                        null,
+                        null,
+                        (partition, bucket, totalBuckets) ->
+                                partition.equals(selected.partition())
+                                        && bucket == selected.bucket()
+                                        && totalBuckets == selected.totalBuckets());
+        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
+        RowType fileProjection =
+                new RowType(
+                        false,
+                        Collections.singletonList(
+                                fields.get(5)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.FILE_NAME))));
+        RowType kindProjection = new RowType(false, Collections.singletonList(fields.get(1)));
+        // Filter fields need not be projected, and unprojected file metadata must be skipped.
+        for (RowType projectedType : Arrays.asList(fileProjection, kindProjection)) {
+            for (PartitionPredicate filter : Arrays.asList(null, partitionFilter)) {
+                for (BucketFilter buckets : Arrays.asList(null, bucketFilter)) {
+                    List<ManifestEntry> expected =
+                            entries.stream()
+                                    .filter(e -> filter == null || filter.test(e.partition()))
+                                    .filter(
+                                            e ->
+                                                    buckets == null
+                                                            || buckets.test(
+                                                                    e.partition(),
+                                                                    e.bucket(),
+                                                                    e.totalBuckets()))
+                                    .collect(Collectors.toList());
+                    try (ManifestAvroReader reader =
+                                    new ManifestAvroReader(fileIO.newInputStream(path));
+                            CloseableIterator<InternalRow> rows =
+                                    reader.read(projectedType, filter, buckets)) {
+                        for (ManifestEntry entry : expected) {
+                            assertThat(rows.hasNext()).isTrue();
+                            InternalRow row = rows.next();
+                            if (projectedType == kindProjection) {
+                                assertThat(row.getByte(0)).isEqualTo(entry.kind().toByteValue());
+                            } else {
+                                InternalRow file = row.getRow(0, 2);
+                                assertThat(file.getLong(0)).isEqualTo(entry.rowCount());
+                                assertThat(file.getString(1).toString())
+                                        .isEqualTo(entry.fileName());
                             }
-                        })
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("expected _KIND but found _FILE");
+                        }
+                        assertThat(rows.hasNext()).isFalse();
+                    }
+                }
+            }
+        }
+    }
+
+    private static Stream<Arguments> reorderedManifestFieldOrders() {
+        return Stream.of(
+                        new int[] {0, 1, 2, 3, 4, 5},
+                        new int[] {0, 5, 1, 2, 3, 4},
+                        new int[] {5, 4, 3, 2, 1, 0},
+                        new int[] {3, 0, 5, 1, 4, 2},
+                        new int[] {1, 0, 2, 4, 3, 5})
+                .flatMap(order -> Stream.of(Arguments.of(order, false), Arguments.of(order, true)));
+    }
+
+    private static RowType reorderedManifestType(int[] fieldOrder, boolean reorderNestedFields) {
+        List<DataField> fileFields = new ArrayList<>(DataFileMeta.SCHEMA.getFields());
+        Collections.reverse(fileFields);
+        List<DataField> fields = ManifestEntry.MANIFEST_ROW_TYPE.getFields();
+        return new RowType(
+                false,
+                Arrays.stream(fieldOrder)
+                        .mapToObj(fields::get)
+                        .map(
+                                field ->
+                                        reorderNestedFields
+                                                        && ManifestEntry.FILE.equals(field.name())
+                                                ? field.newType(new RowType(false, fileFields))
+                                                : field)
+                        .collect(Collectors.toList()));
+    }
+
+    private static GenericRow reorderRow(InternalRow row, RowType sourceType, RowType targetType) {
+        GenericRow result = new GenericRow(targetType.getFieldCount());
+        for (int i = 0; i < targetType.getFieldCount(); i++) {
+            DataField field = targetType.getFields().get(i);
+            int sourcePosition = sourceType.getFieldIndex(field.name());
+            Object value =
+                    InternalRow.createFieldGetter(
+                                    sourceType.getTypeAt(sourcePosition), sourcePosition)
+                            .getFieldOrNull(row);
+            if (value != null && field.type() instanceof RowType) {
+                value =
+                        reorderRow(
+                                (InternalRow) value,
+                                (RowType) sourceType.getTypeAt(sourcePosition),
+                                (RowType) field.type());
+            }
+            result.setField(i, value);
+        }
+        return result;
     }
 
     @RepeatedTest(10)
