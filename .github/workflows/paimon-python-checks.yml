@@ -69,6 +69,12 @@ jobs:
       - name: Install system dependencies
         shell: bash
         run: |
+          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
+            # The Python 3.6 image uses EOL Debian Bullseye.
+            sed -i '/security.debian.org\/debian-security/d' /etc/apt/sources.list
+            sed -i 's|deb.debian.org/debian|archive.debian.org/debian|g' /etc/apt/sources.list
+            echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive
+          fi
           apt-get update && apt-get install -y \
             build-essential \
             git \
