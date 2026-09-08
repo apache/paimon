@@ -31,7 +31,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
@@ -882,49 +881,33 @@ public interface Catalog extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
-    // ==================== Schema management methods ==========================
-
     /**
-     * Whether this catalog supports schema management for tables. If not, {@link
-     * #listSchemas(Identifier, SchemaFilter)} will throw an {@link UnsupportedOperationException}.
+     * Return the schema of a table for the given version. The version can be {@code EARLIEST},
+     * {@code LATEST}, or a schema ID.
      *
-     * <p>This is orthogonal to {@link #supportsVersionManagement()}: version management covers
-     * snapshot / tag / branch APIs, while schema management covers reading historical {@link
-     * TableSchema}s of a table. A catalog may reasonably support one without the other. Write-side
-     * operations on schemas ({@link #createTable(Identifier, Schema, boolean)}, {@link
-     * #alterTable(Identifier, List, boolean)} and {@link #rollbackSchema(Identifier, long)}) are
-     * already exposed by the corresponding methods on this interface.
+     * @param identifier path of the table
+     * @param version version of the schema
+     * @return the requested schema
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support loading schemas
      */
-    default boolean supportsSchemaManagement() {
-        return false;
+    default Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
     }
 
     /**
-     * List schemas of a table, filtered by the given {@link SchemaFilter}.
-     *
-     * <p>All schema read patterns (latest / earliest / by id / by range / all) share this single
-     * method; callers select the desired subset by populating {@link SchemaFilter}. Implementations
-     * must interpret the filter fields consistently:
-     *
-     * <ul>
-     *   <li>{@link SchemaFilter#isLatest()} returns at most one schema, the latest one.
-     *   <li>{@link SchemaFilter#isEarliest()} returns at most one schema, the earliest one.
-     *   <li>{@link SchemaFilter#schemaId()} returns at most one schema with the given id.
-     *   <li>{@link SchemaFilter#maxSchemaId()} / {@link SchemaFilter#minSchemaId()} restrict the
-     *       returned range (inclusive).
-     *   <li>{@link SchemaFilter#all()} returns every schema.
-     * </ul>
-     *
-     * <p>The returned list is not required to be sorted; callers that need a specific order should
-     * sort by {@link TableSchema#id()} themselves.
+     * Get a paged schema list of a table in descending schema ID order.
      *
      * @param identifier path of the table
-     * @param filter which schemas to return, must not be {@code null}
+     * @param maxResults maximum number of results, or {@code null} for the server default
+     * @param pageToken token from the previous response, or {@code null} for the first page
+     * @return schemas and the token for the next page
      * @throws TableNotExistException if the table does not exist
-     * @throws UnsupportedOperationException if the catalog does not {@link
-     *     #supportsSchemaManagement()}
+     * @throws UnsupportedOperationException if the catalog does not support listing schemas
      */
-    default List<TableSchema> listSchemas(Identifier identifier, SchemaFilter filter)
+    default PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         throw new UnsupportedOperationException();
     }

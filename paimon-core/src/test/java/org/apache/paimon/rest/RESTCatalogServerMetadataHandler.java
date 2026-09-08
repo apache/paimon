@@ -19,22 +19,25 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.rest.responses.ListSchemaResponse;
+import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.rest.responses.GetSchemaResponse;
+import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
+import org.apache.paimon.rest.responses.ListSchemasResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.schema.FileSystemSchemaManager;
-import org.apache.paimon.schema.SchemaFilter;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.tag.Tag;
+import org.apache.paimon.utils.SnapshotManager;
 
 import okhttp3.mockwebserver.MockResponse;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** Metadata response handlers used by {@link RESTCatalogServer}. */
@@ -49,78 +52,97 @@ final class RESTCatalogServerMetadataHandler {
             snapshotList.add(snapshots.next());
         }
         ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
-        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+        return response(response);
     }
 
-    static MockResponse listSchemas(FileStoreTable table, Map<String, String> parameters)
-            throws Exception {
-        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
-        SchemaFilter filter = parseSchemaFilter(parameters);
-        List<TableSchema> all = schemaManager.listAll();
-        all.sort(Comparator.comparingLong(TableSchema::id).reversed());
-        List<ListSchemaResponse.SchemaItem> items;
-        if (filter.isLatest()) {
-            items =
-                    all.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(toSchemaItem(all.get(0)));
-        } else if (filter.isEarliest()) {
-            items =
-                    all.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(toSchemaItem(all.get(all.size() - 1)));
-        } else if (filter.schemaId() != null) {
-            long target = filter.schemaId();
-            items =
-                    all.stream()
-                            .filter(s -> s.id() == target)
-                            .findFirst()
-                            .map(s -> Collections.singletonList(toSchemaItem(s)))
-                            .orElse(Collections.emptyList());
+    static MockResponse loadSnapshot(FileStoreTable table, String version) throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = null;
+        try {
+            if (version.equals("EARLIEST")) {
+                snapshot = snapshotManager.earliestSnapshot();
+            } else if (version.equals("LATEST")) {
+                snapshot = snapshotManager.latestSnapshot();
+            } else {
+                try {
+                    snapshot = snapshotManager.tryGetSnapshot(Long.parseLong(version));
+                } catch (NumberFormatException e) {
+                    Optional<Tag> tag = table.tagManager().get(version);
+                    if (tag.isPresent()) {
+                        snapshot = tag.get().trimToSnapshot();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (snapshot == null) {
+            return notFound(ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "No Snapshot");
+        }
+        return response(new GetVersionSnapshotResponse(snapshot));
+    }
+
+    static MockResponse loadSchema(FileStoreTable table, String version) throws Exception {
+        SchemaManager schemaManager = schemaManager(table);
+        TableSchema schema = null;
+        if ("LATEST".equals(version)) {
+            schema = schemaManager.latest().orElse(null);
         } else {
-            items =
-                    all.stream()
-                            .filter(
-                                    s ->
-                                            filter.maxSchemaId() == null
-                                                    || s.id() <= filter.maxSchemaId())
-                            .filter(
-                                    s ->
-                                            filter.minSchemaId() == null
-                                                    || s.id() >= filter.minSchemaId())
-                            .map(RESTCatalogServerMetadataHandler::toSchemaItem)
+            List<TableSchema> schemas = schemaManager.listAll();
+            if ("EARLIEST".equals(version)) {
+                schema =
+                        schemas.stream()
+                                .min(Comparator.comparingLong(TableSchema::id))
+                                .orElse(null);
+            } else {
+                try {
+                    long schemaId = Long.parseLong(version);
+                    if (schemaManager.schemaExists(schemaId)) {
+                        schema = schemaManager.schema(schemaId);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        if (schema == null) {
+            return notFound(ErrorResponse.RESOURCE_TYPE_SCHEMA, "No Schema");
+        }
+        return response(new GetSchemaResponse(schema));
+    }
+
+    static MockResponse listSchemas(FileStoreTable table, int maxResults, String pageToken)
+            throws Exception {
+        List<TableSchema> schemas = schemaManager(table).listAll();
+        schemas.sort(Comparator.comparingLong(TableSchema::id).reversed());
+        if (pageToken != null) {
+            long previousSchemaId = Long.parseLong(pageToken);
+            schemas =
+                    schemas.stream()
+                            .filter(schema -> schema.id() < previousSchemaId)
                             .collect(Collectors.toList());
         }
-        ListSchemaResponse response = new ListSchemaResponse(items);
+
+        int resultSize = Math.min(maxResults, schemas.size());
+        List<TableSchema> result = new ArrayList<>(schemas.subList(0, resultSize));
+        String nextPageToken =
+                resultSize < schemas.size()
+                        ? Long.toString(result.get(result.size() - 1).id())
+                        : null;
+        return response(new ListSchemasResponse(result, nextPageToken));
+    }
+
+    private static SchemaManager schemaManager(FileStoreTable table) {
+        return new FileSystemSchemaManager(table.fileIO(), table.location());
+    }
+
+    private static MockResponse notFound(String resourceType, String message) throws Exception {
+        return new MockResponse()
+                .setResponseCode(404)
+                .setBody(RESTApi.toJson(new ErrorResponse(resourceType, null, message, 404)));
+    }
+
+    private static MockResponse response(RESTResponse response) throws Exception {
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
-    }
-
-    private static SchemaFilter parseSchemaFilter(Map<String, String> parameters) {
-        if (parameters == null || parameters.isEmpty()) {
-            return SchemaFilter.all();
-        }
-        if ("true".equalsIgnoreCase(parameters.get("latest"))) {
-            return SchemaFilter.latest();
-        }
-        if ("true".equalsIgnoreCase(parameters.get("earliest"))) {
-            return SchemaFilter.earliest();
-        }
-        String schemaId = parameters.get("schemaId");
-        if (schemaId != null) {
-            return SchemaFilter.withId(Long.parseLong(schemaId));
-        }
-        String maxSchemaId = parameters.get("maxSchemaId");
-        String minSchemaId = parameters.get("minSchemaId");
-        Long max = maxSchemaId == null ? null : Long.parseLong(maxSchemaId);
-        Long min = minSchemaId == null ? null : Long.parseLong(minSchemaId);
-        if (max == null && min == null) {
-            return SchemaFilter.all();
-        }
-        return SchemaFilter.range(max, min);
-    }
-
-    private static ListSchemaResponse.SchemaItem toSchemaItem(TableSchema schema) {
-        return new ListSchemaResponse.SchemaItem(
-                schema.id(), schema.toSchema(), schema.timeMillis());
     }
 }

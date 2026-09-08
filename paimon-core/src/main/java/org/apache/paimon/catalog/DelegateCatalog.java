@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -221,6 +222,19 @@ public abstract class DelegateCatalog implements Catalog {
             Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         return wrapped.listSnapshotsPaged(identifier, maxResults, pageToken);
+    }
+
+    @Override
+    public Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        return wrapped.loadSchema(identifier, version);
+    }
+
+    @Override
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        return wrapped.listSchemasPaged(identifier, maxResults, pageToken);
     }
 
     @Override

@@ -57,6 +57,7 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
@@ -140,6 +141,44 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         if (restCatalogServer != null) {
             restCatalogServer.shutdown();
         }
+    }
+
+    @Test
+    void testCompatibilityWithServerWithoutSchemaEndpoints() throws Exception {
+        restCatalogServer.setSchemaEndpointsSupported(false);
+        Identifier identifier = Identifier.create("schema_compatibility", "table");
+        createTable(identifier, Collections.emptyMap(), Collections.singletonList("col1"));
+        restCatalogServer.clearReceivedHeaders();
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.schemaManager()).isInstanceOf(FileSystemSchemaManager.class);
+        long firstSchemaId = table.schemaManager().latest().get().id();
+        catalog.alterTable(identifier, SchemaChange.setOption("key", "value"), false);
+        assertThat(((FileStoreTable) catalog.getTable(identifier)).schemaManager().latest().get())
+                .extracting(schema -> schema.options().get("key"))
+                .isEqualTo("value");
+        catalog.rollbackSchema(identifier, firstSchemaId);
+        assertThat(
+                        ((FileStoreTable) catalog.getTable(identifier))
+                                .schemaManager()
+                                .latest()
+                                .get()
+                                .id())
+                .isEqualTo(firstSchemaId);
+
+        ResourcePaths paths = new ResourcePaths("paimon");
+        assertThat(
+                        restCatalogServer.getReceivedHeaders(
+                                paths.schemas(
+                                        identifier.getDatabaseName(), identifier.getObjectName())))
+                .isEmpty();
+        assertThat(
+                        restCatalogServer.getReceivedHeaders(
+                                paths.schemas(
+                                        identifier.getDatabaseName(),
+                                        identifier.getObjectName(),
+                                        "LATEST")))
+                .isEmpty();
     }
 
     @Test

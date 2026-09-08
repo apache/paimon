@@ -77,6 +77,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -92,7 +93,7 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
-import org.apache.paimon.rest.responses.ListSchemaResponse;
+import org.apache.paimon.rest.responses.ListSchemasResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -104,7 +105,7 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaFilter;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -764,41 +765,32 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /**
-     * List schemas of a table filtered by the given {@link SchemaFilter}.
-     *
-     * <p>All schema read patterns (latest / earliest / by id / by range / all) share this single
-     * endpoint. The server is responsible for interpreting the filter and returning the matching
-     * schemas.
-     *
-     * @param identifier database name and table name.
-     * @param filter which schemas to return; see {@link SchemaFilter} for the allowed combinations.
-     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
-     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
-     *     this table
-     */
-    public ListSchemaResponse listSchemas(Identifier identifier, SchemaFilter filter) {
-        Map<String, String> queryParams = Maps.newHashMap();
-        if (filter.isLatest()) {
-            queryParams.put("latest", "true");
+    /** Load the schema of a table for the given version. */
+    public TableSchema loadSchema(Identifier identifier, String version) {
+        GetSchemaResponse response =
+                client.get(
+                        resourcePaths.schemas(
+                                identifier.getDatabaseName(), identifier.getObjectName(), version),
+                        GetSchemaResponse.class,
+                        restAuthFunction);
+        return response.getSchema();
+    }
+
+    /** Get a paged schema list of a table in descending schema ID order. */
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListSchemasResponse response =
+                client.get(
+                        resourcePaths.schemas(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListSchemasResponse.class,
+                        restAuthFunction);
+        List<TableSchema> schemas = response.getSchemas();
+        if (schemas == null) {
+            return new PagedList<>(emptyList(), null);
         }
-        if (filter.isEarliest()) {
-            queryParams.put("earliest", "true");
-        }
-        if (filter.schemaId() != null) {
-            queryParams.put("schemaId", filter.schemaId().toString());
-        }
-        if (filter.maxSchemaId() != null) {
-            queryParams.put("maxSchemaId", filter.maxSchemaId().toString());
-        }
-        if (filter.minSchemaId() != null) {
-            queryParams.put("minSchemaId", filter.minSchemaId().toString());
-        }
-        return client.get(
-                resourcePaths.schemas(identifier.getDatabaseName(), identifier.getObjectName()),
-                queryParams,
-                ListSchemaResponse.class,
-                restAuthFunction);
+        return new PagedList<>(schemas, response.getNextPageToken());
     }
 
     /**

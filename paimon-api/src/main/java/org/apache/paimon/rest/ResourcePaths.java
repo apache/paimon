@@ -235,6 +235,10 @@ public class ResourcePaths {
                 SCHEMAS);
     }
 
+    public String schemas(String databaseName, String objectName, String version) {
+        return SLASH.join(schemas(databaseName, objectName), encodeString(version));
+    }
+
     public String authTable(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
