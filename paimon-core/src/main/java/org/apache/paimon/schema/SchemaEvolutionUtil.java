@@ -36,6 +36,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
@@ -258,6 +259,8 @@ public class SchemaEvolutionUtil {
             return createArrayCastExecutor((ArrayType) inputType, (ArrayType) targetType);
         } else if (inputType instanceof MapType && targetType instanceof MapType) {
             return createMapCastExecutor((MapType) inputType, (MapType) targetType);
+        } else if (inputType instanceof MultisetType && targetType instanceof MultisetType) {
+            return createMultisetCastExecutor((MultisetType) inputType, (MultisetType) targetType);
         } else {
             return checkNotNull(
                     CastExecutors.resolve(inputType, targetType),
@@ -312,6 +315,18 @@ public class SchemaEvolutionUtil {
                         createCastExecutor(inputType.getValueType(), targetType.getValueType()));
 
         CastedMap castedMap = CastedMap.from(castElementGetter);
+        return castedMap::replaceMap;
+    }
+
+    private static CastExecutor<InternalMap, InternalMap> createMultisetCastExecutor(
+            MultisetType inputType, MultisetType targetType) {
+        CastElementGetter castElementGetter =
+                new CastElementGetter(
+                        InternalArray.createElementGetter(inputType.getElementType()),
+                        createCastExecutor(
+                                inputType.getElementType(), targetType.getElementType()));
+
+        CastedMap castedMap = CastedMap.fromKey(castElementGetter);
         return castedMap::replaceMap;
     }
 }

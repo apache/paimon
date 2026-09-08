@@ -30,11 +30,17 @@ import org.apache.paimon.data.InternalMap;
  */
 public class CastedMap implements InternalMap {
 
-    private final CastedArray castedValueArray;
+    private final CastedArray castedArray;
+    private final boolean castKey;
     private InternalMap map;
 
     protected CastedMap(CastElementGetter castValueGetter) {
-        this.castedValueArray = CastedArray.from(castValueGetter);
+        this(castValueGetter, false);
+    }
+
+    private CastedMap(CastElementGetter castElementGetter, boolean castKey) {
+        this.castedArray = CastedArray.from(castElementGetter);
+        this.castKey = castKey;
     }
 
     /**
@@ -47,8 +53,12 @@ public class CastedMap implements InternalMap {
         return new CastedMap(castValueGetter);
     }
 
+    public static CastedMap fromKey(CastElementGetter castKeyGetter) {
+        return new CastedMap(castKeyGetter, true);
+    }
+
     public CastedMap replaceMap(InternalMap map) {
-        this.castedValueArray.replaceArray(map.valueArray());
+        this.castedArray.replaceArray(castKey ? map.keyArray() : map.valueArray());
         this.map = map;
         return this;
     }
@@ -60,11 +70,11 @@ public class CastedMap implements InternalMap {
 
     @Override
     public InternalArray keyArray() {
-        return map.keyArray();
+        return castKey ? castedArray : map.keyArray();
     }
 
     @Override
     public InternalArray valueArray() {
-        return castedValueArray;
+        return castKey ? map.valueArray() : castedArray;
     }
 }

@@ -23,13 +23,16 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.NestedSchemaUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -44,6 +47,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LazyField;
 
@@ -61,6 +65,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -654,6 +659,69 @@ public class SchemaEvolutionTest {
                         Collections.singletonList(
                                 SchemaChange.updateColumnType("f0", DataTypes.STRING())));
         assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.STRING());
+    }
+
+    @Test
+    public void testUpdateMultisetElementType() throws Exception {
+        MultisetType oldIntMultiset = new MultisetType(DataTypes.INT());
+        RowType oldElementType = RowType.of(new DataField(3, "id", DataTypes.INT()));
+        MultisetType oldRowMultiset = new MultisetType(oldElementType);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(
+                                        new DataField(0, "k", DataTypes.INT()),
+                                        new DataField(1, "int_items", oldIntMultiset),
+                                        new DataField(2, "row_items", oldRowMultiset))
+                                .getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        Map<Integer, Integer> intItems = new LinkedHashMap<>();
+        intItems.put(1, 2);
+        intItems.put(2, 1);
+        Map<InternalRow, Integer> rowItems = new LinkedHashMap<>();
+        rowItems.put(GenericRow.of(3), 4);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, new GenericMap(intItems), new GenericMap(rowItems)));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        MultisetType newIntMultiset = new MultisetType(DataTypes.BIGINT());
+        RowType newElementType =
+                RowType.of(
+                        new DataField(3, "id", DataTypes.BIGINT()),
+                        new DataField(4, "name", DataTypes.STRING()));
+        MultisetType newRowMultiset = new MultisetType(newElementType);
+        List<SchemaChange> changes = new ArrayList<>();
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("int_items"), oldIntMultiset, newIntMultiset, changes);
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("row_items"), oldRowMultiset, newRowMultiset, changes);
+        schemaManager.commitChanges(changes);
+
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
+        int[] rowCount = {0};
+        forEachRemaining(
+                table,
+                null,
+                row -> {
+                    rowCount[0]++;
+                    InternalMap intMultiset = row.getMap(1);
+                    assertThat(intMultiset.keyArray().toLongArray()).containsExactly(1L, 2L);
+                    assertThat(intMultiset.valueArray().toIntArray()).containsExactly(2, 1);
+
+                    InternalMap rowMultiset = row.getMap(2);
+                    InternalRow element = rowMultiset.keyArray().getRow(0, 2);
+                    assertThat(element.getLong(0)).isEqualTo(3L);
+                    assertThat(element.isNullAt(1)).isTrue();
+                    assertThat(rowMultiset.valueArray().toIntArray()).containsExactly(4);
+                });
+        assertThat(rowCount[0]).isEqualTo(1);
     }
 
     @Test
