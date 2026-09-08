@@ -738,15 +738,21 @@ or call `flush()` at an operational boundary. `save_episode`, `flush`, and
 frames raises `ValueError`, matching native LeRobot.
 
 Call `clear_episode_buffer()` before `save_episode()` to discard a re-recorded
-episode without advancing frame or episode indices. `finalize()` rejects an
-unfinished episode instead of silently dropping its frames.
+episode without advancing frame or episode indices. Once `save_episode()`
+accepts an episode, `clear_episode_buffer()` no longer affects it, even when the
+batch has not yet been committed. `finalize()` rejects an unfinished episode
+instead of silently dropping its frames.
 
 The writer creates a missing table and appends to an existing compatible table.
 Before writing, it requires the table columns, order, Arrow types, nullability,
 and LeRobot feature metadata to match. On resume, new `index` and
 `episode_index` values continue after the existing maxima, existing task
 mappings are retained, and the episode-local `frame_index` starts again at zero.
-A commit exception has an unknown result and is not automatically retried.
+Each commit records the next global indices and task mapping in Snapshot
+properties. Resume normally reads only that metadata; a non-empty table created
+before these properties existed is scanned once and upgraded by its next
+commit. A commit exception has an unknown result and is not automatically
+retried.
 
 ## Overwrite
 

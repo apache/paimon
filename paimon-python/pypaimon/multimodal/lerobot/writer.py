@@ -18,6 +18,7 @@
 """LeRobot-compatible capture writer for multimodal Paimon tables."""
 
 import copy
+import json
 from typing import Mapping, Optional
 
 import numpy as np
@@ -47,6 +48,11 @@ _DEFAULT_FEATURES = {
     "task_index": {"dtype": "int64", "shape": (1,), "names": None},
 }
 _TASK_FEATURE = {"dtype": "string", "shape": (1,), "names": None}
+_STATE_PREFIX = "pypaimon.lerobot."
+_STATE_VERSION = _STATE_PREFIX + "state-version"
+_NEXT_INDEX = _STATE_PREFIX + "next-index"
+_NEXT_EPISODE_INDEX = _STATE_PREFIX + "next-episode-index"
+_TASK_INDICES = _STATE_PREFIX + "task-indices"
 
 
 class PaimonLeRobotWriter:
@@ -114,6 +120,16 @@ class PaimonLeRobotWriter:
         self._failed = False
 
     def _load_existing_state(self):
+        snapshot = self._table.raw_table.snapshot_manager() \
+            .get_latest_snapshot()
+        if snapshot is None:
+            return 0, 0, {}
+        properties = snapshot.properties or {}
+        if _STATE_VERSION in properties:
+            return self._state_from_snapshot_properties(properties)
+        if any(key.startswith(_STATE_PREFIX) for key in properties):
+            raise ValueError("Existing LeRobot snapshot state is incomplete.")
+
         # ponytail: one resume scan; persist counters if startup cost matters.
         rows = self._table.scan().select([
             "index", "episode_index", "task_index", "task"
@@ -139,6 +155,45 @@ class PaimonLeRobotWriter:
             max(row["episode_index"] for row in rows) + 1,
             task_indices,
         )
+
+    @staticmethod
+    def _state_from_snapshot_properties(properties):
+        if properties[_STATE_VERSION] != "1":
+            raise ValueError(
+                "Unsupported LeRobot snapshot state version %r."
+                % properties[_STATE_VERSION])
+        try:
+            next_index = int(properties[_NEXT_INDEX])
+            next_episode_index = int(properties[_NEXT_EPISODE_INDEX])
+            task_indices = json.loads(properties[_TASK_INDICES])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Existing LeRobot snapshot state is invalid.") from error
+        if next_index < 0 or next_episode_index < 0 \
+                or not isinstance(task_indices, dict):
+            raise ValueError("Existing LeRobot snapshot state is invalid.")
+        indices = list(task_indices.values())
+        if any(not isinstance(task, str)
+               or isinstance(index, bool)
+               or not isinstance(index, int)
+               or index < 0
+               for task, index in task_indices.items()) \
+                or len(set(indices)) != len(indices):
+            raise ValueError("Existing LeRobot snapshot state is invalid.")
+        return next_index, next_episode_index, task_indices
+
+    def _snapshot_properties(self):
+        return {
+            _STATE_VERSION: "1",
+            _NEXT_INDEX: str(self.num_frames),
+            _NEXT_EPISODE_INDEX: str(self.num_episodes),
+            _TASK_INDICES: json.dumps(
+                self._task_indices,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        }
 
     def add_frame(self, frame):
         self._require_open("add_frame")
@@ -257,7 +312,9 @@ class PaimonLeRobotWriter:
         try:
             messages = self._table_write.prepare_commit()
             commit_started = True
-            self._table_commit.commit(messages)
+            self._table_commit.commit(
+                messages,
+                snapshot_properties=self._snapshot_properties())
             snapshot_id = self._snapshot_recorder.snapshot_id
             if snapshot_id is None:
                 raise RuntimeError(

@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -87,8 +88,15 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         first.save_episode()
         first.finalize()
 
-        resumed = PaimonLeRobotWriter(
-            self.connection, "resume", fps=10, features=features)
+        snapshot = self.connection.get_table(
+            "resume").raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual("1", snapshot.properties[
+            "pypaimon.lerobot.state-version"])
+        with patch(
+                "pypaimon.multimodal.table.MultimodalTable.scan",
+                side_effect=AssertionError("resume must not scan table data")):
+            resumed = PaimonLeRobotWriter(
+                self.connection, "resume", fps=10, features=features)
         self.assertEqual(2, resumed.num_frames)
         self.assertEqual(1, resumed.num_episodes)
         resumed.add_frame({
@@ -253,18 +261,34 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         writer.save_episode()
         self.assertEqual(1, writer.num_episodes)
         self.assertEqual(1, writer.pending_episodes)
+        writer.clear_episode_buffer()
+        self.assertEqual(1, writer.pending_episodes)
+
+        writer.add_frame({
+            "action": np.array([2.0], dtype=np.float32),
+            "task": "also keep",
+        })
+        writer.save_episode()
         writer.finalize()
         writer.finalize()
 
         rows = self.connection.get_table("rerecord").scan().select([
             "episode_index", "index", "task", "action"
         ]).to_arrow().to_pylist()
-        self.assertEqual([{
-            "episode_index": 0,
-            "index": 0,
-            "task": "keep",
-            "action": 1.0,
-        }], rows)
+        self.assertEqual([
+            {
+                "episode_index": 0,
+                "index": 0,
+                "task": "keep",
+                "action": 1.0,
+            },
+            {
+                "episode_index": 1,
+                "index": 1,
+                "task": "also keep",
+                "action": 2.0,
+            },
+        ], rows)
         with self.assertRaisesRegex(RuntimeError, "after finalize"):
             writer.add_frame({
                 "action": np.array([2.0], dtype=np.float32),
