@@ -250,7 +250,11 @@ class FileStoreCommit:
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
-    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
+    def commit(
+            self,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
             return
@@ -334,9 +338,15 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds,
-                         hash_index_base_snapshot=hash_index_base_snapshot)
+                         hash_index_base_snapshot=hash_index_base_snapshot,
+                         snapshot_properties=snapshot_properties)
 
-    def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
+    def overwrite(
+            self,
+            overwrite_partition,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
         """Commit the given commit messages in overwrite mode."""
         logger.info(
             "Ready to overwrite to table %s, number of commit messages: %d",
@@ -382,6 +392,7 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
+                snapshot_properties=snapshot_properties,
             )
 
     @staticmethod
@@ -487,7 +498,8 @@ class FileStoreCommit:
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False, index_deletes=None,
                     index_adds=None, changelog_entries=None,
-                    hash_index_base_snapshot=None):
+                    hash_index_base_snapshot=None,
+                    snapshot_properties: Optional[Dict[str, str]] = None):
 
         retry_count = 0
         retry_result = None
@@ -528,6 +540,7 @@ class FileStoreCommit:
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
                 commit_result_may_be_uncertain=commit_result_may_be_uncertain,
+                snapshot_properties=snapshot_properties,
             )
 
             if isinstance(result, RewriteResult):
@@ -606,7 +619,9 @@ class FileStoreCommit:
                          index_deletes=None,
                          index_adds=None,
                          hash_index_base_snapshot=None,
-                         commit_result_may_be_uncertain: bool = False) -> CommitResult:
+                         commit_result_may_be_uncertain: bool = False,
+                         snapshot_properties: Optional[Dict[str, str]] = None
+                         ) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
                 retry_result,
@@ -807,6 +822,9 @@ class FileStoreCommit:
                     latest_snapshot.watermark if latest_snapshot else None),
                 next_row_id=next_row_id,
                 index_manifest=index_manifest,
+                properties=(
+                    dict(snapshot_properties)
+                    if snapshot_properties else None),
             )
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
