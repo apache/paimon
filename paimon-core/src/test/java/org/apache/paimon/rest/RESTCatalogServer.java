@@ -96,7 +96,6 @@ import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
-import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
 import org.apache.paimon.rest.responses.ListConsumersResponse;
@@ -107,7 +106,6 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
-import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
@@ -167,7 +165,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -276,6 +273,7 @@ public class RESTCatalogServer {
 
     private volatile boolean partitionListingSupported = true;
     private volatile boolean partitionOptionsCreateSupported = true;
+    private volatile boolean schemaEndpointsSupported = true;
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -346,6 +344,10 @@ public class RESTCatalogServer {
 
     public void setPartitionOptionsCreateSupported(boolean partitionOptionsCreateSupported) {
         this.partitionOptionsCreateSupported = partitionOptionsCreateSupported;
+    }
+
+    public void setSchemaEndpointsSupported(boolean schemaEndpointsSupported) {
+        this.schemaEndpointsSupported = schemaEndpointsSupported;
     }
 
     public void clearReceivedListPartitionsByFilterRequests() {
@@ -488,9 +490,7 @@ public class RESTCatalogServer {
                         return functionsHandle(parameters);
                     } else if (request.getPath().startsWith(databaseUri)) {
                         String[] resources =
-                                request.getPath()
-                                        .substring((databaseUri + "/").length())
-                                        .split("/");
+                                resourcePath.substring((databaseUri + "/").length()).split("/");
                         String databaseName = RESTUtil.decodeString(resources[0]);
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
@@ -533,6 +533,14 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isListSchemas =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SCHEMAS.equals(resources[3]);
+                        boolean isLoadSchema =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.SCHEMAS.equals(resources[3]);
                         boolean isListConsumers =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -692,6 +700,12 @@ public class RESTCatalogServer {
                             return snapshotHandle(identifier);
                         } else if (isListSnapshots) {
                             return listSnapshots(identifier);
+                        } else if ((isListSchemas || isLoadSchema) && !schemaEndpointsSupported) {
+                            return new MockResponse().setResponseCode(404);
+                        } else if (isListSchemas) {
+                            return listSchemas(identifier, parameters);
+                        } else if (isLoadSchema) {
+                            return loadSchema(identifier, resources[4]);
                         } else if (isListConsumers) {
                             return listConsumers(identifier);
                         } else if (isResetConsumer) {
@@ -992,13 +1006,18 @@ public class RESTCatalogServer {
 
     private MockResponse listSnapshots(Identifier identifier) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Iterator<Snapshot> snapshots = table.snapshotManager().snapshots();
-        List<Snapshot> snapshotList = new ArrayList<>();
-        while (snapshots.hasNext()) {
-            snapshotList.add(snapshots.next());
-        }
-        ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
-        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+        return RESTCatalogServerMetadataHandler.listSnapshots(table);
+    }
+
+    private MockResponse listSchemas(Identifier identifier, Map<String, String> parameters)
+            throws Exception {
+        FileStoreTable table = getFileTable(identifier);
+        return RESTCatalogServerMetadataHandler.listSchemas(
+                table, getMaxResults(parameters), parameters.get(PAGE_TOKEN));
+    }
+
+    private MockResponse loadSchema(Identifier identifier, String version) throws Exception {
+        return RESTCatalogServerMetadataHandler.loadSchema(getFileTable(identifier), version);
     }
 
     private MockResponse listConsumers(Identifier identifier) throws Exception {
@@ -1031,40 +1050,8 @@ public class RESTCatalogServer {
     }
 
     private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
-
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        SnapshotManager snapshotManager = table.snapshotManager();
-        Snapshot snapshot = null;
-        try {
-            if (version.equals("EARLIEST")) {
-                snapshot = snapshotManager.earliestSnapshot();
-            } else if (version.equals("LATEST")) {
-                snapshot = snapshotManager.latestSnapshot();
-            } else {
-                try {
-                    long snapshotId = Long.parseLong(version);
-                    snapshot = snapshotManager.tryGetSnapshot(snapshotId);
-                } catch (NumberFormatException e) {
-                    Optional<Tag> tag = table.tagManager().get(version);
-                    if (tag.isPresent()) {
-                        snapshot = tag.get().trimToSnapshot();
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-
-        if (snapshot == null) {
-            RESTResponse response =
-                    new ErrorResponse(
-                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
-                            identifier.getDatabaseName(),
-                            "No Snapshot",
-                            404);
-            return mockResponse(response, 404);
-        }
-        GetVersionSnapshotResponse response = new GetVersionSnapshotResponse(snapshot);
-        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+        return RESTCatalogServerMetadataHandler.loadSnapshot(table, version);
     }
 
     private Optional<MockResponse> checkTablePartitioned(Identifier identifier) {

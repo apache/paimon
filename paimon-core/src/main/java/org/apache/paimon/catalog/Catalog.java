@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
@@ -877,6 +878,37 @@ public interface Catalog extends AutoCloseable {
      */
     default void rollbackSchema(Identifier identifier, long schemaId)
             throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Return the schema of a table for the given version. The version can be {@code EARLIEST},
+     * {@code LATEST}, or a schema ID.
+     *
+     * @param identifier path of the table
+     * @param version version of the schema
+     * @return the requested schema
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support loading schemas
+     */
+    default Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Get a paged schema list of a table in descending schema ID order.
+     *
+     * @param identifier path of the table
+     * @param maxResults maximum number of results, or {@code null} for the server default
+     * @param pageToken token from the previous response, or {@code null} for the first page
+     * @return schemas and the token for the next page
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support listing schemas
+     */
+    default PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 

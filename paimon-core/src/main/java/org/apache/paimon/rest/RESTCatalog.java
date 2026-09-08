@@ -479,6 +479,34 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        try {
+            return Optional.ofNullable(api.loadSchema(identifier, version));
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SCHEMA)) {
+                return Optional.empty();
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listSchemasPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,

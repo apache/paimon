@@ -77,6 +77,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -92,6 +93,7 @@ import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
+import org.apache.paimon.rest.responses.ListSchemasResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -103,6 +105,7 @@ import org.apache.paimon.rest.responses.ListViewsResponse;
 import org.apache.paimon.rest.responses.PagedResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -760,6 +763,34 @@ public class RESTApi {
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
+    }
+
+    /** Load the schema of a table for the given version. */
+    public TableSchema loadSchema(Identifier identifier, String version) {
+        GetSchemaResponse response =
+                client.get(
+                        resourcePaths.schemas(
+                                identifier.getDatabaseName(), identifier.getObjectName(), version),
+                        GetSchemaResponse.class,
+                        restAuthFunction);
+        return response.getSchema();
+    }
+
+    /** Get a paged schema list of a table in descending schema ID order. */
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListSchemasResponse response =
+                client.get(
+                        resourcePaths.schemas(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListSchemasResponse.class,
+                        restAuthFunction);
+        List<TableSchema> schemas = response.getSchemas();
+        if (schemas == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(schemas, response.getNextPageToken());
     }
 
     /**
