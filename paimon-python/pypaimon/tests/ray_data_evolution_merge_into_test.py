@@ -4722,6 +4722,60 @@ class MergeConditionUnitTest(unittest.TestCase):
         result = filter_batch(batch, 's.age > t.age')
         self.assertEqual(result.column('s.id').to_pylist(), [2, 3])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_partition_order(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        batch_size = 20_000
+        expected = list(range(4 * batch_size))
+        source = pa.table({
+            't.id': pa.chunked_array([
+                pa.array(
+                    range(i * batch_size, (i + 1) * batch_size),
+                    type=pa.int64(),
+                )
+                for i in range(4)
+            ]),
+        })
+
+        result = filter_batch(
+            source, '"t.id" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t.id').to_pylist(), expected)
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_filter_batch_preserves_large_offset_chunks(self):
+        from pypaimon.ray.merge_condition import filter_batch
+
+        child_count = 1_100_000_000
+
+        def large_list():
+            return pa.ListArray.from_arrays(
+                pa.array([0, child_count], type=pa.int32()),
+                pa.nulls(child_count),
+            )
+
+        batch = pa.table({
+            't._ROW_ID': pa.chunked_array([
+                pa.array([0], type=pa.int64()),
+                pa.array([1], type=pa.int64()),
+            ]),
+            't.payload': pa.chunked_array([large_list(), large_list()]),
+        })
+
+        result = filter_batch(
+            batch, '"t._ROW_ID" >= 0', _pre_rewritten=True,
+        )
+
+        self.assertEqual(result.column('t._ROW_ID').to_pylist(), [0, 1])
+        payload = result.column('t.payload')
+        self.assertEqual(payload.num_chunks, 2)
+        self.assertEqual(
+            [len(chunk.values) for chunk in payload.chunks],
+            [child_count, child_count],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
