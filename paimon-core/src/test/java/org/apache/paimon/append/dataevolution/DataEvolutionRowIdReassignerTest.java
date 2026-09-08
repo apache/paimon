@@ -1740,6 +1740,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     public void testReassignGlobalIndexRowRanges() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         createBTreeIndex(table);
+        long buildSchemaId = table.schema().id();
 
         assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(5L);
 
@@ -1758,6 +1759,12 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         new Range(7, 7),
                         new Range(8, 8),
                         new Range(9, 9));
+        assertThat(table.store().newIndexFileHandler().scanEntries())
+                .allSatisfy(
+                        entry -> {
+                            assertThat(entry.schemaId()).isEqualTo(buildSchemaId);
+                            assertThat(entry.indexFile().schemaId()).isEqualTo(buildSchemaId);
+                        });
 
         Predicate predicate =
                 new PredicateBuilder(table.rowType()).equal(table.rowType().getFieldIndex("id"), 4);

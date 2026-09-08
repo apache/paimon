@@ -158,7 +158,8 @@ public class SortedGlobalIndexWriter implements Serializable {
                         Collections.singletonList(indexField),
                         indexType,
                         resultEntries,
-                        sourceMeta);
+                        sourceMeta,
+                        table.schema().id());
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());

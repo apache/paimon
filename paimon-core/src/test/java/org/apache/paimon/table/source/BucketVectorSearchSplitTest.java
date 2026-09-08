@@ -137,10 +137,13 @@ class BucketVectorSearchSplitTest {
                 .hasMessageContaining("wrong magic number");
 
         byte[] unsupportedVersion = serialize(split());
-        ByteBuffer.wrap(unsupportedVersion).putInt(Long.BYTES, 2);
+        ByteBuffer versionBuffer = ByteBuffer.wrap(unsupportedVersion);
+        int futureVersion = versionBuffer.getInt(Long.BYTES) + 1;
+        versionBuffer.putInt(Long.BYTES, futureVersion);
         assertThatThrownBy(() -> deserialize(unsupportedVersion))
                 .isInstanceOf(IOException.class)
-                .hasMessageContaining("Unsupported BucketVectorSearchSplit version: 2");
+                .hasMessageContaining(
+                        "Unsupported BucketVectorSearchSplit version: " + futureVersion);
     }
 
     private static byte[] serialize(BucketVectorSearchSplit split) throws IOException {

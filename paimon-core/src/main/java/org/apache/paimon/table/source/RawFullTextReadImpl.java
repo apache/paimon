@@ -70,6 +70,7 @@ class RawFullTextReadImpl {
     @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
     private final DataField textColumn;
+    @Nullable private final String rawIndexType;
     private final IndexSearch indexSearch;
 
     RawFullTextReadImpl(
@@ -78,12 +79,14 @@ class RawFullTextReadImpl {
             @Nullable PartitionPredicate partitionFilter,
             int limit,
             DataField textColumn,
+            @Nullable String rawIndexType,
             IndexSearch indexSearch) {
         this.table = table;
         this.planSnapshot = planSnapshot;
         this.partitionFilter = partitionFilter;
         this.limit = limit;
         this.textColumn = textColumn;
+        this.rawIndexType = rawIndexType;
         this.indexSearch = indexSearch;
     }
 
@@ -178,11 +181,13 @@ class RawFullTextReadImpl {
         Map<String, RawFullTextIndex> rawIndexes = new HashMap<>();
         long rowRangeStart = rawRowRanges.get(0).from;
         long rowRangeEnd = rawRowRanges.get(rawRowRanges.size() - 1).to;
-        String fallbackIndexType = firstIndexType(splitsByColumn);
         String column = textColumn.name();
         String indexType = indexType(column, splitsByColumn);
         if (indexType == null) {
-            indexType = checkNotNull(fallbackIndexType);
+            indexType = rawIndexType;
+        }
+        if (indexType == null) {
+            indexType = checkNotNull(firstIndexType(splitsByColumn));
         }
         GlobalIndexer globalIndexer =
                 GlobalIndexerFactoryUtils.load(indexType).create(textColumn, rawSearchOptions());

@@ -20,14 +20,20 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from copy import deepcopy
+from io import BytesIO
 
+import fastavro
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-from pypaimon.manifest.index_manifest_file import IndexManifestFile
+from pypaimon.manifest.index_manifest_file import (
+    INDEX_MANIFEST_ENTRY_SCHEMA,
+    IndexManifestFile,
+)
 from pypaimon.table.row.generic_row import GenericRow
 
 
@@ -55,7 +61,9 @@ class IndexManifestWriteTest(unittest.TestCase):
         self.catalog.create_table(name, s, False)
         return self.catalog.get_table(name)
 
-    def _entry(self, file_name, field_id, meta=b'm', source_meta=None):
+    def _entry(
+            self, file_name, field_id, meta=b'm', source_meta=None,
+            schema_id=7):
         partition = GenericRow([], [])
         index_file = IndexFileMeta(
             index_type='BTREE',
@@ -71,7 +79,13 @@ class IndexManifestWriteTest(unittest.TestCase):
                 source_meta=source_meta,
             ),
         )
-        return IndexManifestEntry(kind=0, partition=partition, bucket=0, index_file=index_file)
+        return IndexManifestEntry(
+            kind=0,
+            partition=partition,
+            bucket=0,
+            index_file=index_file,
+            schema_id=schema_id,
+        )
 
     def test_write_read_roundtrip(self):
         imf = IndexManifestFile(self._table())
@@ -90,6 +104,28 @@ class IndexManifestWriteTest(unittest.TestCase):
         self.assertEqual(10, gim.row_range_end)
         self.assertEqual([2], gim.extra_field_ids)
         self.assertEqual(b'm', bytes(gim.index_meta))
+        self.assertEqual(7, a.schema_id)
+
+    def test_read_legacy_manifest_without_schema_id(self):
+        table = self._table()
+        imf = IndexManifestFile(table)
+        entry = self._entry('legacy-index', 1)
+        record = imf._to_avro_record(entry)
+        record.pop('_SCHEMA_ID')
+        legacy_schema = deepcopy(INDEX_MANIFEST_ENTRY_SCHEMA)
+        legacy_schema['fields'] = [
+            field for field in legacy_schema['fields']
+            if field['name'] != '_SCHEMA_ID'
+        ]
+
+        buffer = BytesIO()
+        fastavro.writer(buffer, legacy_schema, [record])
+        file_name = 'index-manifest-legacy-' + uuid.uuid4().hex
+        path = table.table_path.rstrip('/') + '/manifest/' + file_name
+        with table.file_io.new_output_stream(path) as output_stream:
+            output_stream.write(buffer.getvalue())
+
+        self.assertIsNone(imf.read(file_name)[0].schema_id)
 
     def test_write_read_primary_key_source_meta(self):
         source_meta = b'primary-key-source-meta'
@@ -106,8 +142,9 @@ class IndexManifestWriteTest(unittest.TestCase):
         deletes = [self._entry('idx-a', 1)]
         new_name = imf.combine_deletes(previous, deletes)
         self.assertNotEqual(previous, new_name)
-        survivors = {e.index_file.file_name for e in imf.read(new_name)}
-        self.assertEqual({'idx-b'}, survivors)
+        survivors = imf.read(new_name)
+        self.assertEqual({'idx-b'}, {e.index_file.file_name for e in survivors})
+        self.assertEqual(7, survivors[0].schema_id)
 
     def test_combine_unknown_delete_is_noop_on_content(self):
         imf = IndexManifestFile(self._table())

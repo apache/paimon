@@ -74,6 +74,7 @@ INDEX_MANIFEST_ENTRY_SCHEMA = {
         {"name": "_EXTERNAL_PATH", "type": ["null", "string"], "default": None},
         {"name": "_GLOBAL_INDEX",
          "type": ["null", _GLOBAL_INDEX_META_SCHEMA], "default": None},
+        {"name": "_SCHEMA_ID", "type": ["null", "long"], "default": None},
     ],
 }
 
@@ -157,7 +158,8 @@ class IndexManifestFile:
                         self.partition_keys_fields
                     ),
                     bucket=record['_BUCKET'],
-                    index_file=index_file_meta
+                    index_file=index_file_meta,
+                    schema_id=record.get('_SCHEMA_ID'),
                 )
                 entries.append(entry)
 
@@ -211,7 +213,8 @@ class IndexManifestFile:
                     kind=record.get('kind', 0),
                     partition=partition,
                     bucket=record.get('bucket', 0),
-                    index_file=index_file_meta
+                    index_file=index_file_meta,
+                    schema_id=record.get('schema_id'),
                 )
                 entries.append(entry)
 
@@ -311,6 +314,7 @@ class IndexManifestFile:
             "_DELETIONS_VECTORS_RANGES": dv_ranges,
             "_EXTERNAL_PATH": index_file.external_path,
             "_GLOBAL_INDEX": global_index,
+            "_SCHEMA_ID": entry.schema_id,
         }
 
 

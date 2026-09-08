@@ -80,7 +80,8 @@ public class ManifestEntryChanges {
                                                 FileKind.DELETE,
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
-                                                m)));
+                                                m,
+                                                m.schemaId())));
         commitMessage
                 .newFilesIncrement()
                 .newIndexFiles()
@@ -91,7 +92,8 @@ public class ManifestEntryChanges {
                                                 FileKind.ADD,
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
-                                                m)));
+                                                m,
+                                                m.schemaId())));
 
         commitMessage
                 .compactIncrement()
@@ -115,7 +117,8 @@ public class ManifestEntryChanges {
                                                 FileKind.DELETE,
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
-                                                m)));
+                                                m,
+                                                m.schemaId())));
         commitMessage
                 .compactIncrement()
                 .newIndexFiles()
@@ -126,7 +129,8 @@ public class ManifestEntryChanges {
                                                 FileKind.ADD,
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
-                                                m)));
+                                                m,
+                                                m.schemaId())));
     }
 
     private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {

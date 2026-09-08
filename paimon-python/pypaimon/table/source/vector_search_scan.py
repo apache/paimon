@@ -25,6 +25,9 @@ from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolut
 from pypaimon.globalindex.data_evolution_global_index_scanner import (
     is_supported_scalar_index,
 )
+from pypaimon.globalindex.global_index_schema_compatibility import (
+    filter_compatible_global_indexes,
+)
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
@@ -132,6 +135,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             return False
 
         entries = index_file_handler.scan(snapshot, index_file_filter)
+        entries = filter_compatible_global_indexes(self._table, entries)
         all_index_files = [entry.index_file for entry in entries]
 
         # Group vector index files by (rowRangeStart, rowRangeEnd).

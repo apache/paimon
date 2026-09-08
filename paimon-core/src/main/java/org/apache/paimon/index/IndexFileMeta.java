@@ -54,7 +54,8 @@ public class IndexFileMeta {
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
-                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
+                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA),
+                            new DataField(7, "_SCHEMA_ID", new BigIntType(true))));
 
     private final String indexType;
     private final String fileName;
@@ -71,6 +72,8 @@ public class IndexFileMeta {
 
     private final @Nullable String externalPath;
 
+    @Nullable private final Long schemaId;
+
     public IndexFileMeta(
             String indexType,
             String fileName,
@@ -78,7 +81,7 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath) {
-        this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null);
+        this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null, null);
     }
 
     public IndexFileMeta(
@@ -89,6 +92,26 @@ public class IndexFileMeta {
             @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath,
             @Nullable GlobalIndexMeta globalIndexMeta) {
+        this(
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                globalIndexMeta,
+                null);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable String externalPath,
+            @Nullable GlobalIndexMeta globalIndexMeta,
+            @Nullable Long schemaId) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
@@ -96,6 +119,7 @@ public class IndexFileMeta {
         this.dvRanges = dvRanges;
         this.externalPath = externalPath;
         this.globalIndexMeta = globalIndexMeta;
+        this.schemaId = schemaId;
     }
 
     public IndexFileMeta(
@@ -105,7 +129,7 @@ public class IndexFileMeta {
             long rowCount,
             @Nullable GlobalIndexMeta globalIndexMeta,
             @Nullable String externalPath) {
-        this(indexType, fileName, fileSize, rowCount, null, externalPath, globalIndexMeta);
+        this(indexType, fileName, fileSize, rowCount, null, externalPath, globalIndexMeta, null);
     }
 
     public String indexType() {
@@ -138,6 +162,26 @@ public class IndexFileMeta {
         return externalPath;
     }
 
+    @Nullable
+    public Long schemaId() {
+        return schemaId;
+    }
+
+    public IndexFileMeta withSchemaId(@Nullable Long schemaId) {
+        if (Objects.equals(this.schemaId, schemaId)) {
+            return this;
+        }
+        return new IndexFileMeta(
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                globalIndexMeta,
+                schemaId);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -153,13 +197,21 @@ public class IndexFileMeta {
                 && rowCount == that.rowCount
                 && Objects.equals(dvRanges, that.dvRanges)
                 && Objects.equals(externalPath, that.externalPath)
-                && Objects.equals(globalIndexMeta, that.globalIndexMeta);
+                && Objects.equals(globalIndexMeta, that.globalIndexMeta)
+                && Objects.equals(schemaId, that.schemaId);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                indexType, fileName, fileSize, rowCount, dvRanges, externalPath, globalIndexMeta);
+                indexType,
+                fileName,
+                fileSize,
+                rowCount,
+                dvRanges,
+                externalPath,
+                globalIndexMeta,
+                schemaId);
     }
 
     @Override
@@ -178,6 +230,9 @@ public class IndexFileMeta {
                 + dvRanges
                 + ", externalPath='"
                 + externalPath
+                + '\''
+                + ", schemaId="
+                + schemaId
                 + '}';
     }
 }

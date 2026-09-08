@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.sorted;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
@@ -140,18 +141,27 @@ public class SortedGlobalIndexScanner implements Serializable {
                         indexType,
                         Collections.singletonList(indexField),
                         partitionPredicate);
-        List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
-        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
+        GlobalIndexSchemaCompatibility.CompatibilityResult compatibility =
+                GlobalIndexSchemaCompatibility.partitionByCompatibility(table, currentIndexes);
+        List<IndexManifestEntry> compatibleIndexes = compatibility.compatible();
+        List<Range> rangesToBuild =
+                new ArrayList<>(unindexedRowRanges(snapshot, compatibleIndexes));
+        List<IndexManifestEntry> deletedIndexEntries =
+                new ArrayList<>(compatibility.incompatible());
+        for (IndexManifestEntry entry : compatibility.incompatible()) {
+            rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
+        }
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
-            deletedIndexEntries =
+            List<IndexManifestEntry> indexesToRefresh =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
                             table,
                             snapshot,
                             partitionPredicate,
-                            currentIndexes,
+                            compatibleIndexes,
                             Collections.singletonList(indexField));
-            for (IndexManifestEntry entry : deletedIndexEntries) {
+            deletedIndexEntries.addAll(indexesToRefresh);
+            for (IndexManifestEntry entry : indexesToRefresh) {
                 rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
             }
         }

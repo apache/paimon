@@ -41,14 +41,17 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                         "index-file",
                         100,
                         10,
+                        null,
+                        null,
                         new GlobalIndexMeta(0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
-                        null);
+                        11L);
 
-        GlobalIndexMeta restored =
-                serializer.fromRow(serializer.toRow(indexFile)).globalIndexMeta();
+        IndexFileMeta restoredIndexFile = serializer.fromRow(serializer.toRow(indexFile));
+        GlobalIndexMeta restored = restoredIndexFile.globalIndexMeta();
 
         assertThat(restored.sourceMeta()).containsExactly(1, 2);
         assertThat(restored.indexMeta()).containsExactly(3, 4);
+        assertThat(restoredIndexFile.schemaId()).isEqualTo(11L);
     }
 
     @Test

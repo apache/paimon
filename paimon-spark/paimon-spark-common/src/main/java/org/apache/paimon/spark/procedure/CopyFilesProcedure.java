@@ -175,7 +175,11 @@ public class CopyFilesProcedure extends BaseProcedure {
                         sourceTableIdentifier, targetTableIdentifier, snapshot, partitionPredicate);
         List<CopyFileInfo> indexFilesRdd =
                 listIndexFilesOperator.execute(
-                        sourceTableIdentifier, targetTableIdentifier, snapshot, partitionPredicate);
+                        sourceTableIdentifier,
+                        targetTableIdentifier,
+                        snapshot,
+                        partitionPredicate,
+                        dataFilesRdd);
 
         // 3. copy data and index files
         JavaRDD<CopyFileInfo> dataCopyFileInfoRdd =

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -115,14 +116,23 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                             && supportsFullTextSearch(entry.indexFile().indexType());
                 };
 
-        List<IndexFileMeta> allIndexFiles =
-                indexFileHandler.scan(snapshot, indexFileFilter).stream()
+        List<IndexManifestEntry> discoveredEntries =
+                indexFileHandler.scan(snapshot, indexFileFilter);
+        List<IndexFileMeta> discoveredIndexFiles =
+                discoveredEntries.stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
+        List<IndexRangeSelection> discoveredSelections =
+                chooseIndexRanges(discoveredIndexFiles, textColumnIds, idToColumn);
+        List<IndexFileMeta> compatibleIndexFiles =
+                GlobalIndexSchemaCompatibility.filterCompatible(table, discoveredEntries).stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        List<IndexRangeSelection> compatibleSelections =
+                chooseIndexRanges(compatibleIndexFiles, textColumnIds, idToColumn);
 
         List<FullTextSearchSplit> splits = new ArrayList<>();
-        for (IndexRangeSelection selection :
-                chooseIndexRanges(allIndexFiles, textColumnIds, idToColumn)) {
+        for (IndexRangeSelection selection : compatibleSelections) {
             splits.add(
                     new IndexFullTextSearchSplit(
                             selection.columnName,
@@ -132,18 +142,22 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                             selection.searchRanges));
         }
 
-        if (!allIndexFiles.isEmpty()) {
-            List<Range> rawRowRanges =
-                    new DataEvolutionGlobalIndexCoverage(
-                                    table,
-                                    snapshot,
-                                    partitionFilter,
-                                    allIndexFiles,
-                                    table.coreOptions().fullTextIndexSearchMode())
-                            .unindexedRanges(textColumnIds);
-            if (!rawRowRanges.isEmpty()) {
-                splits.add(new RawFullTextSearchSplit(rawRowRanges));
-            }
+        List<Range> rawRowRanges =
+                new DataEvolutionGlobalIndexCoverage(
+                                table,
+                                snapshot,
+                                partitionFilter,
+                                compatibleIndexFiles,
+                                table.coreOptions().fullTextIndexSearchMode())
+                        .unindexedRanges(textColumnIds);
+        @Nullable
+        String rawIndexType =
+                firstIndexType(
+                        compatibleSelections.isEmpty()
+                                ? discoveredSelections
+                                : compatibleSelections);
+        if (!rawRowRanges.isEmpty() && rawIndexType != null) {
+            splits.add(new RawFullTextSearchSplit(rawRowRanges, rawIndexType));
         }
 
         @Nullable Snapshot planSnapshot = snapshot;
@@ -159,6 +173,14 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                 return planSnapshot;
             }
         };
+    }
+
+    @Nullable
+    private static String firstIndexType(List<IndexRangeSelection> selections) {
+        if (selections.isEmpty() || selections.get(0).files.isEmpty()) {
+            return null;
+        }
+        return selections.get(0).files.get(0).indexType();
     }
 
     /**

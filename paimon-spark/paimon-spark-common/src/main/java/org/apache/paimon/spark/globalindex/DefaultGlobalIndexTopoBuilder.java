@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -115,9 +116,16 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         List<IndexManifestEntry> currentIndexes =
                 GlobalIndexBuilderUtils.currentIndexEntries(
                         table, snapshot, indexType, indexFields, partitionPredicate);
+        GlobalIndexSchemaCompatibility.CompatibilityResult compatibility =
+                GlobalIndexSchemaCompatibility.partitionByCompatibility(table, currentIndexes);
+        List<IndexManifestEntry> compatibleIndexes = compatibility.compatible();
         List<Range> rowRangesToBuild =
                 new ArrayList<>(
-                        GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, currentIndexes));
+                        GlobalIndexBuilderUtils.unindexedRowRanges(snapshot, compatibleIndexes));
+        List<IndexManifestEntry> indexesToReplace = new ArrayList<>(compatibility.incompatible());
+        for (IndexManifestEntry index : compatibility.incompatible()) {
+            rowRangesToBuild.add(index.indexFile().globalIndexMeta().rowRange());
+        }
         byte[] sourceMeta = new DataEvolutionIndexSourceMeta(snapshot.id()).serialize();
         boolean detectDataFileChange =
                 new Options(table.options(), options.toMap()).get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION)
@@ -132,11 +140,11 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         .withPartitionFilter(partitionPredicate)
                         .plan()
                         .files();
-        List<IndexManifestEntry> indexesToRefresh = Collections.emptyList();
         if (detectDataFileChange) {
-            indexesToRefresh =
+            List<IndexManifestEntry> indexesToRefresh =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
-                            table.schemaManager(), entries, currentIndexes, indexFields);
+                            table.schemaManager(), entries, compatibleIndexes, indexFields);
+            indexesToReplace.addAll(indexesToRefresh);
             for (IndexManifestEntry index : indexesToRefresh) {
                 rowRangesToBuild.add(index.indexFile().globalIndexMeta().rowRange());
             }
@@ -182,7 +190,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                             .collect();
             commitMessages.addAll(CommitMessageSerializer.deserializeAll(commitMessageBytes));
         }
-        for (IndexManifestEntry index : indexesToRefresh) {
+        for (IndexManifestEntry index : indexesToReplace) {
             commitMessages.add(
                     new CommitMessageImpl(
                             index.partition(),

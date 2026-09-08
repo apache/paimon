@@ -39,7 +39,7 @@ public class RawVectorSearchSplit extends VectorSearchSplit {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private static final ThreadLocal<IndexFileMetaSerializer> INDEX_SERIALIZER =
             ThreadLocal.withInitial(IndexFileMetaSerializer::new);

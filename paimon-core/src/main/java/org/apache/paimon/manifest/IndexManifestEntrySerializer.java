@@ -76,7 +76,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                 indexFile.rowCount(),
                 dvMetasToRowArrayData(indexFile.dvRanges()),
                 fromString(indexFile.externalPath()),
-                globalIndexRow);
+                globalIndexRow,
+                record.schemaId());
     }
 
     @Override
@@ -112,6 +113,7 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                             sourceMeta);
         }
 
+        Long schemaId = row.getFieldCount() <= 10 || row.isNullAt(10) ? null : row.getLong(10);
         return new IndexManifestEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
@@ -123,7 +125,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                         row.getLong(6),
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
                         row.isNullAt(8) ? null : row.getString(8).toString(),
-                        globalIndexMeta));
+                        globalIndexMeta),
+                schemaId);
     }
 
     public static Function<InternalRow, BinaryRow> partitionGetter() {

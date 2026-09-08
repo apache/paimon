@@ -41,6 +41,8 @@ class IndexFileMeta:
     external_path: Optional[str] = None
     # For global index
     global_index_meta: Optional[GlobalIndexMeta] = None
+    # Transported from the top-level index manifest entry; not persisted here.
+    schema_id: Optional[int] = None
 
     def __eq__(self, other):
         if not isinstance(other, IndexFileMeta):

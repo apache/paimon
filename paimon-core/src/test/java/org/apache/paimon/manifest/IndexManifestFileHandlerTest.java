@@ -143,11 +143,16 @@ public class IndexManifestFileHandlerTest {
         IndexManifestFileHandler handler =
                 new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
 
-        String manifestFile = handler.write(null, Arrays.asList(pkVectorEntry("btree", "index")));
+        IndexManifestEntry entry = pkVectorEntry("btree", "index");
+        entry =
+                new IndexManifestEntry(
+                        entry.kind(), entry.partition(), entry.bucket(), entry.indexFile(), 11L);
+        String manifestFile = handler.write(null, Arrays.asList(entry));
 
         RowType legacyGlobalIndexSchema =
                 GlobalIndexMeta.SCHEMA.copy(GlobalIndexMeta.SCHEMA.getFields().subList(0, 5));
-        List<DataField> legacyEntryFields = new ArrayList<>(IndexManifestEntry.SCHEMA.getFields());
+        List<DataField> legacyEntryFields =
+                new ArrayList<>(IndexManifestEntry.SCHEMA.getFields().subList(0, 10));
         legacyEntryFields.set(9, legacyEntryFields.get(9).newType(legacyGlobalIndexSchema));
         RowType legacySchema =
                 ManifestSchemaUtils.withFormatIdentifier(new RowType(false, legacyEntryFields));

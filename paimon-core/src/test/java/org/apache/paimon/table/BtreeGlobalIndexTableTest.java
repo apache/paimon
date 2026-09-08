@@ -588,12 +588,13 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         IndexFileMeta sourceBacked =
                 new IndexFileMeta(
-                        "btree",
-                        "source-backed-index",
-                        0,
-                        10,
-                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
-                        null);
+                                "btree",
+                                "source-backed-index",
+                                0,
+                                10,
+                                new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
+                                null)
+                        .withSchemaId(table.schema().id());
 
         assertThat(
                         DataEvolutionGlobalIndexScanner.create(

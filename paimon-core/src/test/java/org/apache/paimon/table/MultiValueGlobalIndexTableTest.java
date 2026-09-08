@@ -21,15 +21,20 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.NestedSchemaUtils;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -37,6 +42,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -106,6 +112,57 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         assertThat(readIds(fullSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
     }
 
+    @Test
+    public void testIndexCompatibilityAcrossSchemaEvolution() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(1, array(-1)));
+        long firstBuildSchemaId = table.schema().id();
+        buildIndex(table);
+        List<IndexFileMeta> firstIndexFiles =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(java.util.stream.Collectors.toList());
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("note", DataTypes.STRING()), false);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable fullSearchTable = fullSearchTable(table);
+        Predicate sameTypePredicate =
+                new PredicateBuilder(fullSearchTable.rowType()).arrayContains(1, -1);
+        assertThat(readIds(fullSearchTable, sameTypePredicate)).containsExactly(1);
+
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("tags"),
+                table.rowType().getTypeAt(1),
+                DataTypes.ARRAY(DataTypes.BIGINT()),
+                schemaChanges);
+        table.schemaManager().commitChanges(schemaChanges);
+        table = table.copyWithLatestSchema();
+        write(table, GenericRow.of(2, array(-1L), null));
+        assertThat(DataEvolutionGlobalIndexScanner.create(table, firstIndexFiles)).isEmpty();
+        buildIndex(table);
+
+        fullSearchTable = fullSearchTable(table.copyWithLatestSchema());
+        Predicate evolvedTypePredicate =
+                new PredicateBuilder(fullSearchTable.rowType()).arrayContains(1, -1L);
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(fullSearchTable, null, evolvedTypePredicate)
+                        .get()) {
+            assertThat(scanner.scan(evolvedTypePredicate).get().results().toRangeList())
+                    .containsExactly(new Range(0, 1));
+            assertThat(scanner.unindexedRows(evolvedTypePredicate).results().isEmpty()).isTrue();
+        }
+        assertThat(readIdsWithoutSplitAssertion(fullSearchTable, evolvedTypePredicate))
+                .containsExactly(1, 2);
+        assertThat(firstBuildSchemaId).isNotEqualTo(fullSearchTable.schema().id());
+        long currentSchemaId = fullSearchTable.schema().id();
+        assertThat(fullSearchTable.store().newIndexFileHandler().scanEntries())
+                .isNotEmpty()
+                .allSatisfy(entry -> assertThat(entry.schemaId()).isEqualTo(currentSchemaId))
+                .noneMatch(entry -> firstIndexFiles.contains(entry.indexFile()));
+    }
+
     private void buildIndex(FileStoreTable table) throws Exception {
         SortedGlobalIndexScanner scanner =
                 new SortedGlobalIndexScanner(table, "multivalue").withIndexField("tags");
@@ -166,6 +223,24 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                 .createReader(plan)
                 .forEachRemaining(row -> ids.add(row.getInt(0)));
         return ids;
+    }
+
+    private List<Integer> readIdsWithoutSplitAssertion(FileStoreTable table, Predicate predicate)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<Integer> ids = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        return ids;
+    }
+
+    private FileStoreTable fullSearchTable(FileStoreTable table) {
+        return table.copy(
+                Collections.singletonMap(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
     }
 
     private GenericArray array(Object... elements) {
