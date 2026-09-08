@@ -109,6 +109,24 @@ checkpoint completion waits for compaction. Tune it with checkpoint duration and
 `lookup` is incompatible with `full-compaction.delta-commits`. For periodic full compaction with
 changelog generation, use `full-compaction` instead.
 
+By setting `'changelog-producer.preserve-sequence-on-retract'` to a comma-separated list of column names,
+retraction records (`-U`, `-D`) will take those columns' values from the incoming event instead of the
+stored row. This is useful when delete or update events carry an event timestamp that downstream consumers
+need, such as external systems like Cassandra that rely on `WRITETIME` for conflict resolution.
+This option is only supported by the `lookup` changelog producer.
+
+```sql
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.preserve-sequence-on-retract' = 'event_ts'
+);
+```
+
 ## Full Compaction
 
 ```sql
