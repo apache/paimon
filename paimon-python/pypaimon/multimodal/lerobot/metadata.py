@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""LeRobot component tables and version publication."""
+"""LeRobot component tables and training tags."""
 
 from array import array
 import json
@@ -26,19 +26,18 @@ import pyarrow.parquet as pq
 
 from pypaimon import Schema as PaimonSchema
 from pypaimon.catalog.catalog_exception import (
-    DatabaseNotExistException,
     TableAlreadyExistException,
-    TableNotExistException,
+    TagNotExistException,
 )
 from pypaimon.common.identifier import Identifier
 from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.table import _target_schema
 
 
-_VERSION_ID = "version_id"
 _PANDAS_METADATA_OPTION = "pypaimon.lerobot.pandas-metadata"
 _TABLE_SUFFIXES = {
-    "versions": "__versions",
+    "info": "__info",
+    "stats": "__stats",
     "episodes": "__episodes",
     "tasks": "__tasks",
     "subtasks": "__subtasks",
@@ -48,12 +47,6 @@ _COMPANION_OPTION_KEYS = {
     for name in _TABLE_SUFFIXES
 }
 
-_VERSIONS_SCHEMA = pa.schema([
-    pa.field(_VERSION_ID, pa.int64(), nullable=False),
-    pa.field("info_json", pa.string(), nullable=False),
-    pa.field("stats_json", pa.string()),
-    pa.field("has_subtasks", pa.bool_(), nullable=False),
-])
 _EMPTY_TASKS_SCHEMA = pa.schema([
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
@@ -110,6 +103,7 @@ class _EpisodeIndex:
 def _load_dataset_metadata(dataset, info, source):
     fps = _positive_integer(info.get("fps"), "fps")
     stats = _source_stats(dataset, source)
+    stats_table = None if stats is None else _metadata_table(stats)
     tasks_table = _source_tasks(
         dataset, source, int(info["total_tasks"]))
     task_indices = _task_indices(
@@ -124,10 +118,9 @@ def _load_dataset_metadata(dataset, info, source):
     )
     return {
         "fps": fps,
-        "info_json": _canonical_json(info),
-        "stats_json": (
-            None if stats is None else _canonical_json(
-                stats, allow_nan=True)),
+        "info_table": _metadata_table(info),
+        "stats_table": (stats_table if stats_table is not None
+                        and stats_table.num_rows > 0 else None),
         "episodes": None,
         "episodes_schema": episode_source["schema"],
         "episode_paths": episode_source["paths"],
@@ -166,13 +159,16 @@ def _quote_identifier_part(value):
     return "`%s`" % value if "." in value else value
 
 
-def _managed_table_options(frames_identifier):
+def _managed_table_options(frames_identifier, metadata=None):
     identifier = Identifier.from_string(str(frames_identifier))
     if identifier.get_branch_name() is not None:
         raise ValueError(
             "LeRobot import does not support table branches.")
     result = {}
     for name, suffix in _TABLE_SUFFIXES.items():
+        if metadata is not None and name in ("stats", "subtasks") \
+                and metadata[name + "_table"] is None:
+            continue
         result[_COMPANION_OPTION_KEYS[name]] = _companion_identifier(
             frames_identifier, suffix)
     return result
@@ -184,6 +180,8 @@ def _companion_table_identifiers(frames_table):
     for name, key in _COMPANION_OPTION_KEYS.items():
         value = options.get(key)
         if not value:
+            if name in ("stats", "subtasks"):
+                continue
             raise ValueError(
                 "LeRobot table %s is missing managed option %s."
                 % (frames_table.identifier, key))
@@ -193,22 +191,14 @@ def _companion_table_identifiers(frames_table):
 
 def _prepare_metadata_tables(connection, frames_table, metadata):
     schemas = {
-        "versions": _VERSIONS_SCHEMA,
+        "info": metadata["info_table"].schema,
         "episodes": metadata["episodes_schema"],
         "tasks": metadata["tasks_table"].schema,
     }
-    if metadata["subtasks_table"] is not None:
-        schemas["subtasks"] = metadata["subtasks_table"].schema
+    for name in ("stats", "subtasks"):
+        if metadata[name + "_table"] is not None:
+            schemas[name] = metadata[name + "_table"].schema
     identifiers = _companion_table_identifiers(frames_table)
-    if metadata["subtasks_table"] is None:
-        try:
-            connection.catalog.get_table(identifiers["subtasks"])
-        except (DatabaseNotExistException, TableNotExistException):
-            pass
-        else:
-            raise ValueError(
-                "LeRobot metadata table %s already exists."
-                % identifiers["subtasks"])
     tables = {}
     for name, schema in schemas.items():
         identifier = identifiers[name]
@@ -243,59 +233,77 @@ def _restore_pandas_metadata(table, data):
     return data.replace_schema_metadata(metadata)
 
 
-def _publish_dataset(
+def _commit_metadata(
         connection,
         tables,
-        version_id,
+        tag_name,
         metadata,
         frames_identifier,
         frames_snapshot_id,
         episodes_snapshot_id):
     _require_initial_snapshot("frames", frames_snapshot_id)
     _require_initial_snapshot("episodes", episodes_snapshot_id)
-    tasks_snapshot_id = _append_arrow(
-        tables["tasks"], metadata["tasks_table"])
-    _require_initial_snapshot("tasks", tasks_snapshot_id)
     component_snapshots = [
-        (frames_identifier, frames_snapshot_id),
         (tables["episodes"].identifier, episodes_snapshot_id),
-        (tables["tasks"].identifier, tasks_snapshot_id),
     ]
-    if metadata["subtasks_table"] is not None:
-        subtasks_snapshot_id = _append_arrow(
-            tables["subtasks"], metadata["subtasks_table"])
-        _require_initial_snapshot("subtasks", subtasks_snapshot_id)
-        component_snapshots.append(
-            (tables["subtasks"].identifier, subtasks_snapshot_id))
-    tag = str(version_id)
-    for identifier, snapshot_id in component_snapshots:
-        _create_tag(connection.catalog, identifier, tag, snapshot_id)
+    for name in ("tasks", "subtasks", "stats", "info"):
+        if name not in tables:
+            continue
+        snapshot_id = _append_arrow(tables[name], metadata[name + "_table"])
+        _require_initial_snapshot(name, snapshot_id)
+        component_snapshots.append((tables[name].identifier, snapshot_id))
+    # Tag the root last so a failed component tag does not expose a root tag.
+    component_snapshots.append((frames_identifier, frames_snapshot_id))
+    if tag_name is not None:
+        for identifier, snapshot_id in component_snapshots:
+            _create_tag(connection.catalog, identifier, tag_name, snapshot_id)
 
-    manifest = _manifest_row(version_id, metadata)
-    _append_arrow(tables["versions"], pa.Table.from_pylist(
-        [manifest], schema=_VERSIONS_SCHEMA))
+
+def create_lerobot_tag(connection, table_name, tag_name):
+    """Tag the current snapshots of a LeRobot table group for training.
+
+    Pause group writes until this call returns. Tags across tables are not an
+    atomic transaction: use the name only after success, and read every
+    component with that tag (never fall back to latest). Failed calls may leave
+    partial tags. Retrying is safe while the component snapshots are unchanged.
+    Returns a mapping from component name to tagged snapshot ID.
+    """
+    _validate_tag_name(tag_name)
+    frames = connection.catalog.get_table(connection._identifier(table_name))
+    identifiers = _companion_table_identifiers(frames)
+    identifiers["frames"] = frames.identifier
+    snapshots = {}
+    for name, identifier in identifiers.items():
+        table = connection.catalog.get_table(identifier)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            raise ValueError("LeRobot component %s has no snapshot." % name)
+        snapshots[name] = snapshot.id
+        existing = _tag_snapshot_id(connection.catalog, identifier, tag_name)
+        if existing is not None and existing != snapshot.id:
+            raise ValueError(
+                "LeRobot tag %s on %s already points to snapshot %s; "
+                "use a new tag name." % (tag_name, identifier, existing))
+    for name, identifier in identifiers.items():
+        _create_tag(connection.catalog, identifier, tag_name, snapshots[name])
+    return snapshots
+
+
+def _validate_tag_name(tag_name):
+    if not isinstance(tag_name, str) or not tag_name.strip() \
+            or any(character in tag_name for character in ("/", "\\", "\x00")):
+        raise ValueError("tag_name must be a non-blank name without path separators.")
 
 
 def _require_initial_snapshot(component, snapshot_id):
     if snapshot_id is None:
         raise ValueError(
-            "LeRobot tag-backed import requires a non-empty %s component."
+            "LeRobot import requires a non-empty %s component."
             % component)
     if snapshot_id != 1:
         raise RuntimeError(
             "LeRobot initial import detected concurrent writes to %s; "
             "expected snapshot 1, found %d." % (component, snapshot_id))
-
-
-def _manifest_row(
-        version_id,
-        metadata):
-    return {
-        _VERSION_ID: version_id,
-        "info_json": metadata["info_json"],
-        "stats_json": metadata["stats_json"],
-        "has_subtasks": metadata["subtasks_table"] is not None,
-    }
 
 
 def _append_arrow(table, data):
@@ -374,6 +382,8 @@ def _tag_snapshot_id(catalog, identifier, tag_name):
     try:
         response = catalog.get_tag(identifier, tag_name)
         snapshot = response.snapshot
+    except TagNotExistException:
+        return None
     except NotImplementedError:
         snapshot = catalog.get_table(identifier).tag_manager().get(tag_name)
     return None if snapshot is None else snapshot.id
@@ -621,14 +631,16 @@ def _subtask_indices(subtasks_table, info):
     return range(subtasks_table.num_rows)
 
 
-def _canonical_json(value, allow_nan=False):
-    return json.dumps(
-        _json_value(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=allow_nan,
-    )
+def _metadata_table(value):
+    if not isinstance(value, dict):
+        raise ValueError("LeRobot info and stats metadata must be objects.")
+    return pa.table({
+        "key": pa.array(list(value), type=pa.string()),
+        "value": pa.array([
+            json.dumps(_json_value(item), ensure_ascii=False, separators=(",", ":"))
+            for item in value.values()
+        ], type=pa.string()),
+    })
 
 
 def _json_value(value):
