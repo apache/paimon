@@ -115,16 +115,18 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         return snap.id if snap is not None else None
 
     def _compact_all_data_files(self, table):
-        """Replace all current data files with one COMPACT output file."""
+        """Replace current data files with one COMPACT file per file group."""
         from pypaimon.table.special_fields import SpecialFields
 
         read_builder = table.new_read_builder().with_projection(
             list(table.field_names) + [SpecialFields.ROW_ID.name]
         )
         plan = read_builder.new_scan().plan_for_write()
-        old_files = [
-            file for split in plan.splits() for file in split.files
-        ]
+        old_files_by_group = {}
+        for split in plan.splits():
+            old_files_by_group.setdefault(
+                (tuple(split.partition.values), split.bucket), [],
+            ).extend(split.files)
         current = read_builder.new_read().to_arrow(plan.splits()).sort_by(
             [(SpecialFields.ROW_ID.name, 'ascending')]
         ).select(list(table.field_names))
@@ -133,12 +135,20 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         writer = write_builder.new_write()
         writer.write_arrow(current)
         messages = writer.prepare_commit()
-        self.assertEqual(len(messages), 1)
-        self.assertEqual(len(messages[0].new_files), 1)
-        messages[0].new_files = [
-            messages[0].new_files[0].assign_first_row_id(0)
-        ]
-        messages[0].deleted_files.extend(old_files)
+        self.assertEqual(
+            {(message.partition, message.bucket) for message in messages},
+            set(old_files_by_group),
+        )
+        for message in messages:
+            old_files = old_files_by_group[
+                (message.partition, message.bucket)
+            ]
+            self.assertEqual(len(message.new_files), 1)
+            first_row_id = min(file.first_row_id for file in old_files)
+            message.new_files = [
+                message.new_files[0].assign_first_row_id(first_row_id)
+            ]
+            message.deleted_files.extend(old_files)
 
         commit = write_builder.new_commit()
         file_store_commit = commit.file_store_commit
@@ -2376,7 +2386,11 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
         self.catalog.create_table(
             target,
-            Schema.from_pyarrow_schema(schema, options=options),
+            Schema.from_pyarrow_schema(
+                schema,
+                partition_keys=['content_key'],
+                options=options,
+            ),
             False,
         )
 

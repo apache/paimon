@@ -86,11 +86,11 @@ def commit_self_merge_with_compaction_retry(
         if result is not None:
             current_updates = result.update_messages
             logger.info(
-                "Rewrote %d stale self-merge file(s) against snapshot %d "
-                "before committing to table %s.",
-                result.rewritten_file_count,
+                "Rebased stale self-merge updates against snapshot %d "
+                "before committing to table %s; rewrote %d file(s).",
                 latest_snapshot.id,
                 table.identifier,
+                result.rewritten_file_count,
             )
 
     # Match Spark's PaimonSparkWriter: every outer rebase attempt creates a
@@ -152,11 +152,11 @@ def commit_self_merge_with_compaction_retry(
             raise conflict
 
         logger.info(
-            "Rewrote %d stale self-merge file(s) against snapshot %d "
-            "before retrying commit to table %s.",
-            result.rewritten_file_count,
+            "Rebased stale self-merge updates against snapshot %d "
+            "before retrying commit to table %s; rewrote %d file(s).",
             latest_snapshot.id,
             table.identifier,
+            result.rewritten_file_count,
         )
         _retry_wait(table, retry_count)
         retry_count += 1
@@ -241,8 +241,9 @@ def _rewrite_updates(
             latest_snapshot.next_row_id,
         )
     ]
-    if not candidates:
-        return None
+    # Compaction can replace an anchor while preserving its exact row-id
+    # range. There is nothing to rewrite then, but the snapshot check below
+    # still needs to advance past that compaction.
     if not _ranges_are_still_covered(current_files, candidates):
         return None
 
