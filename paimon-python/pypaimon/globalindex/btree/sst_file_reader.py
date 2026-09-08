@@ -173,6 +173,27 @@ class SstFileReader:
             read_block,
             self.index_block.iterator())
 
+    def read_many(self, keys):
+        """Return exact matches while reading each selected data block once."""
+        blocks = {}
+        for key in dict.fromkeys(keys):
+            index_iterator = self.index_block.iterator()
+            index_iterator.seek_to(key)
+            if not index_iterator.has_next():
+                continue
+            entry = index_iterator.__next__()
+            handle = SstFileIterator._parse_block_handle(entry.value)
+            blocks.setdefault((handle.offset, handle.size), []).append(key)
+
+        result = []
+        for (offset, size), block_keys in blocks.items():
+            block = self._read_block(BlockHandle(offset, size))
+            for key in block_keys:
+                iterator = block.iterator()
+                if iterator.seek_to(key):
+                    result.append(iterator.__next__())
+        return result
+
     def close(self) -> None:
         """Close the reader and release resources."""
         # No resources to release in this implementation

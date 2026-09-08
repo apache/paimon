@@ -27,9 +27,17 @@ from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchM
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.globalindex.btree.btree_index_writer import BTreeIndexWriter
+from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
+from pypaimon.globalindex.global_index_meta import (
+    GlobalIndexIOMeta,
+    GlobalIndexMeta,
+)
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.key_serializer import LongSerializer
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -79,6 +87,41 @@ class GlobalIndexTest(unittest.TestCase):
             result = result.and_(other)
 
         self.assertEqual(result.results().cardinality(), 10001)
+
+    def test_btree_in_reads_shared_data_block_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO.create()
+            serializer = LongSerializer()
+            writer = BTreeIndexWriter(file_io, directory, serializer)
+            for value in range(128):
+                writer.write(value, value)
+            entry = writer.finish()[0]
+            path = "%s/%s" % (directory, entry.file_name)
+            reader = BTreeIndexReader(
+                serializer,
+                file_io,
+                directory,
+                GlobalIndexIOMeta(
+                    entry.file_name,
+                    file_io.get_file_size(path),
+                    entry.meta,
+                ),
+            )
+            reads = []
+            original = SstFileReader._read_from
+
+            def tracked(instance, offset, length):
+                reads.append((offset, length))
+                return original(instance, offset, length)
+
+            try:
+                with patch.object(SstFileReader, "_read_from", new=tracked):
+                    result = reader.visit_in([1, 2, 3, 3, 127, 999])
+            finally:
+                reader.close()
+
+            self.assertEqual([1, 2, 3, 127], result.results().to_list())
+            self.assertEqual(1, len(reads))
 
 
 class _CoverageOptions:

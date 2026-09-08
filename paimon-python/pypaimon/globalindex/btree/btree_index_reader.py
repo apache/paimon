@@ -225,9 +225,11 @@ class BTreeIndexReader:
 
     def visit_in(self, literals: List[object]) -> Optional[GlobalIndexResult]:
         result = RoaringBitmap64()
-        for literal in literals:
-            range_result = self._range_query(literal, literal, True, True)
-            result = RoaringBitmap64.or_(result, range_result)
+        keys = [self.key_serializer.serialize(literal)
+                for literal in literals if literal is not None]
+        for entry in self.reader.read_many(keys):
+            for row_id in _deserialize_row_ids(entry.value):
+                result.add(row_id)
         return GlobalIndexResult.create(result)
 
     def visit_not_in(self, literals: List[object]) -> Optional[GlobalIndexResult]:
