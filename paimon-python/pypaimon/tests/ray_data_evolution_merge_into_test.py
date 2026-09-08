@@ -22,6 +22,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -152,6 +153,48 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         finally:
             writer.close()
             commit.close()
+
+    def _reassign_partition_row_ids(self, table, partition_value):
+        """Commit the metadata-only OVERWRITE produced by row-id reassignment."""
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        latest = table.snapshot_manager().get_latest_snapshot()
+        manifest_file = ManifestFileManager(table)
+        manifest_list = ManifestListManager(table)
+        entries = manifest_file.read_entries_parallel(
+            manifest_list.read_all(latest), drop_stats=False)
+        next_row_id = latest.next_row_id
+        reassigned = []
+        for entry in entries:
+            if entry.partition.values[0] == partition_value:
+                entry = entry.assign_first_row_id(next_row_id)
+                next_row_id += entry.file.row_count
+            reassigned.append(entry)
+
+        token = str(uuid.uuid4())
+        manifests = manifest_file.rolling_write(
+            reassigned, 1 << 30, 'manifest-{}'.format(token))
+        base_manifest_list = 'manifest-list-{}-0'.format(token)
+        delta_manifest_list = 'manifest-list-{}-1'.format(token)
+        manifest_list.write(base_manifest_list, manifests)
+        manifest_list.write(delta_manifest_list, [])
+        snapshot = replace(
+            latest,
+            id=latest.id + 1,
+            base_manifest_list=base_manifest_list,
+            delta_manifest_list=delta_manifest_list,
+            delta_record_count=0,
+            commit_user='reassign-row-id-test',
+            commit_identifier=0,
+            commit_kind='OVERWRITE',
+            time_millis=latest.time_millis + 1,
+            next_row_id=next_row_id,
+            uuid=str(uuid.uuid4()),
+        )
+        self.assertTrue(RenamingSnapshotCommit(
+            table.snapshot_manager()).commit(latest.uuid, snapshot, []))
 
     def _merge_and_capture_self_merge_plan(self, **kwargs):
         from pypaimon.ray.data_evolution_merge_join import (
@@ -2318,6 +2361,69 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         out = self._read_sorted(target)
         self.assertEqual(out['age'], [99, 99, 99])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
+
+    def test_self_merge_rejects_concurrent_row_id_reassignment(self):
+        from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
+
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('pt', pa.string()),
+            ('value', pa.int32()),
+        ])
+        target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(
+                schema,
+                partition_keys=['pt'],
+                options=self.de_options,
+            ),
+            False,
+        )
+        self._write(target, pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'pt': ['p1', 'p2'],
+            'value': pa.array([10, 20], type=pa.int32()),
+        }, schema=schema))
+        table = self.catalog.get_table(target)
+        self.assertEqual(table.primary_keys, [])
+        real_atomic_commit = RenamingSnapshotCommit.commit
+        injected = [False]
+
+        def reassign_then_fail_cas(commit, base_uuid, snapshot, statistics):
+            if not injected[0] and snapshot.commit_kind == 'APPEND':
+                injected[0] = True
+                self._reassign_partition_row_ids(table, 'p1')
+                return False
+            return real_atomic_commit(
+                commit, base_uuid, snapshot, statistics)
+
+        error = None
+        with patch.object(
+                RenamingSnapshotCommit,
+                'commit',
+                new=reassign_then_fail_cas,
+        ):
+            try:
+                merge_into(
+                    target=target,
+                    source=target,
+                    catalog_options=self.catalog_options,
+                    on=['_ROW_ID'],
+                    when_matched=[WhenMatched.update({'value': lit(99)})],
+                    num_partitions=_TEST_NUM_PARTITIONS,
+                )
+            except RuntimeError as exc:
+                error = exc
+
+        self.assertTrue(injected[0])
+        output = self._read_sorted(target)
+        self.assertIsNotNone(
+            error,
+            'commit silently succeeded with partial result {}'.format(output),
+        )
+        self.assertRegex(str(error), 'Row ID existence conflict')
+        self.assertEqual(output['value'], [10, 20])
 
     def test_self_merge_update_bypasses_routing_shuffle(self):
         options = dict(self.de_options)
