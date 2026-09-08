@@ -417,6 +417,64 @@ public class SortCompactCommitMessageRewriterTest {
     }
 
     @Test
+    public void testDetectDeleteOnlyCompactCommitSucceededWithConcurrentCompact() throws Exception {
+        TestAppendFileStore store =
+                createAppendStore(
+                        tempDir,
+                        Collections.singletonMap(
+                                CoreOptions.DELETION_VECTORS_ENABLED.key(), "true"));
+
+        // data-0 and data-1 share a single DV index file.
+        store.commit(
+                store.writeDataFiles(
+                        BinaryRow.EMPTY_ROW, 0, Arrays.asList("data-0.orc", "data-1.orc")));
+        Map<String, List<Integer>> dvs = new HashMap<>();
+        dvs.put("data-0.orc", Arrays.asList(1, 3, 5));
+        dvs.put("data-1.orc", Arrays.asList(2, 4, 6));
+        store.commit(store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        store.fileIO(), store.options().path(), store.schema());
+        long baseSnapshotId = table.snapshotManager().latestSnapshotId();
+
+        DataFileMeta old0 = newFile("data-0.orc", 0, 0, 100, 100);
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(old0))
+                        .build();
+
+        // Our delete-only sort compact (all rows filtered out): rewrite persists a new DV index
+        // file holding data-1's deletion vector.
+        SortCompactCommitMessageRewriter rewriter =
+                new SortCompactCommitMessageRewriter(
+                        table, baseSnapshotId, Collections.singletonList(split));
+        long snapshotIdBeforeCommit = rewriter.latestSnapshotIdOrZero();
+        List<CommitMessage> compactMessages = rewriter.rewrite(Collections.emptyList());
+        CommitMessageImpl compact = (CommitMessageImpl) compactMessages.get(0);
+        assertThat(compact.compactIncrement().compactAfter()).isEmpty();
+        assertThat(compact.compactIncrement().newIndexFiles()).isNotEmpty();
+
+        // Our commit fails; meanwhile another compaction commits and deletes the same input file.
+        List<CommitMessage> otherMessages =
+                new SortCompactCommitMessageRewriter(
+                                table, baseSnapshotId, Collections.singletonList(split))
+                        .rewrite(Collections.emptyList());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(otherMessages);
+        }
+
+        // Our commit never landed: the check must return false so the caller aborts our new DV
+        // index file. The concurrent compaction having deleted the same input files must not be
+        // mistaken for our commit.
+        assertThat(rewriter.isBatchCompactCommitSucceeded(snapshotIdBeforeCommit, compactMessages))
+                .isFalse();
+    }
+
+    @Test
     public void testRewriteMultipleBuckets() throws Exception {
         FileStoreTable table = createAppendTable(Collections.emptyMap());
 

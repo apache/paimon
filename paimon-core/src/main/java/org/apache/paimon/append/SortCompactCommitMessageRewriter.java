@@ -520,8 +520,9 @@ public class SortCompactCommitMessageRewriter {
      *
      * <p>Used to avoid aborting sort compact write output when {@link
      * org.apache.paimon.table.sink.TableCommitImpl} fails after the snapshot is already visible.
-     * Matching is based on the compact output file set (or removed input files for delete-only
-     * commits), not on any unrelated batch COMPACT snapshot.
+     * Matching is based on the unique new files written by this rewrite: the compact output data
+     * files, or the new deletion-vector index files for delete-only commits (whose input files may
+     * also be deleted by a concurrent compaction, so removed input files alone prove nothing).
      */
     public boolean isBatchCompactCommitSucceeded(
             long snapshotIdBeforeCommit, List<CommitMessage> compactMessages) {
@@ -555,13 +556,26 @@ public class SortCompactCommitMessageRewriter {
     }
 
     private boolean matchesCompactCommit(Snapshot snapshot, CompactCommitFingerprint fingerprint) {
-        if (!fingerprint.compactAfterFileNames.isEmpty()) {
-            // Output file names are unique and snapshot commit is atomic. Finding any compact
-            // output in a surviving snapshot proves the batch compact commit succeeded, even when
-            // concurrent compaction has replaced other outputs or the COMPACT snapshot expired.
-            return snapshotContainsAnyFile(
-                    snapshot, fingerprint, fingerprint.compactAfterFileNames);
+        // Output data file names and new deletion-vector index file names are unique, and
+        // snapshot commit is atomic. Finding any of them in a surviving snapshot proves THIS
+        // batch compact commit succeeded, even when concurrent compaction has replaced other
+        // outputs or the COMPACT snapshot expired.
+        if (!fingerprint.compactAfterFileNames.isEmpty()
+                && snapshotContainsAnyFile(
+                        snapshot, fingerprint, fingerprint.compactAfterFileNames)) {
+            return true;
         }
+        if (!fingerprint.newIndexFileNames.isEmpty()
+                && snapshotContainsAnyIndexFile(snapshot, fingerprint.newIndexFileNames)) {
+            return true;
+        }
+        if (!fingerprint.compactAfterFileNames.isEmpty()
+                || !fingerprint.newIndexFileNames.isEmpty()) {
+            return false;
+        }
+        // The commit produces no new files at all (delete-only compact without deletion-vector
+        // rewrite), so there is nothing to abort and this result is inconsequential. Fall back
+        // to the weak heuristic: input files already removed by a COMPACT snapshot.
         if (snapshot.commitIdentifier() != BatchWriteBuilder.COMMIT_IDENTIFIER
                 || snapshot.commitKind() != Snapshot.CommitKind.COMPACT) {
             return false;
@@ -571,6 +585,18 @@ public class SortCompactCommitMessageRewriter {
                     snapshot, fingerprint, fingerprint.compactBeforeFileNames);
         }
         return true;
+    }
+
+    private boolean snapshotContainsAnyIndexFile(Snapshot snapshot, Set<String> indexFileNames) {
+        // A snapshot's index manifest only contains live entries, so finding a new index file
+        // name proves the commit that added it is visible in this snapshot.
+        for (IndexManifestEntry entry :
+                table.store().newIndexFileHandler().scan(snapshot, DELETION_VECTORS_INDEX)) {
+            if (indexFileNames.contains(entry.indexFile().fileName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean snapshotContainsAnyFile(
@@ -605,16 +631,19 @@ public class SortCompactCommitMessageRewriter {
     private static final class CompactCommitFingerprint {
         private final Set<String> compactAfterFileNames;
         private final Set<String> compactBeforeFileNames;
+        private final Set<String> newIndexFileNames;
         private final List<BinaryRow> partitions;
         private final Set<Integer> buckets;
 
         private CompactCommitFingerprint(
                 Set<String> compactAfterFileNames,
                 Set<String> compactBeforeFileNames,
+                Set<String> newIndexFileNames,
                 List<BinaryRow> partitions,
                 Set<Integer> buckets) {
             this.compactAfterFileNames = compactAfterFileNames;
             this.compactBeforeFileNames = compactBeforeFileNames;
+            this.newIndexFileNames = newIndexFileNames;
             this.partitions = partitions;
             this.buckets = buckets;
         }
@@ -622,6 +651,7 @@ public class SortCompactCommitMessageRewriter {
         private static CompactCommitFingerprint from(List<CommitMessage> compactMessages) {
             Set<String> compactAfterFileNames = new HashSet<>();
             Set<String> compactBeforeFileNames = new HashSet<>();
+            Set<String> newIndexFileNames = new HashSet<>();
             Set<BinaryRow> partitionSet = new HashSet<>();
             Set<Integer> buckets = new HashSet<>();
             for (CommitMessage message : compactMessages) {
@@ -634,10 +664,14 @@ public class SortCompactCommitMessageRewriter {
                 for (DataFileMeta file : impl.compactIncrement().compactBefore()) {
                     compactBeforeFileNames.add(file.fileName());
                 }
+                for (IndexFileMeta indexFile : impl.compactIncrement().newIndexFiles()) {
+                    newIndexFileNames.add(indexFile.fileName());
+                }
             }
             return new CompactCommitFingerprint(
                     compactAfterFileNames,
                     compactBeforeFileNames,
+                    newIndexFileNames,
                     new ArrayList<>(partitionSet),
                     buckets);
         }
@@ -671,6 +705,7 @@ public class SortCompactCommitMessageRewriter {
                 new CompactCommitFingerprint(
                         Collections.emptySet(),
                         beforeFileNames,
+                        Collections.emptySet(),
                         new ArrayList<>(partitionSet),
                         buckets);
         return !snapshotContainsAnyFile(snapshot, fingerprint, beforeFileNames);
