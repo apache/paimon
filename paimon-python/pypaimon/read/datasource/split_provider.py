@@ -67,6 +67,10 @@ class SplitProvider(ABC):
         """
         return None
 
+    def include_row_kind(self) -> bool:
+        """Whether Arrow output should include the row kind column."""
+        return False
+
     def nested_name_paths(self) -> Optional[List[List[str]]]:
         """Parallel name paths for a nested-leaf projection, or ``None``.
 
@@ -212,13 +216,15 @@ class PreResolvedSplitProvider(SplitProvider):
     """
 
     def __init__(self, table, splits: List[Split], read_type, predicate=None,
-                 limit: Optional[int] = None, nested_name_paths=None):
+                 limit: Optional[int] = None, nested_name_paths=None,
+                 include_row_kind: bool = False):
         self._table = table
         self._splits = splits
         self._read_type = read_type
         self._predicate = predicate
         self._limit = limit
         self._nested_name_paths = nested_name_paths
+        self._include_row_kind = include_row_kind
 
     def table(self):
         return self._table
@@ -231,6 +237,9 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def nested_name_paths(self) -> Optional[List[List[str]]]:
         return self._nested_name_paths
+
+    def include_row_kind(self) -> bool:
+        return self._include_row_kind
 
     def predicate(self):
         return self._predicate
