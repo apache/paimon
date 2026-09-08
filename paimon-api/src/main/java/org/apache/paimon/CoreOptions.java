@@ -1116,6 +1116,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT =
+            key("changelog-producer.preserve-sequence-on-retract")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A comma-separated list of column names whose values should be taken from the "
+                                    + "incoming event rather than the stored row when producing changelog "
+                                    + "retraction records (-U, -D). This is useful when delete or update "
+                                    + "events carry their own event timestamp and you want that timestamp "
+                                    + "preserved in the changelog. "
+                                    + "Only valid when changelog-producer is lookup.");
+
     public static final ConfigOption<Boolean> TABLE_READ_SEQUENCE_NUMBER_ENABLED =
             key("table-read.sequence-number.enabled")
                     .booleanType()
@@ -3911,6 +3923,16 @@ public class CoreOptions implements Serializable {
     public List<String> changelogRowDeduplicateIgnoreFields() {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
+                .orElse(Collections.emptyList());
+    }
+
+    public List<String> changelogPreserveSequenceOnRetract() {
+        return options.getOptional(CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT)
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
 

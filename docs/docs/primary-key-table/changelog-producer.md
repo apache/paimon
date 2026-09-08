@@ -103,6 +103,24 @@ changelog for the same record. It also supports `changelog-producer.ignore-updat
 records and `changelog-producer.ignore-delete` to exclude DELETE (-D) records from changelog files. These options are
 useful when downstream consumers only need the latest state (e.g. upsert sinks) and do not require retraction.
 
+By setting `'changelog-producer.preserve-sequence-on-retract'` to a comma-separated list of column names,
+retraction records (`-U`, `-D`) will take those columns' values from the incoming event instead of the
+stored row. This is useful when delete or update events carry an event timestamp that downstream consumers
+need, such as external systems like Cassandra that rely on `WRITETIME` for conflict resolution.
+This option is only supported by the `lookup` changelog producer.
+
+```sql
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.preserve-sequence-on-retract' = 'event_ts'
+);
+```
+
 (Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
 important for performance).
 

@@ -323,11 +323,36 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
                 }
+                List<String> preserveColumns = options.changelogPreserveSequenceOnRetract();
+                int[] preserveFieldIndices = null;
+                if (!preserveColumns.isEmpty()) {
+                    List<String> fieldNames = valueType.getFieldNames();
+                    preserveFieldIndices =
+                            preserveColumns.stream()
+                                    .mapToInt(
+                                            name -> {
+                                                int idx = fieldNames.indexOf(name);
+                                                if (idx < 0) {
+                                                    throw new IllegalArgumentException(
+                                                            String.format(
+                                                                    "Column '%s' specified in '%s' not found in value type. "
+                                                                            + "Available columns: %s",
+                                                                    name,
+                                                                    CoreOptions
+                                                                            .CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT
+                                                                            .key(),
+                                                                    fieldNames));
+                                                }
+                                                return idx;
+                                            })
+                                    .toArray();
+                }
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
                                 logDedupEqualSupplier.get(),
                                 lookupStrategy,
-                                UserDefinedSeqComparator.create(valueType, options));
+                                UserDefinedSeqComparator.create(valueType, options),
+                                preserveFieldIndices);
             }
             LookupLevels<?> lookupLevels =
                     createLookupLevels(

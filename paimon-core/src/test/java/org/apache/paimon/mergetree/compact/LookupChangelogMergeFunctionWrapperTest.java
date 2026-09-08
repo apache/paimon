@@ -556,4 +556,139 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv.value().getInt(0)).isEqualTo(3);
     }
+
+    @Test
+    public void testPreserveSequenceOnRetractDelete() {
+        // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // preserve f1 (index 1) on retraction records
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Delete with higher sequence field: changelog -D should carry the delete event's
+        // f1=100, not the old row's f1=50
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(2));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, DELETE, row(10, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(DELETE);
+        // f0 should come from the old row (before image data)
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        // f1 (preserved column) should come from the delete event
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(100);
+        // system sequence number should come from the delete event
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(2);
+    }
+
+    @Test
+    public void testPreserveSequenceOnRetractUpdate() {
+        // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // preserve f1 (index 1) on retraction records
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Update: -U changelog should carry the new event's f1=100, not the old row's f1=50
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(20, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+
+        // -U (UPDATE_BEFORE): f0 from old row, f1 from new event
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(100);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(2);
+
+        // +U (UPDATE_AFTER): entirely from new event
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(20);
+        assertThat(changelogs.get(1).value().getInt(1)).isEqualTo(100);
+    }
+
+    @Test
+    public void testPreserveSequenceOnRetractNotConfigured() {
+        // Verify that the old behavior is preserved when no columns are specified
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // no preserve columns (null)
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        null);
+
+        // Delete: changelog -D should use old row's values (original behavior)
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(2));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, DELETE, row(10, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(DELETE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        // f1 should be from the OLD row (original behavior)
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(50);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(1);
+    }
 }
