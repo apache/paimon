@@ -233,6 +233,69 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual((5, 4), image.size)
         self.assertEqual((73, 73, 73), image.getpixel((0, 0)))
 
+    def test_writes_native_hwc_image_frame_as_png_blob(self):
+        writer = PaimonLeRobotWriter(
+            self.connection,
+            "native_hwc_images",
+            fps=30,
+            features={
+                "observation.image": {
+                    "dtype": "image",
+                    "shape": (4, 5, 3),
+                    "names": ["height", "width", "channels"],
+                },
+            },
+        )
+        writer.add_frame({
+            "observation.image": np.full(
+                (4, 5, 3), 73, dtype=np.uint8),
+            "task": "inspect",
+        })
+        writer.save_episode()
+        writer.finalize()
+
+        _, blobs = self.connection.get_table(
+            "native_hwc_images").scan().select([
+                "observation.image"
+            ]).read_blobs()
+        image = Image.open(io.BytesIO(blobs["observation.image"][0]))
+        self.assertEqual((5, 4), image.size)
+        self.assertEqual((73, 73, 73), image.getpixel((0, 0)))
+
+    def test_writes_multidimensional_and_boolean_numpy_features(self):
+        writer = PaimonLeRobotWriter(
+            self.connection,
+            "numpy_features",
+            fps=10,
+            features={
+                "observation.matrix": {
+                    "dtype": "float32",
+                    "shape": (2, 2),
+                    "names": None,
+                },
+                "observation.flags": {
+                    "dtype": "bool",
+                    "shape": (2,),
+                    "names": None,
+                },
+            },
+        )
+        writer.add_frame({
+            "observation.matrix": np.array(
+                [[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+            "observation.flags": np.array([True, False], dtype=np.bool_),
+            "task": "inspect",
+        })
+        writer.save_episode()
+        writer.finalize()
+
+        rows = self.connection.get_table("numpy_features").scan().select([
+            "observation.matrix", "observation.flags"
+        ]).to_arrow().to_pylist()
+        self.assertEqual([[1.0, 2.0], [3.0, 4.0]],
+                         rows[0]["observation.matrix"])
+        self.assertEqual([True, False], rows[0]["observation.flags"])
+
     def test_discards_rerecorded_episode_and_finalizes_tail_batch(self):
         writer = PaimonLeRobotWriter(
             self.connection,

@@ -250,7 +250,8 @@ class PaimonLeRobotWriter:
                 raise ValueError(
                     "LeRobot feature %s expected shape %s, got %s."
                     % (name, expected_shape, value.shape))
-        return _normalize_value(value, feature, name)
+        value = _normalize_value(value, feature, name)
+        return value.tolist() if isinstance(value, np.ndarray) else value
 
     @staticmethod
     def _image_bytes(value, feature, name):
@@ -261,18 +262,25 @@ class PaimonLeRobotWriter:
                 and isinstance(image_size, tuple) and len(image_size) == 2:
             actual_shape = (image_size[1], image_size[0], len(getbands()))
         expected_shape = _feature_shape(feature, name)
-        channel_last_shape = (
-            (expected_shape[1], expected_shape[2], expected_shape[0])
-            if len(expected_shape) == 3 else ()
-        )
-        if actual_shape and actual_shape != expected_shape \
+        names = tuple(feature.get("names") or ())
+        if names == ("height", "width", "channels"):
+            channel_first_shape = (
+                expected_shape[2], expected_shape[0], expected_shape[1])
+            channel_last_shape = expected_shape
+        else:
+            channel_first_shape = expected_shape
+            channel_last_shape = (
+                (expected_shape[1], expected_shape[2], expected_shape[0])
+                if len(expected_shape) == 3 else ()
+            )
+        if actual_shape and actual_shape != channel_first_shape \
                 and actual_shape != channel_last_shape:
             raise ValueError(
                 "LeRobot feature %s expected shape %s, got %s."
                 % (name, expected_shape, actual_shape))
         return _encode_media_frame(
             value,
-            channel_first=actual_shape == expected_shape,
+            channel_first=actual_shape == channel_first_shape,
         )
 
     def save_episode(self):
