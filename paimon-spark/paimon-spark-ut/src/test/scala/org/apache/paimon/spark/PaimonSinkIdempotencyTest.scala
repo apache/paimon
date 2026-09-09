@@ -48,6 +48,13 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
   private def latestCommitUser(tableName: String): String =
     loadTable(tableName).snapshotManager().latestSnapshot().commitUser()
 
+  private def deleteRecursively(file: File): Unit = {
+    if (file.isDirectory) {
+      file.listFiles().foreach(deleteRecursively)
+    }
+    file.delete()
+  }
+
   private def runToCompletion(query: StreamingQuery): Unit = {
     try {
       query.processAllAvailable()
@@ -95,8 +102,8 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
           checkAnswer(spark.sql("SELECT * FROM T ORDER BY a"), expected)
           assert(snapshotCount("T") == 1)
           assert(
-            latestCommitUser("T").startsWith("spark-checkpoint-"),
-            s"expected a commit user derived from the checkpoint location, " +
+            latestCommitUser("T").startsWith("spark-query-"),
+            s"expected a commit user derived from the query id, " +
               s"but got '${latestCommitUser("T")}'"
           )
 
@@ -305,19 +312,142 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
   }
 
   test("Paimon Sink: addBatch with a repeated batchId must be a no-op") {
-    spark.sql("CREATE TABLE T2 (a INT, b STRING)")
-    val sink = new PaimonSink(
-      spark.sqlContext,
-      loadTable("T2"),
-      Nil,
-      OutputMode.Append(),
-      Options.fromMap(Collections.singletonMap("write.stream.commit-user", "direct-api")))
+    withTempDir {
+      checkpointDir =>
+        withTable("T2") {
+          spark.sql("CREATE TABLE T2 (a INT, b STRING)")
+          // Called outside a stream execution there is no query id, so this also covers the
+          // checkpoint location fallback.
+          val sink = new PaimonSink(
+            spark.sqlContext,
+            loadTable("T2"),
+            Nil,
+            OutputMode.Append(),
+            Options.fromMap(
+              Collections.singletonMap("checkpointLocation", checkpointDir.getCanonicalPath))
+          )
 
-    val batch: DataFrame = Seq((1, "a"), (2, "b")).toDF("a", "b")
-    sink.addBatch(0L, batch)
-    sink.addBatch(0L, batch)
+          val batch: DataFrame = Seq((1, "a"), (2, "b")).toDF("a", "b")
+          sink.addBatch(0L, batch)
+          sink.addBatch(0L, batch)
 
-    checkAnswer(spark.sql("SELECT * FROM T2 ORDER BY a"), Row(1, "a") :: Row(2, "b") :: Nil)
-    assert(snapshotCount("T2") == 1)
+          checkAnswer(spark.sql("SELECT * FROM T2 ORDER BY a"), Row(1, "a") :: Row(2, "b") :: Nil)
+          assert(snapshotCount("T2") == 1)
+          assert(
+            latestCommitUser("T2").startsWith("spark-checkpoint-"),
+            s"expected a commit user derived from the checkpoint location, " +
+              s"but got '${latestCommitUser("T2")}'"
+          )
+        }
+    }
+  }
+
+  test("Paimon Sink: a new query reusing a checkpoint location must not skip its batches") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        dir =>
+          spark.sql("CREATE TABLE T (a INT, b STRING)")
+          val location = loadTable("T").location().toString
+          val checkpointDir = new File(dir, "cp")
+
+          def runOneBatch(row: (Int, String)): Unit = {
+            val inputData = MemoryStream[(Int, String)]
+            val df = inputData.toDS().toDF("a", "b")
+            inputData.addData(row)
+            runToCompletion(
+              df.writeStream
+                .option("checkpointLocation", checkpointDir.getCanonicalPath)
+                .format("paimon")
+                .start(location))
+          }
+
+          runOneBatch((1, "old"))
+          val firstCommitUser = latestCommitUser("T")
+
+          // The checkpoint is dropped and an unrelated query starts at the same location. Its
+          // batch ids start at 0 again, so reusing the identity of the previous query would
+          // make Paimon skip its data as an already committed replay.
+          deleteRecursively(checkpointDir)
+          runOneBatch((2, "new"))
+
+          checkAnswer(
+            spark.sql("SELECT * FROM T ORDER BY a"),
+            Row(1, "old") :: Row(2, "new") :: Nil)
+          assert(
+            latestCommitUser("T") != firstCommitUser,
+            "a query that does not continue the previous checkpoint must not reuse its " +
+              "commit user")
+      }
+    }
+  }
+
+  test("Paimon Sink: an equivalent spelling of the checkpoint location keeps the identity") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE T (a INT, b STRING)")
+          val location = loadTable("T").location().toString
+          val checkpointPath = checkpointDir.getCanonicalPath
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData.toDS().toDF("a", "b")
+          inputData.addData((1, "a"))
+
+          runToCompletion(
+            df.writeStream
+              .option("checkpointLocation", checkpointPath)
+              .format("paimon")
+              .start(location))
+          val firstCommitUser = latestCommitUser("T")
+
+          dropCommitLogEntry(checkpointPath, 0)
+          // The same checkpoint, written with a trailing separator.
+          runToCompletion(
+            df.writeStream
+              .option("checkpointLocation", checkpointPath + "/")
+              .format("paimon")
+              .start(location))
+
+          checkAnswer(spark.sql("SELECT * FROM T"), Row(1, "a") :: Nil)
+          assert(
+            latestCommitUser("T") == firstCommitUser,
+            "the same query resuming the same checkpoint must keep its commit user")
+      }
+    }
+  }
+
+  test("Paimon Sink: expiration of a micro-batch completes before the committer closes") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // Async expiration plus a committer that is closed after every micro-batch:
+          // maintenance has to run before that close, or expiration never happens.
+          spark.sql(
+            "CREATE TABLE T (a INT, b STRING) TBLPROPERTIES (" +
+              "'snapshot.expire.execution-mode' = 'async', " +
+              "'snapshot.num-retained.min' = '1', " +
+              "'snapshot.num-retained.max' = '1')")
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData.toDS().toDF("a", "b")
+          val query = df.writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .format("paimon")
+            .start(location)
+          try {
+            for (i <- 1 to 4) {
+              inputData.addData((i, s"v$i"))
+              query.processAllAvailable()
+            }
+          } finally {
+            query.stop()
+          }
+
+          assert(
+            snapshotCount("T") == 1,
+            s"expiration should retain a single snapshot, found ${snapshotCount("T")}")
+      }
+    }
   }
 }

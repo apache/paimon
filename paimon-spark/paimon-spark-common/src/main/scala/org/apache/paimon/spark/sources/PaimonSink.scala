@@ -50,17 +50,26 @@ class PaimonSink(
    * completed. Committing every batch under a commit user that is stable across restarts lets
    * Paimon skip such a replay instead of committing its data twice.
    *
-   * Resolved lazily: neither the checkpoint location nor the query id is available on the thread
+   * What the commit user has to identify is one incarnation of a checkpoint, not the place it is
+   * stored. Paimon skips a batch whose id a previous run committed under the same user, so reusing
+   * a user across two different queries drops the data of the second one, while changing it within
+   * one query brings back the duplicate. The query id Spark persists in the checkpoint metadata is
+   * exactly that identity: it is new when a checkpoint is recreated, unchanged when a query resumes
+   * from one, and independent of how the location is spelled.
+   *
+   * Resolved lazily: neither the query id nor the checkpoint location is available on the thread
    * that constructs the sink.
    */
   private lazy val commitUser: String = {
     configuredCommitUser.getOrElse {
-      checkpointLocation
-        .map(derivedCommitUser("checkpoint", _))
-        .orElse(queryId.map(derivedCommitUser("query", _)))
+      queryId
+        .map(derivedCommitUser("query", _))
+        // Only reachable outside a stream execution, e.g. a direct addBatch call. A location
+        // cannot tell a recreated checkpoint from a resumed one, so it is a last resort.
+        .orElse(checkpointLocation.map(derivedCommitUser("checkpoint", _)))
         .getOrElse {
           logWarning(
-            "This streaming write has neither a checkpoint location nor a query id to derive a " +
+            "This streaming write has neither a query id nor a checkpoint location to derive a " +
               "stable commit user from, so a replayed micro-batch cannot be recognised and may " +
               s"be committed twice. Set '${SparkConnectorOptions.STREAM_WRITE_COMMIT_USER.key}' " +
               "to make the write idempotent.")
@@ -88,10 +97,8 @@ class PaimonSink(
     }
 
   /**
-   * The id Spark persists in the checkpoint metadata, hence stable across restarts of the same
-   * query. It covers the case of a checkpoint location that never reaches the sink options, for
-   * example one taken from `spark.sql.streaming.checkpointLocation`. It is a thread local of the
-   * stream execution thread, so it can only be read from within [[addBatch]].
+   * The id Spark persists in the checkpoint metadata. It is a thread local of the stream execution
+   * thread, so it can only be read from within [[addBatch]].
    */
   private def queryId: Option[String] =
     Option(sqlContext.sparkContext.getLocalProperty(PaimonSink.QUERY_ID_KEY)).filter(_.nonEmpty)

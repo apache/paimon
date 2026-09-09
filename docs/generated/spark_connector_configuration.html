@@ -144,7 +144,7 @@ under the License.
             <td><h5>write.stream.commit-user</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>The commit user of a Structured Streaming write. Paimon skips a micro-batch that a previous run of the same query already committed under this user, which is what makes a replayed micro-batch idempotent. By default it is derived from the checkpoint location of the query, so it is stable across restarts; set it explicitly only if the same query has to keep its identity across a change of checkpoint location.</td>
+            <td>The commit user of a Structured Streaming write. Paimon skips a micro-batch that a previous run of the same query already committed under this user, which is what makes a replayed micro-batch idempotent. By default it is derived from the query id that Spark persists in the checkpoint, so it is kept while a query resumes from its checkpoint and is new when the checkpoint is; set it explicitly only if a query has to keep its identity across a new checkpoint.</td>
         </tr>
         <tr>
             <td><h5>write.use-v2-write</h5></td>

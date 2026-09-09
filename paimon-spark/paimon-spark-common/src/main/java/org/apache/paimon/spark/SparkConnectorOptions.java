@@ -118,9 +118,10 @@ public class SparkConnectorOptions {
                                     + "micro-batch that a previous run of the same query already "
                                     + "committed under this user, which is what makes a replayed "
                                     + "micro-batch idempotent. By default it is derived from the "
-                                    + "checkpoint location of the query, so it is stable across "
-                                    + "restarts; set it explicitly only if the same query has to "
-                                    + "keep its identity across a change of checkpoint location.");
+                                    + "query id that Spark persists in the checkpoint, so it is "
+                                    + "kept while a query resumes from its checkpoint and is new "
+                                    + "when the checkpoint is; set it explicitly only if a query "
+                                    + "has to keep its identity across a new checkpoint.");
 
     public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
             key("read.stream.maxFilesPerTrigger")
