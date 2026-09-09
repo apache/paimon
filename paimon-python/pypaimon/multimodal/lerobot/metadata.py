@@ -252,11 +252,29 @@ def _commit_metadata(
         snapshot_id = _append_arrow(tables[name], metadata[name + "_table"])
         _require_initial_snapshot(name, snapshot_id)
         component_snapshots.append((tables[name].identifier, snapshot_id))
+    frames_table = connection.catalog.get_table(frames_identifier)
+    frames_snapshot_id = _build_initial_btree(
+        frames_table, "index", frames_snapshot_id)
     # Tag the root last so a failed component tag does not expose a root tag.
     component_snapshots.append((frames_identifier, frames_snapshot_id))
     if tag_name is not None:
         for identifier, snapshot_id in component_snapshots:
             _create_tag(connection.catalog, identifier, tag_name, snapshot_id)
+
+
+def _build_initial_btree(table, column, data_snapshot_id):
+    latest = table.snapshot_manager().get_latest_snapshot()
+    if latest is None or latest.id != data_snapshot_id:
+        raise RuntimeError(
+            "LeRobot initial import detected concurrent writes to %s before "
+            "building its %s BTree." % (table.identifier, column))
+    added = table.create_global_index(column, index_type="btree")
+    latest = table.snapshot_manager().get_latest_snapshot()
+    if added <= 0 or latest is None or latest.id != data_snapshot_id + 1:
+        raise RuntimeError(
+            "LeRobot initial import could not publish an isolated "
+            "%s BTree for %s." % (column, table.identifier))
+    return latest.id
 
 
 def create_lerobot_tag(connection, table_name, tag_name):

@@ -707,7 +707,7 @@ from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 
 writer = PaimonLeRobotWriter(
     conn,
-    "robot_data",
+    "recorded_frames",
     fps=30,
     features=dataset_features,
 )
@@ -753,6 +753,28 @@ properties. Resume normally reads only that metadata; a non-empty table created
 before these properties existed is scanned once and upgraded by its next
 commit. A commit exception has an unknown result and is not automatically
 retried.
+
+## Train with Paimon LeRobot data
+
+For map-style training, read a tagged table group created by
+`load_from_lerobot` directly from Paimon. `PaimonLeRobotDataset` requires the
+complete table group; a frame-only table created by `PaimonLeRobotWriter` is
+not sufficient.
+
+```python
+from torch.utils.data import DataLoader
+from pypaimon.multimodal import PaimonLeRobotDataset
+
+dataset = PaimonLeRobotDataset(
+    conn.get_table("robot_data"),
+    tag_name=tag,
+)
+loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
+```
+
+If `tag_name` is omitted, the latest snapshots are used. Metadata is available
+through `dataset.meta`. Frame lookups use the BTree on `index`; payload columns
+remain lazy.
 
 ## Overwrite
 
