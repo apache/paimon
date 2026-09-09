@@ -67,6 +67,8 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
@@ -82,6 +84,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.errors.ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -579,6 +582,72 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         List<String> liveDeletionVectorDataFileNames = liveDeletionVectorDataFileNames(table);
         assertThat(liveDeletionVectorDataFileNames).containsExactly(newAnchorFile);
         assertThat(liveDeletionVectorDataFileNames).doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSplitLargeFilePreservesDeletionVectorsAndBlob(boolean bitmap64)
+            throws Exception {
+        createTableDefault();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
+        options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 mb");
+        FileStoreTable table = getTableDefault().copy(options);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int rowId = 0; rowId < 2500; rowId++) {
+                write.write(
+                        GenericRow.of(
+                                rowId,
+                                BinaryString.fromString("name-" + rowId),
+                                BinaryString.fromString("base-" + rowId),
+                                new BlobData(new byte[] {(byte) rowId})));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        Range range = new Range(0, 2499);
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(range, 0, 999, 2000, 2499)));
+        List<String> expected = readRows(table.newReadBuilder());
+        String oldAnchor = anchorFilesByRange(table).get(range);
+        List<DataFileMeta> blobs =
+                currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
+                        .filter(file -> isBlobFile(file.fileName()))
+                        .collect(Collectors.toList());
+        assertThat(blobs).hasSize(1);
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        table = table.copy(options);
+        compactDataEvolutionTable(table, false);
+
+        List<DataFileMeta> files = currentDataFiles(table, BinaryRow.EMPTY_ROW);
+        List<DataFileMeta> normalFiles =
+                files.stream()
+                        .filter(file -> !isBlobFile(file.fileName()))
+                        .collect(Collectors.toList());
+        assertThat(normalFiles.size()).isGreaterThan(1);
+        assertThat(normalFiles.stream().mapToLong(DataFileMeta::rowCount).sum()).isEqualTo(2500);
+        assertThat(files).doesNotContainAnyElementsOf(blobs);
+        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expected);
+        List<String> expectedAnchors = new ArrayList<>();
+        for (DataFileMeta file : normalFiles) {
+            Range fileRange = file.nonNullRowIdRange();
+            if (Arrays.stream(new long[] {0, 999, 2000, 2499})
+                    .anyMatch(id -> id >= fileRange.from && id <= fileRange.to)) {
+                expectedAnchors.add(file.fileName());
+            }
+        }
+        assertThat(liveDeletionVectorDataFileNames(table))
+                .containsExactlyInAnyOrderElementsOf(expectedAnchors)
+                .doesNotContain(oldAnchor);
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withReadType(SpecialFields.rowTypeWithRowId(table.rowType()));
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> assertThat(row.getLong(4)).isEqualTo(row.getInt(0)));
+        }
     }
 
     @Test

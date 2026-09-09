@@ -21,10 +21,15 @@ package org.apache.paimon.append.dataevolution;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
@@ -33,11 +38,15 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,12 +54,17 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for column sequence propagation in {@link DataEvolutionNormalCompactTask}. */
+/**
+ * Tests for splitting and column sequence propagation in {@link DataEvolutionNormalCompactTask}.
+ */
 public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
 
     private static final int ROW_COUNT = 100;
@@ -125,6 +139,198 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         1,
                         CoreOptions.GlobalIndexColumnUpdateAction.THROW_ERROR);
         assertThat(compacted.columnMaxSequenceNumbers()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSplitHistoricalLargeFile(boolean updateColumn) throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        int rowCount = 12000;
+        Random random = new Random(42);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < rowCount; i++) {
+                StringBuilder value = new StringBuilder();
+                for (int j = 0; j < 8; j++) {
+                    value.append(Long.toHexString(random.nextLong()));
+                }
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString(value.toString())));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        DataFileMeta original = table.store().newScan().plan().files().get(0).file();
+        if (updateColumn) {
+            builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write =
+                            builder.newWrite()
+                                    .withWriteType(
+                                            table.rowType().project(Arrays.asList("dt", "f0")));
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int i = 0; i < rowCount; i++) {
+                    write.write(GenericRow.of(BinaryString.fromString("p0"), i + rowCount));
+                }
+                List<CommitMessage> messages = write.prepareCommit();
+                assignFirstRowId(messages, original.nonNullFirstRowId());
+                commit.commit(messages);
+            }
+        }
+        List<InternalRow> expected = read(table);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "128 kb");
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "10");
+        options.put(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "ignore");
+        table = table.copy(options);
+        long targetSize = table.coreOptions().targetFileSize(false);
+        assertThat(original.fileSize()).isGreaterThan(2 * targetSize);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
+                .isEmpty();
+
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        table = table.copy(options);
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();
+        assertThat(tasks).hasSize(1);
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        DataEvolutionCompactTask task =
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(tasks.get(0)));
+        List<CommitMessage> messages = new ArrayList<>();
+        messages.add(task.doCompact(table, "split-large-file"));
+        List<DataFileMeta> output = task.compactAfter();
+        assertThat(output.size()).isGreaterThan(1);
+        long nextRowId = original.nonNullFirstRowId();
+        long maxSequenceNumber =
+                task.compactBefore().stream()
+                        .mapToLong(DataFileMeta::maxSequenceNumber)
+                        .max()
+                        .getAsLong();
+        for (DataFileMeta file : output) {
+            assertThat(file.nonNullFirstRowId()).isEqualTo(nextRowId);
+            assertThat(file.fileSize()).isLessThan(2 * targetSize);
+            assertThat(file.minSequenceNumber()).isEqualTo(original.minSequenceNumber());
+            assertThat(file.maxSequenceNumber()).isEqualTo(maxSequenceNumber);
+            if (updateColumn) {
+                assertThat(columnSequence(file, table.rowType().getField("f1").id()))
+                        .isEqualTo(original.maxSequenceNumber());
+                assertThat(columnSequence(file, table.rowType().getField("f0").id()))
+                        .isEqualTo(maxSequenceNumber);
+            }
+            nextRowId += file.rowCount();
+        }
+        assertThat(nextRowId).isEqualTo(original.nonNullFirstRowId() + rowCount);
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+        assertThat(read(table)).containsExactlyInAnyOrderElementsOf(expected);
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table,
+                                        false,
+                                        false,
+                                        table.snapshotManager().latestSnapshot())
+                                .plan())
+                .isEmpty();
+    }
+
+    @Test
+    public void testSplitAlignsMultipleBlobColumnsAndVectorFiles() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("b1", DataTypes.BLOB())
+                        .column("b2", DataTypes.BLOB())
+                        .column("v", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 kb")
+                        .option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "128 kb")
+                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json")
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < 2500; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                new BlobData(new byte[] {(byte) i}),
+                                new BlobData(new byte[] {(byte) (i + 1)}),
+                                BinaryVector.fromPrimitiveArray(new float[] {i, i + 1})));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.renameColumn("v", "renamed_v")),
+                false);
+        table = getTableDefault();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        table = table.copy(options);
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(
+                                table, false, false, table.snapshotManager().latestSnapshot())
+                        .plan();
+        assertThat(tasks).hasSize(1);
+        DataEvolutionCompactTask task = tasks.get(0);
+        assertThat(task.compactBefore()).hasSize(4);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(task.doCompact(table, "split-dedicated")));
+        }
+        List<Range> normalRanges =
+                task.compactAfter().stream()
+                        .filter(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()))
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        assertThat(normalRanges.size()).isGreaterThan(1);
+        assertThat(task.compactAfter())
+                .allSatisfy(
+                        file ->
+                                assertThat(
+                                                normalRanges.stream()
+                                                        .anyMatch(
+                                                                range ->
+                                                                        range.from
+                                                                                        <= file
+                                                                                                .nonNullFirstRowId()
+                                                                                && range.to
+                                                                                        >= file
+                                                                                                .nonNullRowIdRange()
+                                                                                                .to))
+                                        .isTrue());
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        ids.add(id);
+                        assertThat(row.getBlob(1).toData()).containsExactly((byte) id);
+                        assertThat(row.getBlob(2).toData()).containsExactly((byte) (id + 1));
+                        assertThat(row.getVector(3).toFloatArray()).containsExactly(id, id + 1);
+                    });
+        }
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.range(0, 2500)
+                                .boxed()
+                                .collect(Collectors.toList()));
     }
 
     private void write() throws Exception {

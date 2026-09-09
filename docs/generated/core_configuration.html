@@ -513,6 +513,12 @@ under the License.
             <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions. Use the 'materialize_deletion_vectors' procedure to apply deletion vectors to the latest table state and assign new row IDs. Reclaiming files retained by historical snapshots or tags requires snapshot expiration.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.split-large-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether data-evolution compaction selects normal data files larger than twice target-file-size, even below compaction.min.file-num. When enabled, normal compaction output rolls at target-file-size while preserving row IDs and logical deletions. Associated dedicated files are rewritten to stay within the new normal-file boundaries.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1817,7 +1823,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>target-file-row-num</h5></td>
             <td style="word-wrap: break-word;">9223372036854775807</td>
             <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction produces a single file unless data-evolution.compaction.split-large-files is enabled. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

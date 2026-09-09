@@ -105,6 +105,29 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("below.parquet", 0L, 10L, 0, 199L),
+                        makeEntryWithSize("boundary.parquet", 10L, 10L, 0, 200L),
+                        makeEntryWithSize("large.parquet", 20L, 10L, 0, 201L),
+                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L));
+        for (boolean enabled : new boolean[] {false, true}) {
+            DataEvolutionCompactCoordinator.CompactPlanner planner =
+                    new DataEvolutionCompactCoordinator.CompactPlanner(
+                            false, false, enabled, 100L, 100L, 1000L, 10L, schemaId -> null, null);
+            List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+            if (enabled) {
+                assertThat(tasks).hasSize(1);
+                assertThat(tasks.get(0).compactBefore())
+                        .containsExactly(entries.get(2).file(), entries.get(3).file());
+            } else {
+                assertThat(tasks).isEmpty();
+            }
+        }
+    }
+
+    @Test
     public void testCompactPlannerContiguousFiles() {
         // Multiple contiguous files should be grouped together
         List<ManifestEntry> entries = new ArrayList<>();
@@ -875,6 +898,7 @@ public class DataEvolutionCompactCoordinatorTest {
             RowType currentRowType) {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
                 true,
+                false,
                 false,
                 targetFileSize,
                 targetFileSize,

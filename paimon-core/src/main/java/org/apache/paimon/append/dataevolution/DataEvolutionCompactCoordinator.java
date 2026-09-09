@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -118,6 +119,7 @@ public class DataEvolutionCompactCoordinator {
                 new DataEvolutionCompactRangePlanner.CandidateOptions(
                         compactBlob,
                         compactVector,
+                        options.dataEvolutionCompactionSplitLargeFiles(),
                         targetFileSize,
                         options.blobTargetFileSize(),
                         openFileCost,
@@ -137,12 +139,18 @@ public class DataEvolutionCompactCoordinator {
                 new CompactPlanner(
                         compactBlob,
                         compactVector,
+                        options.dataEvolutionCompactionSplitLargeFiles(),
                         targetFileSize,
                         options.blobTargetFileSize(),
                         openFileCost,
                         compactMinFileNum,
                         schemaFetcher,
                         currentBlobFieldIds);
+    }
+
+    static boolean isLargeFile(long fileSize, long targetFileSize) {
+        // Subtraction avoids overflowing twice the target size.
+        return fileSize > targetFileSize && fileSize - targetFileSize > targetFileSize;
     }
 
     public static void validateOptions(CoreOptions options) {
@@ -235,6 +243,7 @@ public class DataEvolutionCompactCoordinator {
 
         private final boolean compactBlob;
         private final boolean compactVector;
+        private final boolean splitLargeFiles;
         private final long targetFileSize;
         private final long blobTargetFileSize;
         private final long openFileCost;
@@ -252,6 +261,7 @@ public class DataEvolutionCompactCoordinator {
             this(
                     compactBlob,
                     compactVector,
+                    false,
                     targetFileSize,
                     targetFileSize,
                     openFileCost,
@@ -266,6 +276,7 @@ public class DataEvolutionCompactCoordinator {
         CompactPlanner(
                 boolean compactBlob,
                 boolean compactVector,
+                boolean splitLargeFiles,
                 long targetFileSize,
                 long blobTargetFileSize,
                 long openFileCost,
@@ -274,6 +285,7 @@ public class DataEvolutionCompactCoordinator {
                 @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
+            this.splitLargeFiles = splitLargeFiles;
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
@@ -314,10 +326,10 @@ public class DataEvolutionCompactCoordinator {
                     }
                 }
 
-                if (compactBlob) {
+                if (compactBlob || splitLargeFiles) {
                     associateDedicatedFiles(blobFiles, treeMap, dataFileToBlobFiles);
                 }
-                if (compactVector) {
+                if (compactVector || splitLargeFiles) {
                     associateDedicatedFiles(vectorStoreFiles, treeMap, dataFileToVectorStoreFiles);
                 }
 
@@ -409,8 +421,32 @@ public class DataEvolutionCompactCoordinator {
 
             List<DataFileMeta> dataFiles = compactBin.files();
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            boolean triggerNormalFile = dataFiles.size() >= compactMinFileNum;
+            boolean triggerNormalFile =
+                    dataFiles.size() >= compactMinFileNum
+                            || (splitLargeFiles
+                                    && dataFiles.stream()
+                                            .anyMatch(
+                                                    f ->
+                                                            isLargeFile(
+                                                                    f.fileSize(), targetFileSize)));
             if (triggerNormalFile) {
+                if (splitLargeFiles) {
+                    // Dedicated files must be rewritten with the normal files so that their
+                    // row-id ranges remain within the new normal-file boundaries.
+                    Set<DataFileMeta> filesToRewrite = new LinkedHashSet<>(dataFiles);
+                    for (DataFileMeta dataFile : dataFiles) {
+                        filesToRewrite.addAll(
+                                dataFileToBlobFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                        filesToRewrite.addAll(
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    tasks.add(
+                            new DataEvolutionNormalCompactTask(
+                                    partition, new ArrayList<>(filesToRewrite)));
+                    return tasks;
+                }
                 tasks.add(new DataEvolutionNormalCompactTask(partition, dataFiles));
             }
 

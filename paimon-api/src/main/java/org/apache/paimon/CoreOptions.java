@@ -865,7 +865,8 @@ public class CoreOptions implements Serializable {
                                     + "Enforced at bundle granularity, so a bundled write may exceed it "
                                     + "by up to one bundle. Only constrains files at write time: "
                                     + "compaction is size-based and may merge into larger files, and "
-                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "data-evolution compaction produces a single file unless "
+                                    + "data-evolution.compaction.split-large-files is enabled. Bounds "
                                     + "per-file rows for wide columns to avoid data-evolution OOM. "
                                     + "PyPaimon supports this for data-evolution append tables; its "
                                     + "primary-key, blob and vector writers still fail fast when it "
@@ -2633,6 +2634,17 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
+            key("data-evolution.compaction.split-large-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction selects normal data files larger than "
+                                    + "twice target-file-size, even below compaction.min.file-num. "
+                                    + "When enabled, normal compaction output rolls at target-file-size "
+                                    + "while preserving row IDs and logical deletions. Associated dedicated "
+                                    + "files are rewritten to stay within the new normal-file boundaries.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
             key("data-evolution.compaction.rewrite-row-ids")
                     .booleanType()
@@ -4387,6 +4399,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorBitmap64() {
         return options.get(DELETION_VECTOR_BITMAP64);
+    }
+
+    public boolean dataEvolutionCompactionSplitLargeFiles() {
+        return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
     }
 
     public boolean dataEvolutionCompactionRewriteRowIds() {

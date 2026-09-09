@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator.isLargeFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -53,6 +54,7 @@ final class CompactCandidateRangeCollector {
     private final long blobTargetFileSize;
     private final long openFileCost;
     private final long compactMinFileNum;
+    private final boolean splitLargeFiles;
     private final List<SortedEntryChunk> sortedChunks = new ArrayList<>();
     private long[] words;
     private int chunkSize;
@@ -64,7 +66,8 @@ final class CompactCandidateRangeCollector {
             long targetFileSize,
             long blobTargetFileSize,
             long openFileCost,
-            long compactMinFileNum) {
+            long compactMinFileNum,
+            boolean splitLargeFiles) {
         checkArgument(expectedFileCount >= 0, "Expected live file count cannot be negative.");
         checkArgument(targetFileSize > 0, "Target file size must be positive.");
         checkArgument(blobTargetFileSize > 0, "Blob target file size must be positive.");
@@ -75,6 +78,7 @@ final class CompactCandidateRangeCollector {
         this.blobTargetFileSize = blobTargetFileSize;
         this.openFileCost = openFileCost;
         this.compactMinFileNum = compactMinFileNum;
+        this.splitLargeFiles = splitLargeFiles;
         int initialEntries = Math.max(16, Math.min(expectedFileCount, ENTRY_CHUNK_SIZE));
         this.words = new long[Math.multiplyExact(initialEntries, ENTRY_WORDS)];
     }
@@ -137,6 +141,7 @@ final class CompactCandidateRangeCollector {
                             blobTargetFileSize,
                             openFileCost,
                             compactMinFileNum,
+                            splitLargeFiles,
                             consumer);
             if (chunks.size() == 1) {
                 SortedEntryChunk chunk = chunks.get(0);
@@ -402,6 +407,7 @@ final class CompactCandidateRangeCollector {
         private final long blobTargetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
+        private final boolean splitLargeFiles;
         private final CandidateRangeConsumer consumer;
         private final CandidateBin bin = new CandidateBin();
         private final Map<Integer, BlobFieldAccumulator> blobFields = new HashMap<>();
@@ -412,6 +418,7 @@ final class CompactCandidateRangeCollector {
         private long normalEnd;
         private long normalFileCount;
         private long normalWeight;
+        private boolean largeFile;
         private long vectorFileCount;
         private int componentFileCount;
         private boolean hasPreviousLogicalRange;
@@ -422,11 +429,13 @@ final class CompactCandidateRangeCollector {
                 long blobTargetFileSize,
                 long openFileCost,
                 long compactMinFileNum,
+                boolean splitLargeFiles,
                 CandidateRangeConsumer consumer) {
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
+            this.splitLargeFiles = splitLargeFiles;
             this.consumer = consumer;
         }
 
@@ -457,6 +466,7 @@ final class CompactCandidateRangeCollector {
             normalEnd = end;
             normalFileCount = 1L;
             normalWeight = Math.max(fileSize, openFileCost);
+            largeFile = splitLargeFiles && isLargeFile(fileSize, targetFileSize);
             vectorFileCount = 0L;
             componentFileCount = 1;
             blobFields.clear();
@@ -472,6 +482,7 @@ final class CompactCandidateRangeCollector {
                 checkState(
                         normalEnd == end,
                         "Normal files in one overlapping row-id group must have the same row-id range.");
+                largeFile |= splitLargeFiles && isLargeFile(fileSize, targetFileSize);
                 normalFileCount = Math.addExact(normalFileCount, 1L);
                 normalWeight = Math.addExact(normalWeight, Math.max(fileSize, openFileCost));
                 componentFileCount = Math.addExact(componentFileCount, 1);
@@ -525,7 +536,8 @@ final class CompactCandidateRangeCollector {
                             componentFileCount,
                             normalFileCount,
                             normalWeight,
-                            dedicatedCandidate);
+                            dedicatedCandidate,
+                            largeFile);
             if (normalWeight > targetFileSize) {
                 flushBin();
                 emitComponent(component);
@@ -541,7 +553,9 @@ final class CompactCandidateRangeCollector {
         }
 
         private void emitComponent(Component component) {
-            if (component.normalFileCount >= compactMinFileNum || component.dedicatedCandidate) {
+            if (component.normalFileCount >= compactMinFileNum
+                    || component.dedicatedCandidate
+                    || component.largeFile) {
                 consumer.accept(component.start, component.end, component.fileCount);
             }
         }
@@ -571,6 +585,7 @@ final class CompactCandidateRangeCollector {
         private final long normalFileCount;
         private final long normalWeight;
         private final boolean dedicatedCandidate;
+        private final boolean largeFile;
 
         private Component(
                 long start,
@@ -578,13 +593,15 @@ final class CompactCandidateRangeCollector {
                 int fileCount,
                 long normalFileCount,
                 long normalWeight,
-                boolean dedicatedCandidate) {
+                boolean dedicatedCandidate,
+                boolean largeFile) {
             this.start = start;
             this.end = end;
             this.fileCount = fileCount;
             this.normalFileCount = normalFileCount;
             this.normalWeight = normalWeight;
             this.dedicatedCandidate = dedicatedCandidate;
+            this.largeFile = largeFile;
         }
     }
 

@@ -608,6 +608,32 @@ Ordinary compaction **does not physically remove rows hidden by deletion
 vectors**. Removing their positions would change the alignment with untouched
 column files.
 
+### Splitting Large Files During Compaction
+
+To resize existing large normal data files, enable
+`data-evolution.compaction.split-large-files` (default: `false`) and run compaction:
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'target-file-size' = '128 MB',
+    'data-evolution.compaction.split-large-files' = 'true'
+);
+CALL sys.compact('default.my_table');
+```
+
+The example uses Spark SQL. With this option enabled, normal files strictly larger
+than twice `target-file-size` qualify for compaction even if the file count is below
+`compaction.min.file-num`. Compaction includes all column updates for the same row-ID
+range and rolls normal output files near `target-file-size`. Actual sizes depend on
+compression and the writer's size-check granularity; the last file may be smaller.
+The write-time `target-file-row-num` limit does not apply to compaction.
+
+Row IDs, column updates, and logical deletions are preserved. Associated dedicated
+BLOB and VECTOR files are rewritten along with the normal files to keep their row-ID
+ranges aligned, which adds read and write work for those columns. Their sizes alone
+do not trigger splitting. Compaction rewrites files in the current snapshot; files referenced by older snapshots or tags remain until those references
+expire and snapshot expiration removes them.
+
 ### Materialize Deletion Vectors
 
 To remove deleted positions from the latest table state, run:

@@ -157,7 +157,8 @@ final class DataEvolutionCompactRangePlanner {
                         candidateOptions.targetFileSize,
                         candidateOptions.blobTargetFileSize,
                         candidateOptions.openFileCost,
-                        candidateOptions.compactMinFileNum);
+                        candidateOptions.compactMinFileNum,
+                        candidateOptions.splitLargeFiles);
         try {
             collectDeletedIdentifiers(manifestGroup, deletedIdentifiers, identifier);
             collectCandidateRanges(manifestGroup, deletedIdentifiers, identifier, candidateRanges);
@@ -489,6 +490,7 @@ final class DataEvolutionCompactRangePlanner {
 
         private final boolean compactBlob;
         private final boolean compactVector;
+        private final boolean splitLargeFiles;
         private final long targetFileSize;
         private final long blobTargetFileSize;
         private final long openFileCost;
@@ -499,6 +501,7 @@ final class DataEvolutionCompactRangePlanner {
         CandidateOptions(
                 boolean compactBlob,
                 boolean compactVector,
+                boolean splitLargeFiles,
                 long targetFileSize,
                 long blobTargetFileSize,
                 long openFileCost,
@@ -507,6 +510,7 @@ final class DataEvolutionCompactRangePlanner {
                 @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
+            this.splitLargeFiles = splitLargeFiles;
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;

@@ -46,6 +46,33 @@ class CompactCandidateRangeCollectorTest {
     }
 
     @Test
+    void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
+        for (boolean enabled : new boolean[] {false, true}) {
+            CompactCandidateRangeCollector collector =
+                    new CompactCandidateRangeCollector(16, 100L, 100L, 1000L, 10L, enabled);
+            collector.add(0, NORMAL_FILE, 0L, 10L, 199L);
+            collector.add(0, NORMAL_FILE, 10L, 10L, 200L);
+            collector.add(0, NORMAL_FILE, 20L, 10L, 201L);
+            collector.add(0, NORMAL_FILE, 20L, 10L, 10L);
+            // Dedicated files never trigger normal-file splitting.
+            collector.add(0, 3, 0L, 10L, 1000L);
+            if (enabled) {
+                assertThat(finish(collector)).containsExactly("20-29:2");
+            } else {
+                assertThat(finish(collector)).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void testSplitThresholdDoesNotOverflow() {
+        CompactCandidateRangeCollector collector =
+                new CompactCandidateRangeCollector(16, Long.MAX_VALUE, 100L, 1L, 2L, true);
+        collector.add(0, NORMAL_FILE, 0L, 10L, Long.MAX_VALUE);
+        assertThat(finish(collector)).isEmpty();
+    }
+
+    @Test
     void testSelectsUpdatedFilesEvenWhenOneLogicalRangeExceedsTarget() {
         CompactCandidateRangeCollector collector = collector(100L, 100L, 1L, 2L);
         collector.add(0, NORMAL_FILE, 0L, 10L, 200L);
@@ -156,7 +183,7 @@ class CompactCandidateRangeCollectorTest {
             long openFileCost,
             long compactMinFileNum) {
         return new CompactCandidateRangeCollector(
-                16, targetFileSize, blobTargetFileSize, openFileCost, compactMinFileNum);
+                16, targetFileSize, blobTargetFileSize, openFileCost, compactMinFileNum, false);
     }
 
     private List<String> finish(CompactCandidateRangeCollector collector) {
