@@ -14,11 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""One-time LeRobot Dataset v3 import into a multimodal Paimon table."""
+"""LeRobot Dataset v3 import and direct Paimon capture."""
 
 from pypaimon.multimodal.lerobot.api import load_from_lerobot
+from pypaimon.multimodal.lerobot.writer import PaimonLeRobotWriter
 
 
 __all__ = [
+    "PaimonLeRobotWriter",
     "load_from_lerobot",
 ]

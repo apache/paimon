@@ -450,7 +450,7 @@ def _image_bytes(value, root):
     return _encode_media_frame(value)
 
 
-def _encode_media_frame(value):
+def _encode_media_frame(value, channel_first=None):
     try:
         import numpy as np
         from PIL import Image
@@ -466,7 +466,10 @@ def _encode_media_frame(value):
         if callable(detach):
             value = detach().cpu().numpy()
         array = np.asarray(value)
-        if array.ndim == 3 and array.shape[0] in (1, 3, 4):
+        if channel_first is True or (
+                channel_first is None
+                and array.ndim == 3
+                and array.shape[0] in (1, 3, 4)):
             array = np.transpose(array, (1, 2, 0))
         if np.issubdtype(array.dtype, np.floating):
             array = np.rint(np.clip(array, 0.0, 1.0) * 255.0).astype(np.uint8)
