@@ -611,7 +611,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testPreserveSequenceOnRetractDelete() {
+    public void testPreserveFieldOnRetractDelete() {
         // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         RowType valueType =
@@ -656,7 +656,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testPreserveSequenceOnRetractUpdate() {
+    public void testPreserveFieldOnRetractUpdate() {
         // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         RowType valueType =
@@ -704,7 +704,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
     }
 
     @Test
-    public void testPreserveSequenceOnRetractNotConfigured() {
+    public void testPreserveFieldOnRetractNotConfigured() {
         // Verify that the old behavior is preserved when no columns are specified
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         RowType valueType =
