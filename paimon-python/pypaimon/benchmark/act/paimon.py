@@ -29,9 +29,9 @@ QPOS_COLUMNS = (
 )
 ACTION_COLUMNS = ("action",)
 IMAGE_COLUMNS = (
-    "rgb_front",
-    "rgb_left_wrist",
-    "rgb_right_wrist",
+    "observation_images_rgb_front",
+    "observation_images_rgb_wrist_left",
+    "observation_images_rgb_wrist_right",
 )
 
 

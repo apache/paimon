@@ -244,7 +244,7 @@ def _write_episode(root, split, name, offset, frames=6):
 def benchmark_input(tmp_path, monkeypatch):
     root = tmp_path / "input"
     _write_episode(root, "train", "train-a", 1)
-    _write_episode(root, "train", "train-b", 11)
+    _write_episode(root, "train", "train-b", 11.1)
     _write_episode(root, "val", "val-a", 21)
     warehouse = tmp_path / "warehouse"
     monkeypatch.setattr(agilex, "TABLE_OPTIONS", {
@@ -329,13 +329,35 @@ def test_independent_backend_results_preserve_tensor_and_loss_parity(
         input_root, warehouse, experiment_path, definition=definition)
 
     hdf5_path = tmp_path / "hdf5-result.json"
-    hdf5_result = run_experiment(
-        "hdf5",
-        experiment_path,
-        hdf5_path,
-        input_root=input_root,
-        policy_factory=_policy_factory,
-    )
+    events = []
+    real_run_backend = act_runner.run_backend
+    real_tensor_fingerprint = act_runner._tensor_fingerprint
+
+    def record_run(*args, **kwargs):
+        events.append("round")
+        return real_run_backend(*args, **kwargs)
+
+    def record_fingerprint(*args, **kwargs):
+        events.append("fingerprint")
+        return real_tensor_fingerprint(*args, **kwargs)
+
+    with (
+        patch.object(act_runner, "run_backend", side_effect=record_run),
+        patch.object(
+            act_runner,
+            "_tensor_fingerprint",
+            side_effect=record_fingerprint,
+        ),
+    ):
+        hdf5_result = run_experiment(
+            "hdf5",
+            experiment_path,
+            hdf5_path,
+            input_root=input_root,
+            policy_factory=_policy_factory,
+        )
+    assert events == ["round"] * definition["config"]["rounds"] + [
+        "fingerprint"]
     paimon_path = tmp_path / "paimon-result.json"
     paimon_result = run_experiment(
         "paimon",

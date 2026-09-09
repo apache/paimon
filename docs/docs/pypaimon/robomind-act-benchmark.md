@@ -27,7 +27,7 @@ under the License.
 This benchmark measures the same CPU LeRobot ACT training workload over an
 original RoboMIND AgileX HDF5 dataset or an already ingested and
 canonical-action-backfilled Paimon warehouse. Ingestion and backfill are outside
-the timed scope.
+the timed scope; see [RoboMIND AgileX](./robomind-agilex) to build the warehouse.
 
 The backends run independently. A resolved experiment document preserves the
 shared configuration, normalization, seed, episode selection, Paimon snapshot,

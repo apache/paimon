@@ -239,7 +239,6 @@ def run_experiment(
 
     started_at = _utc_now()
     started = time.monotonic()
-    fingerprint = _tensor_fingerprint(dataset_factory(), plan)
     runs = []
     for round_number in range(1, config.rounds + 1):
         runs.append(run_backend(
@@ -252,6 +251,8 @@ def run_experiment(
             policy_factory=policy_factory,
         ))
         gc.collect()
+    # Fingerprinting scans samples, so keep it after the timed rounds.
+    fingerprint = _tensor_fingerprint(dataset_factory(), plan)
     result = {
         "schema_version": "act-benchmark-result@1",
         "benchmark_id": experiment["benchmark_id"],
@@ -482,10 +483,10 @@ def _shared_normalization(
         statistics_version):
     """Build one train-only normalization contract for both backends.
 
-    HDF5 supplies state and action moments from successful train episodes.
-    Versioned Paimon action statistics must match the float64 HDF5 moments,
-    train scope, frame count, source snapshot, feature name, and ``1e-2``
-    standard-deviation floor.
+    HDF5 supplies state moments and float64-accumulated moments over canonical
+    float32 actions from successful train episodes. Versioned Paimon action
+    statistics must match those moments, train scope, frame count, source
+    snapshot, feature name, and ``1e-2`` standard-deviation floor.
 
     Returns:
         ``(arrays, metadata)`` where arrays are float32 training values and

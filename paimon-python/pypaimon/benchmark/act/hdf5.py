@@ -130,9 +130,9 @@ def compute_normalization(episodes):
 
     Returns:
         ``(normalization, metadata)`` where normalization contains float32
-        arrays used by training. Metadata retains the float64 action moments
-        and frame count used to validate Paimon statistics without losing
-        precision. Standard deviations use a ``1e-2`` floor.
+        arrays used by training. Metadata retains float64-accumulated moments
+        over the canonical float32 actions and the frame count used to validate
+        Paimon statistics. Standard deviations use a ``1e-2`` floor.
     """
     train = [
         episode for episode in episodes
@@ -149,7 +149,7 @@ def compute_normalization(episodes):
             qpos.update(_read_vectors(
                 h5, QPOS_FIELDS, slice(None), dtype=np.float64))
             action.update(_read_vectors(
-                h5, ACTION_FIELDS, slice(None), dtype=np.float64))
+                h5, ACTION_FIELDS, slice(None), dtype=np.float32))
     qpos_mean, qpos_std = qpos.finish()
     action_mean, action_std = action.finish()
     return ({
