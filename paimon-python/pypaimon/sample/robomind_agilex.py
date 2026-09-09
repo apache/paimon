@@ -37,7 +37,6 @@ DEFAULT_STATISTICS_VERSION = "robomind-agilex-joint-position@1"
 TABLE_OPTIONS = {
     "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "false",
-    "vector.file.format": "vortex",
 }
 
 NUMERIC_FIELDS = (
@@ -59,12 +58,27 @@ NUMERIC_FIELDS = (
     ("action_joint_velocity_right", "master/joint_velocity_right"),
 )
 IMAGE_FIELDS = (
-    ("rgb_front", "observations/rgb_images/camera_front"),
-    ("rgb_left_wrist", "observations/rgb_images/camera_left_wrist"),
-    ("rgb_right_wrist", "observations/rgb_images/camera_right_wrist"),
-    ("depth_front", "observations/depth_images/camera_front"),
-    ("depth_left_wrist", "observations/depth_images/camera_left_wrist"),
-    ("depth_right_wrist", "observations/depth_images/camera_right_wrist"),
+    ("observation_images_rgb_front", "observations/rgb_images/camera_front"),
+    (
+        "observation_images_rgb_wrist_left",
+        "observations/rgb_images/camera_left_wrist",
+    ),
+    (
+        "observation_images_rgb_wrist_right",
+        "observations/rgb_images/camera_right_wrist",
+    ),
+    (
+        "observation_images_depth_front",
+        "observations/depth_images/camera_front",
+    ),
+    (
+        "observation_images_depth_wrist_left",
+        "observations/depth_images/camera_left_wrist",
+    ),
+    (
+        "observation_images_depth_wrist_right",
+        "observations/depth_images/camera_right_wrist",
+    ),
 )
 
 _ACTION_LEFT = "action_joint_position_left"
