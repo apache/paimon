@@ -23,10 +23,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-from PIL import Image
 
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 
 class PaimonLeRobotWriterTest(unittest.TestCase):
@@ -203,6 +207,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual([0.0, 0.0], [row["timestamp"] for row in rows])
         self.assertEqual([0.5, 0.0], [row["action"] for row in rows])
 
+    @unittest.skipUnless(Image is not None, "Pillow is required for image tests")
     def test_writes_raw_image_frame_as_png_blob(self):
         writer = PaimonLeRobotWriter(
             self.connection,
@@ -233,6 +238,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         self.assertEqual((5, 4), image.size)
         self.assertEqual((73, 73, 73), image.getpixel((0, 0)))
 
+    @unittest.skipUnless(Image is not None, "Pillow is required for image tests")
     def test_writes_native_hwc_image_frame_as_png_blob(self):
         writer = PaimonLeRobotWriter(
             self.connection,
@@ -427,6 +433,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             })
         self.assertFalse(writer.has_pending_frames())
 
+    @unittest.skipUnless(Image is not None, "Pillow is required for image tests")
     def test_add_frame_validates_pil_image_shape(self):
         writer = PaimonLeRobotWriter(
             self.connection,
