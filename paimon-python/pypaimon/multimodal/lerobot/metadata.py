@@ -310,6 +310,32 @@ def _append_arrow(table, data):
     return _append_arrow_tables(table, [data])
 
 
+def _overwrite_arrow(table, data):
+    target_schema = _target_schema(table)
+    if not data.schema.equals(target_schema, check_metadata=False):
+        raise ValueError(
+            "LeRobot component schema %s does not match target %s."
+            % (data.schema, target_schema))
+    builder = table.new_batch_write_builder().overwrite()
+    table_write = builder.new_write()
+    table_commit = builder.new_commit()
+    commit_started = False
+    try:
+        table_write.write_arrow(data)
+        messages = table_write.prepare_commit()
+        commit_started = True
+        table_commit.commit(messages)
+    except BaseException:
+        if not commit_started:
+            table_write.abort()
+        raise
+    finally:
+        try:
+            table_write.close()
+        finally:
+            table_commit.close()
+
+
 def _append_arrow_tables(table, tables):
     builder = table.new_batch_write_builder()
     table_write = None
