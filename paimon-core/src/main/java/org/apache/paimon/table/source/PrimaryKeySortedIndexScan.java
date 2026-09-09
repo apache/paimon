@@ -32,6 +32,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.index.pksorted.PkSortedBucketIndexState;
 import org.apache.paimon.index.pksorted.PkSortedIndexGroup;
 import org.apache.paimon.io.DataFileMeta;
@@ -42,6 +43,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FutureUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
@@ -54,6 +56,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -64,6 +67,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -71,7 +75,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Plans source-backed scalar index groups in file-local row-position space. */
+/** Plans source-backed sorted-index groups in file-local row-position space. */
 public final class PrimaryKeySortedIndexScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeySortedIndexScan.class);
@@ -83,7 +87,10 @@ public final class PrimaryKeySortedIndexScan {
     public interface ReaderFactory {
 
         GlobalIndexReader create(
-                FilePlan file, PrimaryKeyIndexDefinition definition, List<IndexFileMeta> payloads);
+                FilePlan file,
+                PrimaryKeyIndexDefinition definition,
+                List<IndexFileMeta> payloads,
+                long totalRowCount);
     }
 
     static ReaderFactory readerFactory(
@@ -92,7 +99,7 @@ public final class PrimaryKeySortedIndexScan {
         ExecutorService executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         GlobalIndexFileReader fileReader = meta -> fileIO.newInputStream(meta.filePath());
-        return (file, definition, payloads) -> {
+        return (file, definition, payloads, totalRowCount) -> {
             IndexPathFactory indexPathFactory =
                     pathFactories.get(file.sourceSplit().partition(), file.sourceSplit().bucket());
             List<GlobalIndexIOMeta> ioMetas = new ArrayList<>(payloads.size());
@@ -109,7 +116,7 @@ public final class PrimaryKeySortedIndexScan {
                             definition.indexType(),
                             rowType.getField(definition.fieldId()),
                             definition.options());
-            return indexer.createReader(fileReader, ioMetas, executor);
+            return indexer.createReader(fileReader, ioMetas, totalRowCount, executor);
         };
     }
 
@@ -131,8 +138,7 @@ public final class PrimaryKeySortedIndexScan {
 
         List<PrimaryKeyIndexDefinition> scalarDefinitions = new ArrayList<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+            if (definition.family().isScalar()) {
                 scalarDefinitions.add(definition);
             }
         }
@@ -164,10 +170,15 @@ public final class PrimaryKeySortedIndexScan {
             Pair<BinaryRow, Integer> bucket = bucketEntry.getKey();
             List<IndexFileMeta> bucketPayloads =
                     payloadsByBucket.getOrDefault(bucket, Collections.emptyList());
-            Set<PrimaryKeyIndexSourceFile> activeSourceFiles = new HashSet<>();
+            Map<Integer, Set<PrimaryKeyIndexSourceFile>> activeSourceFilesByLevel = new HashMap<>();
             for (DataFileMeta dataFile : bucketEntry.getValue()) {
-                activeSourceFiles.add(
-                        new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
+                if (PrimaryKeyIndexSourcePolicy.shouldRead(dataFile)) {
+                    activeSourceFilesByLevel
+                            .computeIfAbsent(dataFile.level(), ignored -> new HashSet<>())
+                            .add(
+                                    new PrimaryKeyIndexSourceFile(
+                                            dataFile.fileName(), dataFile.rowCount()));
+                }
             }
             Map<String, Map<Integer, PkSortedIndexGroup>> groupsBySource = new LinkedHashMap<>();
             for (PrimaryKeyIndexDefinition definition : scalarDefinitions) {
@@ -188,8 +199,11 @@ public final class PrimaryKeySortedIndexScan {
                                     bucketEntry.getValue(),
                                     definitionPayloads);
                     for (PkSortedIndexGroup group : state.groups()) {
+                        Set<PrimaryKeyIndexSourceFile> activeGroupSources =
+                                activeSourceFilesByLevel.getOrDefault(
+                                        group.dataLevel(), Collections.emptySet());
                         for (PrimaryKeyIndexSourceFile sourceFile : group.sourceFiles()) {
-                            if (!activeSourceFiles.contains(sourceFile)) {
+                            if (!activeGroupSources.contains(sourceFile)) {
                                 continue;
                             }
                             groupsBySource
@@ -235,13 +249,14 @@ public final class PrimaryKeySortedIndexScan {
             ReaderFactory readerFactory) {
         Map<Integer, PrimaryKeyIndexDefinition> definitionsByField = new LinkedHashMap<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+            if (definition.family().isScalar()) {
                 definitionsByField.put(definition.fieldId(), definition);
             }
         }
 
         Map<PkSortedIndexGroup, SharedGlobalIndexReader> sharedReaders = new IdentityHashMap<>();
+        List<GlobalIndexEvaluator> evaluators = new ArrayList<>();
+        List<CompletableFuture<Optional<GlobalIndexResult>>> resultFutures = new ArrayList<>();
         List<EvaluatedFile> files = new ArrayList<>();
         try {
             for (FilePlan file : plan.files()) {
@@ -257,22 +272,36 @@ public final class PrimaryKeySortedIndexScan {
                                     }
                                     SharedGlobalIndexReader reader = sharedReaders.get(group.get());
                                     if (reader == null) {
+                                        PkSortedIndexGroup indexGroup = group.get();
+                                        long totalRowCount =
+                                                totalRowCount(indexGroup.sourceFiles());
                                         reader =
                                                 new SharedGlobalIndexReader(
-                                                        group.get().sourceFiles(),
+                                                        indexGroup.sourceFiles(),
                                                         () ->
                                                                 readerFactory.create(
                                                                         file,
                                                                         definition,
-                                                                        group.get().payloads()));
-                                        sharedReaders.put(group.get(), reader);
+                                                                        indexGroup.payloads(),
+                                                                        totalRowCount));
+                                        sharedReaders.put(indexGroup, reader);
                                     }
-                                    return Collections.singletonList(
-                                            fileLocalReader(file, group.get(), reader));
+                                    return Collections.singletonList(fileLocalReader(file, reader));
                                 });
+                evaluators.add(evaluator);
+                try {
+                    resultFutures.add(evaluator.evaluateAsync(predicate));
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    resultFutures.add(FutureUtils.completedExceptionally(e));
+                }
+            }
+
+            for (int i = 0; i < plan.files().size(); i++) {
+                FilePlan file = plan.files().get(i);
                 Optional<GlobalIndexResult> result;
                 try {
-                    result = evaluator.evaluate(predicate);
+                    result = awaitEvaluation(resultFutures.get(i));
                 } catch (RuntimeException e) {
                     rethrowIfInterrupted(e);
                     LOG.warn(
@@ -281,40 +310,73 @@ public final class PrimaryKeySortedIndexScan {
                             file.dataFile().fileName(),
                             e);
                     result = Optional.empty();
-                } finally {
-                    evaluator.close();
                 }
                 files.add(new EvaluatedFile(file, result));
             }
         } finally {
+            IOUtils.closeAllQuietly(evaluators);
             IOUtils.closeAllQuietly(sharedReaders.values());
         }
         return new EvaluatedPlan(plan.snapshotId(), files);
     }
 
-    private static GlobalIndexReader fileLocalReader(
-            FilePlan file, PkSortedIndexGroup group, SharedGlobalIndexReader reader) {
-        List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
-        PrimaryKeyIndexSourceFile target =
-                new PrimaryKeyIndexSourceFile(
-                        file.dataFile().fileName(), file.dataFile().rowCount());
-        int sourceIndex = -1;
-        for (int i = 0; i < sourceFiles.size(); i++) {
-            if (sourceFiles.get(i).equals(target)) {
-                sourceIndex = i;
-                break;
+    private static Optional<GlobalIndexResult> awaitEvaluation(
+            CompletableFuture<Optional<GlobalIndexResult>> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during index evaluation", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException) {
+                throw (RuntimeException) e.getCause();
             }
+            if (e.getCause() instanceof Error) {
+                throw (Error) e.getCause();
+            }
+            throw new RuntimeException(e.getCause());
         }
+    }
+
+    private static GlobalIndexReader fileLocalReader(
+            FilePlan file, SharedGlobalIndexReader reader) {
+        DataFileMeta dataFile = file.dataFile();
+        SourceLocation sourceLocation = reader.sourceLocations.get(dataFile.fileName());
         checkArgument(
-                sourceIndex >= 0,
+                sourceLocation != null,
                 "Data file %s is not covered by its sorted-index source group.",
-                file.dataFile().fileName());
-        return new FileLocalGlobalIndexReader(reader, sourceIndex);
+                dataFile.fileName());
+        checkArgument(
+                dataFile.rowCount() == sourceLocation.rowCount,
+                "Data file %s row count %s does not match sorted-index source row count %s.",
+                dataFile.fileName(),
+                dataFile.rowCount(),
+                sourceLocation.rowCount);
+        return new FileLocalGlobalIndexReader(reader, sourceLocation.sourceIndex);
+    }
+
+    private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
+        long totalRowCount = 0;
+        for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
+            totalRowCount = Math.addExact(totalRowCount, sourceFile.rowCount());
+        }
+        return totalRowCount;
     }
 
     private static void rethrowIfInterrupted(RuntimeException exception) {
         if (Thread.currentThread().isInterrupted()) {
             throw exception;
+        }
+    }
+
+    private static final class SourceLocation {
+
+        private final long rowCount;
+        private final int sourceIndex;
+
+        private SourceLocation(long rowCount, int sourceIndex) {
+            this.rowCount = rowCount;
+            this.sourceIndex = sourceIndex;
         }
     }
 
@@ -327,6 +389,7 @@ public final class PrimaryKeySortedIndexScan {
                         CompletableFuture<Optional<GlobalIndexResult>>,
                         CompletableFuture<List<Optional<GlobalIndexResult>>>>
                 localizedResults;
+        private final Map<String, SourceLocation> sourceLocations;
         private final long[] sourceOffsets;
 
         private GlobalIndexReader reader;
@@ -338,10 +401,18 @@ public final class PrimaryKeySortedIndexScan {
             this.readerFactory = readerFactory;
             this.results = new ConcurrentHashMap<>();
             this.localizedResults = new ConcurrentHashMap<>();
+            this.sourceLocations = new HashMap<>();
             this.sourceOffsets = new long[sourceFiles.size() + 1];
             for (int i = 0; i < sourceFiles.size(); i++) {
-                sourceOffsets[i + 1] =
-                        Math.addExact(sourceOffsets[i], sourceFiles.get(i).rowCount());
+                PrimaryKeyIndexSourceFile sourceFile = sourceFiles.get(i);
+                checkArgument(
+                        sourceLocations.put(
+                                        sourceFile.fileName(),
+                                        new SourceLocation(sourceFile.rowCount(), i))
+                                == null,
+                        "Duplicate sorted-index source file %s.",
+                        sourceFile.fileName());
+                sourceOffsets[i + 1] = Math.addExact(sourceOffsets[i], sourceFile.rowCount());
             }
         }
 
@@ -381,6 +452,30 @@ public final class PrimaryKeySortedIndexScan {
             return query(
                     QueryKey.of(QueryOperation.CONTAINS, fieldRef, literal),
                     () -> reader().visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.ARRAY_CONTAINS, fieldRef, literal),
+                    () -> reader().visitArrayContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAYS_OVERLAP, fieldRef, literals),
+                    () -> reader().visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAY_CONTAINS_ALL, fieldRef, literals),
+                    () -> reader().visitArrayContainsAll(fieldRef, literals));
         }
 
         @Override
@@ -564,6 +659,9 @@ public final class PrimaryKeySortedIndexScan {
         STARTS_WITH,
         ENDS_WITH,
         CONTAINS,
+        ARRAY_CONTAINS,
+        ARRAYS_OVERLAP,
+        ARRAY_CONTAINS_ALL,
         LIKE,
         LESS_THAN,
         GREATER_OR_EQUAL,
@@ -656,6 +754,24 @@ public final class PrimaryKeySortedIndexScan {
         public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
                 FieldRef fieldRef, Object literal) {
             return localize(wrapped.visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitArrayContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArrayContainsAll(fieldRef, literals));
         }
 
         @Override

@@ -28,6 +28,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
@@ -108,24 +109,30 @@ public class MapSharedShreddingUtils {
     public static RowType buildPhysicalReadType(
             RowType logicalReadType,
             Map<String, MapSharedShreddingFieldMeta> sharedShreddingFieldMetas) {
-        if (sharedShreddingFieldMetas.isEmpty()) {
-            return logicalReadType;
-        }
-
         List<DataField> physicalReadFields = new ArrayList<>();
         boolean converted = false;
         for (DataField logicalReadField : logicalReadType.getFields()) {
             MapSharedShreddingFieldMeta fieldMeta =
                     sharedShreddingFieldMetas.get(logicalReadField.name());
             if (fieldMeta == null) {
-                physicalReadFields.add(logicalReadField);
+                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(logicalReadField)) {
+                    // Read a legacy/default-layout file while selected-key pushdown is active.
+                    DataType valueType = selectedKeysValueType((RowType) logicalReadField.type());
+                    DataType physicalType =
+                            DataTypes.MAP(DataTypes.STRING().notNull(), valueType)
+                                    .copy(logicalReadField.type().isNullable());
+                    physicalReadFields.add(logicalReadField.newType(physicalType));
+                    converted = true;
+                } else {
+                    physicalReadFields.add(logicalReadField);
+                }
                 continue;
             }
 
             DataType valueType;
             DataType physicalType;
             if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(logicalReadField)) {
-                // recall partial key with shared shredding pushdown
+                // Read only selected keys from a shared-shredding ROW.
                 valueType = selectedKeysValueType((RowType) logicalReadField.type());
                 physicalType =
                         buildSpecificPhysicalStructType(
@@ -134,7 +141,7 @@ public class MapSharedShreddingUtils {
                                         selectedKeysIncludeOverflow(logicalReadField, fieldMeta))
                                 .copy(logicalReadField.type().isNullable());
             } else {
-                // recall whole field without shared shredding pushdown
+                // Rebuild the whole MAP from a shared-shredding ROW.
                 valueType = ((MapType) logicalReadField.type()).getValueType();
                 physicalType =
                         buildPhysicalStructType(valueType, fieldMeta.numColumns())

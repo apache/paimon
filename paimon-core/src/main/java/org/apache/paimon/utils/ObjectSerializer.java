@@ -112,6 +112,11 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return deserializeList(view);
     }
 
+    /**
+     * Serializes a record to schema-dependent bytes.
+     *
+     * <p>The bytes must be deserialized with the same row schema.
+     */
     public byte[] serializeToBytes(T record) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
@@ -119,6 +124,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return out.toByteArray();
     }
 
+    /** Deserializes bytes produced with this serializer's current row schema. */
     public T deserializeFromBytes(byte[] bytes) throws IOException {
         ByteArrayInputStream in = new ByteArrayInputStream(bytes);
         DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);

@@ -788,7 +788,11 @@ public class InferVariantShreddingWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, dataFile, fileIO.getFileSize(dataFile)))) {
+                                        fileIO,
+                                        dataFile,
+                                        fileIO.getFileSize(dataFile),
+                                        null,
+                                        null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }

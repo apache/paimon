@@ -75,7 +75,8 @@ public class ParquetInt96RowSelectionTest {
                         fileIO,
                         file,
                         fileIO.getFileSize(file),
-                        RoaringBitmap32.bitmapOf(SELECTED_POSITIONS));
+                        RoaringBitmap32.bitmapOf(SELECTED_POSITIONS),
+                        null);
         ParquetReaderFactory readerFactory =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, BATCH_SIZE, null);
 

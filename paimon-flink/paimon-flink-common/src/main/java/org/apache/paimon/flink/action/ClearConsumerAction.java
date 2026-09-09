@@ -51,11 +51,7 @@ public class ClearConsumerAction extends TableActionBase implements LocalAction 
     @Override
     public void executeLocally() {
         FileStoreTable dataTable = (FileStoreTable) table;
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        dataTable.fileIO(),
-                        dataTable.location(),
-                        dataTable.snapshotManager().branch());
+        ConsumerManager consumerManager = dataTable.consumerManager();
 
         Pattern includingPattern =
                 StringUtils.isNullOrWhitespaceOnly(includingConsumers)

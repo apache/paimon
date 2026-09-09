@@ -86,7 +86,7 @@ case class PaimonStrategy(spark: SparkSession)
     case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
       relation.scan match {
         case scan: PaimonScan if PostponeMergeOnRead.usesCustomSource(scan.table) =>
-          scan.planPostponeMerge(spark.sparkContext.defaultParallelism) match {
+          scan.planPostponeMerge() match {
             case Some(mergePlan) =>
               val inputScan = PostponeMergeInputScan(mergePlan)
               val inputOutput =

@@ -50,6 +50,35 @@ class PrimaryKeySortedIndexOptionsTest {
     }
 
     @Test
+    void testResolvesMultiValueIndexColumns() {
+        CoreOptions options =
+                new CoreOptions(
+                        Collections.singletonMap(
+                                "pk-multivalue.index.columns", " tags,  categories "));
+
+        assertThat(options.primaryKeyMultiValueIndexColumns())
+                .containsExactly("tags", "categories");
+    }
+
+    @Test
+    void testResolvesFMIndexColumnsAndOptions() {
+        Map<String, String> values = new HashMap<>();
+        values.put("pk-fm.index.columns", " content,  description ");
+        values.put(
+                "fields.content.pk-fm.index.options",
+                "{\"partition-row-count\":\"2000\",\"fm-index.sa-sample-rate\":\"16\"}");
+
+        CoreOptions coreOptions = new CoreOptions(values);
+        Options options = coreOptions.primaryKeyFMIndexOptions("content");
+
+        assertThat(coreOptions.primaryKeyFMIndexEnabled()).isTrue();
+        assertThat(coreOptions.primaryKeyFMIndexColumns())
+                .containsExactly("content", "description");
+        assertThat(options.get("fm-index.partition-row-count")).isEqualTo("2000");
+        assertThat(options.get("fm-index.sa-sample-rate")).isEqualTo("16");
+    }
+
+    @Test
     void testResolvesBTreeIndexAndSortOptions() {
         Map<String, String> values = new HashMap<>();
         values.put("sorted-index.records-per-range", "10");
@@ -79,5 +108,16 @@ class PrimaryKeySortedIndexOptionsTest {
         Options options = new CoreOptions(values).primaryKeyBitmapIndexOptions("status");
 
         assertThat(options.get("bitmap-index.dictionary-block-size")).isEqualTo("8 kb");
+    }
+
+    @Test
+    void testResolvesMultiValueIndexOptions() {
+        Map<String, String> values = new HashMap<>();
+        values.put(
+                "fields.tags.pk-multivalue.index.options", "{\"dictionary-block-size\":\"8 kb\"}");
+
+        Options options = new CoreOptions(values).primaryKeyMultiValueIndexOptions("tags");
+
+        assertThat(options.get("multivalue-index.dictionary-block-size")).isEqualTo("8 kb");
     }
 }

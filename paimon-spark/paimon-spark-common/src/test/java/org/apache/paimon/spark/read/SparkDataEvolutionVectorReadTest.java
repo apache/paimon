@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.read;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
@@ -35,8 +36,8 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -48,6 +49,7 @@ import org.apache.paimon.table.source.VectorSearchSplit;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SerializableFunction;
@@ -76,19 +78,64 @@ public class SparkDataEvolutionVectorReadTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testRawSearchUsesSparkPath() {
+    public void testRawSearchUsesSparkPath() throws Exception {
         TestingSparkVectorRead read = new TestingSparkVectorRead();
+        Snapshot snapshot = snapshot(1L);
         RawVectorSearchSplit rawSplit =
                 new RawVectorSearchSplit(
                         Collections.singletonList(new Range(42, 42)),
                         Collections.emptyList(),
                         null);
-        VectorScan.Plan plan = () -> Collections.singletonList(rawSplit);
+        VectorScan.Plan plan =
+                new VectorScan.Plan() {
+                    @Override
+                    public List<VectorSearchSplit> splits() {
+                        return Collections.singletonList(rawSplit);
+                    }
+
+                    @Override
+                    public Snapshot snapshot() {
+                        return snapshot;
+                    }
+                };
 
         GlobalIndexResult result = read.read(plan);
 
         assertThat(read.rawSparkPathUsed).isTrue();
+        assertThat(read.plannedSnapshot()).isSameAs(snapshot);
         assertThat(result.results().contains(42L)).isTrue();
+
+        byte[] serialized = InstantiationUtil.serializeObject(read);
+        TestingSparkVectorRead restored =
+                InstantiationUtil.deserializeObject(
+                        serialized, Thread.currentThread().getContextClassLoader());
+        assertThat(restored.plannedSnapshot().id()).isEqualTo(snapshot.id());
+    }
+
+    private static Snapshot snapshot(long id) {
+        return new Snapshot(
+                id,
+                0L,
+                "base-manifest-list",
+                null,
+                "delta-manifest-list",
+                null,
+                null,
+                null,
+                null,
+                "user",
+                null,
+                0L,
+                Snapshot.CommitKind.APPEND,
+                0L,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     @Test
@@ -145,7 +192,8 @@ public class SparkDataEvolutionVectorReadTest {
                         .options(options.toMap())
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath), schema);
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
@@ -175,6 +223,10 @@ public class SparkDataEvolutionVectorReadTest {
                     new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
                     new float[] {1.0f},
                     null);
+        }
+
+        private Snapshot plannedSnapshot() {
+            return planSnapshot;
         }
 
         @Override
@@ -390,6 +442,7 @@ public class SparkDataEvolutionVectorReadTest {
         public GlobalIndexReader createReader(
                 GlobalIndexFileReader fileReader,
                 List<GlobalIndexIOMeta> files,
+                long totalRowCount,
                 ExecutorService executor) {
             throw new UnsupportedOperationException();
         }

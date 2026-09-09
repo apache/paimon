@@ -89,6 +89,21 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
         fileSizeCache.put(filePath, size);
     }
 
+    @Override
+    public void invalidate(String filePathPrefix) {
+        synchronized (lock) {
+            Iterator<Map.Entry<BlockKey, byte[]>> iterator = cache.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<BlockKey, byte[]> entry = iterator.next();
+                if (entry.getKey().filePath.startsWith(filePathPrefix)) {
+                    currentSize -= entry.getValue().length;
+                    iterator.remove();
+                }
+            }
+        }
+        fileSizeCache.keySet().removeIf(filePath -> filePath.startsWith(filePathPrefix));
+    }
+
     private static class BlockKey {
         final String filePath;
         final int blockIndex;

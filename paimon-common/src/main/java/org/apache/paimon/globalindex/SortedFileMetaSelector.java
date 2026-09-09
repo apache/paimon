@@ -103,6 +103,23 @@ public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<Glo
     }
 
     @Override
+    public Optional<List<GlobalIndexIOMeta>> visitArrayContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<List<GlobalIndexIOMeta>> visitLike(FieldRef fieldRef, Object literal) {
         return Optional.of(filter(meta -> literal != null && !meta.onlyNulls()));
     }

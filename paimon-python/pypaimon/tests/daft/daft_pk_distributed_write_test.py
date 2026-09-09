@@ -125,6 +125,13 @@ def test_bare_datasink_rejects_multiple_primary_key_write_tasks(catalog):
             pa.table({"id": [value], "value": [f"v-{value}"]})
         )
         results.extend(sink.write(iter([micropartition])))
+    staged_paths = [
+        str(data_file.external_path or data_file.file_path)
+        for result in results
+        for message in result.result
+        for data_file in message.new_files
+    ]
+    assert staged_paths
 
     with pytest.raises(
         ValueError, match="require a single non-empty Daft write task"
@@ -132,6 +139,7 @@ def test_bare_datasink_rejects_multiple_primary_key_write_tasks(catalog):
         sink.finalize(results)
 
     assert table.snapshot_manager().get_latest_snapshot() is None
+    assert all(table.file_io.exists(path) for path in staged_paths)
 
 
 def test_bare_datasink_supports_single_task_dynamic_bucket(catalog):
@@ -227,6 +235,10 @@ def test_postpone_mode_primary_key_write_preserves_existing_path(catalog):
 
     assert sum(summary["rows"]) == 2
     assert table.snapshot_manager().get_latest_snapshot() is not None
+    scanner = table.new_read_builder().new_scan().file_scanner
+    manifests, _ = scanner.manifest_scanner()
+    entries = scanner.manifest_file_manager.read_entries_parallel(manifests)
+    assert {entry.bucket for entry in entries} == {-2}
 
 
 def test_group_udfs_reuse_worker_table_metadata(catalog, monkeypatch):

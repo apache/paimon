@@ -94,7 +94,18 @@ class RowIdColumnConflictChecker:
 
     def _contains_any_write_field(self, field_ids, file):
         if file.write_cols is None:
-            return True
+            schema = self._schema_manager.get_schema(file.schema_id)
+            if schema is None:
+                raise RuntimeError(f"Schema {file.schema_id} not found")
+            data_file_fields = (
+                schema.data_file_fields(None)
+                if hasattr(schema, 'data_file_fields')
+                else schema.fields
+            )
+            return any(
+                field.id in field_ids
+                for field in data_file_fields
+            )
         for col_name in file.write_cols:
             fid = self._field_id(file, col_name)
             if fid is not None and fid in field_ids:
@@ -126,7 +137,12 @@ class RowIdColumnConflictChecker:
         if file.write_cols is None:
             schema = schema_manager.get_schema(file.schema_id)
             if schema is not None:
-                for field in schema.fields:
+                data_file_fields = (
+                    schema.data_file_fields(None)
+                    if hasattr(schema, 'data_file_fields')
+                    else schema.fields
+                )
+                for field in data_file_fields:
                     if not SpecialFields.is_system_field(field.name):
                         field_ids.add(field.id)
         else:
@@ -149,8 +165,21 @@ class _WriteRange:
         self.field_ids = field_ids
 
 
-class CommitConflictError(RuntimeError):
-    """A deterministic pre-snapshot conflict which is safe to abort."""
+class RowIdExistenceConflict(RuntimeError):
+    """A staged row-id file no longer matches the current base-file layout."""
+
+    def __init__(self, entry):
+        self.entry = entry
+        super().__init__(
+            "Row ID existence conflict: file '{}' references "
+            "firstRowId={}, rowCount={} in bucket {}, "
+            "but no matching file exists in the current snapshot. "
+            "The referenced file may have been rewritten by a "
+            "concurrent compaction or removed by an overwrite.".format(
+                entry.file.file_name,
+                entry.file.first_row_id,
+                entry.file.row_count,
+                entry.bucket))
 
 
 class ConflictDetection:
@@ -215,6 +244,10 @@ class ConflictDetection:
                     "Trying to delete file {} which is not previously added.".format(
                         entry.file.file_name))
 
+        conflict = self.check_bucket_num_conflicts(merged_entries)
+        if conflict is not None:
+            return conflict
+
         conflict = self.check_overwrite_from_snapshot(
             latest_snapshot, delta_entries, commit_kind)
         if conflict is not None:
@@ -247,6 +280,24 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    @staticmethod
+    def check_bucket_num_conflicts(entries):
+        total_buckets = {}
+        for entry in entries:
+            if entry.kind != 0 or entry.total_buckets <= 0:
+                continue
+            partition = tuple(entry.partition.values)
+            previous = total_buckets.get(partition)
+            if previous is not None and previous != entry.total_buckets:
+                return RuntimeError(
+                    "Total buckets of partition {} differ between committed "
+                    "files: {} and {}. Give up committing.".format(
+                        partition, previous, entry.total_buckets,
+                    )
+                )
+            total_buckets[partition] = entry.total_buckets
+        return None
 
     def check_hash_index_conflicts(
             self, latest_snapshot, delta_index_entries=None):
@@ -512,16 +563,7 @@ class ConflictDetection:
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
-                return RuntimeError(
-                    "Row ID existence conflict: file '{}' references "
-                    "firstRowId={}, rowCount={} in bucket {}, "
-                    "but no matching file exists in the current snapshot. "
-                    "The referenced file may have been rewritten by a "
-                    "concurrent compaction or removed by an overwrite.".format(
-                        entry.file.file_name,
-                        entry.file.first_row_id,
-                        entry.file.row_count,
-                        entry.bucket))
+                return RowIdExistenceConflict(entry)
 
         return None
 
@@ -635,7 +677,8 @@ class ConflictDetection:
             count=entry.file.row_count,
         )
 
-    def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
+    def check_row_id_from_snapshot(
+            self, latest_snapshot, commit_entries, check_compaction=True):
         if not self.data_evolution_enabled:
             return None
         if self._row_id_check_from_snapshot is None:
@@ -669,13 +712,16 @@ class ConflictDetection:
                 latest_snapshot.id + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
-                continue
+                raise RuntimeError(
+                    "Row-id conflict check cannot continue because snapshot "
+                    "{} cannot be found.".format(snapshot_id))
 
             if snapshot.commit_kind == "COMPACT":
-                err = self._compact_conflicts_with_delta(
-                    snapshot, delta_signatures, column_checker, commit_entries)
-                if err is not None:
-                    return err
+                if check_compaction:
+                    err = self._compact_conflicts_with_delta(
+                        snapshot, delta_signatures, column_checker, commit_entries)
+                    if err is not None:
+                        return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

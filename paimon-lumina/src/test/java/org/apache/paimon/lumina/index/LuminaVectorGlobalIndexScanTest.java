@@ -34,6 +34,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -96,7 +97,7 @@ public class LuminaVectorGlobalIndexScanTest {
 
         Path tablePath = new Path(tempDir.toString());
         fileIO = new LocalFileIO();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         String similarityMetric = "l2";
         Schema schema =
@@ -155,7 +156,7 @@ public class LuminaVectorGlobalIndexScanTest {
     public void testVectorIndexScanWithDifferentMetrics() throws Exception {
         Path tablePath = new Path(tempDir.toString(), "inner_product");
         fileIO.mkdirs(tablePath);
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
 
         Schema schema =
                 Schema.newBuilder()

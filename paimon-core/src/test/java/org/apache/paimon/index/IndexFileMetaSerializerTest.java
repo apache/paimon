@@ -51,6 +51,28 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
         assertThat(restored.indexMeta()).containsExactly(3, 4);
     }
 
+    @Test
+    void testEqualityIncludesGlobalIndexMeta() {
+        IndexFileMeta first =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {1}));
+        IndexFileMeta equal =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {1}));
+        IndexFileMeta different =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {2}));
+
+        assertThat(first).isEqualTo(equal).hasSameHashCodeAs(equal).isNotEqualTo(different);
+    }
+
+    private static IndexFileMeta globalIndexFile(GlobalIndexMeta globalIndexMeta) {
+        return new IndexFileMeta("ivf-pq", "index-file", 100, 10, globalIndexMeta, null);
+    }
+
     @Override
     protected ObjectSerializer<IndexFileMeta> serializer() {
         return new IndexFileMetaSerializer();

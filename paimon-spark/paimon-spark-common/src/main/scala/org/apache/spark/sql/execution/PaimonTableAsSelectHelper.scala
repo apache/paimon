@@ -119,6 +119,24 @@ object PaimonTableAsSelectHelper {
     }
   }
 
+  def checkNonAtomicSelfReference(
+      catalog: TableCatalog,
+      ident: Identifier,
+      query: LogicalPlan): Unit = {
+    val referencesTarget = query.exists {
+      case r: DataSourceV2Relation =>
+        r.catalog.contains(catalog) && r.identifier.contains(ident)
+      case _ => false
+    }
+    if (referencesTarget) {
+      throw new UnsupportedOperationException(
+        s"Cannot replace table $ident because the replacement query reads from the same table " +
+          "and the requested table definition requires a non-atomic drop-and-create. " +
+          "Write the query result to a temporary table first, or keep the existing provider, " +
+          "table type, and partitioning.")
+    }
+  }
+
   /**
    * Rewrite to OverwriteByExpression or OverwritePartitionsDynamic for an existing table,
    * preserving table definition. Returns None if the table does not exist.

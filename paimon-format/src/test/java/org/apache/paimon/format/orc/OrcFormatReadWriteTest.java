@@ -135,7 +135,7 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         }
 
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         Map<String, Map<String, String>> readFieldMetadata =
                 ((SupportsFieldMetadata) newFormat).readFieldMetadata(context);
         assertThat(readFieldMetadata).containsOnlyKeys("id", "name");
@@ -166,7 +166,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 legacyFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -193,7 +194,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 newFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -220,7 +222,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 legacyFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         Timestamp shiftedTimestamp =
@@ -252,7 +255,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 newFormat
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         Timestamp shiftedTimestamp =

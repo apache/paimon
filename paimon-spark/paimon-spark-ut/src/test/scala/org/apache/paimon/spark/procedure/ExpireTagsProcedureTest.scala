@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.data.Timestamp
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.SnapshotManager
 
@@ -26,6 +25,9 @@ import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThat
 
 class ExpireTagsProcedureTest extends PaimonSparkTestBase {
+
+  /** The plain wall clock a user types, as the documented example does. */
+  private val WALL_CLOCK = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
 
   test("Paimon procedure: expire tags that reached its timeRetained") {
     val tagTimeExpireEnabled = scala.util.Random.nextBoolean()
@@ -100,11 +102,9 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
     // tag-2 as the base older_than time.
     // tag-1 expired by its file creation time.
     val olderThanTime1 = table.tagManager().getOrThrow("tag-2").getTagCreateTime
-    val timestamp1 =
-      new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime1).getMillisecond)
+    val timestamp1 = WALL_CLOCK.format(olderThanTime1)
     checkAnswer(
-      spark.sql(
-        s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '${timestamp1.toString}')"),
+      spark.sql(s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '$timestamp1')"),
       Row("tag-1") :: Nil
     )
 
@@ -115,11 +115,9 @@ class ExpireTagsProcedureTest extends PaimonSparkTestBase {
     // tag-4 as the base older_than time.
     // tag-2,tag-3,tag-5 expired, tag-5 reached its tagTimeRetained.
     val olderThanTime2 = table.tagManager().getOrThrow("tag-4").getTagCreateTime
-    val timestamp2 =
-      new java.sql.Timestamp(Timestamp.fromLocalDateTime(olderThanTime2).getMillisecond)
+    val timestamp2 = WALL_CLOCK.format(olderThanTime2)
     checkAnswer(
-      spark.sql(
-        s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '${timestamp2.toString}')"),
+      spark.sql(s"CALL paimon.sys.expire_tags(table => 'test.T', older_than => '$timestamp2')"),
       Row("tag-2") :: Row("tag-3") :: Row("tag-5") :: Nil
     )
 

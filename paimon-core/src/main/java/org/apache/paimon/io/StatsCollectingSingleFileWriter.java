@@ -75,6 +75,10 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         super.writeBundle(bundle);
     }
 
+    protected final boolean requiresPerRecordStats() {
+        return statsRequirePerRecord;
+    }
+
     public SimpleColStats[] fieldStats(long fileSize) throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (isStatsDisabled) {

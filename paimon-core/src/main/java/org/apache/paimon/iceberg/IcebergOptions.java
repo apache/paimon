@@ -40,6 +40,8 @@ public class IcebergOptions {
 
     public static final String REST_CONFIG_PREFIX = "metadata.iceberg.rest.";
 
+    public static final String TABLE_PROPERTIES_PREFIX = "metadata.iceberg.table-properties.";
+
     public static final ConfigOption<StorageType> METADATA_ICEBERG_STORAGE =
             key("metadata.iceberg.storage")
                     .enumType(StorageType.class)
@@ -188,6 +190,24 @@ public class IcebergOptions {
         return restConfig;
     }
 
+    public Map<String, String> icebergTableProperties() {
+        Map<String, String> tableProperties = new HashMap<>();
+        options.keySet()
+                .forEach(
+                        key -> {
+                            if (key.startsWith(TABLE_PROPERTIES_PREFIX)) {
+                                String propertyKey =
+                                        key.substring(TABLE_PROPERTIES_PREFIX.length());
+                                Preconditions.checkArgument(
+                                        !propertyKey.isEmpty(),
+                                        "config key '%s' for iceberg table property is empty!",
+                                        key);
+                                tableProperties.put(propertyKey, options.get(key));
+                            }
+                        });
+        return tableProperties;
+    }
+
     public boolean deleteAfterCommitEnabled() {
         return options.get(METADATA_DELETE_AFTER_COMMIT);
     }
@@ -198,27 +218,46 @@ public class IcebergOptions {
 
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
-        DISABLED("disabled", "Disable Iceberg compatibility support."),
-        TABLE_LOCATION("table-location", "Store Iceberg metadata in each table's directory."),
+        DISABLED("disabled", "Disable Iceberg compatibility support.", false),
+        TABLE_LOCATION(
+                "table-location", "Store Iceberg metadata in each table's directory.", false),
         HADOOP_CATALOG(
                 "hadoop-catalog",
                 "Store Iceberg metadata in a separate directory. "
-                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog."),
+                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.",
+                false),
         HIVE_CATALOG(
                 "hive-catalog",
                 "Not only store Iceberg metadata like hadoop-catalog, "
-                        + "but also create Iceberg external table in Hive."),
+                        + "but also create Iceberg external table in Hive.",
+                true),
         REST_CATALOG(
                 "rest-catalog",
                 "Store Iceberg metadata in a REST catalog. "
-                        + "This allows integration with Iceberg REST catalog services.");
+                        + "This allows integration with Iceberg REST catalog services.",
+                true);
 
         private final String value;
         private final String description;
+        private final boolean requiresMetadataCommitter;
 
-        StorageType(String value, String description) {
+        StorageType(String value, String description, boolean requiresMetadataCommitter) {
             this.value = value;
             this.description = description;
+            this.requiresMetadataCommitter = requiresMetadataCommitter;
+        }
+
+        /** Whether this storage type syncs metadata to an external catalog via a committer. */
+        public boolean requiresMetadataCommitter() {
+            return requiresMetadataCommitter;
+        }
+
+        /**
+         * Identifier this storage type's {@code IcebergMetadataCommitterFactory} is registered
+         * under.
+         */
+        public String committerFactoryIdentifier() {
+            return value;
         }
 
         @Override

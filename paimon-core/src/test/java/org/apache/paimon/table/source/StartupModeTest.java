@@ -19,7 +19,9 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -86,6 +88,60 @@ public class StartupModeTest extends ScannerTestBase {
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
                 .isEqualTo(snapshotReader.withSnapshot(4).withMode(ScanMode.ALL).read().splits());
+    }
+
+    @Test
+    public void testStartFromLatestDelta() throws Exception {
+        initializeTable(StartupMode.LATEST_DELTA);
+        initializeTestData(); // initialize 3 commits
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(3).withMode(ScanMode.DELTA).read().splits());
+
+        // Do not search backwards for an APPEND snapshot when the latest snapshot is COMPACT.
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(4, write.prepareCommit(true, 4));
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(4);
+        assertThat(table.snapshotManager().latestSnapshot().commitKind())
+                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(table.newScan().plan().splits()).isEmpty();
+
+        writeAndCommit(5, rowData(1, 10, 103L));
+        assertThat(table.newScan().plan().splits())
+                .isEqualTo(snapshotReader.withSnapshot(5).withMode(ScanMode.DELTA).read().splits());
+    }
+
+    @Test
+    public void testStartFromLatestDeltaWithoutSnapshot() throws Exception {
+        initializeTable(StartupMode.LATEST_DELTA);
+
+        assertThat(table.newScan().plan().splits()).isEmpty();
+        assertThatThrownBy(() -> table.newStreamScan().plan())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "'latest-delta' scan mode is only supported for batch sources."));
+    }
+
+    @Test
+    public void testStartFromLatestDeltaDoesNotSkipLevelZero() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        properties.put(
+                CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.FIRST_ROW.toString());
+        initializeTable(StartupMode.LATEST_DELTA, properties);
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("latest-delta").toString());
+                StreamTableWrite levelZeroWrite =
+                        table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit levelZeroCommit = table.newCommit(commitUser)) {
+            levelZeroWrite.write(rowData(1, 10, 100L));
+            levelZeroCommit.commit(1, levelZeroWrite.prepareCommit(false, 1));
+        }
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).isNotEmpty();
+        assertThat(plan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(1).withMode(ScanMode.DELTA).read().splits());
     }
 
     @Test

@@ -40,6 +40,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
@@ -229,10 +230,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         dataWriter::write);
             } finally {
                 writeBuffer.clear();
-                if (changelogWriter != null) {
-                    changelogWriter.close();
-                }
-                dataWriter.close();
+                // dataWriter is a local and is reachable from nowhere else, so a failing
+                // changelogWriter.close() would strand it open with its rolled files unaborted.
+                // closeAll runs both and attaches the second failure to the first.
+                IOUtils.closeAll(changelogWriter, dataWriter);
             }
 
             if (changelogWriter != null) {

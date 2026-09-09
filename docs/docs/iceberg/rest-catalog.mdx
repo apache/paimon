@@ -35,6 +35,12 @@ You need to provide information about Rest Catalog by setting options prefixed w
 `'metadata.iceberg.rest.uri' = 'https://localhost/'`. Paimon will try to use these options to initialize an iceberg rest catalog, 
 and use this rest catalog to commit metadata.
 
+:::warning
+
+Tables containing `GEOMETRY` or `GEOGRAPHY` columns cannot use `'metadata.iceberg.storage' = 'rest-catalog'` because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
+
+:::
+
 **Dependency:**
 
 This feature needs dependency:
@@ -128,4 +134,3 @@ There are some cases when committing to iceberg rest catalog:
 1. table not exists in iceberg rest-catalog. It'll create the table in rest catalog first, and commit metadata.
 2. table exists in iceberg rest-catalog and is compatible with the base metadata stored in the separate directory. It'll directly get the table and commit metadata. 
 3. table exists, and isn't compatible with the base metadata stored in the separate directory. It'll **drop the table and recreate the table**, then commit metadata.
-

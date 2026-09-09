@@ -76,6 +76,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
+            boolean changelogIgnoreUpdateBefore,
+            boolean changelogIgnoreDelete,
             @Nullable BucketedDvMaintainer dvMaintainer,
             CoreOptions options,
             @Nullable RemoteLookupFileManager<T> remoteLookupFileManager) {
@@ -89,6 +91,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 mfFactory,
                 mergeSorter,
                 produceChangelog,
+                changelogIgnoreUpdateBefore,
+                changelogIgnoreDelete,
                 dvMaintainer != null);
         this.dvMaintainer = dvMaintainer;
         this.lookupLevels = lookupLevels;

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import scala.collection.JavaConverters._
@@ -44,6 +45,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
         .map(i => s"($i, 'document number $i about paimon lake format')")
         .mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
+      val scanSnapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
 
       val output = spark
         .sql(
@@ -61,6 +63,11 @@ class FullTextSearchTest extends PaimonSparkTestBase {
         .filter(_.indexFile().indexType() == indexType)
 
       assert(indexEntries.nonEmpty)
+      assert(
+        indexEntries.forall(
+          entry =>
+            DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile()).scanSnapshotId() ==
+              scanSnapshotId))
       val totalRowCount = indexEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100L)
     }

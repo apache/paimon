@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
@@ -35,8 +37,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 
@@ -97,8 +97,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
             buildIndex(getTableDefault(), true);
             writeFuture.get(10, TimeUnit.SECONDS);
 
-            SortedGlobalIndexBuilder builder =
-                    new SortedGlobalIndexBuilder(getTableDefault(), "btree").withIndexField("f1");
+            SortedGlobalIndexScanner builder =
+                    new SortedGlobalIndexScanner(getTableDefault(), "btree").withIndexField("f1");
             assertThat(builder.incrementalScan()).isNotPresent();
         } finally {
             executor.shutdownNow();
@@ -159,15 +159,17 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
     }
 
     private void buildIndex(FileStoreTable table, boolean incremental) throws Exception {
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("f1");
-        Optional<Pair<RowRangeIndex, List<DataSplit>>> scan =
+        SortedGlobalIndexScanner builder =
+                new SortedGlobalIndexScanner(table, "btree").withIndexField("f1");
+        Optional<ScanResult<DataSplit>> scan =
                 incremental ? builder.incrementalScan() : builder.scan();
         assertThat(scan).isPresent();
 
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : scan.get().getRight()) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (DataSplit dataSplit : scan.get().entries()) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", "f1", dataSplit, scan.get().scanSnapshotId()));
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
@@ -176,16 +178,18 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
     }
 
     private void buildPartitionIndex(FileStoreTable table, String partition) throws Exception {
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree")
+        SortedGlobalIndexScanner builder =
+                new SortedGlobalIndexScanner(table, "btree")
                         .withIndexField("f1")
                         .withPartitionPredicate(partitionPredicate(table, partition));
-        Optional<Pair<RowRangeIndex, List<DataSplit>>> scan = builder.scan();
+        Optional<ScanResult<DataSplit>> scan = builder.scan();
         assertThat(scan).isPresent();
 
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : scan.get().getRight()) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (DataSplit dataSplit : scan.get().entries()) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table, "btree", "f1", dataSplit, scan.get().scanSnapshotId()));
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

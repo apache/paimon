@@ -402,7 +402,7 @@ public class NativeFullTextGlobalIndexTest {
 
         try (NativeFullTextGlobalIndexReader reader =
                 (NativeFullTextGlobalIndexReader)
-                        indexer.createReader(fileReader, metas, newDirectExecutorService())) {
+                        indexer.createReader(fileReader, metas, 1, newDirectExecutorService())) {
             FullTextSearch search = new FullTextSearch("text", matchQuery("indexer"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();

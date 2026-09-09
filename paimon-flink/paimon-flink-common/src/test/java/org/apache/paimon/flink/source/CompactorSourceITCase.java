@@ -29,6 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -429,7 +430,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
     }
 
     private FileStoreTable createFileStoreTable() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.createTable(
                         new Schema(

@@ -25,6 +25,7 @@ import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.index.IndexFileMetaV1Deserializer;
 import org.apache.paimon.index.IndexFileMetaV2Deserializer;
 import org.apache.paimon.index.IndexFileMetaV3Deserializer;
+import org.apache.paimon.index.IndexFileMetaV4Deserializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
@@ -33,6 +34,7 @@ import org.apache.paimon.io.DataFileMeta10LegacySerializer;
 import org.apache.paimon.io.DataFileMeta12LegacySerializer;
 import org.apache.paimon.io.DataFileMetaFirstRowIdLegacySerializer;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
@@ -51,12 +53,13 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
-    public static final int CURRENT_VERSION = 11;
+    public static final int CURRENT_VERSION = 13;
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
 
     private DataFileMetaFirstRowIdLegacySerializer dataFileMetaFirstRowIdLegacySerializer;
+    private DataFileMetaWriteColsLegacySerializer dataFileMetaWriteColsLegacySerializer;
     private DataFileMeta12LegacySerializer dataFileMeta12LegacySerializer;
     private DataFileMeta10LegacySerializer dataFileMeta10LegacySerializer;
     private DataFileMeta09Serializer dataFile09Serializer;
@@ -64,6 +67,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private IndexFileMetaV1Deserializer indexEntryV1Deserializer;
     private IndexFileMetaV2Deserializer indexEntryV2Deserializer;
     private IndexFileMetaV3Deserializer indexEntryV3Deserializer;
+    private IndexFileMetaV4Deserializer indexEntryV4Deserializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
@@ -184,8 +188,13 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<DataFileMeta>> fileDeserializer(
             int version, DataInputView view) {
-        if (version >= 9) {
+        if (version >= 13) {
             return () -> dataFileSerializer.deserializeList(view);
+        } else if (version >= 9) {
+            if (dataFileMetaWriteColsLegacySerializer == null) {
+                dataFileMetaWriteColsLegacySerializer = new DataFileMetaWriteColsLegacySerializer();
+            }
+            return () -> dataFileMetaWriteColsLegacySerializer.deserializeList(view);
         } else if (version == 8) {
             if (dataFileMetaFirstRowIdLegacySerializer == null) {
                 dataFileMetaFirstRowIdLegacySerializer =
@@ -217,8 +226,13 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer(
             int version, DataInputView view) {
-        if (version >= 11) {
+        if (version >= 12) {
             return () -> indexEntrySerializer.deserializeList(view);
+        } else if (version == 11) {
+            if (indexEntryV4Deserializer == null) {
+                indexEntryV4Deserializer = new IndexFileMetaV4Deserializer();
+            }
+            return () -> indexEntryV4Deserializer.deserializeList(view);
         } else if (version >= 9) {
             if (indexEntryV3Deserializer == null) {
                 indexEntryV3Deserializer = new IndexFileMetaV3Deserializer();

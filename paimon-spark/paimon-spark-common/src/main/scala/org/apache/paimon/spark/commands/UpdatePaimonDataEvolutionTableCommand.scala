@@ -84,7 +84,8 @@ case class UpdatePaimonDataEvolutionTableCommand(
       matchedCondition,
       Seq(updateAction),
       Nil,
-      Nil).run(sparkSession)
+      Nil,
+      allowPinnedSelfMergeShortcut = true).run(sparkSession)
   }
 
   private def deterministicUpdate: Boolean = {

@@ -129,6 +129,42 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
     }
 
     @Override
+    public final void readIntegersAsLongs(int total, WritableLongVector c, int rowId) {
+        int requiredBytes = total * 4;
+        ByteBuffer buffer = getBuffer(requiredBytes);
+        for (int i = 0; i < total; i++) {
+            c.setLong(rowId + i, buffer.getInt());
+        }
+    }
+
+    @Override
+    public final void readIntegersAsDoubles(int total, WritableDoubleVector c, int rowId) {
+        int requiredBytes = total * 4;
+        ByteBuffer buffer = getBuffer(requiredBytes);
+        for (int i = 0; i < total; i++) {
+            c.setDouble(rowId + i, buffer.getInt());
+        }
+    }
+
+    @Override
+    public final void readFloatsAsDoubles(int total, WritableDoubleVector c, int rowId) {
+        int requiredBytes = total * 4;
+        ByteBuffer buffer = getBuffer(requiredBytes);
+        for (int i = 0; i < total; i++) {
+            c.setDouble(rowId + i, buffer.getFloat());
+        }
+    }
+
+    @Override
+    public final void readLongsAsInts(int total, WritableIntVector c, int rowId) {
+        int requiredBytes = total * 8;
+        ByteBuffer buffer = getBuffer(requiredBytes);
+        for (int i = 0; i < total; i++) {
+            c.setInt(rowId + i, (int) buffer.getLong());
+        }
+    }
+
+    @Override
     public void skipIntegers(int total) {
         in.skip(total * 4L);
     }
@@ -313,6 +349,21 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
             byte[] bytes = new byte[len];
             buffer.get(bytes);
             return Binary.fromConstantByteArray(bytes);
+        }
+    }
+
+    @Override
+    public final void readFixedLenByteArray(int total, int len, WritableBytesVector v, int rowId) {
+        for (int i = 0; i < total; i++) {
+            ByteBuffer buffer = getBuffer(len);
+            if (buffer.hasArray()) {
+                v.putByteArray(
+                        rowId + i, buffer.array(), buffer.arrayOffset() + buffer.position(), len);
+            } else {
+                byte[] bytes = new byte[len];
+                buffer.get(bytes);
+                v.putByteArray(rowId + i, bytes, 0, len);
+            }
         }
     }
 

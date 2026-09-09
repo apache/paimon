@@ -138,12 +138,12 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
                     elementLengths[i] = NULL_ELEMENT_LENGTH;
                     continue;
                 }
-                SeekableInputStream in = openBlobInputStream(blob);
-                if (in == null) {
+                BlobCopySource source = prepareBlobSource(blob);
+                if (source == null) {
                     elementLengths[i] = NULL_ELEMENT_LENGTH;
                     continue;
                 }
-                BlobDescriptor descriptor = writeBlobData(in);
+                BlobDescriptor descriptor = writeBlobData(source);
                 elementLengths[i] = descriptor.length();
                 flush |= accept(descriptor);
                 recordSuccess(descriptor.length());

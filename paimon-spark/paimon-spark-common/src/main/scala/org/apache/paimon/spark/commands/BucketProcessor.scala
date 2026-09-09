@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.bucket.BucketFunction
 import org.apache.paimon.codegen.CodeGenUtils
 import org.apache.paimon.crosspartition.{GlobalIndexAssigner, KeyPartOrRow}
-import org.apache.paimon.data.{BinaryRow, GenericRow, InternalRow => PaimonInternalRow, JoinedRow}
+import org.apache.paimon.data.{BinaryRow, InternalRow => PaimonInternalRow}
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.index.HashBucketAssigner
 import org.apache.paimon.schema.TableSchema
@@ -31,7 +31,6 @@ import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor
-import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{CloseableIterator, SerializationUtils}
 
 import org.apache.spark.TaskContext
@@ -39,6 +38,7 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder.{Deserializer, Serializer}
+import org.apache.spark.sql.catalyst.expressions.{GenericInternalRow, JoinedRow => SparkJoinedRow}
 import org.apache.spark.sql.types.StructType
 
 import java.util.UUID
@@ -173,32 +173,27 @@ case class DynamicBucketProcessor(
 
 case class GlobalDynamicBucketProcessor(
     fileStoreTable: FileStoreTable,
-    rowType: RowType,
     numAssigners: Integer,
     encoderGroup: EncoderSerDeGroup)
   extends BucketProcessor[(KeyPartOrRow, Array[Byte])] {
 
   override def processPartition(
       rowIterator: Iterator[(KeyPartOrRow, Array[Byte])]): Iterator[Row] = {
-    new GlobalIndexAssignerIterator(
-      rowIterator,
-      fileStoreTable,
-      rowType,
-      numAssigners,
-      encoderGroup)
+    new GlobalIndexAssignerIterator(rowIterator, fileStoreTable, numAssigners, encoderGroup)
   }
 }
 
 class GlobalIndexAssignerIterator(
     rowIterator: Iterator[(KeyPartOrRow, Array[Byte])],
     fileStoreTable: FileStoreTable,
-    rowType: RowType,
     numAssigners: Integer,
     encoderGroup: EncoderSerDeGroup)
   extends Iterator[Row]
   with AutoCloseable {
 
   private val queue = mutable.Queue[Row]()
+
+  private val dataRowType = fileStoreTable.rowType()
 
   val ioManager: IOManager = createIOManager
 
@@ -215,12 +210,11 @@ class GlobalIndexAssignerIterator(
       numAssigners,
       TaskContext.getPartitionId(),
       (row, bucket) => {
-        val extraRow: GenericRow = new GenericRow(2)
-        extraRow.setField(0, row.getRowKind.toByteValue)
-        extraRow.setField(1, bucket)
-        queue.enqueue(
-          encoderGroup.internalToRow(
-            DataConverter.fromPaimon(new JoinedRow(row, extraRow), rowType)))
+        val dataRow = DataConverter.fromPaimon(row, dataRowType)
+        val extraRow = new GenericInternalRow(2)
+        extraRow.setByte(0, row.getRowKind.toByteValue)
+        extraRow.setInt(1, bucket)
+        queue.enqueue(encoderGroup.internalToRow(new SparkJoinedRow(dataRow, extraRow)))
       }
     )
     rowIterator.foreach {

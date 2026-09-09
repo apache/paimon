@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -185,6 +186,110 @@ class MapSharedShreddingUtilsTest {
 
         assertThat(MapSharedShreddingUtils.logicalToPhysicalSchema(logical, new HashMap<>()))
                 .isEqualTo(logical);
+    }
+
+    @Test
+    void testBuildPhysicalReadTypeWithoutSharedShreddingMetadata() {
+        RowType fullMapReadType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "metrics",
+                                DataTypes.MAP(
+                                        DataTypes.STRING().notNull(),
+                                        DataTypes.BIGINT().notNull())));
+        assertThat(
+                        MapSharedShreddingUtils.buildPhysicalReadType(
+                                fullMapReadType, Collections.emptyMap()))
+                .isSameAs(fullMapReadType);
+
+        DataField selectedKeysField =
+                MapSelectedKeysMetadataUtils.withSelectedKeys(
+                        fullMapReadType.getField("metrics"),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "0", DataTypes.BIGINT().notNull()),
+                                DataTypes.FIELD(1, "1", DataTypes.BIGINT().notNull()),
+                                DataTypes.FIELD(2, "2", DataTypes.BIGINT().notNull())),
+                        Arrays.asList("key1", "key2", "missing"));
+        RowType selectedKeysReadType =
+                new RowType(
+                        false, Arrays.asList(fullMapReadType.getField("id"), selectedKeysField));
+
+        RowType physicalReadType =
+                MapSharedShreddingUtils.buildPhysicalReadType(
+                        selectedKeysReadType, Collections.emptyMap());
+        assertThat(physicalReadType.isNullable()).isFalse();
+        assertThat(physicalReadType.getField("id")).isSameAs(fullMapReadType.getField("id"));
+        DataField physicalMapField = physicalReadType.getField("metrics");
+        assertThat(physicalMapField.id()).isEqualTo(selectedKeysField.id());
+        assertThat(physicalMapField.description()).isEqualTo(selectedKeysField.description());
+        assertThat(physicalMapField.type())
+                .isEqualTo(
+                        DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT().notNull()));
+    }
+
+    @Test
+    void testBuildPhysicalReadTypeWithSharedShreddingMetadata() {
+        Map<String, Integer> nameToId = new TreeMap<>();
+        nameToId.put("key1", 0);
+        nameToId.put("key2", 1);
+        Map<Integer, List<Integer>> fieldToColumns = new TreeMap<>();
+        fieldToColumns.put(0, Collections.singletonList(2));
+        MapSharedShreddingFieldMeta fieldMeta =
+                new MapSharedShreddingFieldMeta(
+                        nameToId,
+                        fieldToColumns,
+                        new TreeSet<Integer>(Collections.singletonList(1)),
+                        4,
+                        2);
+        Map<String, MapSharedShreddingFieldMeta> fieldMetas = new HashMap<>();
+        fieldMetas.put("metrics", fieldMeta);
+
+        DataField fullMapField =
+                DataTypes.FIELD(
+                        1,
+                        "metrics",
+                        DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()).notNull());
+        RowType fullMapReadType =
+                new RowType(
+                        false,
+                        Arrays.asList(DataTypes.FIELD(0, "id", DataTypes.INT()), fullMapField));
+        RowType fullPhysicalReadType =
+                MapSharedShreddingUtils.buildPhysicalReadType(fullMapReadType, fieldMetas);
+        DataField fullPhysicalMapField = fullPhysicalReadType.getField("metrics");
+        assertThat(fullPhysicalMapField.id()).isEqualTo(fullMapField.id());
+        assertThat(fullPhysicalMapField.type().isNullable()).isFalse();
+        assertThat(((RowType) fullPhysicalMapField.type()).getFieldNames())
+                .containsExactly(
+                        "__field_mapping",
+                        "__col_0",
+                        "__col_1",
+                        "__col_2",
+                        "__col_3",
+                        "__overflow");
+
+        DataField selectedKeysField =
+                MapSelectedKeysMetadataUtils.withSelectedKeys(
+                        fullMapField,
+                        DataTypes.ROW(
+                                        DataTypes.FIELD(0, "0", DataTypes.BIGINT()),
+                                        DataTypes.FIELD(1, "1", DataTypes.BIGINT()),
+                                        DataTypes.FIELD(2, "2", DataTypes.BIGINT()))
+                                .notNull(),
+                        Arrays.asList("key1", "key2", "missing"));
+        RowType selectedKeysReadType =
+                new RowType(
+                        false, Arrays.asList(fullMapReadType.getField("id"), selectedKeysField));
+        RowType selectedPhysicalReadType =
+                MapSharedShreddingUtils.buildPhysicalReadType(selectedKeysReadType, fieldMetas);
+        DataField selectedPhysicalMapField = selectedPhysicalReadType.getField("metrics");
+        assertThat(selectedPhysicalMapField.id()).isEqualTo(selectedKeysField.id());
+        assertThat(selectedPhysicalMapField.description())
+                .isEqualTo(selectedKeysField.description());
+        assertThat(selectedPhysicalMapField.type().isNullable()).isFalse();
+        assertThat(((RowType) selectedPhysicalMapField.type()).getFieldNames())
+                .containsExactly("__field_mapping", "__col_2", "__overflow");
     }
 
     @Test

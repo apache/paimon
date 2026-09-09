@@ -223,37 +223,48 @@ public class PrimaryKeyBlobExternalizer {
                 keys.size() == map.size() && values.size() == map.size(),
                 "MAP<X, BLOB> key/value array size does not match map size.");
 
-        Map<Object, Blob> blobs = new LinkedHashMap<>();
+        Map<Object, Object> copied = new LinkedHashMap<>();
         for (int i = 0; i < map.size(); i++) {
             Object key = InternalRowUtils.copy(keyGetter.getElementOrNull(keys, i), keyType);
-            blobs.put(key, values.isNullAt(i) ? null : values.getBlob(i));
+            copied.put(key, values.isNullAt(i) ? null : values.getBlob(i));
         }
 
+        GenericMap blobs = createBlobMap(copied, keyType);
+        InternalArray normalizedKeys = blobs.keyArray();
+        InternalArray normalizedValues = blobs.valueArray();
         boolean hasBlob = false;
-        for (Blob blob : blobs.values()) {
-            if (blob != null) {
+        for (int i = 0; i < blobs.size(); i++) {
+            if (!normalizedValues.isNullAt(i)) {
                 hasBlob = true;
                 break;
             }
         }
         if (!hasBlob) {
-            return blobs.size() == map.size() ? null : new GenericMap(blobs);
+            return blobs.size() == map.size() ? null : blobs;
         }
 
         Map<Object, Object> externalized = new LinkedHashMap<>();
-        for (Map.Entry<Object, Blob> entry : blobs.entrySet()) {
-            Blob blob = entry.getValue();
-            if (blob == null) {
-                externalized.put(entry.getKey(), null);
+        for (int i = 0; i < blobs.size(); i++) {
+            Object key = keyGetter.getElementOrNull(normalizedKeys, i);
+            if (normalizedValues.isNullAt(i)) {
+                externalized.put(key, null);
                 continue;
             }
+            Blob blob = normalizedValues.getBlob(i);
             BlobDescriptor descriptor = packWriter.write(blob);
             externalized.put(
-                    entry.getKey(),
+                    key,
                     Blob.fromFile(
                             fileIO, descriptor.uri(), descriptor.offset(), descriptor.length()));
         }
-        return new GenericMap(externalized);
+        return createBlobMap(externalized, keyType);
+    }
+
+    private static GenericMap createBlobMap(Map<?, ?> map, DataType keyType) {
+        DataTypeRoot keyRoot = keyType.getTypeRoot();
+        return keyRoot == DataTypeRoot.BINARY || keyRoot == DataTypeRoot.VARBINARY
+                ? GenericMap.fromBinaryKeyMap(map)
+                : new GenericMap(map);
     }
 
     public void prepareCommit() throws IOException {

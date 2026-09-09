@@ -187,7 +187,7 @@ public class CompactChainTableProcedure extends BaseProcedure {
         if (partitionExists) {
             Map<String, String> staticPartition =
                     SparkProcedureUtils.parseStaticPartition(spark(), targetPartition);
-            writer.writeBuilder().withOverwrite(staticPartition);
+            writer.withOverwrite(staticPartition);
         }
         writer.commit(writer.write(datasetForWrite));
         LOG.info("Successfully compacted partition {} to snapshot branch.", partitionStr);

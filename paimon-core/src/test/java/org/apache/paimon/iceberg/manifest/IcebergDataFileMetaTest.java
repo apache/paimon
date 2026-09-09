@@ -228,4 +228,51 @@ class IcebergDataFileMetaTest {
         assertThat((byte[]) ((GenericMap) meta.upperBounds()).get(1))
                 .isEqualTo(new byte[] {5, 0, 0, 0});
     }
+
+    @Test
+    @DisplayName("Test geospatial fields publish null counts but not WKB bounds")
+    void testGeospatialBoundsSkipped() {
+        IcebergSchema icebergSchema =
+                new IcebergSchema(
+                        0,
+                        Arrays.asList(
+                                new IcebergDataField(
+                                        new DataField(1, "geom", DataTypes.GEOMETRY())),
+                                new IcebergDataField(
+                                        new DataField(2, "geog", DataTypes.GEOGRAPHY()))));
+
+        byte[] wkbPoint =
+                new byte[] {
+                    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0x40
+                };
+        BinaryRow values = new BinaryRow(2);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(values);
+        rowWriter.writeBinary(0, wkbPoint, 0, wkbPoint.length);
+        rowWriter.writeBinary(1, wkbPoint, 0, wkbPoint.length);
+        rowWriter.complete();
+
+        BinaryArray nullCounts = new BinaryArray();
+        BinaryArrayWriter arrayWriter = new BinaryArrayWriter(nullCounts, 2, 8);
+        arrayWriter.writeLong(0, 1L);
+        arrayWriter.writeLong(1, 2L);
+        arrayWriter.complete();
+
+        IcebergDataFileMeta meta =
+                IcebergDataFileMeta.create(
+                        IcebergDataFileMeta.Content.DATA,
+                        "path",
+                        "parquet",
+                        BinaryRow.EMPTY_ROW,
+                        10,
+                        100,
+                        icebergSchema,
+                        new SimpleStats(values, values, nullCounts),
+                        null);
+
+        assertThat(meta.nullValueCounts().size()).isEqualTo(2);
+        assertThat(((GenericMap) meta.nullValueCounts()).get(1)).isEqualTo(1L);
+        assertThat(((GenericMap) meta.nullValueCounts()).get(2)).isEqualTo(2L);
+        assertThat(meta.lowerBounds().size()).isZero();
+        assertThat(meta.upperBounds().size()).isZero();
+    }
 }

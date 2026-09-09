@@ -44,6 +44,7 @@ import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -53,10 +54,13 @@ import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeVisitor;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -94,6 +98,8 @@ import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -234,7 +240,28 @@ public interface Arrow2PaimonVectorConverter {
                                 }
                             };
                         }
+
+                        @Override
+                        public ByteBuffer getByteBuffer(int index) {
+                            VarBinaryVector binaryVector = (VarBinaryVector) vector;
+                            int start = binaryVector.getStartOffset(index);
+                            int end = binaryVector.getEndOffset(index);
+                            return binaryVector
+                                    .getDataBuffer()
+                                    .nioBuffer(start, end - start)
+                                    .order(ByteOrder.LITTLE_ENDIAN);
+                        }
                     };
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(GeometryType geometryType) {
+            return visit(new VarBinaryType(geometryType.isNullable(), VarBinaryType.MAX_LENGTH));
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(GeographyType geographyType) {
+            return visit(new VarBinaryType(geographyType.isNullable(), VarBinaryType.MAX_LENGTH));
         }
 
         @Override
@@ -450,13 +477,30 @@ public interface Arrow2PaimonVectorConverter {
             } else if (precision >= 4 && precision <= 6) {
                 return Timestamp.fromMicros(value);
             } else {
-                return Timestamp.fromEpochMillis(value / 1_000_000, (int) (value % 1_000_000));
+                return Timestamp.fromEpochMillis(
+                        Math.floorDiv(value, 1_000_000L), (int) Math.floorMod(value, 1_000_000L));
             }
         }
 
         @Override
         public Arrow2PaimonVectorConverter visit(VariantType variantType) {
-            throw new UnsupportedOperationException();
+            final Arrow2PaimonVectorConverter rawConverter =
+                    visit(
+                            RowType.builder()
+                                    .field(Variant.VALUE, DataTypes.BYTES().notNull())
+                                    .field(Variant.METADATA, DataTypes.BYTES().notNull())
+                                    .build());
+            return vector -> {
+                List<FieldVector> children = ((StructVector) vector).getChildrenFromFields();
+                if (children.size() != 2
+                        || !Variant.VALUE.equals(children.get(0).getName())
+                        || !Variant.METADATA.equals(children.get(1).getName())) {
+                    throw new IllegalArgumentException(
+                            "Expected raw Variant Arrow layout [value, metadata]. Physical "
+                                    + "shredded layouts must be handled by a shredding read plan.");
+                }
+                return rawConverter.convertVector(vector);
+            };
         }
 
         @Override

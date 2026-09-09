@@ -1034,11 +1034,25 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("""INSERT INTO T VALUES (1, parse_json('{"age":26,"city":"Beijing"}'))""")
 
     val df =
-      sql("SELECT id, variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
+      sql(
+        "SELECT id, try_variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 2)
     else assert(isVariantType(v.dataType))
     checkAnswer(df, Seq(Row(1, 26, "Beijing")))
+  }
+
+  test("Paimon Variant pushdown: strict cast preserves conditional evaluation") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES
+          | (0, parse_json('{"a":"bad"}')),
+          | (1, parse_json('{"a":1}'))
+          |""".stripMargin)
+
+    val df = sql("SELECT id, IF(id = 1, variant_get(v, '$.a', 'int'), NULL) FROM T ORDER BY id")
+    assert(isVariantType(fieldByPath(scanReadSchemaOf(df), Seq("v")).dataType))
+    checkAnswer(df, Seq(Row(0, null), Row(1, 1)))
   }
 
   test("Paimon Variant pushdown: nested variant column inside a struct") {
@@ -1046,7 +1060,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
     sql("""INSERT INTO T VALUES (1, named_struct('v', parse_json('{"age":26}'), 'x', 100))""")
 
-    val df = sql("SELECT id, variant_get(nested.v, '$.age', 'int') FROM T")
+    val df = sql("SELECT id, try_variant_get(nested.v, '$.age', 'int') FROM T")
     val v = fieldByPath(scanReadSchemaOf(df), Seq("nested", "v"))
     if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 1)
     else assert(isVariantType(v.dataType))
@@ -1073,7 +1087,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("""INSERT INTO T VALUES (1, parse_json('{"a":1}'), parse_json('{"x":"hi","y":"bye"}'))""")
 
     val df = sql(
-      "SELECT variant_get(v1, '$.a', 'int'), variant_get(v2, '$.x', 'string'), variant_get(v2, '$.y', 'string') FROM T")
+      "SELECT try_variant_get(v1, '$.a', 'int'), variant_get(v2, '$.x', 'string'), variant_get(v2, '$.y', 'string') FROM T")
     val readSchema = scanReadSchemaOf(df)
     val v1 = fieldByPath(readSchema, Seq("v1"))
     val v2 = fieldByPath(readSchema, Seq("v2"))
@@ -1105,7 +1119,7 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     sql("CREATE TABLE T (id INT, v VARIANT)")
     sql("""INSERT INTO T VALUES (1, parse_json('{"age":26}'))""")
 
-    val df = sql("SELECT variant_get(v, '$.age', 'int') FROM T")
+    val df = sql("SELECT try_variant_get(v, '$.age', 'int') FROM T")
     val desc = df.queryExecution.optimizedPlan
       .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.description() }
       .getOrElse(fail("expected a DataSourceV2ScanRelation in the plan"))

@@ -50,11 +50,7 @@ public class ResetConsumerProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
         fileStoreTable.snapshotManager().snapshot(nextSnapshotId);
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
-                        fileStoreTable.snapshotManager().branch());
+        ConsumerManager consumerManager = fileStoreTable.consumerManager();
         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
 
         return new String[] {"Success"};
@@ -64,11 +60,7 @@ public class ResetConsumerProcedure extends ProcedureBase {
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        fileStoreTable.fileIO(),
-                        fileStoreTable.location(),
-                        fileStoreTable.snapshotManager().branch());
+        ConsumerManager consumerManager = fileStoreTable.consumerManager();
         consumerManager.deleteConsumer(consumerId);
 
         return new String[] {"Success"};

@@ -37,6 +37,8 @@ public class CompactActionFactory implements ActionFactory {
 
     private static final String PARTITION_IDLE_TIME = "partition_idle_time";
 
+    private static final String BUCKETS = "buckets";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -77,6 +79,10 @@ public class CompactActionFactory implements ActionFactory {
             action.withWhereSql(params.get(WHERE));
         }
 
+        if (params.has(BUCKETS)) {
+            action.withBucketsExpression(params.get(BUCKETS));
+        }
+
         return Optional.of(action);
     }
 
@@ -107,7 +113,8 @@ public class CompactActionFactory implements ActionFactory {
                         + "[--table_conf <key>=<value>] \n"
                         + "[--order_by <order_columns>] \n"
                         + "[--partition_idle_time <partition_idle_time>] \n"
-                        + "[--compact_strategy <compact_strategy>]");
+                        + "[--compact_strategy <compact_strategy>] \n"
+                        + "[--buckets <bucket_ids_or_ranges>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database_name> "
                         + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
@@ -135,6 +142,9 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition_idle_time 10s");
+        System.out.println(
+                "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
+                        + "--compact_strategy full --buckets 0-9,20");
         System.out.println(
                 "--compact_strategy determines how to pick files to be merged, the default is determined by the runtime execution mode. "
                         + "`full` : Only supports batch mode. All files will be selected for merging."

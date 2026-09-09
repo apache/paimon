@@ -85,9 +85,9 @@ public class SparkMultimodalITCase {
         spark.sql(
                 "\n"
                         + "CREATE TABLE my_db1.vector_test (gid BIGINT, sid STRING, embs ARRAY<FLOAT>)"
-                        + " PARTITIONED BY (`date` STRING COMMENT 'date') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + " USING paimon\n"
+                        + "PARTITIONED BY (`date` STRING COMMENT 'date')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'vector.file.format'='lance',\n"
                         + "    'vector-field'='embs',\n"
                         + "    'field.embs.vector-dim'='4',\n"

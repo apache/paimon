@@ -21,9 +21,11 @@ package org.apache.paimon.globalindex.bitmap;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -36,15 +38,17 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 /** The {@link GlobalIndexer} for bitmap index. */
-public class BitmapGlobalIndexer implements GlobalIndexer {
+public class BitmapGlobalIndexer implements SortedGlobalIndexer {
 
     private final KeySerializer keySerializer;
+    private final GlobalIndexKeyExtractor keyExtractor;
     private final int dictionaryBlockSize;
     @Nullable private final BlockCompressionFactory compressionFactory;
     private final long fallbackScanMaxSize;
 
     public BitmapGlobalIndexer(DataField dataField, Options options) {
         this.keySerializer = KeySerializer.create(dataField.type());
+        this.keyExtractor = GlobalIndexKeyExtractor.identity(dataField.type());
         this.dictionaryBlockSize =
                 (int)
                         options.get(BitmapGlobalIndexOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE)
@@ -60,6 +64,11 @@ public class BitmapGlobalIndexer implements GlobalIndexer {
     }
 
     @Override
+    public GlobalIndexKeyExtractor keyExtractor() {
+        return keyExtractor;
+    }
+
+    @Override
     public BitmapGlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter)
             throws IOException {
         return new BitmapGlobalIndexWriter(
@@ -70,8 +79,9 @@ public class BitmapGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new LazyFilteredBitmapReader(
-                fileReader, files, keySerializer, fallbackScanMaxSize, executor);
+                fileReader, files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
     }
 }

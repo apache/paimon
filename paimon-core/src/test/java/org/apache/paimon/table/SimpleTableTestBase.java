@@ -43,6 +43,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -587,7 +588,7 @@ public abstract class SimpleTableTestBase {
         write.write(rowData(1, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
@@ -618,7 +619,7 @@ public abstract class SimpleTableTestBase {
     @Test
     public void testCopyWithLatestSchemaPicksUpAlteredOptions() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
 
         schemaManager.commitChanges(SchemaChange.setOption("my-custom-key", "my-custom-value"));
 
@@ -1098,7 +1099,7 @@ public abstract class SimpleTableTestBase {
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager =
-                new SchemaManager(table.fileIO(), table.location(), "test-branch");
+                new FileSystemSchemaManager(table.fileIO(), table.location(), "test-branch");
         TableSchema branchSchema =
                 SchemaManager.fromPath(table.fileIO(), schemaManager.toSchemaPath(0));
         TableSchema schema0 = schemaManager.schema(0);
@@ -1350,7 +1351,7 @@ public abstract class SimpleTableTestBase {
         assertThat(branchSnapshot.equals(snapshot)).isTrue();
 
         // verify schema in branch1 and main branch is same
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = new FileSystemSchemaManager(table.fileIO(), table.location());
         TableSchema branchSchema =
                 SchemaManager.fromPath(
                         table.fileIO(), schemaManager.copyWithBranch(BRANCH_NAME).toSchemaPath(0));

@@ -31,8 +31,10 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
@@ -42,6 +44,7 @@ import org.apache.paimon.utils.TagManager;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
@@ -579,6 +582,159 @@ public class IncrementalTableTest extends TableTestBase {
                                                 "%s,%s",
                                                 earliestTimestamp - 2, earliestTimestamp - 1))))
                 .isEmpty();
+    }
+
+    @Test
+    public void testPostponeSameBucketNumberWithDifferentActiveBuckets() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .option("bucket", String.valueOf(BucketMode.POSTPONE_BUCKET))
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(1, 1), 0, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG1", 1);
+
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(2, 2), 1, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG2", 2);
+
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .containsExactly(GenericRow.of(2, 2));
+    }
+
+    @Test
+    public void testPostponeBucketNumberChangedInIncrementalDiff() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .option("bucket", String.valueOf(BucketMode.POSTPONE_BUCKET))
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(1, 1), 0, 1);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG1", 1);
+
+        builder = table.newPostponeFixedBucketWriteBuilder().withOverwrite(Collections.emptyMap());
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(1, 2), 0, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG2", 2);
+
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .isInstanceOf(InconsistentTagBucketException.class)
+                .hasMessageContaining(
+                        "The bucket number of two snapshots are different (1, 2), "
+                                + "which is not supported in incremental diff query.");
+    }
+
+    @Test
+    public void testPostponeBucketNumberChangedInLaterPartition() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", String.valueOf(BucketMode.POSTPONE_BUCKET))
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(2, 2, 2), 0, 1);
+            write.writeAndReturn(GenericRow.of(1, 1, 1), 0, 1);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG1", 1);
+
+        builder = table.newPostponeFixedBucketWriteBuilder().withOverwrite(Collections.emptyMap());
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(2, 2, 3), 0, 1);
+            write.writeAndReturn(GenericRow.of(1, 1, 2), 0, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG2", 2);
+
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .isInstanceOf(InconsistentTagBucketException.class)
+                .hasMessageContaining(
+                        "The bucket number of two snapshots are different (1, 2), "
+                                + "which is not supported in incremental diff query.");
+    }
+
+    @Test
+    public void testPostponeDifferentBucketNumbersForDifferentPartitions() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", String.valueOf(BucketMode.POSTPONE_BUCKET))
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(1, 1, 1), 0, 1);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG1", 1);
+
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(2, 1, 1), 1, 2);
+            commit.commit(write.prepareCommit());
+        }
+        table.createTag("TAG2", 2);
+
+        // test snapshot expiration won't affect tag diff query
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            write.writeAndReturn(GenericRow.of(3, 1, 1), 0, 1);
+            commit.commit(write.prepareCommit());
+        }
+        table.newExpireSnapshots()
+                .config(ExpireConfig.builder().snapshotRetainMax(1).snapshotRetainMin(1).build())
+                .expire();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .containsExactly(GenericRow.of(2, 1, 1));
     }
 
     private static long utcMills(String timestamp) {

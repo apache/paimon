@@ -57,6 +57,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean isStreamingMode;
     private final MemoryPoolFactory memoryPoolFactory;
     @Nullable private final MetricGroup metricGroup;
+    private final TableWriteFactory tableWriteFactory;
 
     @Nullable private UriReaderFactory blobDescriptorReaderFactory;
 
@@ -72,6 +73,30 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean isStreamingMode,
             MemoryPoolFactory memoryPoolFactory,
             @Nullable MetricGroup metricGroup) {
+        this(
+                table,
+                commitUser,
+                state,
+                ioManager,
+                ignorePreviousFiles,
+                waitCompaction,
+                isStreamingMode,
+                memoryPoolFactory,
+                metricGroup,
+                FileStoreTable::newWrite);
+    }
+
+    StoreSinkWriteImpl(
+            FileStoreTable table,
+            String commitUser,
+            StoreSinkWriteState state,
+            IOManager ioManager,
+            boolean ignorePreviousFiles,
+            boolean waitCompaction,
+            boolean isStreamingMode,
+            MemoryPoolFactory memoryPoolFactory,
+            @Nullable MetricGroup metricGroup,
+            TableWriteFactory tableWriteFactory) {
         this.commitUser = commitUser;
         this.state = state;
         this.paimonIOManager = new IOManagerImpl(ioManager.getSpillingDirectoriesPaths());
@@ -80,12 +105,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.isStreamingMode = isStreamingMode;
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
+        this.tableWriteFactory = tableWriteFactory;
         this.write = newTableWrite(table);
     }
 
     private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
         TableWriteImpl<?> tableWrite =
-                table.newWrite(commitUser, state.getSubtaskId())
+                tableWriteFactory
+                        .create(table, commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withMemoryPoolFactory(memoryPoolFactory);
@@ -120,6 +147,12 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Nullable
     public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
         return write.writeAndReturn(withBlobDescriptorReader(rowData), bucket);
+    }
+
+    @Override
+    @Nullable
+    public SinkRecord write(InternalRow rowData, int bucket, int totalBuckets) throws Exception {
+        return write.writeAndReturn(withBlobDescriptorReader(rowData), bucket, totalBuckets);
     }
 
     private InternalRow withBlobDescriptorReader(InternalRow rowData) {
@@ -197,5 +230,12 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     public TableWriteImpl<?> getWrite() {
         return write;
+    }
+
+    @FunctionalInterface
+    interface TableWriteFactory {
+
+        TableWriteImpl<?> create(
+                FileStoreTable table, String commitUser, @Nullable Integer writeId);
     }
 }

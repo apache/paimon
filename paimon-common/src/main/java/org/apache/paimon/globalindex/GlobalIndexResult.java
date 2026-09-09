@@ -50,6 +50,13 @@ public interface GlobalIndexResult {
         return create(RoaringNavigableMap64.or(this.results(), other.results()));
     }
 
+    default GlobalIndexResult andNot(GlobalIndexResult other) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        result.or(this.results());
+        result.andNot(other.results());
+        return create(result);
+    }
+
     /** Returns an empty {@link GlobalIndexResult}. */
     static GlobalIndexResult createEmpty() {
         return create(new RoaringNavigableMap64());

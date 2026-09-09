@@ -24,9 +24,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DateTimeUtils}. */
 public class DateTimeUtilsTest {
@@ -67,6 +69,29 @@ public class DateTimeUtilsTest {
         ts = DateTimeUtils.parseTimestampData(dt, 3);
         assertThat(dt)
                 .isEqualTo(ts.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+    }
+
+    @Test
+    public void testParseTimestampDataRejectsMissingSeparator() {
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-0112:30", 3))
+                .isInstanceOf(DateTimeParseException.class);
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-14 19:35", 3))
+                .isInstanceOf(DateTimeParseException.class);
+    }
+
+    @Test
+    public void testParseTimestampDataWrittenByToString() {
+        for (LocalDateTime time :
+                new LocalDateTime[] {
+                    LocalDateTime.of(2024, 1, 1, 12, 30),
+                    LocalDateTime.of(2024, 1, 1, 0, 0),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3, 456_000),
+                    LocalDateTime.of(1, 1, 1, 0, 0)
+                }) {
+            String dt = Timestamp.fromLocalDateTime(time).toString();
+            assertThat(DateTimeUtils.parseTimestampData(dt, 6).toLocalDateTime()).isEqualTo(time);
+        }
     }
 
     @Test
@@ -132,5 +157,29 @@ public class DateTimeUtilsTest {
                 Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_456_789));
         assertThat(DateTimeUtils.truncate(full, 9).toLocalDateTime().getNano())
                 .isEqualTo(123_456_789);
+    }
+
+    @Test
+    public void testTruncatePreEpoch() {
+        // A pre-epoch value has a negative millisecond, so dropping the sub-precision digits has
+        // to floor: rounding toward zero would move the value forward in time instead.
+        Timestamp preEpoch =
+                Timestamp.fromLocalDateTime(
+                        LocalDateTime.of(1969, 12, 31, 23, 59, 59, 999_999_000));
+        assertThat(preEpoch.getMillisecond()).isEqualTo(-1);
+
+        assertThat(DateTimeUtils.truncate(preEpoch, 0).toLocalDateTime())
+                .isEqualTo(LocalDateTime.of(1969, 12, 31, 23, 59, 59));
+        assertThat(DateTimeUtils.truncate(preEpoch, 2).toLocalDateTime())
+                .isEqualTo(LocalDateTime.of(1969, 12, 31, 23, 59, 59, 990_000_000));
+    }
+
+    @Test
+    public void testUnixTimestampPreEpoch() {
+        // -1500 epoch millis is 1969-12-31 23:59:58.500, whose epoch second is -2.
+        assertThat(DateTimeUtils.unixTimestamp(-1500)).isEqualTo(-2);
+        assertThat(DateTimeUtils.unixTimestamp(-1000)).isEqualTo(-1);
+        assertThat(DateTimeUtils.unixTimestamp(-1)).isEqualTo(-1);
+        assertThat(DateTimeUtils.unixTimestamp(1500)).isEqualTo(1);
     }
 }

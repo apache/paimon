@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
-import org.apache.paimon.io.cache.CacheCallback;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheKey.PositionCacheKey;
 import org.apache.paimon.io.cache.CacheManager;
@@ -34,7 +33,6 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 
-import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util to apply a built bloom filter . */
@@ -44,8 +42,7 @@ public class FileBasedBloomFilter implements Closeable {
     private final CacheManager cacheManager;
     private final BloomFilter filter;
     private final PositionCacheKey cacheKey;
-
-    private int accessCount;
+    private final boolean cacheable;
 
     public FileBasedBloomFilter(
             SeekableInputStream input,
@@ -58,8 +55,8 @@ public class FileBasedBloomFilter implements Closeable {
         this.cacheManager = cacheManager;
         checkArgument(expectedEntries >= 0);
         this.filter = new BloomFilter(expectedEntries, readLength);
-        this.accessCount = 0;
         this.cacheKey = CacheKey.forPosition(filePath, readOffset, readLength, true);
+        this.cacheable = cacheManager.canFitPage(readLength, true);
     }
 
     @Nullable
@@ -80,18 +77,34 @@ public class FileBasedBloomFilter implements Closeable {
                 bloomFilterHandle.size());
     }
 
+    /** Whether the complete filter fits the configured index cache budget. */
+    public boolean isCacheable() {
+        return cacheable;
+    }
+
+    /** Whether the filter is currently resident; fitting the budget does not imply admission. */
+    public boolean isCached() {
+        return cacheManager.contains(cacheKey);
+    }
+
+    /** Number of bytes needed to read the complete filter. */
+    public int size() {
+        return cacheKey.length();
+    }
+
+    /** Tests a resident filter, or returns null without reading the file on a cache miss. */
+    @Nullable
+    public Boolean testHashIfPresent(int hash) {
+        MemorySegment segment = cacheManager.getPageIfPresent(cacheKey);
+        return segment == null ? null : filter.testHash(hash, segment);
+    }
+
     public boolean testHash(int hash) {
-        accessCount++;
-        // we should refresh cache in LRU, but we cannot refresh everytime, it is costly.
-        // so we introduce a refresh count to reduce refresh
-        if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
-            MemorySegment segment =
-                    cacheManager.getPage(
-                            cacheKey, this::readBytes, new BloomFilterCallBack(filter));
-            filter.setMemorySegment(segment, 0);
-            accessCount = 0;
+        MemorySegment segment = cacheManager.getPageIfPresent(cacheKey);
+        if (segment == null) {
+            segment = cacheManager.getPage(cacheKey, this::readBytes);
         }
-        return filter.testHash(hash);
+        return filter.testHash(hash, segment);
     }
 
     private byte[] readBytes(CacheKey k) throws IOException {
@@ -116,20 +129,5 @@ public class FileBasedBloomFilter implements Closeable {
     @Override
     public void close() throws IOException {
         cacheManager.invalidPage(cacheKey);
-    }
-
-    /** Call back for cache manager. */
-    private static class BloomFilterCallBack implements CacheCallback {
-
-        private final BloomFilter bloomFilter;
-
-        private BloomFilterCallBack(BloomFilter bloomFilter) {
-            this.bloomFilter = bloomFilter;
-        }
-
-        @Override
-        public void onRemoval(CacheKey key) {
-            this.bloomFilter.unsetMemorySegment();
-        }
     }
 }

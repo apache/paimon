@@ -56,7 +56,7 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
                                     "Data Evolution Compact Deletion Vector Rewriter : "
                                             + table.name(),
                                     new CommittableTypeInfo(),
-                                    new DataEvolutionCompactDeletionVectorOperator.Factory(
+                                    new DataEvolutionCommitPreparationOperator.Factory(
                                             table, snapshot))
                             .forceNonParallel();
         }

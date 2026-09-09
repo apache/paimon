@@ -35,7 +35,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** GlobalIndexResultSerializer to serialize and deserialize GlobalIndexResult. */
 public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult> {
 
-    private static final int VERSION = 1;
+    private static final int VERSION_1 = 1;
+    private static final int VERSION_2 = 2;
+
+    private static final byte UNSCORED_RESULT_KIND = 0;
+    private static final byte SCORED_RESULT_KIND = 1;
 
     @Override
     public Serializer<GlobalIndexResult> duplicate() {
@@ -59,7 +63,9 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
     @Override
     public void serialize(GlobalIndexResult globalIndexResult, DataOutputView dataOutput)
             throws IOException {
-        dataOutput.writeInt(VERSION);
+        boolean isScored = globalIndexResult instanceof ScoredGlobalIndexResult;
+        dataOutput.writeInt(VERSION_2);
+        dataOutput.writeByte(isScored ? SCORED_RESULT_KIND : UNSCORED_RESULT_KIND);
 
         RoaringNavigableMap64 roaringNavigableMap64 = globalIndexResult.results();
         byte[] bytes = roaringNavigableMap64.serialize();
@@ -67,7 +73,7 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
         dataOutput.writeInt(bytes.length);
         dataOutput.write(bytes);
 
-        if (globalIndexResult instanceof ScoredGlobalIndexResult) {
+        if (isScored) {
             ScoredGlobalIndexResult scored = (ScoredGlobalIndexResult) globalIndexResult;
             dataOutput.writeInt(roaringNavigableMap64.getIntCardinality());
             ScoreGetter scoreGetter = scored.scoreGetter();
@@ -82,21 +88,55 @@ public class GlobalIndexResultSerializer implements Serializer<GlobalIndexResult
     @Override
     public GlobalIndexResult deserialize(DataInputView dataInput) throws IOException {
         int version = dataInput.readInt();
-        if (version != VERSION) {
-            throw new IllegalStateException("Invalid version: " + version);
+        if (version == VERSION_1) {
+            return deserializeV1(dataInput);
+        }
+        if (version == VERSION_2) {
+            return deserializeV2(dataInput);
+        }
+        throw new IllegalStateException("Invalid version: " + version);
+    }
+
+    private GlobalIndexResult deserializeV1(DataInputView dataInput) throws IOException {
+        RoaringNavigableMap64 roaringNavigableMap64 = deserializeBitmap(dataInput);
+        int scoreSize = dataInput.readInt();
+        // V1 inferred the result kind from score count, so empty scored results are
+        // indistinguishable.
+        if (scoreSize == 0) {
+            return GlobalIndexResult.create(roaringNavigableMap64);
+        }
+        return deserializeScoredResult(dataInput, roaringNavigableMap64, scoreSize);
+    }
+
+    private GlobalIndexResult deserializeV2(DataInputView dataInput) throws IOException {
+        byte resultKind = dataInput.readByte();
+        if (resultKind != UNSCORED_RESULT_KIND && resultKind != SCORED_RESULT_KIND) {
+            throw new IllegalStateException("Invalid result kind: " + resultKind);
         }
 
+        RoaringNavigableMap64 roaringNavigableMap64 = deserializeBitmap(dataInput);
+        int scoreSize = dataInput.readInt();
+        if (resultKind == UNSCORED_RESULT_KIND) {
+            checkArgument(
+                    scoreSize == 0, "Unexpected score size for unscored result: %s", scoreSize);
+            return GlobalIndexResult.create(roaringNavigableMap64);
+        }
+        return deserializeScoredResult(dataInput, roaringNavigableMap64, scoreSize);
+    }
+
+    private RoaringNavigableMap64 deserializeBitmap(DataInputView dataInput) throws IOException {
         int size = dataInput.readInt();
         byte[] bytes = new byte[size];
         dataInput.readFully(bytes);
 
         RoaringNavigableMap64 roaringNavigableMap64 = new RoaringNavigableMap64();
         roaringNavigableMap64.deserialize(bytes);
-        int scoreSize = dataInput.readInt();
+        return roaringNavigableMap64;
+    }
 
-        if (scoreSize == 0) {
-            return GlobalIndexResult.create(roaringNavigableMap64);
-        }
+    private ScoredGlobalIndexResult deserializeScoredResult(
+            DataInputView dataInput, RoaringNavigableMap64 roaringNavigableMap64, int scoreSize)
+            throws IOException {
         checkArgument(
                 scoreSize == roaringNavigableMap64.getIntCardinality(),
                 "Error size of score: "

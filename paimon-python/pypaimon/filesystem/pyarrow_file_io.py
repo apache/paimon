@@ -20,7 +20,6 @@ import os
 import re
 import subprocess
 import threading
-import uuid
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
@@ -31,7 +30,7 @@ import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options, SecurityOptions
 from pypaimon.common.options.options_utils import OptionsUtils
@@ -44,6 +43,10 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
+
+
+class LegacyOssDirectoryListingError(RuntimeError):
+    """Raised when legacy PyArrow OSS cannot enumerate a directory."""
 
 
 class PyArrowFileIO(FileIO):
@@ -403,7 +406,7 @@ class PyArrowFileIO(FileIO):
 
     def list_status(self, path: str):
         if self._legacy_oss_mode():
-            raise RuntimeError(
+            raise LegacyOssDirectoryListingError(
                 "Listing OSS directories is not supported with PyArrow < 16 "
                 "(it parses the first key segment as a bucket). Upgrade to "
                 "pyarrow >= 16, or install pyjindosdk and set fs.oss.impl=jindo.")
@@ -581,7 +584,7 @@ class PyArrowFileIO(FileIO):
             if file_info.type == pafs.FileType.Directory:
                 return False
 
-        temp_path = path + str(uuid.uuid4()) + ".tmp"
+        temp_path = create_temp_path(path)
         success = False
         try:
             self.write_file(temp_path, content, False)

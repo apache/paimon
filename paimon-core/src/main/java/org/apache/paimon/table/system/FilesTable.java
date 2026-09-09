@@ -410,7 +410,8 @@ public class FilesTable implements ReadonlyTable {
                 Function<Long, RowDataToObjectArrayConverter> keyConverters,
                 DataFileMeta file,
                 SimpleStatsEvolutions simpleStatsEvolutions) {
-            StatsLazyGetter statsGetter = new StatsLazyGetter(file, simpleStatsEvolutions);
+            StatsLazyGetter statsGetter =
+                    new StatsLazyGetter(file, simpleStatsEvolutions, schemaManager);
             @SuppressWarnings("unchecked")
             Supplier<Object>[] fields =
                     new Supplier[] {
@@ -478,19 +479,35 @@ public class FilesTable implements ReadonlyTable {
 
         private final DataFileMeta file;
         private final SimpleStatsEvolutions simpleStatsEvolutions;
+        private final SchemaManager schemaManager;
 
         private Map<String, Long> lazyNullValueCounts;
         private Map<String, Object> lazyLowerValueBounds;
         private Map<String, Object> lazyUpperValueBounds;
 
-        private StatsLazyGetter(DataFileMeta file, SimpleStatsEvolutions simpleStatsEvolutions) {
+        private StatsLazyGetter(
+                DataFileMeta file,
+                SimpleStatsEvolutions simpleStatsEvolutions,
+                SchemaManager schemaManager) {
             this.file = file;
             this.simpleStatsEvolutions = simpleStatsEvolutions;
+            this.schemaManager = schemaManager;
         }
 
         private void initialize() {
+            List<String> writeCols = file.writeCols();
+            if (writeCols == null) {
+                TableSchema fileSchema = schemaManager.schema(file.schemaId());
+                List<DataField> physicalFields = fileSchema.dataFileSchema(null).fields();
+                if (physicalFields.size() != fileSchema.fields().size()) {
+                    writeCols =
+                            physicalFields.stream()
+                                    .map(DataField::name)
+                                    .collect(Collectors.toList());
+                }
+            }
             SimpleStatsEvolution evolution =
-                    simpleStatsEvolutions.getOrCreate(file.schemaId(), file.writeCols());
+                    simpleStatsEvolutions.getOrCreate(file.schemaId(), writeCols);
             // Create value stats
             SimpleStatsEvolution.Result result =
                     evolution.evolution(file.valueStats(), file.rowCount(), file.valueStatsCols());

@@ -47,6 +47,7 @@ import unittest
 from typing import Any, Dict, List
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -816,6 +817,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
         self.assertEqual(self._split_buckets(splits),
                          self._expected_buckets(table, [17]))
 
+    @pytest.mark.python_plan
     def test_per_partition_pruning_with_mixed_or(self):
         """``(part='a' AND id=1) OR (part='b' AND id=2)``: each partition
         sees only the bucket for its own ``id`` literal. Without

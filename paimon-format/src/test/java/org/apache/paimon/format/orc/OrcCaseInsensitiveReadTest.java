@@ -74,7 +74,8 @@ class OrcCaseInsensitiveReadTest {
         List<InternalRow> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             reader.forEachRemaining(
                     row ->
                             rows.add(

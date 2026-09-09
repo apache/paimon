@@ -22,24 +22,31 @@ from collections import defaultdict
 
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
+from pypaimon.globalindex.data_evolution_global_index_scanner import (
+    is_supported_scalar_index,
+)
 from pypaimon.table.source.vector_search_split import (
     IndexVectorSearchSplit,
     RawVectorSearchSplit,
-    VectorSearchSplit,
 )
+from pypaimon.table.source.vector_search_split import VectorSearchSplit  # noqa F401
 from pypaimon.utils.range import Range
 
 
 class VectorSearchScanPlan:
     """Plan of vector search scan."""
 
-    def __init__(self, splits):
-        # type: (List[VectorSearchSplit]) -> None
+    def __init__(self, splits, snapshot=None):
+        # type: (list, object) -> None
         self._splits = splits
+        self._snapshot = snapshot
 
     def splits(self):
-        # type: () -> List[VectorSearchSplit]
+        # type: () -> list
         return self._splits
+
+    def snapshot(self):
+        return self._snapshot
 
 
 class VectorSearchScan(ABC):
@@ -117,6 +124,8 @@ class DataEvolutionVectorScan(VectorSearchScan):
             field_id = global_index_meta.index_field_id
             if vector_column.id == field_id:
                 return True
+            if not is_supported_scalar_index(entry.index_file):
+                return False
             for filter_field_id in filter_field_ids:
                 if contains_field(global_index_meta, filter_field_id):
                     return True
@@ -150,7 +159,8 @@ class DataEvolutionVectorScan(VectorSearchScan):
             for index_file in all_index_files:
                 meta = index_file.global_index_meta
                 assert meta is not None
-                if meta.index_field_id == vector_column.id:
+                if (meta.index_field_id == vector_column.id
+                        or not is_supported_scalar_index(index_file)):
                     continue
                 scalar_range = Range(meta.row_range_start, meta.row_range_end)
                 if range_key.overlaps(scalar_range):
@@ -178,6 +188,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
             f for f in all_index_files
             if f.global_index_meta is not None
             and f.global_index_meta.index_field_id != vector_column.id
+            and is_supported_scalar_index(f)
         ]
         if self._filter is not None:
             scalar_unindexed_ranges = DataEvolutionGlobalIndexCoverage(
@@ -213,7 +224,7 @@ class DataEvolutionVectorScan(VectorSearchScan):
                 )
             )
 
-        return VectorSearchScanPlan(splits)
+        return VectorSearchScanPlan(splits, snapshot)
 
 
 def _has_intersection(ranges, row_range):
@@ -227,7 +238,9 @@ def _scalar_index_files_for_ranges(all_index_files, row_ranges, vector_field_id)
     scalar_files = []
     for index_file in all_index_files:
         meta = index_file.global_index_meta
-        if meta is None or meta.index_field_id == vector_field_id:
+        if (meta is None
+                or meta.index_field_id == vector_field_id
+                or not is_supported_scalar_index(index_file)):
             continue
         if _has_intersection(row_ranges, Range(meta.row_range_start, meta.row_range_end)):
             scalar_files.append(index_file)

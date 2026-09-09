@@ -136,6 +136,7 @@ public class DataFileMeta08Serializer implements Serializable {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 }

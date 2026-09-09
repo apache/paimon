@@ -80,7 +80,7 @@ public class MergeIntoActionFactory implements ActionFactory {
         action.withMergeCondition(params.getRequired(ON));
 
         List<String> actions =
-                Arrays.stream(params.get(MERGE_ACTIONS).split(","))
+                Arrays.stream(params.getRequired(MERGE_ACTIONS).split(","))
                         .map(String::trim)
                         .collect(Collectors.toList());
         if (actions.contains(MATCHED_UPSERT)) {

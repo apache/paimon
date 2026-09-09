@@ -124,12 +124,13 @@ trait ExpressionHelperBase extends PredicateHelper {
     } else {
       val newPlan = FakeLogicalPlan(Seq(expr), plan.children)
       spark.sessionState.analyzer.execute(newPlan) match {
-        case FakeLogicalPlan(resolvedExpr, _) =>
-          resolvedExpr.foreach {
-            expr =>
-              if (!expr.resolved) {
-                throw new RuntimeException(s"cannot resolve ${expr.sql} from $plan")
-              }
+        case analyzedPlan @ FakeLogicalPlan(resolvedExpr, _) =>
+          resolvedExpr.find(expr => !expr.resolved).foreach {
+            unresolvedExpr =>
+              // Let Spark report the concrete unresolved column or type error with its structured
+              // AnalysisException before falling back to Paimon's generic error.
+              spark.sessionState.analyzer.checkAnalysis(analyzedPlan)
+              throw new RuntimeException(s"cannot resolve ${unresolvedExpr.sql} from $plan")
           }
           resolvedExpr.head
         case _ =>

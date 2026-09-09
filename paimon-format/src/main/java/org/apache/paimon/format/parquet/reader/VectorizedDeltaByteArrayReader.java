@@ -92,8 +92,13 @@ public class VectorizedDeltaByteArrayReader extends VectorizedReaderBase
             System.arraycopy(suffixArray, suffix.position(), bytes, prefixLength, suffixLength);
 
             c.putByteArray(rowId + i, bytes, offset, length);
-            BytesColumnVector.Bytes b = c.getBytes(rowId + i);
-            previous = ByteBuffer.wrap(b.data, b.offset, b.len);
+            // Keep the value we just assembled rather than a view over the output vector's
+            // buffer. The record reader resets that vector between batches, and reset() zeroes
+            // the buffer, so a view into it would hand NUL bytes to the next value's prefix
+            // whenever a page spans more than one batch. skipBinary avoids the same hazard by
+            // alternating two vectors; here the array is already a fresh copy, so wrapping it
+            // costs nothing.
+            previous = ByteBuffer.wrap(bytes);
             currentRow++;
         }
     }

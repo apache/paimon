@@ -30,6 +30,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.spark.data.SparkInternalRow;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -176,6 +177,17 @@ public class SparkInternalRowTest {
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Spark MAP<X, BLOB> does not support null keys.");
+    }
+
+    @Test
+    public void testGetTimestampNtz() {
+        Timestamp timestamp =
+                Timestamp.fromLocalDateTime(LocalDateTime.parse("2026-08-31T10:15:30.123456"));
+        RowType rowType = RowType.of(DataTypes.TIMESTAMP());
+        SparkInternalRow row = SparkInternalRow.create(rowType).replace(GenericRow.of(timestamp));
+
+        assertThat(row.get(0, SparkTypeUtils.fromPaimonType(DataTypes.TIMESTAMP())))
+                .isEqualTo(timestamp.toMicros());
     }
 
     private String sparkRowToString(org.apache.spark.sql.Row row) {

@@ -197,8 +197,7 @@ class DataEvolutionFullTextRead(FullTextRead):
 
         projection = [self._text_columns[0].name, SpecialFields.ROW_ID.name]
         read_builder = read_builder.with_projection(projection)
-        plan = read_builder.new_scan().with_global_index_result(
-            GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
     def _build_raw_index(self, row_ids, texts, row_range_start):

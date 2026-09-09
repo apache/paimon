@@ -83,6 +83,23 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitArrayContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
@@ -230,6 +247,7 @@ public class OrcPredicateFunctionVisitor
             case SMALLINT:
             case INTEGER:
             case BIGINT:
+            case TIME_WITHOUT_TIME_ZONE:
                 return PredicateLeaf.Type.LONG;
             case FLOAT:
             case DOUBLE:

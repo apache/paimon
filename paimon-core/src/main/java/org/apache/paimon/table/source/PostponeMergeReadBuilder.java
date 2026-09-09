@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -40,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -56,18 +58,25 @@ public final class PostponeMergeReadBuilder implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
-    private final Snapshot snapshot;
+    private final @Nullable Snapshot snapshot;
 
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private RowType readType;
     @Nullable private transient MetricRegistry metricRegistry;
     @Nullable private transient String readProtectionTagName;
-    private int defaultBucketNum = 1;
 
-    private PostponeMergeReadBuilder(FileStoreTable table, Snapshot snapshot) {
+    private PostponeMergeReadBuilder(FileStoreTable table, @Nullable Snapshot snapshot) {
         this.table = table;
         this.snapshot = snapshot;
+    }
+
+    /** Creates a builder for execution-engine supplied postpone and real-bucket splits. */
+    public static PostponeMergeReadBuilder createForSplits(FileStoreTable table) {
+        checkArgument(
+                table.bucketMode() == BucketMode.POSTPONE_MODE && !table.primaryKeys().isEmpty(),
+                "Postpone merge read requires a primary-key postpone bucket table.");
+        return new PostponeMergeReadBuilder(table, null);
     }
 
     /** Creates a snapshot-bound builder when the selected partitions contain postpone files. */
@@ -172,13 +181,8 @@ public final class PostponeMergeReadBuilder implements Serializable {
         return this;
     }
 
-    public PostponeMergeReadBuilder withDefaultBucketNum(int defaultBucketNum) {
-        checkArgument(defaultBucketNum > 0, "Default postpone bucket number must be positive.");
-        this.defaultBucketNum = defaultBucketNum;
-        return this;
-    }
-
     public PostponeMergePlan plan() {
+        checkArgument(snapshot != null, "Snapshot-bound postpone merge plan requires a snapshot.");
         RowType resultReadType = resultReadType();
         RowType mergeReadType = mergeReadType(resultReadType);
 
@@ -209,12 +213,28 @@ public final class PostponeMergeReadBuilder implements Serializable {
             postponeReader.withPartitionFilter(partitionFilter);
         }
 
+        List<DataSplit> realSplits = realReader.read().dataSplits();
+        List<DataSplit> postponeSplits =
+                PostponeUtils.groupPostponeFiles(postponeReader.read().dataSplits());
+        PostponeUtils.PostponeBucketRouter bucketRouter;
+        if (postponeSplits.isEmpty()) {
+            bucketRouter = PostponeUtils.createPostponeBucketRouter(table, Collections.emptyMap());
+        } else {
+            List<BinaryRow> postponePartitions =
+                    postponeSplits.stream()
+                            .map(DataSplit::partition)
+                            .distinct()
+                            .collect(Collectors.toList());
+            bucketRouter =
+                    PostponeUtils.createPostponeBucketRouter(
+                            table, snapshot.id(), postponePartitions);
+        }
+
         PostponeMergePlan plan =
                 new PostponeMergePlan(
-                        realReader.read().dataSplits(),
-                        PostponeUtils.groupPostponeFiles(postponeReader.read().dataSplits()),
-                        PostponeUtils.createPostponeBucketRouter(
-                                table, snapshot.id(), defaultBucketNum, partitionFilter),
+                        realSplits,
+                        postponeSplits,
+                        bucketRouter,
                         keyType(),
                         resultReadType,
                         mergeReadType);
@@ -222,16 +242,19 @@ public final class PostponeMergeReadBuilder implements Serializable {
         return plan;
     }
 
-    /** Rebuilds only the routing metadata of an existing plan with a new default bucket number. */
-    public PostponeMergePlan reroute(PostponeMergePlan plan, int newDefaultBucketNum) {
-        checkArgument(newDefaultBucketNum > 0, "Default postpone bucket number must be positive.");
-        if (table.coreOptions()
-                .toConfiguration()
-                .contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)) {
-            return plan;
-        }
-        defaultBucketNum = newDefaultBucketNum;
-        return plan.withDefaultBucketNum(defaultBucketNum);
+    /** Builds a plan from splits and routing metadata supplied by an execution engine. */
+    public PostponeMergePlan plan(
+            List<DataSplit> realSplits,
+            List<DataSplit> postponeSplits,
+            PostponeUtils.PostponeBucketRouter bucketRouter) {
+        RowType resultReadType = resultReadType();
+        return new PostponeMergePlan(
+                realSplits,
+                PostponeUtils.groupPostponeFiles(postponeSplits),
+                bucketRouter,
+                keyType(),
+                resultReadType,
+                mergeReadType(resultReadType));
     }
 
     @Nullable
@@ -290,6 +313,7 @@ public final class PostponeMergeReadBuilder implements Serializable {
         }
         CoreOptions.StartupMode startupMode = table.coreOptions().startupMode();
         if (startupMode == CoreOptions.StartupMode.INCREMENTAL
+                || startupMode == CoreOptions.StartupMode.LATEST_DELTA
                 || startupMode == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME
                 || startupMode == CoreOptions.StartupMode.FROM_CREATION_TIMESTAMP) {
             throw new UnsupportedOperationException(

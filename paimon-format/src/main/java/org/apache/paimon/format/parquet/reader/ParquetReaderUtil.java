@@ -44,8 +44,9 @@ import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToPaimonField;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
@@ -88,6 +89,16 @@ public class ParquetReaderUtil {
                                 children.get(i),
                                 lookupColumnByName(groupColumnIO, childName),
                                 getTypeIgnoreCase(parquetType.asGroupType(), childName)));
+            }
+            GroupType parquetGroup = parquetType.asGroupType();
+            for (int i = children.size(); i < parquetGroup.getFieldCount(); i++) {
+                Type extraType = parquetGroup.getType(i);
+                DataField extraField = convertToPaimonField(addFallbackFieldIds(extraType));
+                fieldsBuilder.add(
+                        constructField(
+                                extraField,
+                                lookupColumnByName(groupColumnIO, extraType.getName()),
+                                extraType));
             }
 
             return new ParquetGroupField(
@@ -156,7 +167,9 @@ public class ParquetReaderUtil {
             if (columnIO instanceof GroupColumnIO) {
                 GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
                 if (!StringUtils.isNullOrWhitespaceOnly(fieldName)) {
-                    while (!Objects.equals(groupColumnIO.getName(), fieldName)) {
+                    // Column lookup is case-insensitive; the wrapper-group names can
+                    // therefore differ in case from the requested field name.
+                    while (!groupColumnIO.getName().equalsIgnoreCase(fieldName)) {
                         groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
                     }
                     elementTypeColumnIO = groupColumnIO;
@@ -197,6 +210,18 @@ public class ParquetReaderUtil {
                 primitiveColumnIO.getColumnDescriptor(),
                 primitiveColumnIO.getId(),
                 primitiveColumnIO.getFieldPath());
+    }
+
+    private static Type addFallbackFieldIds(Type type) {
+        Type result = type;
+        if (!type.isPrimitive()) {
+            List<Type> children =
+                    type.asGroupType().getFields().stream()
+                            .map(ParquetReaderUtil::addFallbackFieldIds)
+                            .collect(Collectors.toList());
+            result = type.asGroupType().withNewFields(children);
+        }
+        return result.getId() == null ? result.withId(0) : result;
     }
 
     /**

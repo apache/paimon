@@ -39,11 +39,15 @@ public class CatalogSnapshotCommit implements SnapshotCommit {
     }
 
     @Override
-    public boolean commit(Snapshot snapshot, String branch, List<PartitionStatistics> statistics)
+    public boolean commit(
+            @Nullable String baseSnapshotUuid,
+            Snapshot snapshot,
+            String branch,
+            List<PartitionStatistics> statistics)
             throws Exception {
         Identifier newIdentifier =
                 new Identifier(identifier.getDatabaseName(), identifier.getTableName(), branch);
-        return catalog.commitSnapshot(newIdentifier, uuid, snapshot, statistics);
+        return catalog.commitSnapshot(newIdentifier, uuid, baseSnapshotUuid, snapshot, statistics);
     }
 
     @Override

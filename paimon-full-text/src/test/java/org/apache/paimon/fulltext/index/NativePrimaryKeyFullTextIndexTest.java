@@ -131,10 +131,11 @@ class NativePrimaryKeyFullTextIndexTest {
         GlobalIndexer indexer = GlobalIndexer.create("full-text", TEXT_FIELD, options);
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload ->
+                        (payload, totalRowCount) ->
                                 indexer.createReader(
                                         fileReader(),
                                         Collections.singletonList(toIOMeta(payload)),
+                                        totalRowCount,
                                         newDirectExecutorService()));
 
         List<List<PrimaryKeySearchPosition>> rankings =

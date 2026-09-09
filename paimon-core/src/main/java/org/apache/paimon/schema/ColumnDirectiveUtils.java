@@ -34,9 +34,13 @@ import org.apache.paimon.utils.StringUtils;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Utilities for column comment directives (BLOB / VECTOR type conversion via ADD COLUMN). */
 public final class ColumnDirectiveUtils {
@@ -310,7 +314,18 @@ public final class ColumnDirectiveUtils {
                 }
             }
         }
-        String newValue = existing == null ? fieldName : existing + "," + fieldName;
+
+        Set<String> values = new LinkedHashSet<>();
+        if (existing != null) {
+            values.addAll(
+                    Arrays.stream(existing.split(","))
+                            .map(String::trim)
+                            .filter(str -> !str.isEmpty())
+                            .collect(Collectors.toList()));
+        }
+        values.add(fieldName);
+
+        String newValue = StringUtils.join(values.iterator(), ",");
         options.put(optionKey, newValue);
     }
 

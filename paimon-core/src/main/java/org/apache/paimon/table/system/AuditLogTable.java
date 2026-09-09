@@ -41,6 +41,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
@@ -782,6 +783,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public TableRead withIOManager(IOManager ioManager) {
             this.dataRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            // System-table wrappers must preserve memory control on the physical data read.
+            dataRead.withReadBatchSizer(sizer);
             return this;
         }
 

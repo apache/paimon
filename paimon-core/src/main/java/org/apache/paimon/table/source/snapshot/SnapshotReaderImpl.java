@@ -608,6 +608,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+        TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
+                tableSchema, before, beforeFiles, plan.snapshot(), afterFiles);
         return toIncrementalPlan(
                 false,
                 new LazyField<>(() -> before),

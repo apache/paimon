@@ -22,16 +22,18 @@ Each class registers itself with the global registry at import time
 via :func:`register_aggregator`, so importing
 ``pypaimon.read.reader.aggregate`` makes all of them discoverable.
 
-This module ships 19 aggregators — the primary-key placeholder plus
-the 18 most commonly-used value aggregators: ``primary_key`` /
+This module ships 20 aggregators — the primary-key placeholder plus
+the 19 most commonly-used value aggregators: ``primary_key`` /
 ``last_value`` / ``last_non_null_value`` / ``first_value`` /
 ``first_non_null_value`` / ``sum`` / ``max`` / ``min`` / ``bool_or``
 / ``bool_and`` / ``product`` / ``listagg`` / ``collect`` /
 ``merge_map`` / ``merge_map_with_keytime`` / ``nested_update`` /
-``nested_partial_update`` / ``theta_sketch`` / ``rbm32``. Other
-aggregators (``hll_sketch`` / ``rbm64``) are intentionally deferred —
-the registry will report them as unsupported so users see a clear
-error rather than a silent fallback.
+``nested_partial_update`` / ``theta_sketch`` / ``hll_sketch`` /
+``rbm32``. The remaining aggregator (``rbm64``) is intentionally
+deferred — Java serializes it with ``Roaring64Bitmap``'s private ART
+format, which has no portable counterpart in ``pyroaring``, so the
+bytes are not interchangeable. The registry reports it as unsupported
+so users see a clear error rather than a silent fallback.
 """
 from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
@@ -69,6 +71,7 @@ NAME_COLLECT = "collect"
 NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
 NAME_MERGE_MAP = "merge_map"
 NAME_THETA_SKETCH = "theta_sketch"
+NAME_HLL_SKETCH = "hll_sketch"
 NAME_RBM32 = "rbm32"
 
 
@@ -1432,6 +1435,64 @@ class FieldThetaSketchAgg(FieldAggregator):
         return union.get_result().serialize()
 
 
+class FieldHllSketchAgg(FieldAggregator):
+    """Aggregator for HyperLogLog sketches.
+
+    Mirrors Java's ``FieldHllSketchAgg`` / ``HllSketchUtil.union``: the
+    union is seeded from ``input_field`` and then updated with
+    ``accumulator``, and the result is emitted as a compact ``HLL_4``
+    sketch. Both sides use Apache DataSketches, so the serialized bytes
+    are interchangeable with Java's ``HllSketch.toCompactByteArray()``.
+    """
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if _atomic_base_name(field_type) not in ("VARBINARY", "BYTES"):
+            raise ValueError(
+                "Data type for hll sketch column must be 'VarBinaryType' but was '{}'.".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        if not isinstance(accumulator, (bytes, bytearray)):
+            raise TypeError(
+                "HllSketch accumulator must be bytes, got {}".format(type(accumulator))
+            )
+
+        if not isinstance(input_field, (bytes, bytearray)):
+            raise TypeError(
+                "HllSketch input must be bytes, got {}".format(type(input_field))
+            )
+
+        if isinstance(accumulator, bytearray):
+            accumulator = bytes(accumulator)
+        if isinstance(input_field, bytearray):
+            input_field = bytes(input_field)
+
+        try:
+            from _datasketches import hll_sketch, hll_union, tgt_hll_type
+        except ImportError as exc:
+            raise ImportError(
+                "The hll_sketch aggregator requires the 'datasketches' "
+                "package. Install it with "
+                "\"pip install 'pypaimon[hll-sketch]'\"."
+            ) from exc
+
+        sketch1 = hll_sketch.deserialize(accumulator)
+        sketch2 = hll_sketch.deserialize(input_field)
+
+        # Java builds the union from the input sketch (``Union.heapify``)
+        # and folds the accumulator in afterwards; keep that order so the
+        # union's lg_k is taken from the same side as Java's.
+        union = hll_union(sketch2.lg_config_k)
+        union.update(sketch2)
+        union.update(sketch1)
+
+        return bytes(union.get_result(tgt_hll_type.HLL_4).serialize_compact())
+
+
 class FieldRoaringBitmap32Agg(FieldAggregator):
     """roaring bitmap 32 aggregate a field of a row."""
 
@@ -1545,6 +1606,9 @@ register_aggregator(
 )
 register_aggregator(
     NAME_THETA_SKETCH, _build_no_type_check(FieldThetaSketchAgg, NAME_THETA_SKETCH)
+)
+register_aggregator(
+    NAME_HLL_SKETCH, _build_no_type_check(FieldHllSketchAgg, NAME_HLL_SKETCH)
 )
 register_aggregator(
     NAME_RBM32, _build_roaring_bitmap(FieldRoaringBitmap32Agg, NAME_RBM32)

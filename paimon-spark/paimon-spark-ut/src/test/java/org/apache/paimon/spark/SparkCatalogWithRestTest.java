@@ -365,6 +365,56 @@ public class SparkCatalogWithRestTest {
     }
 
     @Test
+    public void testColumnMaskingCrossColumnWithProjection() {
+        spark.sql(
+                "CREATE TABLE t_cross_column_masking (first_name STRING, last_name STRING, display STRING, other_col STRING)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true', 'source.split.target-size'='1 b')");
+        spark.sql("INSERT INTO t_cross_column_masking VALUES ('john', 'doe', 'ignored', 'o1')");
+        spark.sql("INSERT INTO t_cross_column_masking VALUES ('jane', 'roe', 'ignored', 'o2')");
+
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put(
+                "display",
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(0, "first_name", DataTypes.STRING()),
+                                new FieldRef(1, "last_name", DataTypes.STRING()))));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_cross_column_masking"), columnMasking);
+
+        assertThat(
+                        spark.sql("SELECT display FROM t_cross_column_masking ORDER BY other_col")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[john-doe], [jane-roe]]");
+        assertThat(
+                        spark.sql("SELECT other_col FROM t_cross_column_masking ORDER BY other_col")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[o1], [o2]]");
+    }
+
+    @Test
+    public void testRowFilterDisablesAggregatePushdown() {
+        spark.sql(
+                "CREATE TABLE t_agg_pushdown (id INT) TBLPROPERTIES"
+                        + " ('query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_agg_pushdown VALUES (1), (2), (3)");
+
+        LeafPredicate idFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(1));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_agg_pushdown"), Collections.singletonList(idFilter));
+
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_agg_pushdown").collectAsList().toString())
+                .isEqualTo("[[2]]");
+    }
+
+    @Test
     public void testRowFilter() {
         spark.sql(
                 "CREATE TABLE t_row_filter (id INT, name STRING, age INT, department STRING) TBLPROPERTIES"
@@ -863,7 +913,8 @@ public class SparkCatalogWithRestTest {
                                 spark.sql(
                                                 "SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
                                         .collectAsList())
-                .hasMessageContaining("Unable to read data without column non_existent_column");
+                .hasMessageContaining(
+                        "Row filter references column 'non_existent_column' which does not exist");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(

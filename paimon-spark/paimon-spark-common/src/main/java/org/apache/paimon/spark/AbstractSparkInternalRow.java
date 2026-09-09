@@ -30,6 +30,7 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.MapData;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.BinaryType;
 import org.apache.spark.sql.types.BooleanType;
 import org.apache.spark.sql.types.ByteType;
@@ -46,6 +47,7 @@ import org.apache.spark.sql.types.NullType;
 import org.apache.spark.sql.types.ShortType;
 import org.apache.spark.sql.types.StringType;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 import org.apache.spark.sql.types.UserDefinedType;
 import org.apache.spark.sql.types.VarcharType;
@@ -235,7 +237,7 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
         if (dataType instanceof DateType) {
             return getInt(ordinal);
         }
-        if (dataType instanceof TimestampType) {
+        if (dataType instanceof TimestampType || dataType instanceof TimestampNTZType) {
             return getLong(ordinal);
         }
         if (dataType instanceof CalendarIntervalType) {
@@ -255,6 +257,24 @@ public abstract class AbstractSparkInternalRow extends SparkInternalRow {
         }
         if (dataType instanceof UserDefinedType) {
             return get(ordinal, ((UserDefinedType<?>) dataType).sqlType());
+        }
+        if (SparkShimLoader.shim().isSparkVariantType(dataType)) {
+            return SparkShimLoader.shim().toSparkVariant(row.getVariant(ordinal));
+        }
+        if (SparkShimLoader.shim().isSparkGeometryType(dataType)) {
+            org.apache.paimon.types.GeometryType geometryType =
+                    (org.apache.paimon.types.GeometryType) rowType.getTypeAt(ordinal);
+            return SparkShimLoader.shim()
+                    .toSparkGeometry(row.getBinary(ordinal), geometryType.getCrs());
+        }
+        if (SparkShimLoader.shim().isSparkGeographyType(dataType)) {
+            org.apache.paimon.types.GeographyType geographyType =
+                    (org.apache.paimon.types.GeographyType) rowType.getTypeAt(ordinal);
+            return SparkShimLoader.shim()
+                    .toSparkGeography(
+                            row.getBinary(ordinal),
+                            geographyType.getCrs(),
+                            geographyType.getAlgorithm().toString());
         }
 
         throw new UnsupportedOperationException("Unsupported data type " + dataType.simpleString());

@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
-from pypaimon.common.options import Options
+from pypaimon.common.options.options import Options
 from pypaimon.common.options.config_option import ConfigOption
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.options_utils import OptionsUtils
@@ -124,6 +124,7 @@ class CoreOptions:
         "partial-update.remove-record-on-sequence-group",
         "rowkind.field",
         "primary-key",
+        "primary-key.nullable",
         "partition",
         "dynamic-bucket.initial-buckets",
         "force-lookup",
@@ -131,6 +132,7 @@ class CoreOptions:
         "data-evolution.enabled",
         "index-file-in-data-file-dir",
         "blob-field",
+        "video-frame-field",
         "blob-descriptor-field",
         "blob-view-field",
         "pk-clustering-override",
@@ -141,6 +143,7 @@ class CoreOptions:
     FILE_FORMAT_AVRO: str = "avro"
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
+    FILE_FORMAT_VIDEO: str = "video"
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
@@ -208,6 +211,16 @@ class CoreOptions:
         )
     )
 
+    PRIMARY_KEY_NULLABLE: ConfigOption[bool] = (
+        ConfigOptions.key("primary-key.nullable")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether primary key fields can contain null values. Null values "
+            "use null-safe equality when records are merged."
+        )
+    )
+
     DYNAMIC_BUCKET_TARGET_ROW_NUM: ConfigOption[int] = (
         ConfigOptions.key("dynamic-bucket.target-row-num")
         .int_type()
@@ -224,6 +237,46 @@ class CoreOptions:
         .default_value(-1)
         .with_description(
             "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
+        )
+    )
+
+    POSTPONE_BATCH_WRITE_FIXED_BUCKET: ConfigOption[bool] = (
+        ConfigOptions.key("postpone.batch-write-fixed-bucket")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to write data into fixed buckets for batch writes to a "
+            "postpone bucket table."
+        )
+    )
+
+    POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM: ConfigOption[int] = (
+        ConfigOptions.key("postpone.batch-write-fixed-bucket.max-parallelism")
+        .int_type()
+        .default_value(2048)
+        .with_description(
+            "Maximum bucket number inferred for a postpone batch write."
+        )
+    )
+
+    POSTPONE_TARGET_ROW_NUM_PER_BUCKET: ConfigOption[int] = (
+        ConfigOptions.key("postpone.target-row-num-per-bucket")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Target row number per bucket when batch writing a postpone "
+            "partition without real bucket data."
+        )
+    )
+
+    POSTPONE_TARGET_SIZE_PER_BUCKET: ConfigOption[MemorySize] = (
+        ConfigOptions.key("postpone.target-size-per-bucket")
+        .memory_type()
+        .default_value(MemorySize.parse("1 gb"))
+        .with_description(
+            "Target uncompressed input size per bucket when batch writing a "
+            "postpone partition without real bucket data. This option is "
+            "ignored when postpone.target-row-num-per-bucket is configured."
         )
     )
 
@@ -346,6 +399,18 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
+    VIDEO_FRAME_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("video-frame-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated scalar BLOB fields whose logical values are "
+            "frames in encoded videos packed into '.video' files. Payload "
+            "boundaries may be nested across fields, but every change must "
+            "occur at a logical episode boundary."
+        )
     )
 
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
@@ -652,11 +717,46 @@ class CoreOptions:
         .with_description("Whether to enable row tracking.")
     )
 
+    ROW_TRACKING_PARTITION_GROUP_ON_COMMIT: ConfigOption[bool] = (
+        ConfigOptions.key("row-tracking.partition-group-on-commit")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "When row-tracking is enabled, whether to group new file metas "
+            "by partition before commit, so that assigned row IDs are "
+            "contiguous within each partition."
+        )
+    )
+
     DATA_EVOLUTION_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("data-evolution.enabled")
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable data evolution.")
+    )
+
+    DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("data-evolution.write-cols-optimization.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to omit write columns from data file metadata when a "
+            "data evolution file contains all non-dedicated columns. Readers "
+            "always support the omitted metadata, but writing it is disabled "
+            "by default for compatibility with older readers."
+        )
+    )
+
+    DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("data-evolution.row-id-conflict-rewrite.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "Maximum total size of current data files whose row-id ranges "
+            "PyPaimon may automatically rebase staged updates against when "
+            "a concurrent compaction changes file boundaries. Set to 0 B "
+            "to disable."
+        )
     )
 
     DATA_EVOLUTION_ROW_SIDECAR_ENABLED: ConfigOption[bool] = (
@@ -1030,6 +1130,10 @@ class CoreOptions:
     def from_dict(options: dict) -> 'CoreOptions':
         return CoreOptions(Options(options))
 
+    @staticmethod
+    def primary_key_nullable_from_dict(options: dict) -> bool:
+        return Options(options).get(CoreOptions.PRIMARY_KEY_NULLABLE)
+
     def path(self, default=None):
         return self.options.get(CoreOptions.PATH, default)
 
@@ -1048,11 +1152,41 @@ class CoreOptions:
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
 
+    def primary_key_nullable(self, default=None):
+        return self.options.get(CoreOptions.PRIMARY_KEY_NULLABLE, default)
+
     def dynamic_bucket_target_row_num(self, default=None):
         return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)
 
     def dynamic_bucket_max_buckets(self, default=None):
         return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
+
+    def postpone_batch_write_fixed_bucket(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET, default
+        )
+
+    def postpone_batch_write_fixed_bucket_max_parallelism(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET_MAX_PARALLELISM,
+            default,
+        )
+
+    def postpone_target_row_num_per_bucket(self, default=None):
+        return self.options.get(
+            CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET, default
+        )
+
+    def postpone_target_size_per_bucket(self, default=None):
+        if default is not None and not isinstance(default, MemorySize):
+            default = (
+                MemorySize.of_bytes(default)
+                if isinstance(default, int)
+                else MemorySize.parse(default)
+            )
+        return self.options.get(
+            CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET, default
+        ).get_bytes()
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
@@ -1116,6 +1250,14 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
+        # Do not treat blob.stored-descriptor-fields as a layout switch.
+        # Python master ignored that key and wrote dedicated .blob payloads;
+        # a global fallback would mis-parse those files during a rolling
+        # upgrade. The cost is that Java tables which only set the fallback
+        # key store inline descriptors, and Python returns those bytes
+        # instead of fetching payload. Migrate explicitly to
+        # blob-descriptor-field (column directives already copy the legacy
+        # key onto the canonical option).
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
@@ -1125,6 +1267,19 @@ class CoreOptions:
 
     def blob_field(self, default=None):
         value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def video_frame_field(self, default=None) -> Optional[str]:
+        fields = self.video_frame_fields(default)
+        if len(fields) > 1:
+            raise ValueError(
+                "'video-frame-field' configures multiple fields "
+                f"{sorted(fields)}; use video_frame_fields()."
+            )
+        return next(iter(fields)) if fields else None
+
+    def video_frame_fields(self, default=None):
+        value = self.options.get(CoreOptions.VIDEO_FRAME_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
     def blob_view_resolve_enabled(self, default=True):
@@ -1258,8 +1413,25 @@ class CoreOptions:
     def row_tracking_enabled(self, default=None):
         return self.options.get(CoreOptions.ROW_TRACKING_ENABLED, default)
 
+    def row_tracking_partition_group_on_commit(self, default=None):
+        return self.options.get(
+            CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT, default)
+
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def data_evolution_write_cols_optimization_enabled(self, default=None):
+        return self.options.get(
+            CoreOptions.DATA_EVOLUTION_WRITE_COLS_OPTIMIZATION_ENABLED,
+            default,
+        )
+
+    def data_evolution_row_id_conflict_rewrite_max_size(self, default=None):
+        value = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE,
+            default,
+        )
+        return value.get_bytes()
 
     def data_evolution_row_sidecar_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED, default)

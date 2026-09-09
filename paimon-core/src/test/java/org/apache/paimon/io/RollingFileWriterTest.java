@@ -113,6 +113,8 @@ public class RollingFileWriterTest {
                                         true,
                                         statsDenseStore,
                                         false,
+                                        null,
+                                        null,
                                         null),
                         targetFileSize,
                         targetFileRowNum);
@@ -169,7 +171,7 @@ public class RollingFileWriterTest {
         assertThat(files.get(2).rowCount()).isEqualTo(30);
     }
 
-    private static BundleRecords bundle(int rowCount) {
+    private static SingleUseBundleRecords bundle(int rowCount) {
         List<InternalRow> rows = new ArrayList<>();
         for (int i = 0; i < rowCount; i++) {
             rows.add(GenericRow.of(i));
@@ -286,7 +288,8 @@ public class RollingFileWriterTest {
                 rowFormat
                         .createReaderFactory(SCHEMA, SCHEMA, Collections.emptyList())
                         .createReader(
-                                new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                                new FormatReaderContext(
+                                        fileIO, path, fileIO.getFileSize(path), null, null))) {
             reader.forEachRemaining(row -> result.add(row.getInt(0)));
         }
         return result;

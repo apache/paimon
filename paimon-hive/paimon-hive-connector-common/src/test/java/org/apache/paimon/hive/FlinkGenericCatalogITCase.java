@@ -163,13 +163,10 @@ public class FlinkGenericCatalogITCase extends AbstractTestBaseJUnit4 {
         assertThat(result2).containsExactly(Row.of(2L, 0L, "APPEND"));
 
         // check leaf predicate query with exist snapshot_id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id=6"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "snapshot upper id:6 should not greater than latestSnapshotId:4");
+        assertThat(
+                        sql(
+                                "SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots where snapshot_id=6"))
+                .isEmpty();
 
         // check compound predicate query with right range
         List<Row> result3 =

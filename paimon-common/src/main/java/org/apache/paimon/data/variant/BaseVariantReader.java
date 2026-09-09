@@ -32,18 +32,23 @@ import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VariantType;
 
 import javax.annotation.Nullable;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.List;
 
@@ -91,13 +96,19 @@ public class BaseVariantReader {
      * this function if the variant is missing.
      */
     public Object read(InternalRow row, byte[] topLevelMetadata) {
+        return read(row, ByteBuffer.wrap(topLevelMetadata).order(ByteOrder.LITTLE_ENDIAN));
+    }
+
+    public Object read(InternalRow row, ByteBuffer topLevelMetadata) {
         if (schema.typedIdx < 0 || row.isNullAt(schema.typedIdx)) {
             if (schema.variantIdx < 0 || row.isNullAt(schema.variantIdx)) {
                 // Both `typed_value` and `value` are null, meaning the variant is missing.
                 throw malformedVariant();
             }
             GenericVariant variant =
-                    new GenericVariant(row.getBinary(schema.variantIdx), topLevelMetadata);
+                    new GenericVariant(
+                            PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
+                            topLevelMetadata);
             return VariantGet.cast(variant, targetType, castArgs);
         } else {
             return readFromTyped(row, topLevelMetadata);
@@ -105,12 +116,12 @@ public class BaseVariantReader {
     }
 
     /** Subclasses should override it to produce the read result when `typed_value` is not null. */
-    protected Object readFromTyped(InternalRow row, byte[] topLevelMetadata) {
+    protected Object readFromTyped(InternalRow row, ByteBuffer topLevelMetadata) {
         throw new UnsupportedOperationException();
     }
 
     /** A util function to rebuild the variant in binary format from a variant value. */
-    protected Variant rebuildVariant(InternalRow row, byte[] topLevelMetadata) {
+    protected Variant rebuildVariant(InternalRow row, ByteBuffer topLevelMetadata) {
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
         ShreddingUtils.rebuild(
                 new PaimonShreddingUtils.PaimonShreddedRow(row), topLevelMetadata, schema, builder);
@@ -118,7 +129,7 @@ public class BaseVariantReader {
     }
 
     /** A util function to throw error or return null when an invalid cast happens. */
-    protected Object invalidCast(InternalRow row, byte[] topLevelMetadata) {
+    protected Object invalidCast(InternalRow row, ByteBuffer topLevelMetadata) {
         return VariantGet.invalidCast(rebuildVariant(row, topLevelMetadata), targetType, castArgs);
     }
 
@@ -215,7 +226,7 @@ public class BaseVariantReader {
         }
 
         @Override
-        public Object readFromTyped(InternalRow row, byte[] topLevelMetadata) {
+        public Object readFromTyped(InternalRow row, ByteBuffer topLevelMetadata) {
             if (schema.objectSchema == null) {
                 return invalidCast(row, topLevelMetadata);
             }
@@ -228,7 +239,9 @@ public class BaseVariantReader {
                     && schema.variantIdx >= 0
                     && !row.isNullAt(schema.variantIdx)) {
                 unshreddedObject =
-                        new GenericVariant(row.getBinary(schema.variantIdx), topLevelMetadata);
+                        new GenericVariant(
+                                PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
+                                topLevelMetadata);
                 if (unshreddedObject.getType() != Type.OBJECT) {
                     throw malformedVariant();
                 }
@@ -286,7 +299,7 @@ public class BaseVariantReader {
         }
 
         @Override
-        protected Object readFromTyped(InternalRow row, byte[] topLevelMetadata) {
+        protected Object readFromTyped(InternalRow row, ByteBuffer topLevelMetadata) {
             if (schema.arraySchema == null) {
                 return invalidCast(row, topLevelMetadata);
             }
@@ -344,7 +357,7 @@ public class BaseVariantReader {
         }
 
         @Override
-        public Object readFromTyped(InternalRow row, byte[] topLevelMetadata) {
+        public Object readFromTyped(InternalRow row, ByteBuffer topLevelMetadata) {
             if (schema.objectSchema == null) {
                 return invalidCast(row, topLevelMetadata);
             }
@@ -355,7 +368,9 @@ public class BaseVariantReader {
             GenericVariant unshreddedObject = null;
             if (schema.variantIdx >= 0 && !row.isNullAt(schema.variantIdx)) {
                 unshreddedObject =
-                        new GenericVariant(row.getBinary(schema.variantIdx), topLevelMetadata);
+                        new GenericVariant(
+                                PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
+                                topLevelMetadata);
                 if (unshreddedObject.getType() != Type.OBJECT) {
                     throw malformedVariant();
                 }
@@ -418,12 +433,14 @@ public class BaseVariantReader {
         }
 
         @Override
-        public Object read(InternalRow row, byte[] topLevelMetadata) {
+        public Object read(InternalRow row, ByteBuffer topLevelMetadata) {
             if (isTopLevelUnshredded) {
                 if (row.isNullAt(schema.variantIdx)) {
                     throw malformedVariant();
                 }
-                return new GenericVariant(row.getBinary(schema.variantIdx), topLevelMetadata);
+                return new GenericVariant(
+                        PaimonShreddingUtils.binaryBuffer(row, schema.variantIdx),
+                        topLevelMetadata);
             }
             return rebuildVariant(row, topLevelMetadata);
         }
@@ -462,7 +479,7 @@ public class BaseVariantReader {
         }
 
         @Override
-        protected Object readFromTyped(InternalRow row, byte[] topLevelMetadata) {
+        protected Object readFromTyped(InternalRow row, ByteBuffer topLevelMetadata) {
             if (!noNeedCast && resolve == null) {
                 if (targetType.equals(DataTypes.STRING())) {
                     return BinaryString.fromString(
@@ -503,6 +520,15 @@ public class BaseVariantReader {
                                 typedValueIdx,
                                 ((DecimalType) scalaType).getPrecision(),
                                 ((DecimalType) scalaType).getScale());
+            } else if (scalaType instanceof DateType) {
+                i = row.getInt(typedValueIdx);
+            } else if (scalaType instanceof TimestampType) {
+                i = row.getTimestamp(typedValueIdx, ((TimestampType) scalaType).getPrecision());
+            } else if (scalaType instanceof LocalZonedTimestampType) {
+                i =
+                        row.getTimestamp(
+                                typedValueIdx,
+                                ((LocalZonedTimestampType) scalaType).getPrecision());
             } else {
                 throw new UnsupportedOperationException("Unsupported scalar type: " + scalaType);
             }

@@ -21,9 +21,15 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
+import org.apache.paimon.flink.sink.coordinator.SavepointTagger;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.SerializableSupplier;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
@@ -33,6 +39,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
+import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 /** An {@link AppendTableSink} which handles {@link InternalRow}. */
@@ -56,8 +64,9 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     // checkpointing on by default for the JM-side committer; bounded sources will
                     // be handled by end-input support in a follow-up PR
                     true,
-                    true,
-                    createCommitterFactory());
+                    createCommitterFactory(),
+                    new Options(table.options())
+                            .get(FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT));
         }
         return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
     }
@@ -83,15 +92,15 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     StoreSinkWrite.Provider writeProvider,
                     String commitUser,
                     boolean streamingCheckpointEnabled,
-                    boolean failoverAfterRecovery,
-                    Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+                    Committer.Factory<Committable, ManifestCommittable> committerFactory,
+                    boolean autoTagForSavepoint) {
         return new CoordinatorCommittingFactory(
                 table,
                 writeProvider,
                 commitUser,
                 streamingCheckpointEnabled,
-                failoverAfterRecovery,
-                committerFactory);
+                committerFactory,
+                autoTagForSavepoint);
     }
 
     private static class CoordinatorCommittingFactory extends RowDataStoreWriteOperator.Factory
@@ -100,20 +109,20 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         private static final long serialVersionUID = 1L;
 
         private final boolean streamingCheckpointEnabled;
-        private final boolean failoverAfterRecovery;
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
+        private final boolean autoTagForSavepoint;
 
         CoordinatorCommittingFactory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser,
                 boolean streamingCheckpointEnabled,
-                boolean failoverAfterRecovery,
-                Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+                Committer.Factory<Committable, ManifestCommittable> committerFactory,
+                boolean autoTagForSavepoint) {
             super(table, storeSinkWriteProvider, initialCommitUser);
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
-            this.failoverAfterRecovery = failoverAfterRecovery;
             this.committerFactory = committerFactory;
+            this.autoTagForSavepoint = autoTagForSavepoint;
         }
 
         @Override
@@ -124,7 +133,29 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     committerFactory,
                     streamingCheckpointEnabled,
                     initialCommitUser,
-                    failoverAfterRecovery);
+                    autoTagForSavepoint ? createSavepointTaggerFactory(table) : null);
+        }
+
+        /**
+         * Builds the savepoint auto-tag factory. The factory captures only serializable suppliers
+         * and binds the commit user late, on the JM, once the coordinator has restored it.
+         */
+        private static SavepointTagger.Factory createSavepointTaggerFactory(FileStoreTable table) {
+            SerializableSupplier<SnapshotManager> snapshotManagerFactory = table::snapshotManager;
+            SerializableSupplier<TagManager> tagManagerFactory = table::tagManager;
+            SerializableSupplier<TagDeletion> tagDeletionFactory =
+                    () -> table.store().newTagDeletion();
+            SerializableSupplier<List<TagCallback>> callbacksSupplier =
+                    () -> table.store().createTagCallbacks(table);
+            Duration tagTimeRetained = table.coreOptions().tagDefaultTimeRetained();
+            return commitUser ->
+                    new SavepointTagger(
+                            snapshotManagerFactory.get(),
+                            tagManagerFactory.get(),
+                            tagDeletionFactory.get(),
+                            callbacksSupplier.get(),
+                            tagTimeRetained,
+                            commitUser);
         }
 
         @Override
@@ -136,7 +167,12 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     parameters.getOperatorEventDispatcher().getOperatorEventGateway(operatorId);
             return (T)
                     new CoordinatorCommittingRowDataStoreWriteOperator(
-                            parameters, table, storeSinkWriteProvider, initialCommitUser, gateway);
+                            parameters,
+                            table,
+                            storeSinkWriteProvider,
+                            initialCommitUser,
+                            gateway,
+                            autoTagForSavepoint);
         }
 
         @Override

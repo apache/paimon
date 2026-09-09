@@ -62,6 +62,7 @@ class Tag(Snapshot):
         """
         return Tag(
             version=snapshot.version,
+            uuid=snapshot.uuid,
             id=snapshot.id,
             schema_id=snapshot.schema_id,
             base_manifest_list=snapshot.base_manifest_list,
@@ -69,6 +70,7 @@ class Tag(Snapshot):
             total_record_count=snapshot.total_record_count,
             delta_record_count=snapshot.delta_record_count,
             commit_user=snapshot.commit_user,
+            writer_version=snapshot.writer_version,
             commit_identifier=snapshot.commit_identifier,
             commit_kind=snapshot.commit_kind,
             time_millis=snapshot.time_millis,
@@ -90,6 +92,7 @@ class Tag(Snapshot):
         """Convert this Tag to a Snapshot"""
         return Snapshot(
             version=self.version,
+            uuid=self.uuid,
             id=self.id,
             schema_id=self.schema_id,
             base_manifest_list=self.base_manifest_list,
@@ -97,6 +100,7 @@ class Tag(Snapshot):
             total_record_count=self.total_record_count,
             delta_record_count=self.delta_record_count,
             commit_user=self.commit_user,
+            writer_version=self.writer_version,
             commit_identifier=self.commit_identifier,
             commit_kind=self.commit_kind,
             time_millis=self.time_millis,

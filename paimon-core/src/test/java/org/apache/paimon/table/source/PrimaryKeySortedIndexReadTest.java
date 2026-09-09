@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -43,7 +44,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** End-to-end reads for source-backed scalar indexes, residual filters, and deletion vectors. */
+/** End-to-end reads for source-backed sorted indexes, residual filters, and deletion vectors. */
 class PrimaryKeySortedIndexReadTest extends TableTestBase {
 
     @Override
@@ -199,5 +200,55 @@ class PrimaryKeySortedIndexReadTest extends TableTestBase {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         assertThat(ids).containsExactlyInAnyOrderElementsOf(expectedIds);
+    }
+
+    @Test
+    void testReadWithMultiValueIndex() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("tags", DataTypes.ARRAY(DataTypes.STRING()))
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .option(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags")
+                        .build();
+        catalog.createTable(identifier(), schema, false);
+        FileStoreTable table = getTableDefault();
+        BinaryString red = BinaryString.fromString("red");
+        BinaryString blue = BinaryString.fromString("blue");
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, new GenericArray(new BinaryString[] {red, blue})),
+                GenericRow.of(2, new GenericArray(new BinaryString[] {blue})),
+                GenericRow.of(3, null));
+        write(
+                table,
+                ioManager,
+                GenericRow.of(4, new GenericArray(new BinaryString[0])),
+                GenericRow.of(5, new GenericArray(new BinaryString[] {null, red})));
+        compact(table, BinaryRow.EMPTY_ROW, 0, ioManager, true);
+
+        Snapshot snapshot = table.store().snapshotManager().latestSnapshot();
+        assertThat(
+                        table.store()
+                                .newIndexFileHandler()
+                                .scanSourceIndexes(snapshot, BinaryRow.EMPTY_ROW, 0))
+                .singleElement()
+                .extracting(IndexFileMeta::indexType)
+                .isEqualTo("multivalue");
+
+        Predicate predicate = new PredicateBuilder(table.rowType()).arrayContains(1, red);
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).isNotEmpty().allMatch(IndexedSplit.class::isInstance);
+
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactlyInAnyOrder(1, 5);
     }
 }

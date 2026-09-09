@@ -35,9 +35,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
+import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId
@@ -211,7 +214,11 @@ public class TableSchema implements Serializable {
         if (StringUtils.isNullOrWhitespaceOnly(key)) {
             return Collections.emptyList();
         }
-        List<String> bucketKeys = Arrays.asList(key.split(","));
+        List<String> bucketKeys =
+                Arrays.stream(key.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
         if (notContainsAll(fieldNames(), bucketKeys)) {
             throw new RuntimeException(
                     String.format(
@@ -285,10 +292,49 @@ public class TableSchema implements Serializable {
             return this;
         }
 
+        RowType rowType = new RowType(fields);
+        List<DataField> projectedFields =
+                new CoreOptions(options).dataEvolutionNestedFieldEnabled()
+                        ? rowType.projectByPaths(writeCols).getFields()
+                        : rowType.project(writeCols).getFields();
+        return copy(projectedFields);
+    }
+
+    public TableSchema dataFileSchema(@Nullable List<String> writeCols) {
+        if (writeCols != null) {
+            return project(writeCols);
+        }
+
+        // A null write-cols value normally means the full schema. For data-evolution tables with
+        // dedicated BLOB or vector files, however, a schema which enables the compact metadata can
+        // omit the redundant list when a normal file contains every non-dedicated field. Dedicated
+        // files always keep their explicit write columns. Checking the schema option preserves the
+        // legacy meaning for older schema versions which used null for a true full-schema file.
+        CoreOptions coreOptions = CoreOptions.fromMap(options);
+        if (!coreOptions.dataEvolutionEnabled()
+                || !coreOptions.dataEvolutionWriteColsOptimizationEnabled()) {
+            return this;
+        }
+        RowType rowType = new RowType(fields);
+        Set<String> dedicatedFields =
+                new HashSet<>(fieldNamesInBlobFile(rowType, coreOptions.blobInlineField()));
+        dedicatedFields.addAll(fieldNamesInVectorFile(rowType, coreOptions.withVectorFormat()));
+        if (dedicatedFields.isEmpty()) {
+            return this;
+        }
+
+        List<DataField> nonDedicatedFields =
+                fields.stream()
+                        .filter(field -> !dedicatedFields.contains(field.name()))
+                        .collect(Collectors.toList());
+        return copy(nonDedicatedFields);
+    }
+
+    private TableSchema copy(List<DataField> projectedFields) {
         return new TableSchema(
                 version,
                 id,
-                new RowType(fields).project(writeCols).getFields(),
+                projectedFields,
                 highestFieldId,
                 partitionKeys,
                 primaryKeys,

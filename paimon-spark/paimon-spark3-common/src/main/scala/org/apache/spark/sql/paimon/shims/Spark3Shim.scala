@@ -218,10 +218,9 @@ class Spark3Shim extends SparkShim {
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
@@ -350,10 +349,53 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
 
+  override def toSparkVariant(variant: Variant): Object =
+    throw new UnsupportedOperationException("Variant requires Spark 4.0 or later")
+
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType =
     throw new UnsupportedOperationException()
+
+  override def toPaimonGeometry(o: Object): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(o: Object): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte] = unsupportedGeospatial()
+
+  override def toSparkGeometry(wkb: Array[Byte], crs: String): Object = unsupportedGeospatial()
+
+  override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object =
+    unsupportedGeospatial()
+
+  override def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
+
+  override def isSparkGeographyType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
+
+  override def SparkGeometryType(crs: String): org.apache.spark.sql.types.DataType =
+    unsupportedGeospatial()
+
+  override def SparkGeographyType(
+      crs: String,
+      algorithm: String): org.apache.spark.sql.types.DataType = unsupportedGeospatial()
+
+  override def sparkGeometryCrs(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  override def sparkGeographyCrs(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  override def sparkGeographyAlgorithm(dataType: org.apache.spark.sql.types.DataType): String =
+    unsupportedGeospatial()
+
+  private def unsupportedGeospatial[T](): T =
+    throw new UnsupportedOperationException("Geometry and geography require Spark 4.1 or later")
 
   override def toPaimonVariant(row: InternalRow, pos: Int): Variant =
     throw new UnsupportedOperationException()

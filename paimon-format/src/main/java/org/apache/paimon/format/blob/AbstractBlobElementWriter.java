@@ -24,6 +24,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.ReusingBlobRefStreamProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
@@ -35,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.zip.CRC32;
 
@@ -55,6 +57,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private final BlobFetchMetricReporter blobFetchMetricReporter;
     private final CRC32 crc32;
     private final byte[] copyBuffer;
+    private final ReusingBlobRefStreamProvider reuseSource;
 
     private String pathString;
 
@@ -78,6 +81,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         this.blobFetchMetricReporter = blobFetchMetricReporter;
         this.crc32 = new CRC32();
         this.copyBuffer = new byte[copyBufferSize];
+        this.reuseSource = new ReusingBlobRefStreamProvider();
     }
 
     @Override
@@ -124,10 +128,39 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         }
     }
 
-    protected final @Nullable SeekableInputStream openBlobInputStream(Blob blob)
-            throws IOException {
+    /**
+     * Prepares the byte source for a blob, or returns {@code null} to write it as NULL (missing
+     * file / fetch failure). An exact {@link BlobRef} with known length reuses one source stream
+     * (bounded to the descriptor); other blobs open their own stream and read until EOF.
+     */
+    protected final @Nullable BlobCopySource prepareBlobSource(Blob blob) throws IOException {
+        // Exact class only: subclasses may override newInputStream() and must not be bypassed.
+        if (blob != null && blob.getClass() == BlobRef.class) {
+            BlobRef ref = (BlobRef) blob;
+            long length = ref.toDescriptor().length();
+            if (length >= 0) {
+                // Position/release the previous source first; its cleanup error is not this blob's
+                // fetch failure and must not be turned into a NULL write.
+                reuseSource.prepareFor(ref);
+                SeekableInputStream source = openStream(ref, () -> reuseSource.openBounded(ref));
+                if (source == null) {
+                    return null;
+                }
+                return new BlobCopySource(source, length);
+            }
+        }
+
+        SeekableInputStream source = openStream(blob, blob::newInputStream);
+        if (source == null) {
+            return null;
+        }
+        return new BlobCopySource(source, -1L);
+    }
+
+    @Nullable
+    private SeekableInputStream openStream(Blob blob, StreamOpener opener) throws IOException {
         try {
-            return blob.newInputStream();
+            return opener.open();
         } catch (IOException | RuntimeException e) {
             if (writeNullOnMissingFile && HttpClientUtils.isNotFoundError(e)) {
                 LOG.warn(
@@ -148,19 +181,53 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         }
     }
 
-    protected final BlobDescriptor writeBlobData(SeekableInputStream in) throws IOException {
+    protected final BlobDescriptor writeBlobData(BlobCopySource source) throws IOException {
         long blobPosition = out.getPos();
-        try (SeekableInputStream stream = in) {
-            int bytesRead = stream.read(copyBuffer);
-            while (bytesRead >= 0) {
-                write(copyBuffer, bytesRead);
-                bytesRead = stream.read(copyBuffer);
+        if (source.reused()) {
+            try {
+                copyExactly(source.stream(), source.length());
+            } catch (IOException | RuntimeException e) {
+                blobFetchMetricReporter.recordFetchFailure(e);
+                // Source is at an unknown position now; drop it so the next blob reopens.
+                reuseSource.discardQuietly();
+                throw e;
             }
-        } catch (IOException | RuntimeException e) {
-            blobFetchMetricReporter.recordFetchFailure(e);
-            throw e;
+        } else {
+            try (SeekableInputStream stream = source.stream()) {
+                int bytesRead = stream.read(copyBuffer);
+                while (bytesRead >= 0) {
+                    write(copyBuffer, bytesRead);
+                    bytesRead = stream.read(copyBuffer);
+                }
+            } catch (IOException | RuntimeException e) {
+                blobFetchMetricReporter.recordFetchFailure(e);
+                throw e;
+            }
         }
         return new BlobDescriptor(pathString, blobPosition, out.getPos() - blobPosition);
+    }
+
+    /** Copies exactly {@code length} bytes from {@code stream}, throwing on premature EOF. */
+    private void copyExactly(SeekableInputStream stream, long length) throws IOException {
+        long remaining = length;
+        while (remaining > 0) {
+            int toRead = (int) Math.min(copyBuffer.length, remaining);
+            int bytesRead = stream.read(copyBuffer, 0, toRead);
+            if (bytesRead < 0) {
+                throw new EOFException(
+                        String.format(
+                                "Unexpected EOF while copying BLOB payload for field %s: expected %d "
+                                        + "bytes but source ended %d bytes early.",
+                                blobFieldName, length, remaining));
+            }
+            if (bytesRead == 0) {
+                throw new IOException(
+                        "Source returned 0 bytes while copying BLOB payload for field "
+                                + blobFieldName);
+            }
+            write(copyBuffer, bytesRead);
+            remaining -= bytesRead;
+        }
     }
 
     protected final boolean accept(BlobDescriptor descriptor) throws IOException {
@@ -234,6 +301,40 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
     private static boolean isHttpUri(String uri) {
         return uri.regionMatches(true, 0, "http://", 0, "http://".length())
                 || uri.regionMatches(true, 0, "https://", 0, "https://".length());
+    }
+
+    @Override
+    public final void close() throws IOException {
+        reuseSource.close();
+    }
+
+    @FunctionalInterface
+    private interface StreamOpener {
+        SeekableInputStream open() throws IOException;
+    }
+
+    /** The byte source of a single blob payload to be copied into the blob file. */
+    protected static final class BlobCopySource {
+
+        private final SeekableInputStream stream;
+        private final long length;
+
+        private BlobCopySource(SeekableInputStream stream, long length) {
+            this.stream = stream;
+            this.length = length;
+        }
+
+        private boolean reused() {
+            return length >= 0;
+        }
+
+        private SeekableInputStream stream() {
+            return stream;
+        }
+
+        private long length() {
+            return length;
+        }
     }
 
     /** Lazily gets a Blob from a row or array. */

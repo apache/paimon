@@ -38,6 +38,13 @@ public class SparkCatalogOptions {
                     .defaultValue(Catalog.DEFAULT_DATABASE)
                     .withDescription("The default database name.");
 
+    public static final ConfigOption<Boolean> DISABLE_CREATE_TABLE_IN_DEFAULT_DB =
+            key("disable-create-table-in-default-db")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, creating table in default database is not allowed. Default is false.");
+
     public static final ConfigOption<Boolean> V1FUNCTION_ENABLED =
             key("v1Function.enabled")
                     .booleanType()

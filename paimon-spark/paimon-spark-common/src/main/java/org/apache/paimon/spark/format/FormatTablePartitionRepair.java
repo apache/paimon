@@ -23,9 +23,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
+import org.apache.paimon.table.format.FormatTablePartitionStatsCollector;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,6 +55,23 @@ public class FormatTablePartitionRepair {
      */
     public static int repair(
             PaimonFormatTable sparkTable, boolean addPartitions, boolean dropPartitions) {
+        return repair(sparkTable, addPartitions, dropPartitions, null);
+    }
+
+    /**
+     * Repair the partition metadata of a Format Table with catalog-managed partitions, optionally
+     * measuring the partitions it finds and reporting their statistics.
+     *
+     * <p>When measuring, every partition found on the filesystem is measured, not only the newly
+     * registered ones: a repair is exactly the moment the catalog numbers are known to be behind.
+     *
+     * @param statsCollector measures the partitions, or null to only reconcile the registration
+     */
+    public static int repair(
+            PaimonFormatTable sparkTable,
+            boolean addPartitions,
+            boolean dropPartitions,
+            @Nullable FormatTablePartitionStatsCollector statsCollector) {
         Preconditions.checkArgument(
                 addPartitions || dropPartitions,
                 "MSCK REPAIR TABLE must enable ADD and/or DROP partitions");
@@ -67,15 +87,21 @@ public class FormatTablePartitionRepair {
                 listFilesystemPartitionSpecs(formatTable),
                 formatTable.partitionKeys(),
                 addPartitions,
-                dropPartitions);
+                dropPartitions,
+                statsCollector);
     }
 
     private static List<Map<String, String>> listFilesystemPartitionSpecs(FormatTable formatTable) {
-        // Discover partitions from the raw directory names rather than through the table scan:
-        // the scan casts each value to its column type and back (e.g. month=01 -> 1), producing
-        // specs that can no longer round-trip to the real directory. The write path registers the
-        // raw directory value, so a repair must diff against the same raw values to avoid
-        // spuriously adding/dropping partition metadata.
+        // Raw directory names rather than the table scan: the scan casts each value to its column
+        // type and back (month=01 -> 1), producing specs that no longer name the real directory,
+        // while the write path registers the raw value. That is also why no partition type is
+        // passed below: it would re-enable the cast this discovery deliberately avoids.
+        //
+        // The default partition name is still needed. In a value-only layout the null partition is
+        // a bare "__DEFAULT_PARTITION__" directory, which the generic hidden-directory rule ("_"
+        // prefix) skips unless the listing knows the name is meaningful. Without it a repair never
+        // registers the null partition, and a SYNC/DROP sees it as registered-but-deleted and
+        // unregisters a partition that still holds data.
         boolean onlyValueInPath =
                 new CoreOptions(formatTable.options()).formatTablePartitionOnlyValueInPath();
         List<Pair<LinkedHashMap<String, String>, Path>> found =
@@ -84,7 +110,10 @@ public class FormatTablePartitionRepair {
                         new Path(formatTable.location()),
                         formatTable.partitionKeys().size(),
                         formatTable.partitionKeys(),
-                        onlyValueInPath);
+                        onlyValueInPath,
+                        null,
+                        null,
+                        formatTable.defaultPartName());
         List<Map<String, String>> specs = new ArrayList<>(found.size());
         for (Pair<LinkedHashMap<String, String>, Path> pair : found) {
             PartitionPathUtils.validatePartitionSpecForPath(pair.getKey(), onlyValueInPath);
@@ -96,11 +125,9 @@ public class FormatTablePartitionRepair {
     /**
      * Diff the filesystem partition set against the catalog registration set and apply the
      * requested actions. ADD registers "directory exists but unregistered"; DROP is metadata-only
-     * cleanup of "registered but directory missing". Scan-completeness guard: the filesystem
-     * listing that feeds {@code filesystemPartitions} ({@link
-     * PartitionPathUtils#searchPartSpecAndPaths}) fails on any mid-scan LIST error instead of
-     * returning a truncated set, so a DROP diff can only be produced from a complete listing and a
-     * transient failure never deregisters partitions that still exist.
+     * cleanup of "registered but directory missing". {@link
+     * PartitionPathUtils#searchPartSpecAndPaths} fails on a mid-scan LIST error rather than
+     * returning a truncated set, so a transient failure never deregisters partitions that exist.
      */
     static int apply(
             FormatTablePartitionManager partitionManager,
@@ -108,10 +135,30 @@ public class FormatTablePartitionRepair {
             List<String> partitionKeys,
             boolean addPartitions,
             boolean dropPartitions) {
+        return apply(
+                partitionManager,
+                filesystemPartitions,
+                partitionKeys,
+                addPartitions,
+                dropPartitions,
+                null);
+    }
+
+    static int apply(
+            FormatTablePartitionManager partitionManager,
+            List<Map<String, String>> filesystemPartitions,
+            List<String> partitionKeys,
+            boolean addPartitions,
+            boolean dropPartitions,
+            @Nullable FormatTablePartitionStatsCollector statsCollector) {
         Set<Map<String, String>> registeredPartitions = new HashSet<>();
+        Set<Map<String, String>> customLocationPartitions = new HashSet<>();
         for (Partition partition :
                 partitionManager.listPartitions(Collections.<String, String>emptyMap(), null)) {
             registeredPartitions.add(partition.spec());
+            if (hasCustomLocation(partition)) {
+                customLocationPartitions.add(partition.spec());
+            }
         }
 
         Set<Map<String, String>> filesystemSet = new HashSet<>(filesystemPartitions);
@@ -128,24 +175,51 @@ public class FormatTablePartitionRepair {
         List<Map<String, String>> dropDiff = new ArrayList<>();
         if (dropPartitions) {
             for (Map<String, String> partition : registeredPartitions) {
-                if (!filesystemSet.contains(partition)) {
+                if (!filesystemSet.contains(partition)
+                        && !customLocationPartitions.contains(partition)) {
                     dropDiff.add(partition);
                 }
             }
             sortByCanonicalPath(dropDiff, partitionKeys);
         }
 
-        // A first repair of a pre-existing table can discover far more partitions than any regular
-        // write. Splitting such a diff into per-request batches is the partition catalog's job;
-        // registration is an idempotent upsert and unregistration ignores missing partitions, so a
+        // A first repair can discover far more partitions than any regular write. Splitting the
+        // diff into requests is the partition catalog's job; both halves are idempotent, so a
         // mid-way failure leaves a state a rerun converges from.
-        if (!addDiff.isEmpty()) {
+        if (statsCollector != null) {
+            // Every partition that ends up registered with a directory behind it, not only the
+            // newly added ones: numbers for partitions written outside Paimon are what a repair
+            // exists to correct. Without ADD it stays inside the already registered set.
+            List<Map<String, String>> measured = new ArrayList<>();
+            for (Map<String, String> partition : filesystemPartitions) {
+                if ((addPartitions || registeredPartitions.contains(partition))
+                        && !customLocationPartitions.contains(partition)) {
+                    measured.add(partition);
+                }
+            }
+            sortByCanonicalPath(measured, partitionKeys);
+            if (!measured.isEmpty()) {
+                partitionManager.createPartitions(
+                        measured, true, statsCollector.collect(measured), true, null);
+            }
+        } else if (!addDiff.isEmpty()) {
             partitionManager.createPartitions(addDiff, true);
         }
         if (!dropDiff.isEmpty()) {
             partitionManager.dropPartitions(dropDiff);
         }
         return addDiff.size() + dropDiff.size();
+    }
+
+    private static boolean hasCustomLocation(Partition partition) {
+        Map<String, String> options = partition.options();
+        if (options == null || !options.containsKey(CoreOptions.PATH.key())) {
+            return false;
+        }
+        if (options.get(CoreOptions.PATH.key()) == null) {
+            throw new IllegalStateException("Partition path option must not be null.");
+        }
+        return true;
     }
 
     /** Sort partitions by their canonical path for a stable, deterministic apply order. */

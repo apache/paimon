@@ -173,6 +173,64 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         self.assertIsNone(result)
         evaluator.close()
 
+    def test_and_tracks_only_evaluated_fields(self):
+        fields = _make_fields()
+        indexed = GlobalIndexResult.from_range(Range(42, 42))
+
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(indexed)]
+            if field.id == 0 else [],
+        )
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(method='equal', index=0, field='a', literals=[42]),
+                Predicate(method='equal', index=1, field='b', literals=[99]),
+            ],
+        )
+
+        evaluation = evaluator.evaluate_with_contributing_fields(predicate)
+
+        self.assertIsNotNone(evaluation)
+        self.assertEqual(frozenset([0]), evaluation.contributing_field_ids)
+        self.assertEqual([Range(42, 42)],
+                         evaluation.result.results().to_range_list())
+        evaluator.close()
+
+    def test_discarded_or_branch_does_not_contribute_fields(self):
+        fields = _make_fields()
+        indexed = GlobalIndexResult.from_range(Range(42, 42))
+
+        evaluator = GlobalIndexEvaluator(
+            fields,
+            lambda field: [StubGlobalIndexReader(indexed)]
+            if field.id in (0, 2) else [],
+        )
+        predicate = Predicate(
+            method='and', index=None, field=None,
+            literals=[
+                Predicate(
+                    method='or', index=None, field=None,
+                    literals=[
+                        Predicate(method='equal', index=0, field='a',
+                                  literals=[42]),
+                        Predicate(method='equal', index=1, field='b',
+                                  literals=[99]),
+                    ],
+                ),
+                Predicate(method='equal', index=2, field='c', literals=[42]),
+            ],
+        )
+
+        evaluation = evaluator.evaluate_with_contributing_fields(predicate)
+
+        self.assertIsNotNone(evaluation)
+        self.assertEqual(frozenset([2]), evaluation.contributing_field_ids)
+        self.assertEqual([Range(42, 42)],
+                         evaluation.result.results().to_range_list())
+        evaluator.close()
+
     def test_and_with_disjoint_results(self):
         fields = _make_fields()
         result_a = GlobalIndexResult.from_range(Range(1, 3))

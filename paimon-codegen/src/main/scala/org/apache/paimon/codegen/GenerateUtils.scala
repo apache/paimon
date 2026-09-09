@@ -375,7 +375,7 @@ object GenerateUtils {
     // ordered by type root definition
     case CHAR | VARCHAR => BINARY_STRING
     case BOOLEAN => className[JBoolean]
-    case BINARY | VARBINARY => "byte[]"
+    case BINARY | VARBINARY | GEOMETRY | GEOGRAPHY => "byte[]"
     case DECIMAL => className[Decimal]
     case TINYINT => className[JByte]
     case SMALLINT => className[JShort]
@@ -404,7 +404,7 @@ object GenerateUtils {
         s"(($BINARY_STRING) $rowTerm.getString($indexTerm))"
       case BOOLEAN =>
         s"$rowTerm.getBoolean($indexTerm)"
-      case BINARY | VARBINARY =>
+      case BINARY | VARBINARY | GEOMETRY | GEOGRAPHY =>
         s"$rowTerm.getBinary($indexTerm)"
       case DECIMAL =>
         s"$rowTerm.getDecimal($indexTerm, ${getPrecision(t)}, ${getScale(t)})"
@@ -594,7 +594,7 @@ object GenerateUtils {
       s"$writerTerm.writeString($indexTerm, $fieldValTerm)"
     case BOOLEAN =>
       s"$writerTerm.writeBoolean($indexTerm, $fieldValTerm)"
-    case BINARY | VARBINARY =>
+    case BINARY | VARBINARY | GEOMETRY | GEOGRAPHY =>
       s"$writerTerm.writeBinary($indexTerm, $fieldValTerm, 0, $fieldValTerm.length)"
     case DECIMAL =>
       s"$writerTerm.writeDecimal($indexTerm, $fieldValTerm, ${getPrecision(t)})"

@@ -28,8 +28,8 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -201,7 +201,7 @@ public class SchemaEvolutionTest extends TableTestBase {
                         .option(CoreOptions.SEQUENCE_FIELD.key(), "col1")
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), schema);
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
@@ -219,7 +219,7 @@ public class SchemaEvolutionTest extends TableTestBase {
                         .primaryKey("id")
                         .build();
         TableSchema tableSchema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), baseSchema);
+                SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, tablePath), baseSchema);
 
         // Paimon INT, source BIGINT: Paimon can evolve INT -> BIGINT, compatible.
         List<DataField> bigintFields =
@@ -262,7 +262,8 @@ public class SchemaEvolutionTest extends TableTestBase {
                 upDataFieldStream
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(table.fileIO(), table.location()),
+                                        new FileSystemSchemaManager(
+                                                table.fileIO(), table.location()),
                                         identifier,
                                         catalogLoader,
                                         TypeMapping.defaultMapping()))

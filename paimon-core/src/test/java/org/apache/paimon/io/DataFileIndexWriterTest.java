@@ -36,6 +36,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -158,7 +159,7 @@ public class DataFileIndexWriterTest {
             throws Catalog.TableNotExistException {
         Path tableRoot =
                 fileSystemCatalog.getTableLocation(Identifier.create(tableName, tableName));
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         tableRoot,

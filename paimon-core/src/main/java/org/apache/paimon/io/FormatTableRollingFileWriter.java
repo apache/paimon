@@ -45,7 +45,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
     private final long targetFileSize;
     private final long targetFileRowNum;
     private final List<FileWriterAbortExecutor> closedWriters;
-    private final List<TwoPhaseOutputStream.Committer> committers;
+    private final List<FormatTableWrittenFile> writtenFiles;
 
     private FormatTableSingleFileWriter currentWriter = null;
     private long recordCount = 0;
@@ -75,7 +75,7 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
         this.targetFileSize = targetFileSize;
         this.targetFileRowNum = targetFileRowNum;
         this.closedWriters = new ArrayList<>();
-        this.committers = new ArrayList<>();
+        this.writtenFiles = new ArrayList<>();
     }
 
     public long targetFileSize() {
@@ -116,7 +116,14 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
         currentWriter.close();
         closedWriters.add(currentWriter.abortExecutor());
         if (currentWriter.committers() != null) {
-            committers.addAll(currentWriter.committers());
+            // Read the counts off the writer that produced this file: once it is replaced, the
+            // rows it wrote cannot be recovered without reading the file back.
+            long fileRecordCount = currentWriter.recordCount();
+            long fileSizeInBytes = currentWriter.outputBytes();
+            for (TwoPhaseOutputStream.Committer committer : currentWriter.committers()) {
+                writtenFiles.add(
+                        new FormatTableWrittenFile(committer, fileRecordCount, fileSizeInBytes));
+            }
         }
 
         currentWriter = null;
@@ -128,22 +135,24 @@ public class FormatTableRollingFileWriter implements AutoCloseable {
             currentWriter.abort();
             currentWriter = null;
         }
-        for (TwoPhaseOutputStream.Committer committer : committers) {
+        for (FormatTableWrittenFile writtenFile : writtenFiles) {
+            TwoPhaseOutputStream.Committer committer = writtenFile.committer();
             try {
                 committer.discard(fileIO);
             } catch (Throwable e) {
                 LOG.warn("Exception occurs when discarding file {}.", committer.targetPath(), e);
             }
         }
-        committers.clear();
+        writtenFiles.clear();
         for (FileWriterAbortExecutor abortExecutor : closedWriters) {
             abortExecutor.abort();
         }
         closedWriters.clear();
     }
 
-    public List<TwoPhaseOutputStream.Committer> committers() {
-        return committers;
+    /** The files this writer produced, each with the rows and bytes it holds. */
+    public List<FormatTableWrittenFile> writtenFiles() {
+        return writtenFiles;
     }
 
     @Override

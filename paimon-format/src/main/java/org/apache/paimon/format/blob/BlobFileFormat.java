@@ -65,7 +65,8 @@ public class BlobFileFormat extends FileFormat {
     }
 
     public static boolean isBlobFile(String fileName) {
-        return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER);
+        return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER)
+                || fileName.endsWith("." + VideoFileFormatFactory.IDENTIFIER);
     }
 
     public void setWriteNullOnMissingFile(boolean writeNullOnMissingFile) {

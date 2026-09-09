@@ -87,22 +87,23 @@ public class ChangelogCompactTaskSerializerTest {
 
     private DataFileMeta newFile() {
         return DataFileMeta.create(
-                UUID.randomUUID().toString(),
-                0,
-                1,
-                row(0),
-                row(0),
-                newSimpleStats(0, 1),
-                newSimpleStats(0, 1),
-                0,
-                1,
-                0,
-                0,
-                0L,
-                null,
-                FileSource.APPEND,
-                null,
-                null,
-                null);
+                        UUID.randomUUID().toString(),
+                        0,
+                        1,
+                        row(0),
+                        row(0),
+                        newSimpleStats(0, 1),
+                        newSimpleStats(0, 1),
+                        0,
+                        1,
+                        0,
+                        0,
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null)
+                .withColumnMaxSequenceNumbers(new long[] {1L});
     }
 }

@@ -580,6 +580,8 @@ public class PredicateTest {
         assertThat(executeLike("abcde", "%c.e")).isEqualTo(false);
         assertThat(executeLike("a-c", "a\\_c")).isEqualTo(false);
         assertThat(executeLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(Arrays.asList(executeLike("a%", "a\\%"), executeLike("a\\anything", "a\\%")))
+                .containsExactly(true, false);
         assertThat(executeLike("startX", "start%")).isEqualTo(true);
         assertThat(executeLike("not_startX", "start%")).isEqualTo(false);
         assertThat(executeLike("xxmiddleyy", "%middle%")).isEqualTo(true);
@@ -600,6 +602,24 @@ public class PredicateTest {
         assertThat(getLikeFunc("%end")).isEqualTo(EndsWith.INSTANCE);
         assertThat(getLikeFunc("%middle%")).isEqualTo(Contains.INSTANCE);
         assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
+    }
+
+    @Test
+    public void testLikeSingleCharacterWildcardMatchesLineTerminators() {
+        String[] lineTerminators = {"\n", "\r", "\u0085", "\u2028", "\u2029"};
+        for (String lineTerminator : lineTerminators) {
+            assertThat(
+                            Like.INSTANCE.test(
+                                    DataTypes.STRING(),
+                                    fromString("a" + lineTerminator + "b"),
+                                    fromString("a_b")))
+                    .isTrue();
+        }
+
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a_b")))
+                .isFalse();
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a__b")))
+                .isTrue();
     }
 
     private boolean executeLike(String s, String pattern) {

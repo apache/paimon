@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.CatalogOptions;
@@ -35,6 +36,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -77,6 +79,7 @@ public class FormatReadBuilder implements ReadBuilder {
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
+    @Nullable private transient FormatTableFileIOResolver fileIOResolver;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -182,6 +185,11 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
+        return createReader(dataSplit, null);
+    }
+
+    protected RecordReader<InternalRow> createReader(
+            FormatDataSplit dataSplit, @Nullable ReadBatchSizer readBatchSizer) throws IOException {
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -198,21 +206,33 @@ public class FormatReadBuilder implements ReadBuilder {
                         table.partitionKeys(), readType().getFields(), table.partitionType());
 
         BinaryRow partition = dataSplit.partition();
+        FileIO fileIO = fileIOResolver().fileIO(dataSplit.useCatalogContextFileIO());
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
         for (FormatDataSplit.FileMeta file : dataSplit.files()) {
-            suppliers.add(() -> createFileReader(file, partition, readerFactory, partitionMapping));
+            suppliers.add(
+                    () ->
+                            createFileReader(
+                                    fileIO,
+                                    file,
+                                    partition,
+                                    readerFactory,
+                                    partitionMapping,
+                                    readBatchSizer));
         }
         return ConcatRecordReader.create(suppliers);
     }
 
     private RecordReader<InternalRow> createFileReader(
+            FileIO fileIO,
             FormatDataSplit.FileMeta file,
             @Nullable BinaryRow partition,
             FormatReaderFactory readerFactory,
-            Pair<int[], RowType> partitionMapping)
+            Pair<int[], RowType> partitionMapping,
+            @Nullable ReadBatchSizer readBatchSizer)
             throws IOException {
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), file.filePath(), file.fileSize(), null);
+                new FormatReaderContext(
+                        fileIO, file.filePath(), file.fileSize(), null, readBatchSizer);
         try {
             FileRecordReader<InternalRow> reader;
             Long length = file.length();
@@ -238,7 +258,14 @@ public class FormatReadBuilder implements ReadBuilder {
                     formatReaderContext.filePath());
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
-            throw e;
+            // A split spans many files that a Format Table's writers may have written differently.
+            // Naming the one that failed is the only way to tell them apart from the outside.
+            throw new IOException(
+                    "Failed to read file "
+                            + formatReaderContext.filePath()
+                            + " of table "
+                            + table.fullName(),
+                    e);
         }
     }
 
@@ -247,6 +274,13 @@ public class FormatReadBuilder implements ReadBuilder {
                 rowType.getFieldNames().stream()
                         .filter(name -> !partitionKeys.contains(name))
                         .collect(Collectors.toList()));
+    }
+
+    private synchronized FormatTableFileIOResolver fileIOResolver() {
+        if (fileIOResolver == null) {
+            fileIOResolver = new FormatTableFileIOResolver(table);
+        }
+        return fileIOResolver;
     }
 
     // ===================== Unsupported ===============================

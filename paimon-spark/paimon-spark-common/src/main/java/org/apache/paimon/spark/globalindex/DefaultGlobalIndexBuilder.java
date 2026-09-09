@@ -39,6 +39,8 @@ import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -61,6 +63,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     private final String indexType;
     private final Range rowRange;
     private final Options options;
+    private final @Nullable byte[] sourceMeta;
 
     public DefaultGlobalIndexBuilder(
             FileStoreTable table,
@@ -78,7 +81,8 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 Collections.emptyList(),
                 indexType,
                 rowRange,
-                options);
+                options,
+                null);
     }
 
     public DefaultGlobalIndexBuilder(
@@ -90,6 +94,28 @@ public class DefaultGlobalIndexBuilder implements Serializable {
             String indexType,
             Range rowRange,
             Options options) {
+        this(
+                table,
+                partition,
+                readType,
+                indexField,
+                extraFields,
+                indexType,
+                rowRange,
+                options,
+                null);
+    }
+
+    public DefaultGlobalIndexBuilder(
+            FileStoreTable table,
+            BinaryRow partition,
+            RowType readType,
+            DataField indexField,
+            List<DataField> extraFields,
+            String indexType,
+            Range rowRange,
+            Options options,
+            @Nullable byte[] sourceMeta) {
         this.table = table;
         this.partition = partition;
         this.readType = readType;
@@ -102,6 +128,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         this.indexType = indexType;
         this.rowRange = rowRange;
         this.options = options;
+        this.sourceMeta = sourceMeta;
     }
 
     /** The primary index column followed by the extra columns, in index order. */
@@ -131,7 +158,8 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                         rowRange,
                         indexedFields(),
                         indexType,
-                        resultEntries);
+                        resultEntries,
+                        sourceMeta);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());

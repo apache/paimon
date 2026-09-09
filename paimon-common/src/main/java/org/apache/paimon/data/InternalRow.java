@@ -126,6 +126,8 @@ public interface InternalRow extends DataGetters {
                 return Boolean.class;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 return byte[].class;
             case DECIMAL:
                 return Decimal.class;
@@ -180,6 +182,8 @@ public interface InternalRow extends DataGetters {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 fieldGetter = row -> row.getBinary(fieldPos);
                 break;
             case DECIMAL:

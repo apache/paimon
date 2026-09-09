@@ -105,6 +105,7 @@ public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestVectorGlobalIndexReader(

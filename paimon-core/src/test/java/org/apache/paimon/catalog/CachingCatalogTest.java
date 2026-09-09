@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -363,8 +364,56 @@ class CachingCatalogTest extends CatalogTestBase {
         when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
 
         assertThat(catalog.listPartitions(identifier)).isEmpty();
-        catalog.createPartitions(identifier, singletonList(spec), false);
+        catalog.createPartitions(identifier, singletonList(spec), false, null, false, null);
 
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithStatisticsForwardsAndInvalidatesPartitionCache()
+            throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Partition created = new Partition(spec, 3, 300, 1, 1000, -1, false);
+        List<PartitionStatistics> statistics =
+                singletonList(new PartitionStatistics(spec, 3, 300, 1, 1000, -1));
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(identifier, singletonList(spec), true, statistics, false, null);
+
+        // Dropping the forward would leave the statistics unreported and nothing else would say so.
+        Mockito.verify(wrapped)
+                .createPartitions(identifier, singletonList(spec), true, statistics, false, null);
+        // A report changes what a partition holds, so the cached listing is stale after it.
+        assertThat(catalog.listPartitions(identifier)).containsExactly(created);
+    }
+
+    @Test
+    public void testCreatePartitionsWithOptionsForwardsAndInvalidatesPartitionCache()
+            throws Exception {
+        Catalog wrapped = Mockito.mock(Catalog.class);
+        TestableCachingCatalog catalog =
+                new TestableCachingCatalog(wrapped, EXPIRATION_TTL, ticker);
+        Identifier identifier = new Identifier("db", "tbl");
+        Map<String, String> spec = singletonMap("dt", "20260717");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), "file:/archive/dt=20260717");
+        options.put("owner", "data-platform");
+        List<Map<String, String>> partitionOptions = singletonList(options);
+        Partition created = new Partition(spec, 0, 0, 0, 0, -1, false);
+        when(wrapped.listPartitions(identifier)).thenReturn(emptyList(), singletonList(created));
+
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+        catalog.createPartitions(
+                identifier, singletonList(spec), true, null, false, partitionOptions);
+
+        Mockito.verify(wrapped)
+                .createPartitions(
+                        identifier, singletonList(spec), true, null, false, partitionOptions);
         assertThat(catalog.listPartitions(identifier)).containsExactly(created);
     }
 

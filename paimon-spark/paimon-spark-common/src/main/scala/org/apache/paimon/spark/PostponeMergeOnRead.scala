@@ -48,7 +48,7 @@ final private[spark] class PostponeMergeOnRead(scan: PaimonBaseScan) {
 
   def enabled: Boolean = PostponeMergeOnRead.usesCustomSource(scan.table)
 
-  def plan(defaultBucketNum: Int): Option[MergePlan] = synchronized {
+  def plan(): Option[MergePlan] = synchronized {
     if (!enabled) {
       return None
     }
@@ -64,7 +64,6 @@ final private[spark] class PostponeMergeOnRead(scan: PaimonBaseScan) {
 
           builder
             .withReadType(scan.readTableRowType)
-            .withDefaultBucketNum(defaultBucketNum)
             .withMetricRegistry(scan.paimonMetricsRegistry)
           if (scan.pushedDataFilters.nonEmpty) {
             builder.withFilter(PredicateBuilder.and(scan.pushedDataFilters.toList.asJava))

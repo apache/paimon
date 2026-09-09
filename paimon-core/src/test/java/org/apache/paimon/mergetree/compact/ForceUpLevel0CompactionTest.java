@@ -60,6 +60,25 @@ public class ForceUpLevel0CompactionTest {
         assertThat(result.get().outputLevel()).isEqualTo(2);
     }
 
+    @Test
+    public void testForceCompaction0ConsidersLevel2() {
+        ForceUpLevel0Compaction compaction =
+                new ForceUpLevel0Compaction(ofTesting(200, 1, 5), null);
+
+        Optional<CompactUnit> result =
+                compaction.pick(3, Arrays.asList(run(0, 1), run(1, 99), run(2, 100)));
+
+        assertThat(result).isPresent();
+        assertThat(result.get().files()).hasSize(3);
+        assertThat(result.get().outputLevel()).isEqualTo(2);
+
+        result = compaction.pick(3, Arrays.asList(run(0, 1), run(1, 99), run(2, 102)));
+
+        assertThat(result).isPresent();
+        assertThat(result.get().files()).hasSize(2);
+        assertThat(result.get().outputLevel()).isEqualTo(1);
+    }
+
     private LevelSortedRun run(int level, int size) {
         return new LevelSortedRun(level, SortedRun.fromSingle(file(size)));
     }

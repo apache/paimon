@@ -40,28 +40,20 @@ public class LambdaScalarFunction implements UnboundFunction, Serializable {
 
     public LambdaScalarFunction(
             String functionName, DataType outputType, String javaType, String lambdaExpression) {
-        try {
-            this.outputType = outputType;
-            this.javaType = javaType;
-            this.functionName = functionName;
-            this.lambdaExpression = lambdaExpression;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to compile lambda expression", e);
-        }
+        this.outputType = outputType;
+        this.javaType = javaType;
+        this.functionName = functionName;
+        this.lambdaExpression = lambdaExpression;
     }
 
     @Override
     public BoundFunction bind(StructType inputType) {
-        try {
-            List<DataType> inputTypes = new ArrayList<>();
-            for (StructField field : inputType.fields()) {
-                inputTypes.add(field.dataType());
-            }
-            return new PaimonSparkScalarFunction(
-                    functionName, inputTypes, outputType, javaType, this.lambdaExpression);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        List<DataType> inputTypes = new ArrayList<>();
+        for (StructField field : inputType.fields()) {
+            inputTypes.add(field.dataType());
         }
+        return new PaimonSparkScalarFunction(
+                functionName, inputTypes, outputType, javaType, this.lambdaExpression);
     }
 
     @Override

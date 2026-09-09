@@ -28,10 +28,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.index.pksorted.PkSortedIndexFile;
 import org.apache.paimon.index.pkvector.PkVectorAnnSegmentFile;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestEntrySerializer;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
@@ -111,6 +113,19 @@ public class IndexFileHandler {
 
     public List<IndexManifestEntry> scan(String indexType) {
         return scan(snapshotManager.latestSnapshot(), indexType);
+    }
+
+    public CloseableIterator<BinaryIndexManifestEntry> scan(
+            BinaryIndexManifestEntry.Projection projection) {
+        return scan(snapshotManager.latestSnapshot(), projection);
+    }
+
+    public CloseableIterator<BinaryIndexManifestEntry> scan(
+            @Nullable Snapshot snapshot, BinaryIndexManifestEntry.Projection projection) {
+        if (snapshot == null || snapshot.indexManifest() == null) {
+            return CloseableIterator.empty();
+        }
+        return indexManifestFile.scan(snapshot.indexManifest(), projection);
     }
 
     public List<IndexManifestEntry> scan(@Nullable Snapshot snapshot, String indexType) {

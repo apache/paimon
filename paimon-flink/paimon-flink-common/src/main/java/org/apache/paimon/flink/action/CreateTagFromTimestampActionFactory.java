@@ -38,7 +38,7 @@ public class CreateTagFromTimestampActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Long timestamp = Long.parseLong(params.get(TIMESTAMP));
+        Long timestamp = Long.parseLong(params.getRequired(TIMESTAMP));
         String timeRetained = params.get(TIME_RETAINED);
         Map<String, String> catalogConfig = catalogConfigMap(params);
 

@@ -62,6 +62,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
 
     @Override
     public List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
+        this.planSnapshot = plan.snapshot();
         return readBatch(plan.splits());
     }
 

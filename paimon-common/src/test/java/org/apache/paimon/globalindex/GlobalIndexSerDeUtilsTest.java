@@ -33,6 +33,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link GlobalIndexResultSerializer}. */
 public class GlobalIndexSerDeUtilsTest {
 
+    private static final int VERSION_1 = 1;
+
     @Test
     public void testSerializeAndDeserializeGlobalIndexResult() throws IOException {
         RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5, 10, 100, 1000);
@@ -54,6 +56,32 @@ public class GlobalIndexSerDeUtilsTest {
 
         assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testSerializeAndDeserializeEmptyScoredGlobalIndexResult() throws IOException {
+        ScoredGlobalIndexResult original = ScoredGlobalIndexResult.createEmpty();
+
+        byte[] serialized = serialize(original);
+        GlobalIndexResult deserialized = deserialize(serialized);
+
+        assertThat(deserialized).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(deserialized.results().isEmpty()).isTrue();
+        assertThat(serialized).isNotEqualTo(serialize(GlobalIndexResult.createEmpty()));
+    }
+
+    @Test
+    public void testEmptyScoredGlobalIndexResultConvenienceMethods() throws IOException {
+        GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
+        ScoredGlobalIndexResult original = ScoredGlobalIndexResult.createEmpty();
+
+        ScoredGlobalIndexResult deserialized =
+                serializer.deserialize(serializer.serialize(original));
+        GlobalIndexResult copied = serializer.copy(original);
+
+        assertThat(deserialized.results().isEmpty()).isTrue();
+        assertThat(copied).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(copied.results().isEmpty()).isTrue();
     }
 
     @Test
@@ -106,6 +134,42 @@ public class GlobalIndexSerDeUtilsTest {
         assertThat(scoreGetter.score(Long.MAX_VALUE - 1)).isEqualTo(0.1f);
     }
 
+    @Test
+    public void testDeserializeV1GlobalIndexResult() throws IOException {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5, 10);
+
+        GlobalIndexResult deserialized = deserialize(serializeV1(GlobalIndexResult.create(bitmap)));
+
+        assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(deserialized.results()).isEqualTo(bitmap);
+    }
+
+    @Test
+    public void testDeserializeV1ScoredGlobalIndexResult() throws IOException {
+        RoaringNavigableMap64 bitmap = RoaringNavigableMap64.bitmapOf(1, 5);
+        Map<Long, Float> scoreMap = new HashMap<>();
+        scoreMap.put(1L, 0.9f);
+        scoreMap.put(5L, 0.8f);
+
+        GlobalIndexResult deserialized =
+                deserialize(serializeV1(ScoredGlobalIndexResult.create(bitmap, scoreMap::get)));
+
+        assertThat(deserialized).isInstanceOf(ScoredGlobalIndexResult.class);
+        ScoredGlobalIndexResult scored = (ScoredGlobalIndexResult) deserialized;
+        assertThat(scored.results()).isEqualTo(bitmap);
+        assertThat(scored.scoreGetter().score(1L)).isEqualTo(0.9f);
+        assertThat(scored.scoreGetter().score(5L)).isEqualTo(0.8f);
+    }
+
+    @Test
+    public void testDeserializeV1EmptyScoredGlobalIndexResult() throws IOException {
+        GlobalIndexResult deserialized =
+                deserialize(serializeV1(ScoredGlobalIndexResult.createEmpty()));
+
+        assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(deserialized.results().isEmpty()).isTrue();
+    }
+
     private byte[] serialize(GlobalIndexResult result) throws IOException {
         GlobalIndexResultSerializer globalIndexResultSerializer = new GlobalIndexResultSerializer();
         DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(1024);
@@ -117,5 +181,26 @@ public class GlobalIndexSerDeUtilsTest {
         GlobalIndexResultSerializer globalIndexResultSerializer = new GlobalIndexResultSerializer();
         DataInputDeserializer dataInputDeserializer = new DataInputDeserializer(data);
         return globalIndexResultSerializer.deserialize(dataInputDeserializer);
+    }
+
+    private byte[] serializeV1(GlobalIndexResult result) throws IOException {
+        DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(1024);
+        dataOutputSerializer.writeInt(VERSION_1);
+
+        RoaringNavigableMap64 bitmap = result.results();
+        byte[] bitmapBytes = bitmap.serialize();
+        dataOutputSerializer.writeInt(bitmapBytes.length);
+        dataOutputSerializer.write(bitmapBytes);
+
+        if (result instanceof ScoredGlobalIndexResult) {
+            dataOutputSerializer.writeInt(bitmap.getIntCardinality());
+            ScoreGetter scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
+            for (long rowId : bitmap) {
+                dataOutputSerializer.writeFloat(scoreGetter.score(rowId));
+            }
+        } else {
+            dataOutputSerializer.writeInt(0);
+        }
+        return dataOutputSerializer.getCopyOfBuffer();
     }
 }

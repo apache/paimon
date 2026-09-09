@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -48,9 +49,12 @@ public class StaticPartitionLoader extends PartitionLoader {
         String defaultPartitionName = Options.fromMap(table.options()).get(PARTITION_DEFAULT_NAME);
         InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
         for (Map<String, String> spec : scanPartitions) {
+            Map<String, String> completedSpec = new LinkedHashMap<>(spec);
+            table.partitionKeys()
+                    .forEach(key -> completedSpec.putIfAbsent(key, defaultPartitionName));
             GenericRow row =
                     InternalRowPartitionComputer.convertSpecToInternalRow(
-                            spec, partitionType, defaultPartitionName);
+                            completedSpec, partitionType, defaultPartitionName);
             partitions.add(serializer.toBinaryRow(row).copy());
         }
     }

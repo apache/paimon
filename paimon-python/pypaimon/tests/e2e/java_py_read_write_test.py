@@ -20,6 +20,8 @@ import json
 import os
 import sys
 import unittest
+import uuid
+from decimal import Decimal
 
 import pandas as pd
 import pyarrow as pa
@@ -27,7 +29,7 @@ from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
 from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
-from pypaimon.schema.data_types import VectorType
+from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
 
@@ -1552,12 +1554,55 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 {4: b'java-omega'},
             ],
         )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'java-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'java-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'java-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'java-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'java-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'java-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'java-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
 
     def test_write_map_blob_for_java(self):
         map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())
+        compact_decimal_map_blob_type = pa.map_(
+            pa.decimal128(10, 2), pa.large_binary())
+        high_decimal_map_blob_type = pa.map_(
+            pa.decimal128(20, 2), pa.large_binary())
+        date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
+        time_map_blob_type = pa.map_(pa.time32('ms'), pa.large_binary())
+        binary_schema_type = pa.map_(pa.binary(4), pa.large_binary())
+        varbinary_schema_type = pa.map_(pa.binary(), pa.large_binary())
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('payloads', map_blob_type),
+            ('boolean_payloads', boolean_map_blob_type),
+            ('compact_decimal_payloads', compact_decimal_map_blob_type),
+            ('high_decimal_payloads', high_decimal_map_blob_type),
+            ('date_payloads', date_map_blob_type),
+            ('time_payloads', time_map_blob_type),
+            ('binary_payloads', binary_schema_type),
+            ('varbinary_payloads', varbinary_schema_type),
         ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
@@ -1567,6 +1612,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'bucket': '-1',
             },
         )
+        pa_schema = PyarrowFieldParser.from_paimon_schema(schema.fields)
+        binary_map_blob_type = pa_schema.field('binary_payloads').type
+        varbinary_map_blob_type = pa_schema.field('varbinary_payloads').type
         table_name = 'default.map_blob_python_test'
         self.catalog.drop_table(table_name, True)
         self.catalog.create_table(table_name, schema, False)
@@ -1582,6 +1630,51 @@ class JavaPyReadWriteTest(unittest.TestCase):
                     [(4, b'python-omega')],
                 ],
                 type=map_blob_type,
+            ),
+            'boolean_payloads': pa.array(
+                [[(True, b'python-boolean')], None, None, None],
+                type=boolean_map_blob_type,
+            ),
+            'compact_decimal_payloads': pa.array(
+                [[(Decimal('12.34'), b'python-compact-decimal')],
+                 None, None, None],
+                type=compact_decimal_map_blob_type,
+            ),
+            'high_decimal_payloads': pa.array(
+                [[(
+                    Decimal('123456789012345678.90'),
+                    b'python-high-decimal',
+                )], None, None, None],
+                type=high_decimal_map_blob_type,
+            ),
+            'date_payloads': pa.array(
+                [[(
+                    datetime.date(1969, 12, 31),
+                    b'python-date',
+                )], None, None, None],
+                type=date_map_blob_type,
+            ),
+            'time_payloads': pa.array(
+                [[(
+                    datetime.time(12, 34, 56, 789000),
+                    b'python-time',
+                )], None, None, None],
+                type=time_map_blob_type,
+            ),
+            'binary_payloads': pa.array(
+                [
+                    [
+                        (bytes([0, 255, 1, 2]), b'python-binary'),
+                    ],
+                    None,
+                    None,
+                    None,
+                ],
+                type=binary_map_blob_type,
+            ),
+            'varbinary_payloads': pa.array(
+                [[(b'', b'python-varbinary')], None, None, None],
+                type=varbinary_map_blob_type,
             ),
         }, schema=pa_schema)
         write_builder = table.new_batch_write_builder()
@@ -1607,13 +1700,40 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 {4: b'python-omega'},
             ],
         )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'python-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'python-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'python-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'python-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'python-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'python-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'python-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
 
     def test_compact_conflict_shard_update(self):
         """
         1. Java writes 5 base files (testCompactConflictWriteBase)
         2. pypaimon ShardTableUpdator scans table, prepares evolution
         3. Java runs compact (testCompactConflictRunCompact)
-        4. pypaimon commits stale evolution -> conflict detected, raises RuntimeError
+        4. pypaimon rebases the stale evolution files and commits successfully
         """
         import subprocess
 
@@ -1659,13 +1779,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
                          f"Java compact failed:\n{result.stdout}\n{result.stderr}")
         print("Java compact completed")
 
-        # Step 4: pypaimon commits stale evolution -> conflict detected
+        # Step 4: pypaimon rewrites stale evolution files against the compacted range
         tc = wb.new_commit()
-        with self.assertRaises(RuntimeError) as ctx:
-            tc.commit(stale_commit_msgs)
-        self.assertIn("conflict", str(ctx.exception))
+        tc.commit(stale_commit_msgs)
         tc.close()
-        print(f"Conflict detected as expected: {ctx.exception}")
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            rows_read,
+            sum(value is not None for value in result.column('f2').to_pylist()),
+        )
 
     def test_blob_compact_conflict_update(self):
         import subprocess
@@ -1807,7 +1932,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
-        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.num_rows, 7)
 
         # VARIANT maps to struct<value: binary NOT NULL, metadata: binary NOT NULL>
         payload_field = result.schema.field('payload')
@@ -1848,6 +1973,31 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Row 3: Carol, [1,2,3]
         carol_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(3)]).to_python()
         self.assertEqual(carol_data, [1, 2, 3])
+
+        # Row 4: Dave, DATE '2024-01-15'
+        dave_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(4)]).to_python()
+        self.assertEqual(dave_data, datetime.date(2024, 1, 15))
+
+        # Row 5: Eve, TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+        eve_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(5)]).to_python()
+        self.assertEqual(
+            eve_data, datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        )
+
+        # Row 6: Frank, TIMESTAMP '2024-01-15 12:30:45.123456 UTC'
+        frank_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(6)]).to_python()
+        self.assertEqual(
+            frank_data,
+            datetime.datetime(
+                2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+            ),
+        )
+
+        # Row 7: Grace, UUID '12345678-1234-5678-1234-567812345678'
+        grace_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(7)]).to_python()
+        self.assertEqual(
+            grace_data, uuid.UUID('12345678-1234-5678-1234-567812345678')
+        )
 
         print("test_py_read_variant_table: verified {} VARIANT rows".format(result.num_rows))
 
@@ -1905,6 +2055,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             id=2  payload=[10,20,30]
             id=3  payload="hello"
             id=4  payload=null
+            id=5  payload=DATE '2024-01-15'
+            id=6  payload=TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+            id=7  payload=UUID '12345678-1234-5678-1234-567812345678'
         """
         variant_type = pa.struct([
             pa.field('value', pa.binary(), nullable=False),
@@ -1922,15 +2075,24 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
+        test_uuid = uuid.UUID('12345678-1234-5678-1234-567812345678')
         variant_col = GenericVariant.to_arrow_array([
             GenericVariant.from_python({"name": "test", "value": 42}),
             GenericVariant.from_python([10, 20, 30]),
             GenericVariant.from_python("hello"),
             None,  # SQL NULL at the column level, not a VARIANT containing JSON null
+            GenericVariant.from_python(datetime.date(2024, 1, 15)),
+            GenericVariant.from_python(
+                datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+            ),
+            GenericVariant.from_python(test_uuid),
         ])
         data = pa.table({
-            'id': pa.array([1, 2, 3, 4], type=pa.int32()),
-            'name': pa.array(['row1', 'row2', 'row3', 'row4'], type=pa.string()),
+            'id': pa.array([1, 2, 3, 4, 5, 6, 7], type=pa.int32()),
+            'name': pa.array(
+                ['row1', 'row2', 'row3', 'row4', 'row5', 'row6', 'row7'],
+                type=pa.string()
+            ),
             'payload': variant_col,
         }, schema=pa_schema)
 
@@ -1941,7 +2103,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
-        print("test_py_write_variant_table: wrote 4 VARIANT rows to {}".format(table_name))
+        print("test_py_write_variant_table: wrote 7 VARIANT rows to {}".format(table_name))
 
         # Also write a shredded VARIANT table (py_variant_shredded_test) for Java to read.
         # Python shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields of 'payload'

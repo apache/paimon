@@ -19,12 +19,11 @@ import logging
 from typing import Dict, List, Optional
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
-
-logger = logging.getLogger(__name__)
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.file_store_commit import FileStoreCommit
+
+logger = logging.getLogger(__name__)
 
 
 class TableCommit:
@@ -61,47 +60,41 @@ class TableCommit:
         """Register a callback to be invoked after each successful commit."""
         self._commit_callbacks.append(callback)
 
-    def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
+    def _commit(
+            self,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int = BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties: Optional[Dict[str, str]] = None):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
+        commit_kwargs = {
+            "commit_messages": non_empty_messages,
+            "commit_identifier": commit_identifier,
+        }
+        if snapshot_properties is not None:
+            commit_kwargs["snapshot_properties"] = snapshot_properties
 
-        try:
-            if self.overwrite_partition is not None:
-                # Always call overwrite() even with empty messages, so that
-                # FileStoreCommit.overwrite can handle the empty case properly
-                # (e.g. static overwrite with empty data should delete the partition).
-                logger.info(
-                    "Committing overwrite to table %s, %d non-empty messages",
-                    self.table.identifier, len(non_empty_messages)
-                )
-                self.file_store_commit.overwrite(
-                    overwrite_partition=self.overwrite_partition,
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-            else:
-                if not non_empty_messages:
-                    return
-                logger.info(
-                    "Committing table %s, %d non-empty messages",
-                    self.table.identifier, len(non_empty_messages)
-                )
-                self.file_store_commit.commit(
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-        except CommitConflictError:
-            # Conflict detection runs before manifest and snapshot creation, so
-            # these files are known to be uncommitted. Generic commit failures
-            # are intentionally not aborted because their success is uncertain.
-            try:
-                self.file_store_commit.abort(non_empty_messages)
-            except Exception:
-                logger.warning(
-                    "Failed to abort files after a deterministic commit "
-                    "conflict.",
-                    exc_info=True,
-                )
-            raise
+        # Never abort files in response to a commit exception. Preserving
+        # possible orphan files is safer than deleting files which another
+        # attempt may still commit or which a snapshot may already reference.
+        if self.overwrite_partition is not None:
+            # Always call overwrite() even with empty messages, so that
+            # FileStoreCommit.overwrite can handle the empty case properly
+            # (e.g. static overwrite with empty data should delete the partition).
+            logger.info(
+                "Committing overwrite to table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.overwrite(
+                overwrite_partition=self.overwrite_partition,
+                **commit_kwargs)
+        else:
+            if not non_empty_messages:
+                return
+            logger.info(
+                "Committing table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.commit(**commit_kwargs)
 
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)
@@ -117,9 +110,16 @@ class BatchTableCommit(TableCommit):
         super().__init__(table, commit_user, static_partition)
         self.batch_committed = False
 
-    def commit(self, commit_messages: List[CommitMessage]):
+    def commit(
+            self,
+            commit_messages: List[CommitMessage],
+            snapshot_properties: Optional[Dict[str, str]] = None):
+        """Commit once, attaching optional properties to the snapshot."""
         self._check_committed()
-        self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+        self._commit(
+            commit_messages,
+            BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties=snapshot_properties)
 
     def truncate_table(self) -> None:
         """Truncate the entire table, deleting all data."""
@@ -144,5 +144,13 @@ class StreamTableCommit(TableCommit):
     :meth:`StreamTableWrite.prepare_commit`.
     """
 
-    def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        self._commit(commit_messages, commit_identifier)
+    def commit(
+            self,
+            commit_messages: List[CommitMessage],
+            commit_identifier: int,
+            snapshot_properties: Optional[Dict[str, str]] = None):
+        """Commit a stream checkpoint with optional snapshot properties."""
+        self._commit(
+            commit_messages,
+            commit_identifier,
+            snapshot_properties=snapshot_properties)

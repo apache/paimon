@@ -16,8 +16,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import time
 import unittest
+import uuid
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
@@ -30,6 +33,7 @@ from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.json_util import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
@@ -102,6 +106,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             result = catalog.commit_snapshot(
                 self.identifier,
                 "test-uuid",
+                "base-snapshot-uuid",
                 self.test_snapshot,
                 self.test_statistics
             )
@@ -113,6 +118,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             mock_api_instance.commit_snapshot.assert_called_once_with(
                 self.identifier,
                 "test-uuid",
+                "base-snapshot-uuid",
                 self.test_snapshot,
                 self.test_statistics
             )
@@ -134,6 +140,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
                 catalog.commit_snapshot(
                     self.identifier,
                     "test-uuid",
+                    "base-snapshot-uuid",
                     self.test_snapshot,
                     self.test_statistics
                 )
@@ -155,6 +162,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
                 catalog.commit_snapshot(
                     self.identifier,
                     "test-uuid",
+                    "base-snapshot-uuid",
                     self.test_snapshot,
                     self.test_statistics
                 )
@@ -168,14 +176,38 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
         request = CommitTableRequest(
             table_id="test-uuid",
+            base_snapshot_uuid="base-snapshot-uuid",
             snapshot=self.test_snapshot,
             statistics=self.test_statistics
         )
 
         # Verify request fields
         self.assertEqual(request.table_id, "test-uuid")
+        self.assertEqual(request.base_snapshot_uuid, "base-snapshot-uuid")
         self.assertEqual(request.snapshot, self.test_snapshot)
         self.assertEqual(request.statistics, self.test_statistics)
+
+        legacy_request = json.loads(JSON.to_json(request))
+        legacy_request.pop("baseSnapshotUuid")
+        self.assertIsNone(
+            JSON.from_json(
+                json.dumps(legacy_request), CommitTableRequest
+            ).base_snapshot_uuid
+        )
+
+    def test_snapshot_uuid_round_trip_and_legacy_compatibility(self):
+        snapshot_uuid = self.test_snapshot.uuid
+        self.assertEqual(str(uuid.UUID(snapshot_uuid)), snapshot_uuid)
+        self.assertEqual(
+            snapshot_uuid,
+            JSON.from_json(JSON.to_json(self.test_snapshot), Snapshot).uuid,
+        )
+
+        legacy_snapshot = json.loads(JSON.to_json(self.test_snapshot))
+        legacy_snapshot.pop("uuid")
+        self.assertIsNone(
+            JSON.from_json(json.dumps(legacy_snapshot), Snapshot).uuid
+        )
 
     def test_commit_table_response_creation(self):
         """Test CommitTableResponse creation."""
@@ -209,6 +241,7 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
                 result = api.commit_snapshot(
                     self.identifier,
                     "test-uuid",
+                    "base-snapshot-uuid",
                     self.test_snapshot,
                     self.test_statistics
                 )
@@ -218,6 +251,10 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
                 # Verify client was called correctly
                 mock_client.post_with_response_type.assert_called_once()
+                request = mock_client.post_with_response_type.call_args[0][1]
+                self.assertEqual(
+                    request.base_snapshot_uuid, "base-snapshot-uuid"
+                )
 
     def test_rest_catalog_commit_snapshot_with_lance_format(self):
         """Test snapshot commit with Lance format table."""
@@ -296,6 +333,42 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
 class TestRESTCommit(RESTBaseTest):
 
+    def test_commit_snapshot_checks_base_uuid(self):
+        latest = self.table.snapshot_manager().get_latest_snapshot()
+        next_snapshot = replace(
+            latest,
+            id=latest.id + 1,
+            uuid=str(uuid.uuid4()),
+        )
+        table_uuid = self.table.catalog_environment.uuid
+
+        self.assertFalse(
+            self.rest_catalog.commit_snapshot(
+                self.table.identifier,
+                table_uuid,
+                "wrong-base-snapshot-uuid",
+                next_snapshot,
+                [],
+            )
+        )
+        self.assertEqual(
+            latest.id,
+            self.table.snapshot_manager().get_latest_snapshot().id,
+        )
+        self.assertTrue(
+            self.rest_catalog.commit_snapshot(
+                self.table.identifier,
+                table_uuid,
+                latest.uuid,
+                next_snapshot,
+                [],
+            )
+        )
+        self.assertEqual(
+            next_snapshot,
+            self.table.snapshot_manager().get_latest_snapshot(),
+        )
+
     def test_multiple_row_tracking_commits_preserve_all_rows(self):
         pa_schema = pa.schema([('id', pa.int32())])
         schema = Schema.from_pyarrow_schema(
@@ -347,8 +420,8 @@ class TestRESTCommit(RESTBaseTest):
 
         real_commit = tc.file_store_commit.snapshot_commit.commit
 
-        def commit_then_raise(sn, st):
-            real_commit(sn, st)
+        def commit_then_raise(base_snapshot_uuid, sn, st):
+            real_commit(base_snapshot_uuid, sn, st)
             raise RuntimeError("simulated")
 
         with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):

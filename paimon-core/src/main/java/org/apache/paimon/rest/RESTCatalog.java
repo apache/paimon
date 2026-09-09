@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -39,6 +40,8 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.PermissionManagement;
+import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -56,6 +59,7 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -64,6 +68,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTablePartitionPathResolver;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -81,6 +86,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -135,6 +141,16 @@ public class RESTCatalog implements Catalog {
     @Override
     public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(context);
+    }
+
+    @Experimental
+    public PermissionManagement permissionManagement() {
+        return new RESTPermissionManagement(api);
+    }
+
+    @Experimental
+    public PolicyManagement policyManagement() {
+        return new RESTPolicyManagement(api);
     }
 
     @Override
@@ -309,7 +325,7 @@ public class RESTCatalog implements Catalog {
             return SystemTableLoader.loadGlobalTableNamesPaged(
                     context.options(), maxResults, pageToken, tableNamePattern, tableType);
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException(e.getMessage());
+            throw new BadRequestException(e, "%s", e.getMessage());
         }
     }
 
@@ -463,14 +479,44 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        try {
+            return Optional.ofNullable(api.loadSchema(identifier, version));
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SCHEMA)) {
+                return Optional.empty();
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listSchemasPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
         try {
-            return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
+            return api.commitSnapshot(
+                    identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
@@ -745,15 +791,28 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        createPartitions(identifier, partitions, true);
+        createPartitions(identifier, partitions, true, null, false, null);
     }
 
     @Override
     public void createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
+        List<Map<String, String>> canonicalOptions =
+                canonicalizePartitionOptions(identifier, partitions, partitionOptions);
         try {
-            api.createPartitions(identifier, partitions, ignoreIfExists);
+            api.createPartitions(
+                    identifier,
+                    partitions,
+                    ignoreIfExists,
+                    statistics,
+                    replaceStatistics,
+                    canonicalOptions);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -766,7 +825,78 @@ public class RESTCatalog implements Catalog {
                             identifier, e.getMessage()));
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (NotImplementedException e) {
+            if (canonicalOptions == null) {
+                throw e;
+            }
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "REST Catalog server does not support partition options for table %s.",
+                            identifier.getFullName()),
+                    e);
         }
+    }
+
+    @Nullable
+    private List<Map<String, String>> canonicalizePartitionOptions(
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            @Nullable List<Map<String, String>> requested) {
+        if (requested == null) {
+            return null;
+        }
+        if (requested.size() != partitions.size()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Partition options for table %s must align with all %d partition specs, but found %d.",
+                            identifier.getFullName(), partitions.size(), requested.size()));
+        }
+        Set<Map<String, String>> uniquePartitions = new HashSet<>();
+        List<Map<String, String>> canonical = new ArrayList<>(requested.size());
+        boolean hasOptions = false;
+        for (int i = 0; i < requested.size(); i++) {
+            Map<String, String> partition = partitions.get(i);
+            if (partition == null || !uniquePartitions.add(partition)) {
+                throw new IllegalArgumentException(
+                        "Partition specs must be non-null and unique when partition options are provided.");
+            }
+            Map<String, String> options = requested.get(i);
+            if (options == null) {
+                throw new IllegalArgumentException("Partition options must not contain null maps.");
+            }
+            if (options.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must not contain null keys or values.");
+            }
+            Map<String, String> copied = new HashMap<>(options);
+            String location = copied.get(PATH.key());
+            if (location != null) {
+                try {
+                    copied.put(
+                            PATH.key(),
+                            FormatTablePartitionPathResolver.canonicalizeCustomLocation(
+                                            location, context)
+                                    .toString());
+                } catch (IllegalArgumentException e) {
+                    throw invalidPartitionLocation(identifier, partition, e);
+                }
+            }
+            hasOptions |= !copied.isEmpty();
+            canonical.add(copied);
+        }
+        return hasOptions ? canonical : null;
+    }
+
+    private static IllegalArgumentException invalidPartitionLocation(
+            Identifier identifier,
+            @Nullable Map<String, String> partition,
+            IllegalArgumentException cause) {
+        String message =
+                String.format(
+                        "Invalid custom partition location for partition %s of table %s.",
+                        partition, identifier.getFullName());
+        return new IllegalArgumentException(message, cause);
     }
 
     @Override
@@ -1409,7 +1539,7 @@ public class RESTCatalog implements Catalog {
         if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
             Path externalPath = new Path(externalLocation);
             SchemaManager schemaManager =
-                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+                    new FileSystemSchemaManager(fileIOFromOptions(externalPath), externalPath);
             Optional<TableSchema> latest = schemaManager.latest();
             if (latest.isPresent()) {
                 // Note we just validate schema here, will not create a new table

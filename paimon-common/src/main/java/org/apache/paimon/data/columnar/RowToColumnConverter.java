@@ -55,6 +55,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -368,6 +370,16 @@ public class RowToColumnConverter {
             }
 
             @Override
+            public TypeConverter visit(GeometryType geometryType) {
+                return binaryConverter(geometryType.isNullable());
+            }
+
+            @Override
+            public TypeConverter visit(GeographyType geographyType) {
+                return binaryConverter(geographyType.isNullable());
+            }
+
+            @Override
             public TypeConverter visit(DecimalType decimalType) {
                 return createConverter(
                         decimalType.isNullable(),
@@ -479,10 +491,8 @@ public class RowToColumnConverter {
                                     (WritableBytesVector) cv.getChildren()[1];
 
                             Variant variant = row.getVariant(column);
-                            byte[] value = variant.value();
-                            byte[] metadata = variant.metadata();
-                            valueVector.appendByteArray(value, 0, value.length);
-                            metaDataVector.appendByteArray(metadata, 0, metadata.length);
+                            valueVector.appendByteBuffer(variant.valueBuffer());
+                            metaDataVector.appendByteBuffer(variant.metadataBuffer());
                         });
             }
 

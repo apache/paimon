@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
@@ -823,7 +824,8 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'test', 'tag1')");
 
         FileStoreTable table = paimonTable("T");
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location(), "test");
+        SchemaManager schemaManager =
+                new FileSystemSchemaManager(table.fileIO(), table.location(), "test");
         List<Long> schemaIds = schemaManager.listAllIds();
         assertThat(schemaIds.size()).isEqualTo(2);
 

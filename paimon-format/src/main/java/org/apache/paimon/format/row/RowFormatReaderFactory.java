@@ -28,8 +28,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.NestedProjectedRow;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /** Factory for creating {@link RowFormatReader}. */
@@ -38,11 +36,11 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
     private static final int TAIL_PREFETCH_SIZE = 64 * 1024;
 
     private final RowType rowType;
-    @Nullable private final NestedProjectedRow projection;
+    private final RowType projectedRowType;
 
-    public RowFormatReaderFactory(RowType rowType, @Nullable NestedProjectedRow projection) {
+    public RowFormatReaderFactory(RowType rowType, RowType projectedRowType) {
         this.rowType = rowType;
-        this.projection = projection;
+        this.projectedRowType = projectedRowType;
     }
 
     @Override
@@ -53,26 +51,42 @@ public class RowFormatReaderFactory implements FormatReaderFactory {
 
         SeekableInputStream in = fileIO.newInputStream(path);
 
-        int tailSize = (int) Math.min(TAIL_PREFETCH_SIZE, fileSize);
-        long tailOffset = fileSize - tailSize;
-        in.seek(tailOffset);
-        byte[] tailBuf = new byte[tailSize];
-        IOUtils.readFully(in, tailBuf);
+        // Ownership of the stream passes to RowFormatReader only on the last line. Everything
+        // before it parses lengths and offsets taken from the file itself, so a truncated or
+        // corrupt file can throw anywhere in between and would otherwise leak the stream.
+        try {
+            int tailSize = (int) Math.min(TAIL_PREFETCH_SIZE, fileSize);
+            long tailOffset = fileSize - tailSize;
+            in.seek(tailOffset);
+            byte[] tailBuf = new byte[tailSize];
+            IOUtils.readFully(in, tailBuf);
 
-        RowFileFooter footer =
-                RowFileFooter.readFrom(tailBuf, tailSize - RowFileFooter.FOOTER_SIZE);
+            RowFileFooter footer =
+                    RowFileFooter.readFrom(tailBuf, tailSize - RowFileFooter.FOOTER_SIZE);
 
-        RowBlockIndex blockIndex;
-        if (footer.indexOffset >= tailOffset) {
-            int indexOffsetInBuf = (int) (footer.indexOffset - tailOffset);
-            byte[] indexData = new byte[footer.indexLength];
-            System.arraycopy(tailBuf, indexOffsetInBuf, indexData, 0, footer.indexLength);
-            blockIndex = RowBlockIndex.readFrom(indexData);
-        } else {
-            blockIndex = RowBlockIndex.readFrom(in, footer.indexOffset, footer.indexLength);
+            RowBlockIndex blockIndex;
+            if (footer.indexOffset >= tailOffset) {
+                int indexOffsetInBuf = (int) (footer.indexOffset - tailOffset);
+                byte[] indexData = new byte[footer.indexLength];
+                System.arraycopy(tailBuf, indexOffsetInBuf, indexData, 0, footer.indexLength);
+                blockIndex = RowBlockIndex.readFrom(indexData);
+            } else {
+                blockIndex = RowBlockIndex.readFrom(in, footer.indexOffset, footer.indexLength);
+            }
+
+            return new RowFormatReader(
+                    in,
+                    path,
+                    footer,
+                    blockIndex,
+                    rowType,
+                    // Each reader needs its own wrapper: it is mutated in place per row,
+                    // so sharing one instance across readers corrupts interleaved reads.
+                    NestedProjectedRow.create(rowType, projectedRowType),
+                    context.selection());
+        } catch (Throwable t) {
+            IOUtils.closeQuietly(in);
+            throw t;
         }
-
-        return new RowFormatReader(
-                in, path, footer, blockIndex, rowType, projection, context.selection());
     }
 }

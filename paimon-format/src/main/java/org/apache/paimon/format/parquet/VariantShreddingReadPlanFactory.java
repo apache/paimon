@@ -33,7 +33,6 @@ import org.apache.paimon.data.shredding.ShreddingReadPlan;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
-import org.apache.paimon.data.variant.VariantPathSegment;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -52,14 +51,11 @@ import org.apache.parquet.schema.Type;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.apache.paimon.data.variant.Variant.METADATA;
 import static org.apache.paimon.data.variant.Variant.VALUE;
-import static org.apache.paimon.data.variant.VariantMetadataUtils.path;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 
@@ -124,53 +120,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
 
     /** Clips a Variant Parquet field according to the logical Variant row read type. */
     public static Type clipVariantType(RowType variantRowType, GroupType parquetType) {
-        if (!parquetType.containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)) {
-            return parquetType;
-        }
-
-        boolean canClip = true;
-        Set<String> fieldsToRead = new HashSet<>();
-        for (DataField field : variantRowType.getFields()) {
-            String path = path(field.description());
-            VariantPathSegment[] pathSegments = VariantPathSegment.parse(path);
-            if (pathSegments.length < 1) {
-                canClip = false;
-                break;
-            }
-
-            // TODO: support nested column pruning.
-            VariantPathSegment pathSegment = pathSegments[0];
-            if (pathSegment instanceof VariantPathSegment.ObjectExtraction) {
-                fieldsToRead.add(((VariantPathSegment.ObjectExtraction) pathSegment).getKey());
-            } else {
-                canClip = false;
-                break;
-            }
-        }
-
-        if (!canClip) {
-            return parquetType;
-        }
-
-        List<Type> typedFieldsToRead = new ArrayList<>();
-        GroupType typedValue =
-                parquetType.getType(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME).asGroupType();
-        for (Type field : typedValue.getFields()) {
-            if (fieldsToRead.contains(field.getName())) {
-                typedFieldsToRead.add(field);
-                fieldsToRead.remove(field.getName());
-            }
-        }
-
-        List<Type> rowGroupFields = new ArrayList<>();
-        rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.METADATA_FIELD_NAME));
-        if (!fieldsToRead.isEmpty()) {
-            rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
-        }
-        if (!typedFieldsToRead.isEmpty()) {
-            rowGroupFields.add(typedValue.withNewFields(typedFieldsToRead));
-        }
-        return parquetType.withNewFields(rowGroupFields);
+        return VariantShreddingTypePruner.clip(variantRowType, parquetType);
     }
 
     private static boolean containsVariantFields(DataType dataType) {

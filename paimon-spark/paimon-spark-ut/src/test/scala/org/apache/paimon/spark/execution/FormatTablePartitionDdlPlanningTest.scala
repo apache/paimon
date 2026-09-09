@@ -18,11 +18,12 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.{CatalogContext, Identifier}
 import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
-import org.apache.paimon.partition.Partition
+import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
@@ -86,6 +87,18 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
         Map("dt" -> "20260715", "hh" -> "10"),
         Map("dt" -> "20260716", "hh" -> "11")))
     assert(refreshCalls == 1)
+  }
+
+  test("catalog-managed ADD stores LOCATION as a partition path option") {
+    val (table, gateway) = formatTable(withCatalogManagedPartitions = true)
+    val location =
+      new Path(Files.createTempDirectory("format-table-custom-location").toUri).toString
+    val part = partition(20260715, 10).copy(location = Some(location))
+
+    runCommand(
+      PaimonAddFormatTablePartitionsExec(table, Seq(part), ignoreIfExists = false, () => ()))
+
+    assert(gateway.createdOptions == Seq(Map(CoreOptions.PATH.key() -> location.stripSuffix("/"))))
   }
 
   test("mock service owns partial repeats, all repeats, atomic failure, and concurrent ADD") {
@@ -317,7 +330,8 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
 
     var refreshCalls = 0
     runCommand(command.copy(refreshCache = () => refreshCalls += 1))
-    assert(gateway.lookupCalls == 1)
+    assert(gateway.lookupCalls == 0)
+    assert(gateway.registryLoads == 1)
     assert(gateway.dropCalls == 1)
     assert(gateway.dropped.map(_.asScala.toMap) == Seq(Map("dt" -> "20260715", "hh" -> "10")))
     assert(refreshCalls == 1)
@@ -368,7 +382,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -379,7 +396,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       override def listPartitions(
           prefix: JMap[String, String],
           filter: Predicate): JList[Partition] =
-        throw new AssertionError("Complete specs must resolve through list-by-names")
+        Collections.emptyList()
     }
 
     try {
@@ -406,6 +423,78 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     }
   }
 
+  test("mixed DROP keeps complete existence aligned when a partial spec precedes it") {
+    val fileIO = LocalFileIO.create()
+    val tablePath = new Path(Files.createTempDirectory("format-table-drop-mixed-order").toUri)
+    val partialMatch = Map("dt" -> "20260715", "hh" -> "10")
+    val completeMatch = Map("dt" -> "20260716", "hh" -> "11")
+    val unrelated = Map("dt" -> "20260717", "hh" -> "12")
+    val partialDir = new Path(tablePath, "dt=20260715/hh=10")
+    val completeDir = new Path(tablePath, "dt=20260716/hh=11")
+    val unrelatedDir = new Path(tablePath, "dt=20260717/hh=12")
+    var listCalls = 0
+    var listByNamesCalls = 0
+    var dropCalls = 0
+    var dropped = Seq.empty[Map[String, String]]
+    var refreshCalls = 0
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
+        dropCalls += 1
+        dropped = partitions.asScala.map(_.asScala.toMap).toSeq
+      }
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] = {
+        listByNamesCalls += 1
+        registeredPartitions(completeMatch)
+      }
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] = {
+        listCalls += 1
+        registeredPartitions(partialMatch, completeMatch, unrelated)
+      }
+    }
+
+    try {
+      fileIO.mkdirs(partialDir)
+      fileIO.mkdirs(completeDir)
+      fileIO.mkdirs(unrelatedDir)
+      val table = new PaimonFormatTable(
+        rawFormatTable(withCatalogManagedPartitions = true, gateway, tablePath.toString, fileIO))
+      val partialFirst =
+        ResolvedPartitionSpec(Seq("hh"), new GenericInternalRow(Array[Any](10)))
+
+      // A partial request has no existence bit, so placing it first exposes positional drift.
+      runCommand(
+        PaimonDropFormatTablePartitionsExec(
+          table,
+          Seq(partialFirst, partition(20260716, 11)),
+          ifExists = false,
+          purge = false,
+          () => refreshCalls += 1))
+
+      assert(listCalls == 1)
+      assert(listByNamesCalls == 0)
+      assert(dropCalls == 1)
+      assert(dropped == Seq(partialMatch, completeMatch))
+      assert(refreshCalls == 1)
+      assert(!fileIO.exists(partialDir))
+      assert(!fileIO.exists(completeDir))
+      assert(fileIO.exists(unrelatedDir))
+    } finally {
+      fileIO.delete(tablePath, true)
+    }
+  }
+
   test(
     "catalog-managed DROP IF EXISTS drops only registered partitions and preserves pending data") {
     val fileIO = LocalFileIO.create()
@@ -413,29 +502,31 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val registeredSpec = Map("dt" -> "20260716", "hh" -> "11")
     val registeredDir = new Path(tablePath, "dt=20260716/hh=11")
     val pendingDir = new Path(tablePath, "dt=20260715/hh=10")
-    var lookedUp = Seq.empty[Map[String, String]]
+    var registryLoads = 0
     var dropped = Seq.empty[Map[String, String]]
     var refreshCalls = 0
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
       }
 
       override def listPartitionsByNames(
-          partitions: JList[JMap[String, String]]): JList[Partition] = {
-        lookedUp = partitions.asScala.map(_.asScala.toMap).toSeq
-        registeredPartitions(
-          partitions.asScala.map(_.asScala.toMap).filter(_ == registeredSpec).toSeq: _*)
-      }
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        throw new AssertionError("DROP must validate one complete registry view")
 
       override def listPartitions(
           prefix: JMap[String, String],
-          filter: Predicate): JList[Partition] =
-        throw new AssertionError("Complete specs must resolve through list-by-names")
+          filter: Predicate): JList[Partition] = {
+        registryLoads += 1
+        registeredPartitions(registeredSpec)
+      }
     }
 
     try {
@@ -452,10 +543,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
           purge = false,
           () => refreshCalls += 1))
 
-      assert(
-        lookedUp == Seq(
-          Map("dt" -> "20260715", "hh" -> "10"),
-          Map("dt" -> "20260716", "hh" -> "11")))
+      assert(registryLoads == 1)
       assert(dropped == Seq(registeredSpec))
       assert(fileIO.exists(pendingDir))
       assert(!fileIO.exists(registeredDir))
@@ -486,7 +574,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     def newGateway(): FormatTablePartitionManager = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -503,7 +594,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       override def listPartitions(
           prefix: JMap[String, String],
           filter: Predicate): JList[Partition] =
-        throw new AssertionError("Exact specs must resolve through list-by-names")
+        registeredPartitions(registered.toSeq: _*)
     }
     var refreshCalls = 0
 
@@ -551,7 +642,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     def newGateway(): FormatTablePartitionManager = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -572,7 +666,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       override def listPartitions(
           prefix: JMap[String, String],
           filter: Predicate): JList[Partition] =
-        throw new AssertionError("Exact specs must resolve through list-by-names")
+        registeredPartitions(registered.toSeq: _*)
     }
     val firstFileIO = LocalFileIO.create
     var refreshCalls = 0
@@ -615,7 +709,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -657,7 +754,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -713,7 +813,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -869,8 +972,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
   private def registerPartitions(tableName: String, specs: Map[String, String]*): Unit =
     paimonCatalog.createPartitions(
       Identifier.create(dbName0, tableName),
-      specs.map(_.asJava).asJava,
-      true)
+      specs.map(_.asJava).asJava)
 
   private def registeredPartitionSpecs(tableName: String): Set[Map[String, String]] =
     paimonCatalog
@@ -901,16 +1003,24 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
   private class RecordingGateway extends FormatTablePartitionManager {
     var createCalls = 0
     var lookupCalls = 0
+    var registryLoads = 0
     var created = Seq.empty[JMap[String, String]]
+    var createdOptions = Seq.empty[Map[String, String]]
     var ignoreIfExists = false
     var dropCalls = 0
     var dropped = Seq.empty[JMap[String, String]]
 
     override def createPartitions(
         partitions: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = {
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = {
       createCalls += 1
       created = partitions.asScala.toSeq
+      createdOptions = Option(partitionOptions)
+        .map(_.asScala.map(_.asScala.toMap).toSeq)
+        .getOrElse(Seq.empty)
       this.ignoreIfExists = ignoreIfExists
     }
 
@@ -927,8 +1037,12 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
       registeredPartitions(partitions.asScala.map(_.asScala.toMap).toSeq: _*)
     }
 
-    override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
-      Collections.emptyList()
+    override def listPartitions(
+        prefix: JMap[String, String],
+        filter: Predicate): JList[Partition] = {
+      registryLoads += 1
+      registeredPartitions(Map("dt" -> "20260715", "hh" -> "10"))
+    }
   }
 
   private class AtomicGateway(initial: Set[Map[String, String]])
@@ -941,7 +1055,10 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
 
     override def createPartitions(
         partitionsToCreate: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = synchronized {
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean,
+        partitionOptions: JList[JMap[String, String]]): Unit = synchronized {
       val batch = partitionsToCreate.asScala.map(_.asScala.toMap).toSeq
       batches :+= batch
       val duplicates = batch.filter(partitions.contains)

@@ -41,8 +41,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -80,16 +82,30 @@ class FormatTableWriteTest {
         }
 
         assertThat(messages).hasSize(3);
-        List<Path> dataFiles =
-                messages.stream()
-                        .map(
-                                message ->
-                                        ((TwoPhaseCommitMessage) message)
-                                                .getCommitter()
-                                                .targetPath())
-                        .collect(Collectors.toList());
+        // The rows and bytes of each rolled file are counted while writing and survive to commit,
+        // so they never have to be recovered by reading the file back.
+        assertThat(
+                        messages.stream()
+                                .map(message -> ((TwoPhaseCommitMessage) message).recordCount())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(2L, 2L, 1L);
+        // Each message carries the size of the one file it commits, not of some other file that
+        // happens to be positive too.
+        Map<Path, Long> reportedSizes = new LinkedHashMap<>();
+        for (CommitMessage message : messages) {
+            TwoPhaseCommitMessage twoPhase = (TwoPhaseCommitMessage) message;
+            reportedSizes.put(twoPhase.getCommitter().targetPath(), twoPhase.fileSizeInBytes());
+        }
+        assertThat(reportedSizes).hasSize(messages.size());
+        List<Path> dataFiles = new ArrayList<>(reportedSizes.keySet());
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(messages);
+        }
+
+        for (Map.Entry<Path, Long> reported : reportedSizes.entrySet()) {
+            assertThat(reported.getValue())
+                    .as("byte count reported for %s", reported.getKey())
+                    .isEqualTo(fileIO.getFileSize(reported.getKey()));
         }
 
         List<Long> rowCounts =
@@ -151,11 +167,13 @@ class FormatTableWriteTest {
         TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
         java.util.concurrent.atomic.AtomicInteger closeCount =
                 new java.util.concurrent.atomic.AtomicInteger();
-        when(recordWriter.closeAndGetCommitters())
+        when(recordWriter.closeAndGetWrittenFiles())
                 .thenAnswer(
                         ignored -> {
                             if (closeCount.getAndIncrement() == 0) {
-                                return Collections.singletonList(committer);
+                                return Collections.singletonList(
+                                        new org.apache.paimon.io.FormatTableWrittenFile(
+                                                committer, 1L, 1L));
                             }
                             throw new IOException("expected close failure");
                         });

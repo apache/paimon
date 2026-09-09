@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -61,7 +63,8 @@ public class SortCompactAppendTableSink extends RowAppendTableSink {
     }
 
     @Override
-    protected Provider writeProviderOverride() {
+    protected Provider createWriteProvider(
+            CheckpointConfig checkpointConfig, boolean isStreaming, boolean hasSinkMaterializer) {
         return SortCompactAppendSinkWrite.provider();
     }
 

@@ -77,6 +77,23 @@ All data types supported by Paimon are as follows:
       </td>
     </tr>
     <tr>
+      <td><code>GEOMETRY</code><br>
+          <code>GEOMETRY(crs)</code>
+      </td>
+      <td><code>Data type of a planar geometry encoded as OGC Well-Known Binary (WKB).</code><br><br>
+          <code>The optional crs identifies the coordinate reference system. The default is OGC:CRS84.</code>
+      </td>
+    </tr>
+    <tr>
+      <td><code>GEOGRAPHY</code><br>
+          <code>GEOGRAPHY(crs)</code><br>
+          <code>GEOGRAPHY(crs, algorithm)</code>
+      </td>
+      <td><code>Data type of a geography whose edges are interpolated on the surface of the coordinate reference system, encoded as OGC Well-Known Binary (WKB).</code><br><br>
+          <code>The default crs is OGC:CRS84 and the default edge interpolation algorithm is spherical. Supported algorithms are spherical, vincenty, thomas, andoyer, and karney.</code>
+      </td>
+    </tr>
+    <tr>
       <td><code>DECIMAL</code><br>
           <code>DECIMAL(p)</code><br>
           <code>DECIMAL(p, s)</code>
@@ -185,6 +202,14 @@ All data types supported by Paimon are as follows:
       <td><code>Data type of a binary large object.</code><br><br>
           <code>Designed for storing large binary data such as images, videos, audio files, and other multimodal data. Unlike BYTES type which stores data inline, BLOB stores large binary data in separate files and maintains references to them, providing better performance for large objects.</code><br><br>
           <code>Note: Requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. See <a href="../multimodal-table/blob">Blob Type</a> for details.</code>
+      </td>
+    </tr>
+    <tr>
+      <td><code>VECTOR&lt;t, n&gt;</code></td>
+      <td><code>Data type of a fixed-length dense vector.</code><br><br>
+          <code>Paimon supports defining columns of type VECTOR&lt;t, n&gt;, where t is the element type and n is the vector dimension. t must be one of BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE. n must have a value between 1 and 2,147,483,647 (both inclusive). If a vector value is not null, its elements cannot be null.</code><br><br>
+          <code>A VECTOR column cannot be used as a primary key column, a partition column, or for sorting.</code><br><br>
+          <code>Note: Dedicated vector file storage requires 'vector.file.format', 'row-tracking.enabled' and 'data-evolution.enabled'. See <a href="../multimodal-table/vector">Vector Storage</a> for details.</code>
       </td>
     </tr>
     </tbody>

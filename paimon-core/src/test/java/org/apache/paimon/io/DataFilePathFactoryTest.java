@@ -97,6 +97,23 @@ public class DataFilePathFactoryTest {
     }
 
     @Test
+    public void testVideoPathAndFormatIdentifier() {
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-123"),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+
+        Path video = pathFactory.newVideoPath();
+        assertThat(video.getName()).endsWith(".video");
+        assertThat(DataFilePathFactory.formatIdentifier(video.getName())).isEqualTo("video");
+    }
+
+    @Test
     public void testEntropyInjectWithNoPartition() {
         EntropyInjectExternalPathProvider externalPathProvider =
                 createExternalPathProvider(new Path(tempDir.toString()), "bucket-123");

@@ -97,6 +97,7 @@ class CatalogSplitProvider(SplitProvider):
         snapshot_id: Optional[int] = None,
         tag_name: Optional[str] = None,
         dynamic_options: Optional[Dict[str, str]] = None,
+        preserve_current_schema: bool = False,
     ):
         if not table_identifier:
             raise ValueError("table_identifier is required")
@@ -132,6 +133,7 @@ class CatalogSplitProvider(SplitProvider):
         self._snapshot_id = snapshot_id
         self._tag_name = tag_name
         self._dynamic_options = dynamic_options
+        self._preserve_current_schema = preserve_current_schema
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
@@ -150,7 +152,10 @@ class CatalogSplitProvider(SplitProvider):
             if self._dynamic_options:
                 dynamic_options.update(self._dynamic_options)
             if dynamic_options:
-                table = table.copy(dynamic_options)
+                if self._preserve_current_schema:
+                    table = table.copy_without_time_travel(dynamic_options)
+                else:
+                    table = table.copy(dynamic_options)
             self._table_cached = table
         return self._table_cached
 

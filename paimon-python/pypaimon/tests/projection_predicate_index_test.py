@@ -334,6 +334,18 @@ class RewritePredicateIndicesUnitTest(unittest.TestCase):
         self.assertFalse(predicate_supports_arrow_filter(unsafe))
         self.assertFalse(predicate_supports_arrow_filter(mixed))
 
+    def test_arrow_filter_support_rejects_large_boolean_expression(self):
+        from pypaimon.read.push_down_utils import predicate_supports_arrow_filter
+
+        pb = self._build_predicate()
+        large = pb.or_predicates([
+            pb.equal('c', value) for value in range(257)
+        ])
+        large_in = pb.is_in('c', list(range(2000)))
+
+        self.assertFalse(predicate_supports_arrow_filter(large))
+        self.assertTrue(predicate_supports_arrow_filter(large_in))
+
     def test_missing_first_row_id_materializes_null_row_ids(self):
         from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
         from pypaimon.table.special_fields import SpecialFields

@@ -229,6 +229,8 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
             case VARCHAR:
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
             case DECIMAL:
             case BIGINT:
             case TIMESTAMP_WITHOUT_TIME_ZONE:

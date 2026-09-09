@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -56,7 +57,8 @@ public class IncrementalClusterStrategyTest {
 
     @BeforeAll
     public static void setUp() throws Exception {
-        schemaManager = new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
+        schemaManager =
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toString()));
         prepareSchema();
         incrementalClusterStrategy =
                 new IncrementalClusterStrategy(schemaManager, Arrays.asList("f0", "f1"), 25, 1, 3);

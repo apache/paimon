@@ -49,6 +49,7 @@ import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
 import static org.apache.paimon.table.system.BucketsTable.BUCKETS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
+import static org.apache.paimon.table.system.FileIndexesTable.FILE_INDEXES;
 import static org.apache.paimon.table.system.FileKeyRangesTable.FILE_KEY_RANGES;
 import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
@@ -75,6 +76,7 @@ public class SystemTableLoader {
                     .put(BUCKETS, BucketsTable::new)
                     .put(AUDIT_LOG, AuditLogTable::new)
                     .put(FILES, FilesTable::new)
+                    .put(FILE_INDEXES, FileIndexesTable::new)
                     .put(FILE_KEY_RANGES, FileKeyRangesTable::new)
                     .put(TAGS, TagsTable::new)
                     .put(BRANCHES, BranchesTable::new)
@@ -92,9 +94,25 @@ public class SystemTableLoader {
     public static final List<String> GLOBAL_SYSTEM_TABLES =
             Arrays.asList(ALL_TABLES, ALL_PARTITIONS, ALL_TABLE_OPTIONS, CATALOG_OPTIONS);
 
+    /**
+     * System tables built from raw metadata -- file names, row counts, per-column min/max and
+     * distinct/null counts -- none of which a column mask covers.
+     */
+    private static final List<String> PHYSICAL_METADATA_TABLES =
+            Arrays.asList(FILES, FILE_KEY_RANGES, BINLOG, STATISTICS);
+
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {
-        return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type.toLowerCase()))
+        String name = type.toLowerCase();
+        if (PHYSICAL_METADATA_TABLES.contains(name) && dataTable.coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "System table '%s' is not supported on a query-auth table: it reports "
+                                    + "raw file statistics, which column masking cannot be applied "
+                                    + "to.",
+                            name));
+        }
+        return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(name))
                 .map(f -> f.apply(dataTable))
                 .orElse(null);
     }

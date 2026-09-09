@@ -24,7 +24,10 @@ import pyarrow as pa
 from ray.data._internal.execution.interfaces import TaskContext
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.ray_datasink import PaimonDatasink
+from pypaimon.write.ray_datasink import (
+    PaimonDatasink,
+    _consume_write_results,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import TableWrite
 
@@ -304,6 +307,48 @@ class RaySinkTest(unittest.TestCase):
             mock_write.prepare_commit.assert_called_once()
             mock_write.abort.assert_called_once()
 
+    def test_postpone_worker_uses_driver_bucket_plan_without_manifest_scan(self):
+        from pypaimon.write.postpone_bucket import (
+            PostponeBucketPlan,
+            PostponeBucketPlanner,
+        )
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={
+                'bucket': '-2',
+            },
+        )
+        identifier = 'test_db.test_postpone_worker_plan'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        datasink = PaimonDatasink(
+            table,
+            postpone_bucket_plan=PostponeBucketPlan({(): 2}),
+        )
+        data = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'name': ['name-{}'.format(i) for i in range(20)],
+            'value': [float(i) for i in range(20)],
+        }, schema=pa_schema)
+
+        with patch.object(
+            PostponeBucketPlanner,
+            '_load_bucket_metadata',
+            side_effect=AssertionError("worker must not scan manifests"),
+        ) as load:
+            messages = datasink.write([data], Mock(spec=TaskContext))
+
+        load.assert_not_called()
+        self.assertEqual({0, 1}, {message.bucket for message in messages})
+        self.assertEqual({2}, {message.total_buckets for message in messages})
+
     def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
         from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 
@@ -451,7 +496,6 @@ class RaySinkTest(unittest.TestCase):
         datasink._writer_builder.new_commit = mock_new_commit
         with self.assertRaises(Exception):
             datasink.on_write_complete(write_result)
-        self.assertEqual(len(datasink._pending_commit_messages), 1)
 
     def test_on_write_complete_without_on_write_start(self):
         from ray.data.datasource.datasink import WriteResult
@@ -535,48 +579,105 @@ class RaySinkTest(unittest.TestCase):
             )
 
     def test_on_write_failed(self):
-        # Test without pending messages (on_write_complete() never called)
         datasink = PaimonDatasink(self.table, overwrite=False)
         datasink.on_write_start()
-        self.assertEqual(datasink._pending_commit_messages, [])
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)  # Should not raise exception
-
-        # Test with pending messages (on_write_complete() was called but failed)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        commit_msg2 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1, commit_msg2]
-
-        mock_commit = Mock()
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink._writer_builder.new_commit = Mock()
         error = Exception("Write job failed")
         datasink.on_write_failed(error)
 
-        mock_commit.abort.assert_called_once()
-        abort_args = mock_commit.abort.call_args[0][0]
-        self.assertEqual(len(abort_args), 2)
-        self.assertEqual(abort_args[0], commit_msg1)
-        self.assertEqual(abort_args[1], commit_msg2)
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        datasink._writer_builder.new_commit.assert_not_called()
 
-        # Test abort failure handling (should not raise exception)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1]
+    def test_consume_write_results_reports_late_failure(self):
+        import pickle
 
-        mock_commit = Mock()
-        mock_commit.abort.side_effect = Exception("Abort failed")
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)
+        message_col = '__messages__'
 
-        mock_commit.abort.assert_called_once()
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        class FailingResults:
+            def iter_batches(self, batch_format):
+                if batch_format != 'pyarrow':
+                    raise AssertionError(batch_format)
+                yield pa.table({
+                    message_col: pa.array(
+                        [pickle.dumps(['first'])], type=pa.binary()
+                    ),
+                })
+                raise RuntimeError('late failure')
+
+        coordinator = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'late failure'):
+            _consume_write_results(
+                FailingResults(), coordinator, message_col
+            )
+
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_drains_errors_as_data(self):
+        import pickle
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(['first']),
+                    pickle.dumps([]),
+                    pickle.dumps(['last']),
+                ], type=pa.binary()),
+                error_col: pa.array(
+                    [None, 'worker failure', None], type=pa.string()
+                ),
+            }),
+        ])
+        coordinator = Mock()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        coordinator.on_write_complete.assert_not_called()
+        coordinator.on_write_failed.assert_called_once()
+
+    def test_consume_write_results_failure_preserves_completed_files(self):
+        import pickle
+
+        writer = self.table.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'value': [1.1],
+        }, schema=self.pk_pa_schema))
+        messages = writer.prepare_commit()
+        writer.close()
+        paths = [
+            file.external_path or file.file_path
+            for message in messages
+            for file in message.new_files
+        ]
+
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(messages),
+                    pickle.dumps([]),
+                ], type=pa.binary()),
+                error_col: pa.array([None, 'worker failure'], type=pa.string()),
+            }),
+        ])
+        coordinator = PaimonDatasink(self.table, overwrite=False)
+        coordinator.on_write_start()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        self.assertTrue(all(self.table.file_io.exists(path) for path in paths))
 
 
 if __name__ == '__main__':

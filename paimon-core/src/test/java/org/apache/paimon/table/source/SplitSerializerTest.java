@@ -44,6 +44,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -184,20 +185,33 @@ public class SplitSerializerTest {
                         .withBucketPath("dt=20260707/bucket-5")
                         .withDataFiles(
                                 Collections.singletonList(dataFile("chain-file", 0, 21, 30, 300L)))
+                        .withDataDeletionFiles(
+                                Collections.singletonList(
+                                        new DeletionFile("deletion_file", 100, 22, null)))
                         .rawConvertible(false)
                         .build();
         Map<String, String> fileBucketPathMapping = new LinkedHashMap<>();
         Map<String, String> fileBranchMapping = new LinkedHashMap<>();
+        List<DeletionFile> deletionFiles = new ArrayList<>();
         List<DataFileMeta> files = new ArrayList<>();
         for (DataSplit split : Arrays.asList(left, right)) {
-            files.addAll(split.dataFiles());
-            for (DataFileMeta file : split.dataFiles()) {
+            Optional<List<DeletionFile>> deletionFilesOpt = split.deletionFiles();
+            for (int i = 0; i < split.dataFiles().size(); i++) {
+                DataFileMeta file = split.dataFiles().get(i);
+                DeletionFile deletionFile =
+                        deletionFilesOpt.isPresent() ? deletionFilesOpt.get().get(i) : null;
+                files.add(file);
+                deletionFiles.add(deletionFile);
                 fileBucketPathMapping.put(file.fileName(), split.bucketPath());
                 fileBranchMapping.put(file.fileName(), split == left ? "snapshot" : "delta");
             }
         }
         return new ChainSplit(
-                DataFileTestUtils.row(2026), files, fileBranchMapping, fileBucketPathMapping);
+                DataFileTestUtils.row(2026),
+                files,
+                fileBranchMapping,
+                fileBucketPathMapping,
+                deletionFiles);
     }
 
     private static QueryAuthSplit queryAuthSplit(Split split) {
@@ -236,6 +250,7 @@ public class SplitSerializerTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -266,6 +281,7 @@ public class SplitSerializerTest {
         assertThat(actual).isEqualTo(expected);
         assertThat(actual.fileBucketPathMapping()).isEqualTo(expected.fileBucketPathMapping());
         assertThat(actual.fileBranchMapping()).isEqualTo(expected.fileBranchMapping());
+        assertThat(actual.deletionFiles()).isEqualTo(expected.deletionFiles());
     }
 
     private static void assertFallbackSplitEquals(

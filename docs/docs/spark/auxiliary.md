@@ -130,6 +130,11 @@ ANALYZE TABLE my_table COMPUTE STATISTICS FOR COLUMNS col1;
 ANALYZE TABLE my_table COMPUTE STATISTICS FOR ALL COLUMNS;
 ```
 
+On a Format Table with catalog-managed partitions the statement means something narrower: it
+measures the table's partitions and supports `PARTITION (...)` and `NOSCAN`, while the
+`FOR COLUMNS` forms above are not supported, see
+[Manage Format Table Partitions](./sql-ddl#manage-format-table-partitions).
+
 ## Refresh table
 
 The REFRESH TABLE statement invalidates the cached entries, which include data and metadata of the given table.

@@ -18,12 +18,15 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.{DataConverter, SparkTable, SparkTypeUtils, SparkUtils}
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.spark.{BaseTable, DataConverter, SparkTable, SparkTypeUtils, SparkUtils}
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.function.{BlobViewFieldIdSparkFunction, BlobViewSparkFunction, DescriptorToPresignedUrlFunction, ResolvedDescriptorToPresignedUrlFunction}
 import org.apache.paimon.spark.utils.CatalogUtils
 import org.apache.paimon.table.DataTable
+import org.apache.paimon.table.FormatTable
 import org.apache.paimon.types.DataTypeRoot
 import org.apache.paimon.utils.{InternalRowUtils, TypeUtils}
 
@@ -151,21 +154,59 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
 
     val table =
       catalogAndIdentifier.catalog.asTableCatalog.loadTable(catalogAndIdentifier.identifier())
-    assert(table.isInstanceOf[SparkTable])
-    val sparkTable = table.asInstanceOf[SparkTable]
-    if (sparkTable.table.partitionKeys().size() == 0) {
+    // Every Paimon table wrapper exposes the underlying table through BaseTable. Asserting the
+    // narrower SparkTable used to fail a format table with an AssertionError rather than telling
+    // the user anything.
+    if (!table.isInstanceOf[BaseTable]) {
+      throw new UnsupportedOperationException(s"$table is not a Paimon table")
+    }
+    val paimonTable = table.asInstanceOf[BaseTable].table
+    if (paimonTable.partitionKeys().size() == 0) {
       throw new UnsupportedOperationException(s"$table is not a partitioned table")
     }
 
     val toplevelPartitionType =
-      TypeUtils.project(sparkTable.table.rowType, sparkTable.table.partitionKeys()).getTypeAt(0)
-    val partitionValues = sparkTable.table.newReadBuilder.newScan
-      .listPartitionEntries()
-      .asScala
-      .filter(_.fileCount() > 0)
-      .map {
-        partitionEntry => InternalRowUtils.get(partitionEntry.partition(), 0, toplevelPartitionType)
-      }
+      TypeUtils.project(paimonTable.rowType, paimonTable.partitionKeys()).getTypeAt(0)
+    val partitions = paimonTable match {
+      case formatTable: FormatTable =>
+        val partitionType = TypeUtils.project(paimonTable.rowType, paimonTable.partitionKeys())
+        val candidates = formatTable.newReadBuilder.newScan
+          .listPartitionEntries()
+          .asScala
+          .map(entry => InternalRowUtils.get(entry.partition(), 0, toplevelPartitionType))
+          .filter(_ != null)
+          .distinct
+          .sortWith(InternalRowUtils.compare(_, _, toplevelPartitionType.getTypeRoot) > 0)
+
+        // Catalog metadata uses zero both for an empty format table partition and for a
+        // partition whose file count has not been reported. Check candidates from largest to
+        // smallest and stop at the first value whose filtered scan produces data. This also avoids
+        // treating an empty filesystem directory as data without planning splits for the whole
+        // table.
+        candidates.find {
+          candidate =>
+            val predicate = new PredicateBuilder(partitionType).equal(0, candidate)
+            val partitionFilter =
+              PartitionPredicate.fromPredicate(partitionType, predicate)
+            !formatTable.newReadBuilder
+              .withPartitionFilter(partitionFilter)
+              .newScan
+              .plan()
+              .splits()
+              .isEmpty
+        }.toSeq
+      case _ =>
+        // FileStoreTable manifests carry an exact file count, so keep the cheaper metadata path.
+        paimonTable.newReadBuilder.newScan
+          .listPartitionEntries()
+          .asScala
+          .filter(_.fileCount() > 0)
+          .map(entry => InternalRowUtils.get(entry.partition(), 0, toplevelPartitionType))
+    }
+    val partitionValues = partitions
+      // The default partition comes back as a real null, which InternalRowUtils.compare would
+      // dereference. It is also not a value anyone means by "the max partition".
+      .filter(_ != null)
       .sortWith(InternalRowUtils.compare(_, _, toplevelPartitionType.getTypeRoot) < 0)
       .map(DataConverter.fromPaimon(_, toplevelPartitionType))
     if (partitionValues.isEmpty) {

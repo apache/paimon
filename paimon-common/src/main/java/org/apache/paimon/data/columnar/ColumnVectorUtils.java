@@ -97,6 +97,8 @@ public class ColumnVectorUtils {
             case VARCHAR:
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
             case BLOB:
                 return new HeapBytesVector(capacity);
             case DECIMAL:

@@ -241,6 +241,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
             return null;
         }
+        DataType dataType = tableSchema.fields()[pos].dataType();
+        if (SparkShimLoader.shim().isSparkGeometryType(dataType)) {
+            return SparkShimLoader.shim().toPaimonGeometry(internalRow, actualPos);
+        }
+        if (SparkShimLoader.shim().isSparkGeographyType(dataType)) {
+            return SparkShimLoader.shim().toPaimonGeography(internalRow, actualPos);
+        }
         return internalRow.getBinary(actualPos);
     }
 
@@ -462,6 +469,12 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public byte[] getBinary(int pos) {
+            if (SparkShimLoader.shim().isSparkGeometryType(elementType)) {
+                return SparkShimLoader.shim().toPaimonGeometry(arrayData, pos);
+            }
+            if (SparkShimLoader.shim().isSparkGeographyType(elementType)) {
+                return SparkShimLoader.shim().toPaimonGeography(arrayData, pos);
+            }
             return arrayData.getBinary(pos);
         }
 

@@ -24,16 +24,18 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.manifest.BinaryManifestEntry;
-import org.apache.paimon.manifest.BinaryManifestEntry.ReusableIdentifier;
-import org.apache.paimon.manifest.DeletedIdentifierSet;
+import org.apache.paimon.manifest.CollectedDeletes;
+import org.apache.paimon.manifest.CompactFileIdentifierSet;
+import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
 
@@ -58,7 +60,7 @@ public class ManifestEntryExternalSort {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
-            DeletedIdentifierSet deleteEntries = new DeletedIdentifierSet();
+            CompactFileIdentifierSet deleteEntries = new CompactFileIdentifierSet();
             try {
                 scanEntries(
                         section,
@@ -84,9 +86,10 @@ public class ManifestEntryExternalSort {
             ExternalSortConfig config,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
-            DeletedIdentifierSet deleteEntries,
+            CollectedDeletes deletes,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
+        ReusableIdentifier identifier = new ReusableIdentifier();
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
             scanEntries(
                     section,
@@ -94,13 +97,15 @@ public class ManifestEntryExternalSort {
                     manifestReadParallelism,
                     entry -> {
                         if (entry.isAdd()
-                                && (deleteEntries.isEmpty() || !deleteEntries.contains(entry))) {
+                                && (deletes.isEmpty() || !deletes.isDeleted(entry, identifier))) {
                             sorter.write(entry);
                         }
                     });
             List<ManifestFileMeta> files = sorter.writeToManifest(manifestFile);
             newFilesForAbort.addAll(files);
             return files;
+        } finally {
+            identifier.release();
         }
     }
 
@@ -113,11 +118,9 @@ public class ManifestEntryExternalSort {
         if (section.size() <= 1
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : section) {
-                try (CloseableIterator<BinaryManifestEntry> entries =
+                try (CloseableIterator<ProjectedManifestEntry> entries =
                         manifestFile.scan(
-                                meta.fileName(),
-                                meta.fileSize(),
-                                BinaryManifestEntry.fullProjection())) {
+                                meta.fileName(), ProjectedManifestEntry.fullProjection())) {
                     while (entries.hasNext()) {
                         consumer.accept(entries.next());
                     }
@@ -128,7 +131,7 @@ public class ManifestEntryExternalSort {
 
         Function<ManifestFileMeta, List<BinaryRow>> reader =
                 meta -> readBinaryRows(manifestFile, meta);
-        BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+        ProjectedManifestEntry entry = ProjectedManifestEntry.fullProjection().createEntry();
         for (BinaryRow row : sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
             consumer.accept(entry.replace(row));
         }
@@ -141,9 +144,8 @@ public class ManifestEntryExternalSort {
         List<BinaryRow> rows = new ArrayList<>((int) Math.min(entryCount, 1 << 20));
         InternalRowSerializer serializer =
                 new InternalRowSerializer(ManifestEntry.MANIFEST_ROW_TYPE);
-        try (CloseableIterator<BinaryManifestEntry> entries =
-                manifestFile.scan(
-                        meta.fileName(), meta.fileSize(), BinaryManifestEntry.fullProjection())) {
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(meta.fileName(), ProjectedManifestEntry.fullProjection())) {
             while (entries.hasNext()) {
                 rows.add(serializer.toBinaryRow(entries.next().fullRow()).copy());
             }
@@ -156,7 +158,7 @@ public class ManifestEntryExternalSort {
 
     @FunctionalInterface
     private interface BinaryEntryConsumer {
-        void accept(BinaryManifestEntry entry) throws Exception;
+        void accept(ProjectedManifestEntry entry) throws Exception;
     }
 
     /** Config used by manifest entry external sort. */
@@ -222,7 +224,7 @@ public class ManifestEntryExternalSort {
                             config.maxDiskSize);
         }
 
-        private void write(BinaryManifestEntry entry) throws Exception {
+        private void write(ProjectedManifestEntry entry) throws Exception {
             sortKey.replaceExternalSortRow(externalSortRow, entry, entry.fullRow());
             sortBuffer.write(externalSortRow);
         }
@@ -236,51 +238,56 @@ public class ManifestEntryExternalSort {
                 return Collections.emptyList();
             }
 
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                    manifestFile.createRollingWriter();
-            Exception exception = null;
+            ManifestAvroWriter writer = manifestFile.createAvroWriter();
+            List<ManifestFileMeta> files = Collections.emptyList();
+            Throwable primaryFailure = null;
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
                 BinaryRow reuse = new BinaryRow(sortKey.externalSortRowType().getFieldCount());
-                BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+                ProjectedManifestEntry entry =
+                        ProjectedManifestEntry.fullProjection().createEntry();
                 BinaryRow row;
                 while ((row = iterator.next(reuse)) != null) {
                     writer.write(entry.replace(sortKey.binaryManifestRow(row)));
                 }
                 entry.clear();
-            } catch (Exception e) {
-                exception = e;
-            } finally {
-                if (exception != null) {
-                    writer.abort();
-                    throw exception;
-                }
                 writer.close();
+                files = writer.result();
+            } catch (Throwable failure) {
+                primaryFailure = failure;
+            } finally {
+                if (primaryFailure != null) {
+                    writer.abort(primaryFailure);
+                }
             }
-            return writer.result();
+            if (primaryFailure != null) {
+                ExceptionUtils.rethrowException(primaryFailure);
+            }
+            return files;
         }
 
         private Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> writeMinorToManifest(
                 ManifestFile manifestFile,
-                DeletedIdentifierSet deleteEntries,
+                CompactFileIdentifierSet deleteEntries,
                 List<ManifestFileMeta> newFilesForAbort)
                 throws Exception {
             if (isEmpty()) {
                 return Pair.of(Collections.emptyList(), Collections.emptyList());
             }
 
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> addWriter =
-                    manifestFile.createRollingWriter();
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> deleteWriter =
-                    manifestFile.createRollingWriter();
-            DeletedIdentifierSet matchedEntries = new DeletedIdentifierSet();
-            DeletedIdentifierSet emittedDeletes = new DeletedIdentifierSet();
+            ManifestAvroWriter addWriter = manifestFile.createAvroWriter();
+            ManifestAvroWriter deleteWriter = manifestFile.createAvroWriter();
+            CompactFileIdentifierSet matchedEntries = new CompactFileIdentifierSet();
+            CompactFileIdentifierSet emittedDeletes = new CompactFileIdentifierSet();
             ReusableIdentifier identifier = new ReusableIdentifier();
-            Exception exception = null;
+            Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> files =
+                    Pair.of(Collections.emptyList(), Collections.emptyList());
+            Throwable primaryFailure = null;
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
                 BinaryRow reuse = new BinaryRow(sortKey.externalSortRowType().getFieldCount());
-                BinaryManifestEntry entry = BinaryManifestEntry.fullProjection().createEntry();
+                ProjectedManifestEntry entry =
+                        ProjectedManifestEntry.fullProjection().createEntry();
                 BinaryRow row;
                 while ((row = iterator.next(reuse)) != null) {
                     entry.replace(sortKey.binaryManifestRow(row));
@@ -302,19 +309,37 @@ public class ManifestEntryExternalSort {
                 newFilesForAbort.addAll(addWriter.result());
                 deleteWriter.close();
                 newFilesForAbort.addAll(deleteWriter.result());
-            } catch (Exception e) {
-                exception = e;
+                files = Pair.of(addWriter.result(), deleteWriter.result());
+            } catch (Throwable failure) {
+                primaryFailure = failure;
             } finally {
-                identifier.release();
-                matchedEntries.release();
-                emittedDeletes.release();
-                if (exception != null) {
-                    addWriter.abort();
-                    deleteWriter.abort();
-                    throw exception;
+                try {
+                    identifier.release();
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+                try {
+                    matchedEntries.release();
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+                try {
+                    emittedDeletes.release();
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+                if (primaryFailure != null) {
+                    addWriter.abort(primaryFailure);
+                    deleteWriter.abort(primaryFailure);
                 }
             }
-            return Pair.of(addWriter.result(), deleteWriter.result());
+            if (primaryFailure != null) {
+                ExceptionUtils.rethrowException(primaryFailure);
+            }
+            return files;
         }
 
         @Override

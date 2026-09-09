@@ -26,6 +26,7 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.SstFileReader;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 
 import javax.annotation.Nullable;
@@ -81,7 +82,36 @@ public class SortLookupStoreReader implements LookupStoreReader {
 
     @Override
     public void close() throws IOException {
-        reader.close();
-        input.close();
+        // input is the file handle. Both callers of this method -- LocalKvDb#closeAndDeleteSstFile
+        // and the shutdown loop in LocalKvDb#close -- deliberately catch and log so that one bad
+        // reader cannot stall shutdown, which is exactly why a descriptor abandoned here would
+        // never be reclaimed and would show up only as a warning in the log.
+        Throwable collected = null;
+        try {
+            reader.close();
+        } catch (Throwable t) {
+            collected = ExceptionUtils.firstOrSuppressed(t, collected);
+        }
+        try {
+            input.close();
+        } catch (Throwable t) {
+            collected = ExceptionUtils.firstOrSuppressed(t, collected);
+        }
+        if (collected != null) {
+            rethrowAsIOException(collected);
+        }
+    }
+
+    private static void rethrowAsIOException(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        throw new IOException(failure);
     }
 }

@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.FlinkFormatTableSink;
 import org.apache.paimon.flink.sink.FlinkTableSink;
+import org.apache.paimon.flink.source.DataEvolutionDataTableSource;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
 import org.apache.paimon.options.Options;
@@ -98,6 +99,9 @@ public abstract class AbstractFlinkTableFactory
         }
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
+        } else if (CoreOptions.fromMap(table.options()).dataEvolutionEnabled()) {
+            return new DataEvolutionDataTableSource(
+                    context.getObjectIdentifier(), table, unbounded, context);
         } else {
             return new DataTableSource(context.getObjectIdentifier(), table, unbounded, context);
         }

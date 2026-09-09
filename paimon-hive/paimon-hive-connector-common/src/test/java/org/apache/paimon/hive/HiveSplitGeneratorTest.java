@@ -22,25 +22,32 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.utils.HiveSplitGenerator;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -72,6 +79,26 @@ public class HiveSplitGeneratorTest {
                     Collections.emptyMap(),
                     "");
 
+    private static final TableSchema PARTITIONED_TABLE_SCHEMA =
+            new TableSchema(
+                    0,
+                    SCHEMA_FIELDS,
+                    2,
+                    Collections.singletonList("pt"),
+                    Collections.emptyList(),
+                    Collections.emptyMap(),
+                    "");
+
+    /** Partition value holding a character that {@code escapePathName} rewrites. */
+    private static final String ESCAPED_PARTITION_VALUE = "2026-01-01 00:00";
+
+    /** Directory name Paimon writes for {@link #ESCAPED_PARTITION_VALUE}. */
+    private static final String ESCAPED_PARTITION_DIR = "pt=2026-01-01 00%3A00";
+
+    private static final String PLAIN_PARTITION_VALUE = "plain";
+
+    private static final String PLAIN_PARTITION_DIR = "pt=plain";
+
     @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
@@ -91,8 +118,8 @@ public class HiveSplitGeneratorTest {
     @Test
     public void testPackSplitsForNonBucketTable() throws Exception {
         JobConf jobConf = new JobConf();
-        jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456"); // 256MB
-        jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456"); // 256MB
+        jobConf.set("mapreduce.input.fileinputformat.split.maxsize", "268435456"); // 256MB
+        jobConf.set("mapreduce.input.fileinputformat.split.minsize", "268435456"); // 256MB
 
         FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
@@ -113,8 +140,8 @@ public class HiveSplitGeneratorTest {
     @Test
     public void testPackSplitsForBucketTable() throws Exception {
         JobConf jobConf = new JobConf();
-        jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456");
-        jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456");
+        jobConf.set("mapreduce.input.fileinputformat.split.maxsize", "268435456");
+        jobConf.set("mapreduce.input.fileinputformat.split.minsize", "268435456");
 
         FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
@@ -133,8 +160,55 @@ public class HiveSplitGeneratorTest {
         assertThat(totalFiles).isEqualTo(10);
     }
 
+    @Test
+    public void testGenerateSplitsForEscapedPartitionValue() throws Exception {
+        FileStoreTable table = createPartitionedTableWithTwoPartitions();
+
+        // Hive hands back the escaped directory registered in the metastore
+        assertThat(fileIO.exists(new Path(tablePath, ESCAPED_PARTITION_DIR))).isTrue();
+
+        InputSplit[] splits = generateSplits(table, ESCAPED_PARTITION_DIR);
+        assertThat(splits).hasSize(1);
+    }
+
+    @Test
+    public void testGenerateSplitsForPlainPartitionValue() throws Exception {
+        FileStoreTable table = createPartitionedTableWithTwoPartitions();
+
+        assertThat(fileIO.exists(new Path(tablePath, PLAIN_PARTITION_DIR))).isTrue();
+
+        InputSplit[] splits = generateSplits(table, PLAIN_PARTITION_DIR);
+        assertThat(splits).hasSize(1);
+    }
+
+    private InputSplit[] generateSplits(FileStoreTable table, String partitionDir) {
+        JobConf jobConf = new JobConf();
+        jobConf.set(FileInputFormat.INPUT_DIR, tablePath + "/" + partitionDir);
+        return HiveSplitGenerator.generateSplits(table, jobConf, 1);
+    }
+
+    private FileStoreTable createPartitionedTableWithTwoPartitions() throws Exception {
+        FileStoreTable table = createFileStoreTable(PARTITIONED_TABLE_SCHEMA);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            BinaryString.fromString("a"),
+                            BinaryString.fromString(ESCAPED_PARTITION_VALUE)));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            BinaryString.fromString("b"),
+                            BinaryString.fromString(PLAIN_PARTITION_VALUE)));
+            commit.commit(write.prepareCommit());
+        }
+        return table;
+    }
+
     private FileStoreTable createFileStoreTable(TableSchema tableSchema) throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.commit(tableSchema);
 
         return new AppendOnlyFileStoreTable(

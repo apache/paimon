@@ -92,16 +92,6 @@ public final class PostponeMergePlan implements TableScan.Plan {
         return numPotentialBuckets;
     }
 
-    PostponeMergePlan withDefaultBucketNum(int newDefaultBucketNum) {
-        return new PostponeMergePlan(
-                realSplits,
-                postponeSplits,
-                bucketRouter.withDefaultBucketNum(newDefaultBucketNum),
-                keyType,
-                resultReadType,
-                mergeReadType);
-    }
-
     private static long numPotentialBuckets(
             List<DataSplit> realSplits,
             List<DataSplit> postponeSplits,

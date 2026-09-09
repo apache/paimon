@@ -22,6 +22,6 @@ package org.apache.paimon.rest.exceptions;
 public class ServiceFailureException extends RESTException {
 
     public ServiceFailureException(String message, Object... args) {
-        super(String.format(message, args));
+        super(message, args);
     }
 }

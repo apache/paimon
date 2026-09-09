@@ -26,10 +26,22 @@ from pypaimon.catalog.jdbc_catalog_loader import JdbcCatalogLoader
 from pypaimon.catalog.rest.rest_catalog_loader import RESTCatalogLoader
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.read.native_plan import _catalog_options, native_plan
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
+from pypaimon.read.native_plan import (
+    _catalog_options,
+    _predicate_to_native,
+    _read_options,
+    _restore_python_partition_paths,
+    native_family_search_modes_available,
+    native_plan,
+)
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.table_scan import TableScan
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.utils.range import Range
 
 
 def _scan(native_enabled, file_scanner):
@@ -56,10 +68,13 @@ def _scan(native_enabled, file_scanner):
     file_scanner.start_pos_of_this_subtask = None  # no slice
     file_scanner.chunk_shuffle = None              # no chunk-shuffle
     file_scanner._global_index_result = None       # no global-index result
+    file_scanner._row_ranges = None                # no explicit row ranges
     file_scanner.deletion_vectors_enabled = False  # no deletion vectors
     file_scanner.data_evolution = False            # no data evolution
     file_scanner.only_read_real_buckets = False    # not postpone bucket
     scan.file_scanner = file_scanner
+    scan.predicate = None
+    scan.partition_predicate = None
     scan._query_auth_fn = None      # no query-auth restrictions
     scan._read_type = None
     scan.limit = None               # no row limit
@@ -109,7 +124,9 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_plan', return_value=[keep, drop]) as np:
             plan = scan.plan()
 
-        np.assert_called_once_with(scan.table)
+        np.assert_called_once_with(
+            scan.table, predicate=None, limit=None, projection=None,
+            row_ranges=None)
         fs.scan.assert_not_called()
         self.assertEqual(plan.splits(), [keep])
 
@@ -132,9 +149,115 @@ class NativePlanTest(unittest.TestCase):
         with patch('pypaimon.read.native_plan.native_plan', return_value=splits):
             self.assertEqual(scan.plan().splits(), splits)
 
+    def test_plan_forwards_filter_limit_partition_and_time_travel(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table.partition_keys = ['dt']
+        scan.limit = 5
+        scan._read_type = [Mock(name='k'), Mock(name='dt')]
+        scan._read_type[0].name = 'k'
+        scan._read_type[1].name = 'dt'
+        scan.predicate = PredicateBuilder.and_predicates([
+            Predicate('equal', 0, 'k', [7]),
+            Predicate('equal', 1, 'dt', ['2026-08-02']),
+        ])
+        scan.table._applied_dynamic_options = {'scan.snapshot-id': '3'}
+        scan.table.options.options.contains_key.side_effect = (
+            lambda key: key == 'scan.snapshot-id')
+        scan.table.table_schema.id = 2
+        scan.table.schema_manager.latest.return_value.id = 3
+        split = Mock(partition=Mock(values=['2026-08-02']), snapshot_id=3)
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[split]) as np:
+            plan = scan.plan()
+
+        self.assertEqual(plan.snapshot_id, 3)
+        np.assert_called_once_with(
+            scan.table,
+            predicate=scan.predicate,
+            limit=5,
+            projection=['k', 'dt'],
+            row_ranges=None,
+        )
+
+    def test_plan_forwards_global_index_row_ranges(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        fs._global_index_result = GlobalIndexResult.from_ranges([
+            Range(1, 2), Range(5, 5)])
+        split = Mock(partition=Mock(values=[]), snapshot_id=3)
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[split]) as np:
+            plan = scan.plan()
+
+        np.assert_called_once_with(
+            scan.table,
+            predicate=None,
+            limit=None,
+            projection=None,
+            row_ranges=[(1, 2), (5, 5)],
+        )
+        fs.scan.assert_not_called()
+        self.assertEqual(plan.splits(), [split])
+
+    def test_empty_global_index_result_does_not_fall_back(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        fs._global_index_result = GlobalIndexResult.create_empty()
+
+        with patch('pypaimon.read.native_plan.native_plan', return_value=[]) as np:
+            plan = scan.plan()
+
+        np.assert_called_once_with(
+            scan.table,
+            predicate=None,
+            limit=None,
+            projection=None,
+            row_ranges=[],
+        )
+        fs.scan.assert_not_called()
+        self.assertEqual(plan.splits(), [])
+
+    def test_scored_global_index_result_falls_back(self):
+        fs = Mock(partition_key_predicate=None)
+        sentinel = object()
+        fs.scan.return_value = sentinel
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        fs.data_evolution = True
+        bitmap = GlobalIndexResult.from_range(Range(1, 1)).results()
+        fs._global_index_result = ScoredGlobalIndexResult.create(
+            bitmap, lambda _: 1.0)
+
+        with patch('pypaimon.read.native_plan.native_plan') as np:
+            self.assertIs(scan.plan(), sentinel)
+
+        np.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_global_index_row_ranges_require_data_evolution_append_table(self):
+        result = GlobalIndexResult.from_range(Range(1, 1))
+
+        for data_evolution, primary_key in ((False, False), (True, True)):
+            with self.subTest(
+                    data_evolution=data_evolution, primary_key=primary_key):
+                fs = Mock(partition_key_predicate=None)
+                fs.scan.return_value = fallback = object()
+                scan = _scan(native_enabled=True, file_scanner=fs)
+                fs.data_evolution = data_evolution
+                fs._global_index_result = result
+                scan.table.is_primary_key_table = primary_key
+
+                with patch('pypaimon.read.native_plan.native_plan') as np:
+                    self.assertIs(scan.plan(), fallback)
+
+                np.assert_not_called()
+                fs.scan.assert_called_once_with()
+
     def test_plan_falls_back_when_scan_is_not_plain(self):
-        # Native planning does not carry shard/slice, global-index, or
-        # time-travel/incremental scans -> must fall back to the file scanner.
+        # Native planning does not carry shard/slice, explicit row ranges,
+        # arbitrary global-index results, or incremental scans.
         def check(setup):
             fs = Mock(partition_key_predicate=None)
             sentinel = object()
@@ -150,8 +273,8 @@ class NativePlanTest(unittest.TestCase):
         check(lambda s, fs: setattr(fs, 'start_pos_of_this_subtask', 0))
         check(lambda s, fs: setattr(fs, 'chunk_shuffle', (1, 100)))
         check(lambda s, fs: setattr(fs, '_global_index_result', object()))
+        check(lambda s, fs: setattr(fs, '_row_ranges', [object()]))
         check(lambda s, fs: setattr(fs, 'deletion_vectors_enabled', True))
-        check(lambda s, fs: setattr(fs, 'data_evolution', True))
         check(lambda s, fs: setattr(fs, 'only_read_real_buckets', True))
         check(lambda s, fs: (setattr(s.table, 'is_primary_key_table', True),
                              setattr(s.table, 'trimmed_primary_keys', [])))
@@ -161,11 +284,9 @@ class NativePlanTest(unittest.TestCase):
             'return_value', BucketMode.CROSS_PARTITION))
         check(lambda s, fs: setattr(
             s.table, '_applied_dynamic_options', {'scan.snapshot-id': None}))
-        check(lambda s, fs: setattr(s.table, 'partition_keys', ['dt']))
         check(lambda s, fs: setattr(s.table.schema_manager.latest.return_value, 'id', 2))
         check(lambda s, fs: s.table.schema_manager.latest.__setattr__(
             'side_effect', RuntimeError('metadata read failed')))
-        check(lambda s, fs: setattr(s, 'limit', 5))
         check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
             'side_effect', lambda k: k == 'scan.version'))
         check(lambda s, fs: s.table.options.merge_engine.__setattr__(
@@ -181,8 +302,6 @@ class NativePlanTest(unittest.TestCase):
         for attr in ('hadoop_conf', 'prefer_io_loader', 'fallback_io_loader'):
             check(lambda s, fs, attr=attr: setattr(
                 s.table.catalog_environment.catalog_loader.context(), attr, object()))
-        check(lambda s, fs: s.table.options.options.contains_key.__setattr__(
-            'return_value', True))          # time-travel
         check(lambda s, fs: s.table.options.options.contains.__setattr__(
             'return_value', True))          # incremental
 
@@ -208,6 +327,82 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan.native_plan') as np:
             self.assertIs(scan.plan(), sentinel)
         np.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_family_search_modes_require_rust_0_4(self):
+        for available, expect_native in ((False, False), (True, True)):
+            with self.subTest(available=available):
+                fs = Mock(partition_key_predicate=None)
+                fs.scan.return_value = fallback = object()
+                scan = _scan(native_enabled=True, file_scanner=fs)
+                scan.table.options.options.contains_key.side_effect = (
+                    lambda key: key == 'scalar-index.search-mode')
+                scan.table._applied_dynamic_options = {
+                    'scalar-index.search-mode': 'full',
+                }
+                split = Mock(partition=Mock(values=[]), snapshot_id=1)
+
+                with patch(
+                        'pypaimon.read.native_plan.'
+                        'native_family_search_modes_available',
+                        return_value=available), patch(
+                            'pypaimon.read.native_plan.native_plan',
+                            return_value=[split]) as native:
+                    plan = scan.plan()
+
+                if expect_native:
+                    self.assertEqual(plan.splits(), [split])
+                    native.assert_called_once()
+                    fs.scan.assert_not_called()
+                else:
+                    self.assertIs(plan, fallback)
+                    native.assert_not_called()
+                    fs.scan.assert_called_once_with()
+
+    def test_removing_search_mode_falls_back(self):
+        fs = Mock(partition_key_predicate=None)
+        fs.scan.return_value = fallback = object()
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table._applied_dynamic_options = {
+            'scalar-index.search-mode': None,
+        }
+
+        with patch('pypaimon.read.native_plan.native_plan') as native:
+            self.assertIs(scan.plan(), fallback)
+
+        native.assert_not_called()
+        fs.scan.assert_called_once_with()
+
+    def test_dynamic_read_option_uses_native_plan(self):
+        fs = Mock(partition_key_predicate=None)
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table._applied_dynamic_options = {
+            'blob-as-descriptor': 'true',
+            'read.batch-size': '2048',
+            'read.parallelism': '2',
+        }
+        split = Mock(partition=Mock(values=[]), snapshot_id=1)
+
+        with patch(
+                'pypaimon.read.native_plan.native_plan',
+                return_value=[split]) as native:
+            self.assertEqual(scan.plan().splits(), [split])
+
+        native.assert_called_once()
+        fs.scan.assert_not_called()
+
+    def test_unknown_dynamic_option_falls_back(self):
+        fs = Mock(partition_key_predicate=None)
+        fs.scan.return_value = fallback = object()
+        scan = _scan(native_enabled=True, file_scanner=fs)
+        scan.table._applied_dynamic_options = {
+            'future.scan-option': 'value',
+        }
+
+        with patch('pypaimon.read.native_plan.native_plan') as native:
+            self.assertIs(scan.plan(), fallback)
+
+        native.assert_not_called()
         fs.scan.assert_called_once_with()
 
     def test_plan_falls_back_when_native_plan_raises(self):
@@ -271,7 +466,9 @@ class NativePlanTest(unittest.TestCase):
 
         self.assertIs(plan, fallback_plan)
         self.assertIs(stats, fallback_stats)
-        np.assert_called_once_with(scan.table)
+        np.assert_called_once_with(
+            scan.table, predicate=None, limit=None, projection=None,
+            row_ranges=None)
         fs.scan_with_stats.assert_called_once_with()
         fs.scan.assert_not_called()
 
@@ -305,6 +502,43 @@ class NativePlanTest(unittest.TestCase):
             'metastore': 'rest',
         })
 
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_prefers_installed_jindo_for_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+            'fs.oss.impl': 'jindo',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', False)
+    def test_native_plan_uses_opendal_without_jindo(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({})))
+
+        self.assertEqual(_catalog_options(table), {
+            'metastore': 'filesystem',
+        })
+
+    @patch(
+        'pypaimon.filesystem.jindo_file_system_handler.JINDO_AVAILABLE', True)
+    def test_native_plan_respects_explicit_legacy_oss(self):
+        table = Mock(table_path='oss://bucket/table')
+        table.catalog_environment.catalog_loader = FileSystemCatalogLoader(
+            CatalogContext.create_from_options(Options({
+                'fs.oss.impl': 'legacy',
+            })))
+
+        self.assertEqual(_catalog_options(table), {
+            'fs.oss.impl': 'legacy',
+            'metastore': 'filesystem',
+        })
+
     def test_catalog_options_reject_loader_subclass(self):
         class RoutedFileSystemLoader(FileSystemCatalogLoader):
             pass
@@ -316,19 +550,150 @@ class NativePlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exact built-in catalog loader'):
             _catalog_options(table)
 
+    def test_predicate_and_time_travel_are_converted_for_rust(self):
+        predicate = PredicateBuilder.and_predicates([
+            Predicate('greaterOrEqual', 0, 'k', [10]),
+            Predicate('in', 1, 'v', ['a', 'b']),
+        ])
+        self.assertEqual(_predicate_to_native(predicate), {
+            'method': 'and',
+            'children': [
+                {'method': 'greaterOrEqual', 'field': 'k', 'literals': [10]},
+                {'method': 'in', 'field': 'v', 'literals': ['a', 'b']},
+            ],
+        })
+
+        table = Mock()
+        table.options.source_split_target_size.return_value = 1024
+        table.options.source_split_open_file_cost.return_value = 128
+        table.options.options = Options({
+            'scan.snapshot-id': '9',
+            'global-index.search-mode': 'detail',
+            'scalar-index.search-mode': 'full',
+            'vector-index.search-mode': 'fast',
+            'full-text-index.search-mode': 'fast',
+        })
+        self.assertEqual(_read_options(table), {
+            'source.split.target-size': '1024',
+            'source.split.open-file-cost': '128',
+            'scan.snapshot-id': '9',
+            'global-index.search-mode': 'detail',
+            'scalar-index.search-mode': 'full',
+            'vector-index.search-mode': 'fast',
+            'full-text-index.search-mode': 'fast',
+        })
+
+    @unittest.skipIf(sys.version_info < (3, 8),
+                     "importlib.metadata requires Python 3.8")
+    def test_family_search_mode_version_gate(self):
+        cases = {
+            '0.3.0': False,
+            '0.4.0': True,
+            '0.4.0.dev20260808': True,
+            '1.0.0': True,
+        }
+        for version, expected in cases.items():
+            with self.subTest(version=version), patch(
+                    'importlib.metadata.version', return_value=version):
+                self.assertEqual(
+                    native_family_search_modes_available(), expected)
+
+    def test_partition_path_prefers_existing_python_legacy_path(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [Mock(base_name='data.parquet')]
+        data_file = Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
+        )
+        split = Mock(
+            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+
+        _restore_python_partition_paths(table, [split])
+
+        self.assertEqual(
+            data_file.file_path,
+            '/warehouse/t/p=a/b/bucket-0/data.parquet',
+        )
+
+    def test_partition_path_keeps_existing_rust_path(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = []
+        rust_path = '/warehouse/t/p=a%2Fb/bucket-0/data.parquet'
+        data_file = Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path=rust_path,
+        )
+        split = Mock(
+            partition=Mock(values=['a/b']), bucket=0, files=[data_file])
+
+        _restore_python_partition_paths(table, [split])
+
+        self.assertEqual(data_file.file_path, rust_path)
+
+    def test_partition_path_lists_each_bucket_once(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.return_value = [
+            Mock(base_name='a.parquet'), Mock(base_name='b.parquet')]
+        splits = [
+            Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+                external_path=None,
+                file_name=name,
+                file_path='/warehouse/t/p=a%%2Fb/bucket-0/%s' % name,
+            )])
+            for name in ('a.parquet', 'b.parquet')
+        ]
+
+        _restore_python_partition_paths(table, splits)
+
+        table.file_io.list_status.assert_called_once_with(
+            '/warehouse/t/p=a/b/bucket-0')
+        self.assertEqual(
+            [split.files[0].file_path for split in splits],
+            [
+                '/warehouse/t/p=a/b/bucket-0/a.parquet',
+                '/warehouse/t/p=a/b/bucket-0/b.parquet',
+            ],
+        )
+
+    def test_partition_path_listing_failure_is_not_hidden(self):
+        table = Mock(partition_keys=['p'])
+        table.path_factory.return_value.bucket_path.return_value = (
+            '/warehouse/t/p=a/b/bucket-0')
+        table.file_io.list_status.side_effect = PermissionError('denied')
+        split = Mock(partition=Mock(values=['a/b']), bucket=0, files=[Mock(
+            external_path=None,
+            file_name='data.parquet',
+            file_path='/warehouse/t/p=a%2Fb/bucket-0/data.parquet',
+        )])
+
+        with self.assertRaises(PermissionError):
+            _restore_python_partition_paths(table, [split])
+
     def test_native_plan_threads_trimmed_keys_to_deserializer(self):
         # PK tables route through: the trimmed primary keys must reach the
         # deserializer so per-file min/max keys are decoded for merge-on-read.
         kfields = [object()]
         table = Mock(trimmed_primary_keys_fields=kfields)
         table.table_schema = Mock(fields=[], partition_keys=[])
+        table.partition_keys = []
         table.options.source_split_target_size.return_value = 1024
         table.options.source_split_open_file_cost.return_value = 128
+        table.options.options.contains_key.return_value = False
+        table._applied_dynamic_options = {}
         split = Mock()
         split.serialize.return_value = b'bytes'
         rt = Mock()
-        rt.new_read_builder.return_value.new_scan.return_value.plan.return_value \
-            .splits.return_value = [split]
+        builder = rt.new_read_builder.return_value
+        builder.with_row_ranges.return_value = builder
+        builder.new_scan.return_value.plan.return_value.splits.return_value = [split]
         catalog = Mock()
         catalog.get_table.return_value = rt
 
@@ -343,13 +708,14 @@ class NativePlanTest(unittest.TestCase):
                 patch('pypaimon.read.native_plan._catalog_options', return_value={}), \
                 patch('pypaimon.read.native_plan.deserialize_split_v1',
                       return_value='decoded') as des:
-            result = native_plan(table)
+            result = native_plan(table, row_ranges=[(1, 2)])
 
         self.assertEqual(result, ['decoded'])
         rt.new_read_builder.assert_called_once_with({
             CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1024',
             CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): '128',
         })
+        builder.with_row_ranges.assert_called_once_with([(1, 2)])
         des.assert_called_once_with(b'bytes', [], kfields)
 
     def test_native_plan_requires_split_api(self):
@@ -373,7 +739,6 @@ class NativePlanTest(unittest.TestCase):
                         {'pypaimon_rust': fake_mod, 'pypaimon_rust.datafusion': fake_df}):
                     with self.assertRaisesRegex(RuntimeError, '0.3.0'):
                         native_plan(Mock())
-
 
 if __name__ == '__main__':
     unittest.main()

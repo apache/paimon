@@ -79,7 +79,13 @@ public class VortexFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new VortexWriterFactory(
-                () -> new ArrowFormatCWriter(type, formatContext.writeBatchSize(), true));
+                () ->
+                        new ArrowFormatCWriter(
+                                type,
+                                formatContext.writeBatchSize(),
+                                true,
+                                formatContext.writeBatchMemory().getBytes(),
+                                null));
     }
 
     @Override

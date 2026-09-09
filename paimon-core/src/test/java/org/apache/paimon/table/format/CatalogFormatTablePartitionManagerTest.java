@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
@@ -288,6 +289,72 @@ class CatalogFormatTablePartitionManagerTest {
     }
 
     @Test
+    void testRangeOnLeadingKeyIsPushedDownAsValuePattern() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+
+        partitionManager(catalog)
+                .listPartitions(Collections.emptyMap(), yearBetween("2019", "2021"));
+
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER), any(), eq(REQUEST_SIZE), isNull(), eq("year=20%"));
+    }
+
+    @Test
+    void testValuePatternExtendsAnEqualityPrefixByOneKey() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+
+        PredicateBuilder builder = partitionPredicates();
+        Predicate monthRange =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(1, BinaryString.fromString("01")),
+                        builder.lessOrEqual(1, BinaryString.fromString("09")));
+
+        partitionManager(catalog)
+                .listPartitions(Collections.singletonMap("year", "2025"), monthRange);
+
+        verify(catalog)
+                .listPartitionsByFilterPaged(
+                        eq(IDENTIFIER),
+                        any(),
+                        eq(REQUEST_SIZE),
+                        isNull(),
+                        eq("year=2025/month=0%"));
+    }
+
+    /**
+     * The pattern only narrows what the catalog returns; the scan still tests every candidate. So a
+     * pattern that matches extra partitions is harmless, while one that misses a matching partition
+     * silently drops data. This pins the direction that matters against a catalog that really
+     * applies the LIKE pattern.
+     */
+    @Test
+    void testValuePatternNeverDropsAMatchingPartition() throws Exception {
+        List<Partition> universe = new ArrayList<>();
+        for (int year = 2018; year <= 2021; year++) {
+            for (int month = 1; month <= 12; month++) {
+                universe.add(partition(String.valueOf(year), String.format("%02d", month)));
+            }
+        }
+        Catalog catalog = catalogHonouringPattern(universe);
+
+        Predicate filter = yearBetween("2019", "2021");
+        List<Partition> returned =
+                partitionManager(catalog).listPartitions(Collections.emptyMap(), filter);
+
+        List<Partition> shouldSurvive =
+                universe.stream()
+                        .filter(p -> p.spec().get("year").compareTo("2019") >= 0)
+                        .filter(p -> p.spec().get("year").compareTo("2021") <= 0)
+                        .collect(Collectors.toList());
+        assertThat(returned).containsAll(shouldSurvive);
+    }
+
+    @Test
     void testNonLeadingPrefixIsRejected() {
         Catalog catalog = mock(Catalog.class);
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
@@ -325,6 +392,58 @@ class CatalogFormatTablePartitionManagerTest {
         // Rejecting the whole batch when any partition exists only holds if it is never split.
         List<List<Map<String, String>>> batches = capturedCreates(catalog, false, 1);
         assertThat(batches.get(0)).isEqualTo(specs);
+    }
+
+    @Test
+    void testPartitionOptionsStayAlignedAcrossBatches() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2500);
+        List<Map<String, String>> options = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            options.add(Collections.singletonMap("marker", Integer.toString(i)));
+        }
+
+        partitionManager(catalog).createPartitions(specs, true, null, false, options);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> specCaptor = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> optionCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(catalog, times(3))
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        specCaptor.capture(),
+                        eq(true),
+                        isNull(),
+                        eq(false),
+                        optionCaptor.capture());
+        assertThat(specCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 500);
+        assertThat(optionCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 500);
+        assertThat(flatten(specCaptor.getAllValues())).isEqualTo(specs);
+        assertThat(flatten(optionCaptor.getAllValues())).isEqualTo(options);
+    }
+
+    @Test
+    void testMisalignedPartitionOptionsAreRejectedBeforeCatalogAccess() {
+        Catalog catalog = mock(Catalog.class);
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager(catalog)
+                                        .createPartitions(
+                                                specs(2),
+                                                true,
+                                                null,
+                                                false,
+                                                Collections.singletonList(Collections.emptyMap())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must align");
+        verifyNoInteractions(catalog);
     }
 
     @Test
@@ -378,6 +497,205 @@ class CatalogFormatTablePartitionManagerTest {
         assertThat(partitionManager(listCatalog).listPartitionsByNames(Collections.emptyList()))
                 .isEmpty();
         verifyNoInteractions(listCatalog);
+    }
+
+    // ------------------------------------------------------------------------
+    //  reported statistics
+    // ------------------------------------------------------------------------
+
+    @Test
+    void testStatisticsRideInTheRequestOfTheirOwnPartitions() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2500);
+        // Astride both split points, where a partition and its statistics could come apart.
+        List<PartitionStatistics> statistics =
+                Arrays.asList(
+                        statistics(specs.get(0), 1L),
+                        statistics(specs.get(999), 2L),
+                        statistics(specs.get(1000), 3L),
+                        statistics(specs.get(2499), 4L));
+
+        partitionManager(catalog).createPartitions(specs, true, statistics, false, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> specCaptor = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PartitionStatistics>> statisticsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(catalog, times(3))
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        specCaptor.capture(),
+                        eq(true),
+                        statisticsCaptor.capture(),
+                        eq(false),
+                        isNull());
+        List<List<Map<String, String>>> requestedSpecs = specCaptor.getAllValues();
+        List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
+        assertThat(requestedSpecs).extracting(List::size).containsExactly(1000, 1000, 500);
+        assertThat(flatten(requestedSpecs)).isEqualTo(specs);
+        for (int request = 0; request < requestedSpecs.size(); request++) {
+            List<Map<String, String>> registered = requestedSpecs.get(request);
+            for (PartitionStatistics statistic : requestedStatistics.get(request)) {
+                assertThat(registered).contains(statistic.spec());
+            }
+        }
+        // Split apart, never dropped or duplicated.
+        assertThat(requestedStatistics).extracting(List::size).containsExactly(2, 1, 1);
+        assertThat(requestedStatistics.stream().flatMap(List::stream).collect(Collectors.toList()))
+                .containsExactlyElementsOf(statistics);
+    }
+
+    @Test
+    void testABatchThatReportsNothingSendsAnEmptyListNotNull() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2500);
+        // All in the first request, so the two that follow are the ones that report nothing.
+        List<PartitionStatistics> statistics =
+                Arrays.asList(statistics(specs.get(0), 1L), statistics(specs.get(999), 2L));
+
+        partitionManager(catalog).createPartitions(specs, true, statistics, false, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PartitionStatistics>> statisticsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(catalog, times(3))
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        anyList(),
+                        eq(true),
+                        statisticsCaptor.capture(),
+                        eq(false),
+                        isNull());
+        List<List<PartitionStatistics>> requestedStatistics = statisticsCaptor.getAllValues();
+        assertThat(requestedStatistics.get(0)).containsExactlyElementsOf(statistics);
+        // Null would mean "this client does not report", which is the call that predates
+        // statistics; empty means "this request measures nothing", which is what happened.
+        assertThat(requestedStatistics.get(1)).isNotNull().isEmpty();
+        assertThat(requestedStatistics.get(2)).isNotNull().isEmpty();
+    }
+
+    @Test
+    void testStrictCreateWithStatisticsStaysOneRequest() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2500);
+        List<PartitionStatistics> statistics =
+                Arrays.asList(statistics(specs.get(0), 1L), statistics(specs.get(2499), 2L));
+
+        partitionManager(catalog).createPartitions(specs, false, statistics, true, null);
+
+        verify(catalog).createPartitions(IDENTIFIER, specs, false, statistics, true, null);
+    }
+
+    @Test
+    void testStatisticsForAnUnregisteredPartitionAreRejected() {
+        Catalog catalog = mock(Catalog.class);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+        List<Map<String, String>> specs = Collections.singletonList(spec("2025", "01"));
+        // A spec typo would otherwise account for nothing at all, silently.
+        List<PartitionStatistics> statistics =
+                Collections.singletonList(statistics(spec("2025", "02"), 7L));
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        specs, true, statistics, false, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not register")
+                .hasMessageContaining("month=02")
+                .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testStatisticsReportedWithNoPartitionsAreRejected() {
+        Catalog catalog = mock(Catalog.class);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+        // Nothing is registered here, so every reported spec is one this request does not
+        // register. Returning quietly because the list is empty would swallow the whole report.
+        List<PartitionStatistics> statistics =
+                Collections.singletonList(statistics(spec("2025", "01"), 7L));
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        Collections.emptyList(), true, statistics, false, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not register")
+                .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testAWellFormedEmptyReportWithNoPartitionsTouchesNoCatalog() {
+        // Validation comes first, but a report that describes nothing and registers nothing is
+        // still nothing to send.
+        Catalog catalog = mock(Catalog.class);
+
+        partitionManager(catalog)
+                .createPartitions(
+                        Collections.emptyList(), true, Collections.emptyList(), false, null);
+
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testRepeatedPartitionWithStatisticsIsRejected() {
+        Catalog catalog = mock(Catalog.class);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+        Map<String, String> repeated = spec("2025", "01");
+        List<Map<String, String>> specs =
+                Arrays.asList(repeated, spec("2025", "02"), spec("2025", "01"));
+        List<PartitionStatistics> statistics = Collections.singletonList(statistics(repeated, 7L));
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        specs, true, statistics, false, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("registered twice")
+                .hasMessageContaining("month=01")
+                .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testRepeatedStatisticsForOnePartitionAreRejected() {
+        Catalog catalog = mock(Catalog.class);
+        FormatTablePartitionManager partitionManager = partitionManager(catalog);
+        Map<String, String> spec = spec("2025", "01");
+        List<PartitionStatistics> statistics =
+                Arrays.asList(statistics(spec, 7L), statistics(spec, 9L));
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager.createPartitions(
+                                        Collections.singletonList(spec),
+                                        true,
+                                        statistics,
+                                        false,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reported twice")
+                .hasMessageContaining("month=01")
+                .hasMessageContaining("catalog_partition_db.catalog_partition_table");
+
+        verifyNoInteractions(catalog);
+    }
+
+    @Test
+    void testRepeatedPartitionWithoutStatisticsIsAccepted() throws Exception {
+        // A bare registration is an idempotent upsert: repeating one registers the same partition
+        // again and changes nothing, so it is not worth failing a commit over.
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = Arrays.asList(spec("2025", "01"), spec("2025", "01"));
+
+        partitionManager(catalog).createPartitions(specs, true);
+
+        assertThat(capturedCreates(catalog, true, 1).get(0)).isEqualTo(specs);
     }
 
     // ------------------------------------------------------------------------
@@ -457,7 +775,9 @@ class CatalogFormatTablePartitionManagerTest {
     void testRuntimeExceptionIsRethrownUnchanged() throws Exception {
         Catalog catalog = mock(Catalog.class);
         RuntimeException failure = new IllegalStateException("catalog unavailable");
-        doThrow(failure).when(catalog).createPartitions(any(), anyList(), anyBoolean());
+        doThrow(failure)
+                .when(catalog)
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean(), isNull());
         FormatTablePartitionManager partitionManager = partitionManager(catalog);
 
         Throwable thrown = catchThrowable(() -> partitionManager.createPartitions(specs(1), true));
@@ -493,17 +813,68 @@ class CatalogFormatTablePartitionManagerTest {
         return FormatTablePartitionManager.create(IDENTIFIER, PARTITION_KEYS, () -> catalog);
     }
 
+    /** The specs of every request a create that reports nothing sent. */
     private static List<List<Map<String, String>>> capturedCreates(
             Catalog catalog, boolean ignoreIfExists, int expectedRequests) throws Exception {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Map<String, String>>> captor = ArgumentCaptor.forClass(List.class);
         verify(catalog, times(expectedRequests))
-                .createPartitions(eq(IDENTIFIER), captor.capture(), eq(ignoreIfExists));
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        captor.capture(),
+                        eq(ignoreIfExists),
+                        isNull(),
+                        eq(false),
+                        isNull());
         return captor.getAllValues();
     }
 
     private static List<Map<String, String>> flatten(List<List<Map<String, String>>> batches) {
         return batches.stream().flatMap(List::stream).collect(Collectors.toList());
+    }
+
+    private static PredicateBuilder partitionPredicates() {
+        return new PredicateBuilder(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"year", "month"}));
+    }
+
+    private static Predicate yearBetween(String lower, String upper) {
+        PredicateBuilder builder = partitionPredicates();
+        return PredicateBuilder.and(
+                builder.greaterOrEqual(0, BinaryString.fromString(lower)),
+                builder.lessOrEqual(0, BinaryString.fromString(upper)));
+    }
+
+    /** A catalog that really applies the LIKE pattern, so an over-narrow pattern shows up. */
+    private static Catalog catalogHonouringPattern(List<Partition> universe) throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsByFilterPaged(any(), any(), any(), any(), any()))
+                .thenAnswer(
+                        invocation -> {
+                            String pattern = invocation.getArgument(4);
+                            java.util.regex.Pattern like =
+                                    pattern == null
+                                            ? null
+                                            : java.util.regex.Pattern.compile(
+                                                    java.util.regex.Pattern.quote(pattern)
+                                                            .replace("%", "\\E.*\\Q")
+                                                            .replace("_", "\\E.\\Q"));
+                            List<Partition> matched = new ArrayList<>();
+                            for (Partition partition : universe) {
+                                String name =
+                                        "year="
+                                                + partition.spec().get("year")
+                                                + "/month="
+                                                + partition.spec().get("month");
+                                if (like == null || like.matcher(name).matches()) {
+                                    matched.add(partition);
+                                }
+                            }
+                            return new PagedList<>(matched, null);
+                        });
+        return catalog;
     }
 
     private static Partition partition(String year, String month) {
@@ -515,6 +886,17 @@ class CatalogFormatTablePartitionManagerTest {
         spec.put("year", year);
         spec.put("month", month);
         return spec;
+    }
+
+    /** Statistics of one partition, told apart by their record count. */
+    private static PartitionStatistics statistics(Map<String, String> spec, long recordCount) {
+        return new PartitionStatistics(
+                spec,
+                recordCount,
+                recordCount * 1024,
+                1L,
+                1753660800000L,
+                PartitionStatistics.UNKNOWN_TOTAL_BUCKETS);
     }
 
     private static List<Map<String, String>> specs(int count) {

@@ -35,8 +35,8 @@ import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -164,6 +164,30 @@ public class FallbackReadFileStoreTableTest {
         }
 
         assertThat(result).containsExactlyInAnyOrder(Pair.of(1, 1), Pair.of(2, 2));
+    }
+
+    @Test
+    public void testScanVersionForFallbackBranch() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createTag("base");
+
+        writeDataIntoTable(mainTable, 1, rowData(2, 20));
+        long mainSnapshotTime = mainTable.snapshotManager().snapshot(2).timeMillis();
+        mainTable.createBranch("bc", "base");
+        while (System.currentTimeMillis() <= mainSnapshotTime) {
+            Thread.yield();
+        }
+        FileStoreTable branchTable = mainTable.switchToBranch("bc");
+        writeDataIntoTable(branchTable, 2, rowData(3, 30));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+        FileStoreTable versioned =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "2"));
+
+        assertThat(readAndCollect((FallbackReadFileStoreTable) versioned, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
     }
 
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {
@@ -494,7 +518,7 @@ public class FallbackReadFileStoreTableTest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
@@ -539,7 +563,7 @@ public class FallbackReadFileStoreTableTest {
     private AppendOnlyFileStoreTable createTable() throws Exception {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new FileSystemSchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
@@ -555,7 +579,7 @@ public class FallbackReadFileStoreTableTest {
         return new AppendOnlyFileStoreTable(
                         fileIO,
                         tablePath,
-                        new SchemaManager(fileIO, tablePath, branchName).latest().get())
+                        new FileSystemSchemaManager(fileIO, tablePath, branchName).latest().get())
                 .copy(options.toMap());
     }
 }

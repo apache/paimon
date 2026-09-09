@@ -1123,6 +1123,14 @@ class DataEvolutionChunkShuffleEndToEndTest(unittest.TestCase):
         self.assertEqual(actual.column('id').to_pylist(), list(range(200)))
         self.assertEqual(actual.column('payload').to_pylist(), self._payloads(range(200)))
 
+    def test_row_ranges_with_chunk_shuffle_rejected(self):
+        table, _ = self._create_de_table('cs_de_row_ranges')
+        scan = table.new_read_builder().new_scan() \
+            .with_row_ranges([Range(0, 0)]) \
+            .with_chunk_shuffle(seed=1, chunk_size=10)
+        with self.assertRaisesRegex(ValueError, "row ranges"):
+            scan.plan()
+
     def test_deterministic_plan_across_calls(self):
         table, pa_schema = self._create_de_table('cs_de_determinism')
         for c in range(3):

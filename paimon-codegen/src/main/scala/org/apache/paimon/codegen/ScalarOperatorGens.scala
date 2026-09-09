@@ -61,6 +61,14 @@ object ScalarOperatorGens {
       generateOperatorIfNotNull(ctx, resultType, left, right)(
         (leftTerm, rightTerm) => s"$leftTerm.equals($rightTerm)")
     }
+    // geospatial values use WKB byte arrays internally
+    else if (
+      (isGeometry(left.resultType) && isGeometry(right.resultType)) ||
+      (isGeography(left.resultType) && isGeography(right.resultType))
+    ) {
+      generateOperatorIfNotNull(ctx, resultType, left, right)(
+        (leftTerm, rightTerm) => s"java.util.Arrays.equals($leftTerm, $rightTerm)")
+    }
     // numeric types
     else if (isNumeric(left.resultType) && isNumeric(right.resultType)) {
       generateComparison(ctx, "==", left, right, resultType)

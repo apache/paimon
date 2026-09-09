@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for resetting consumer. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ResetConsumerRequest implements RESTRequest {
@@ -42,6 +44,7 @@ public class ResetConsumerRequest implements RESTRequest {
     private final Long nextSnapshotId;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_CONSUMER_ID, FIELD_NEXT_SNAPSHOT_ID})
     public ResetConsumerRequest(
             @JsonProperty(FIELD_CONSUMER_ID) String consumerId,
             @Nullable @JsonProperty(FIELD_NEXT_SNAPSHOT_ID) Long nextSnapshotId) {

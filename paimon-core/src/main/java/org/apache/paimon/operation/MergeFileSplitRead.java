@@ -43,6 +43,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -145,10 +146,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         readerFactoryBuilder.withReadValueType(adjustedReadType);
         mergeSorter.setProjectedValueType(adjustedReadType);
 
-        // Project away fields added for merging.
-        if (adjustedReadType != readType) {
-            outerReadType = readType;
-        }
+        // reset rather than latch: this method may be called again
+        outerReadType = adjustedReadType != readType ? readType : null;
 
         return this;
     }
@@ -184,6 +183,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         if (mfFactory instanceof LookupMergeFunction.Factory) {
             ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
         }
+        return this;
+    }
+
+    @Override
+    public MergeFileSplitRead withReadBatchSizer(ReadBatchSizer sizer) {
+        readerFactoryBuilder.withReadBatchSizer(sizer);
         return this;
     }
 
@@ -293,7 +298,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         ChainKeyValueFileReaderFactory nonOverlappedSectionFactory =
                 builder.build(null, dvFactory, false, filtersForAll, chainReadContext);
         return createMergeReader(
-                files, overlappedSectionFactory, nonOverlappedSectionFactory, forceKeepDelete);
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                forceKeepDelete,
+                new ReducerMergeFunctionWrapper(unwrapLookup(mfFactory).create(actualReadType())));
     }
 
     public RecordReader<KeyValue> createMergeReader(
@@ -311,18 +320,21 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
         return createMergeReader(
-                files, overlappedSectionFactory, nonOverlappedSectionFactory, keepDelete);
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                keepDelete,
+                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType())));
     }
 
     public RecordReader<KeyValue> createMergeReader(
             List<DataFileMeta> files,
             KeyValueFileReaderFactory overlappedSectionFactory,
             KeyValueFileReaderFactory nonOverlappedSectionFactory,
-            boolean keepDelete)
+            boolean keepDelete,
+            MergeFunctionWrapper<KeyValue> mergeFuncWrapper)
             throws IOException {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-        MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType()));
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
                     () ->
@@ -502,9 +514,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     /**
      * Returns the pushed read type if {@link #withReadType(RowType)} was called, else the default
-     * read type.
+     * read type. This is the value layout the merge, comparator and serializer run on internally;
+     * when a sequence field was appended for merging, {@link #createMergeReader} projects its
+     * output back to {@code outerReadType}, so the emitted rows can be narrower than this type.
      */
-    private RowType actualReadType() {
+    public RowType actualReadType() {
         return readerFactoryBuilder.readValueType();
     }
 
@@ -528,5 +542,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(actualReadType(), sequenceFields, sequenceOrder);
+    }
+
+    private static MergeFunctionFactory<KeyValue> unwrapLookup(
+            MergeFunctionFactory<KeyValue> factory) {
+        return factory instanceof LookupMergeFunction.Factory
+                ? ((LookupMergeFunction.Factory) factory).wrapped()
+                : factory;
     }
 }

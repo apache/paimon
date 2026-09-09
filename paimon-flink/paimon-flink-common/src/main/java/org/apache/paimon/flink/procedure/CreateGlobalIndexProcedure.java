@@ -191,6 +191,9 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         if ("bitmap".equals(indexType)) {
             return "Bitmap";
         }
+        if ("multivalue".equals(indexType)) {
+            return "Multivalue";
+        }
         return indexType;
     }
 }

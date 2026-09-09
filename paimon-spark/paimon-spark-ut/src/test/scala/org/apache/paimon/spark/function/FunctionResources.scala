@@ -18,16 +18,41 @@
 
 package org.apache.paimon.spark.function
 
+import org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.expressions.{MutableAggregationBuffer, UserDefinedAggregateFunction}
 import org.apache.spark.sql.types.{DataType, IntegerType, StructType}
 
+import java.io.{File, FileOutputStream}
+import java.util.jar.{JarEntry, JarOutputStream}
+
 object FunctionResources {
 
-  val testUDFJarPath: String =
-    getClass.getClassLoader.getResource("function/hive-test-udfs.jar").getPath
-
   val UDFExampleAdd2Class: String = "org.apache.hadoop.hive.contrib.udf.example.UDFExampleAdd2"
+
+  val testUDFJarPath: String = {
+    val classResource = UDFExampleAdd2Class.replace('.', '/') + ".class"
+    val input = classOf[UDFExampleAdd2].getClassLoader.getResourceAsStream(classResource)
+    val jarFile = File.createTempFile("hive-test-udfs", ".jar")
+    jarFile.deleteOnExit()
+
+    val output = new JarOutputStream(new FileOutputStream(jarFile))
+    try {
+      output.putNextEntry(new JarEntry(classResource))
+      val buffer = new Array[Byte](8192)
+      var bytesRead = input.read(buffer)
+      while (bytesRead != -1) {
+        output.write(buffer, 0, bytesRead)
+        bytesRead = input.read(buffer)
+      }
+      output.closeEntry()
+    } finally {
+      input.close()
+      output.close()
+    }
+
+    jarFile.getAbsolutePath
+  }
 
   val MyIntSumClass: String = "org.apache.paimon.spark.function.MyIntSum"
 }

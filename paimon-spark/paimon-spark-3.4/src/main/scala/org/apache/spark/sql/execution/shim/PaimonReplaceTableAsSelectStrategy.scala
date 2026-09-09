@@ -84,6 +84,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           invalidateCache
         ) :: Nil
       } else {
+        checkNonAtomicSelfReference(catalog, ident, analyzedQuery.get)
         ReplaceTableAsSelectExec(
           catalog,
           ident,

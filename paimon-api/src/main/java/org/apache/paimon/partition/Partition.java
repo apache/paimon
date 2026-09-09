@@ -74,20 +74,19 @@ public class Partition extends PartitionStatistics {
     @Nullable
     private final Map<String, String> options;
 
-    @JsonCreator
     public Partition(
-            @JsonProperty(FIELD_SPEC) Map<String, String> spec,
-            @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
-            @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
-            @JsonProperty(FIELD_FILE_COUNT) long fileCount,
-            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
-            @JsonProperty(FIELD_TOTAL_BUCKETS) int totalBuckets,
-            @JsonProperty(FIELD_DONE) boolean done,
-            @JsonProperty(FIELD_CREATED_AT) @Nullable Long createdAt,
-            @JsonProperty(FIELD_CREATED_BY) @Nullable String createdBy,
-            @JsonProperty(FIELD_UPDATED_AT) @Nullable Long updatedAt,
-            @JsonProperty(FIELD_UPDATED_BY) @Nullable String updatedBy,
-            @JsonProperty(FIELD_OPTIONS) @Nullable Map<String, String> options) {
+            Map<String, String> spec,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime,
+            int totalBuckets,
+            boolean done,
+            @Nullable Long createdAt,
+            @Nullable String createdBy,
+            @Nullable Long updatedAt,
+            @Nullable String updatedBy,
+            @Nullable Map<String, String> options) {
         super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime, totalBuckets);
         this.done = done;
         this.createdAt = createdAt;
@@ -118,6 +117,44 @@ public class Partition extends PartitionStatistics {
                 null,
                 null,
                 null);
+    }
+
+    /**
+     * Reads a partition off the wire. The statistics are optional in the REST contract, so an
+     * absent one decodes to {@link #UNKNOWN} rather than to {@code 0}. {@code totalBuckets} keeps
+     * its {@code 0} default, for writers older than that field.
+     */
+    @JsonCreator
+    static Partition fromJson(
+            @JsonProperty(FIELD_SPEC) Map<String, String> spec,
+            @JsonProperty(FIELD_RECORD_COUNT) @Nullable Long recordCount,
+            @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) @Nullable Long fileSizeInBytes,
+            @JsonProperty(FIELD_FILE_COUNT) @Nullable Long fileCount,
+            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) @Nullable Long lastFileCreationTime,
+            @JsonProperty(FIELD_TOTAL_BUCKETS) int totalBuckets,
+            @JsonProperty(FIELD_DONE) boolean done,
+            @JsonProperty(FIELD_CREATED_AT) @Nullable Long createdAt,
+            @JsonProperty(FIELD_CREATED_BY) @Nullable String createdBy,
+            @JsonProperty(FIELD_UPDATED_AT) @Nullable Long updatedAt,
+            @JsonProperty(FIELD_UPDATED_BY) @Nullable String updatedBy,
+            @JsonProperty(FIELD_OPTIONS) @Nullable Map<String, String> options) {
+        return new Partition(
+                spec,
+                orUnknown(recordCount),
+                orUnknown(fileSizeInBytes),
+                orUnknown(fileCount),
+                orUnknown(lastFileCreationTime),
+                totalBuckets,
+                done,
+                createdAt,
+                createdBy,
+                updatedAt,
+                updatedBy,
+                options);
+    }
+
+    private static long orUnknown(@Nullable Long value) {
+        return value == null ? UNKNOWN : value;
     }
 
     @JsonGetter(FIELD_DONE)

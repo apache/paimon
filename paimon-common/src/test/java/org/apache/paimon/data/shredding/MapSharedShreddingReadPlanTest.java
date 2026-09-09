@@ -28,11 +28,13 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -185,6 +187,48 @@ class MapSharedShreddingReadPlanTest {
         assertThat(selectedKeys.isNullAt(2)).isTrue();
     }
 
+    @Test
+    void testReadSelectedKeysFromNormalMap() {
+        MapSharedShreddingReadPlan readPlan =
+                new MapSharedShreddingReadPlan(selectedKeysLogicalType(), Collections.emptyMap());
+        assertThat(readPlan.physicalRowType().getTypeAt(0)).isInstanceOf(MapType.class);
+
+        HeapBytesVector keys = new HeapBytesVector(3);
+        appendString(keys, "key2");
+        appendString(keys, "key1");
+        appendString(keys, "key1");
+        HeapLongVector values = new HeapLongVector(3);
+        values.appendLong(20L);
+        values.appendLong(10L);
+        values.appendNull();
+        HeapMapVector normalMaps = new HeapMapVector(3, keys, values);
+        normalMaps.putOffsetLength(0, 0, 2);
+        normalMaps.putOffsetLength(1, 2, 1);
+        normalMaps.setNullAt(2);
+        normalMaps.putOffsetLength(2, 3, 0);
+
+        RowColumnVector selectedKeysVector = assembleSelectedKeysVector(readPlan, normalMaps, 3);
+        InternalRow first = selectedKeysVector.getRow(0);
+        assertThat(first.getLong(0)).isEqualTo(10L);
+        assertThat(first.getLong(1)).isEqualTo(20L);
+        assertThat(first.isNullAt(2)).isTrue();
+
+        InternalRow second = selectedKeysVector.getRow(1);
+        assertThat(second.isNullAt(0)).isTrue();
+        assertThat(second.isNullAt(1)).isTrue();
+        assertThat(second.isNullAt(2)).isTrue();
+        assertThat(selectedKeysVector.isNullAt(2)).isTrue();
+    }
+
+    @Test
+    void testFactoryCreatesSelectedKeysPlanForNormalMap() {
+        MapSharedShreddingReadPlanFactory factory =
+                new MapSharedShreddingReadPlanFactory(selectedKeysLogicalType());
+
+        assertThat(factory.shouldCreateReadPlan(Collections.emptyMap(), null)).isTrue();
+        assertThat(factory.createReadPlan(Collections.emptyMap(), null).isIdentity()).isFalse();
+    }
+
     private static InternalMap readMap(
             MapSharedShreddingFieldMeta fieldMeta, HeapRowVector physicalMap) {
         return assembleMapVector(fieldMeta, physicalMap).getMap(0);
@@ -205,11 +249,14 @@ class MapSharedShreddingReadPlanTest {
 
     private static RowColumnVector assembleSelectedKeysVector(
             MapSharedShreddingReadPlan readPlan, HeapRowVector physicalMap) {
-        assertThat(readPlan.physicalRowType().getTypeAt(0)).isInstanceOf(RowType.class);
+        return assembleSelectedKeysVector(readPlan, physicalMap, 1);
+    }
 
+    private static RowColumnVector assembleSelectedKeysVector(
+            MapSharedShreddingReadPlan readPlan, ColumnVector physicalMap, int rowCount) {
         VectorizedColumnBatch physicalBatch =
                 new VectorizedColumnBatch(new ColumnVector[] {physicalMap});
-        physicalBatch.setNumRows(1);
+        physicalBatch.setNumRows(rowCount);
         VectorizedColumnBatch logicalBatch = readPlan.batchAssembler().assemble(physicalBatch);
         return (RowColumnVector) logicalBatch.columns[0];
     }
@@ -280,6 +327,11 @@ class MapSharedShreddingReadPlanTest {
             vector.appendLong(value);
         }
         return vector;
+    }
+
+    private static void appendString(HeapBytesVector vector, String value) {
+        byte[] bytes = BinaryString.fromString(value).toBytes();
+        vector.appendByteArray(bytes, 0, bytes.length);
     }
 
     private static HeapMapVector overflowMap(int key, Long value) {

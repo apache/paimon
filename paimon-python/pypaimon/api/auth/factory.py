@@ -94,11 +94,17 @@ class AuthProviderFactory:
                 # Auto-detect based on URI
                 signing_algorithm = DLFAuthProviderFactory.parse_signing_algo_from_uri(uri)
 
+            token_loader = DLFTokenLoaderFactory.create_token_loader(options)
+            token = (
+                DLFToken.from_options(options)
+                if token_loader is None
+                else None
+            )
             return DLFAuthProvider(
                 uri=uri,
                 region=region,
                 signing_algorithm=signing_algorithm,
-                token=DLFToken.from_options(options),
-                token_loader=DLFTokenLoaderFactory.create_token_loader(options)
+                token=token,
+                token_loader=token_loader
             )
         raise ValueError('Unknown auth provider')

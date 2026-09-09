@@ -246,8 +246,7 @@ public class FlinkSourceBuilder {
         }
 
         int baseParallelism = basePostponeMergeParallelism();
-        PostponeMergeReadBuilder readBuilder =
-                optionalBuilder.get().withDefaultBucketNum(baseParallelism);
+        PostponeMergeReadBuilder readBuilder = optionalBuilder.get();
         org.apache.paimon.types.RowType readType = projectedRowType();
         if (readType != null) {
             readBuilder.withReadType(readType);
@@ -257,9 +256,6 @@ public class FlinkSourceBuilder {
         }
         PostponeMergePlan plan = readBuilder.plan();
         int mergeParallelism = inferPostponeMergeParallelism(plan, baseParallelism);
-        if (mergeParallelism != baseParallelism) {
-            plan = readBuilder.reroute(plan, mergeParallelism);
-        }
         return PostponeMergeOnRead.build(
                 env,
                 sourceName,

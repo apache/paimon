@@ -84,7 +84,7 @@ under the License.
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in blob-descriptor-field or blob-view-field are also treated as BLOB fields.</td>
+            <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB. Fields listed in blob-descriptor-field, blob-view-field, or video-frame-field are also treated as BLOB fields.</td>
         </tr>
         <tr>
             <td><h5>blob-view-field</h5></td>
@@ -213,6 +213,18 @@ under the License.
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' compaction.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>changelog-producer.ignore-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore delete records in the changelog. When set to true, DELETE (-D) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>changelog-producer.ignore-update-before</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore update-before records in the changelog. When set to true, UPDATE_BEFORE (-U) records will not be written to changelog files. This configuration is only valid for the changelog-producer is lookup or full-compaction.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -282,7 +294,7 @@ under the License.
             <td><h5>clustering.strategy</h5></td>
             <td style="word-wrap: break-word;">"auto"</td>
             <td>String</td>
-            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
             <td><h5>commit.callback.#.param</h5></td>
@@ -379,6 +391,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>When incremental size is bigger than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>continuous-compaction.initial-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">earliest</td>
+            <td><p>Enum</p></td>
+            <td>Initial snapshot mode for dedicated streaming compaction. When set to 'earliest' (the default), compaction starts from the earliest available snapshot if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. When set to 'latest', the latest snapshot is read in ALL mode as the initial baseline and subsequent scans start from the next snapshot. The 'latest' mode skips historical snapshot changes and should only be used when historical changelog replay is not required.<br /><br />Possible values:<ul><li>"earliest": Read snapshots from the earliest available snapshot.</li><li>"latest": Read the latest snapshot as the initial full baseline.</li></ul></td>
         </tr>
         <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
@@ -492,7 +510,7 @@ under the License.
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether data-evolution compaction may rewrite row IDs while physically applying deletion vectors. Enable only when callers do not rely on stable _ROW_ID; this invalidates row-id based references and drops global indexes for affected partitions.</td>
+            <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions. Use the 'materialize_deletion_vectors' procedure to apply deletion vectors to the latest table state and assign new row IDs. Reclaiming files retained by historical snapshots or tags requires snapshot expiration.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
@@ -513,10 +531,22 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.nested-field.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable sub-field-level data evolution for nested (struct) columns. When enabled, an update that only touches some sub-fields of a nested column writes an incremental file containing just those sub-fields (aligned by row id); when disabled, the whole top-level column is rewritten. Requires data-evolution.enabled=true. Mixed-version compatibility warning: once a file's write columns record a nested sub-field path (e.g. 'nest.a'), a reader, writer, compactor, or other maintenance job on an older version cannot reconstruct it. Every such component reading or writing this table must be upgraded before enabling this option, and downgrading the binary is unsafe once such files have been committed. This option may only be enabled through a persisted table-option change; dynamic overrides and disabling or removing the option after it has been enabled are not supported.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.reassign.skip-contiguous-row-count</h5></td>
             <td style="word-wrap: break-word;">1000000000</td>
             <td>Long</td>
             <td>Strictly contiguous same-partition logical row-id runs containing more than this number of rows are excluded from row-id reassignment. Set to 0 to disable this filtering.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-id-conflict-rewrite.max-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of current data files whose row-id ranges PyPaimon may automatically rebase staged updates against when a concurrent compaction changes file boundaries. Set to 0 B to disable.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.row-sidecar.enabled</h5></td>
@@ -535,6 +565,12 @@ under the License.
             <td style="word-wrap: break-word;">0.05</td>
             <td>Double</td>
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.write-cols-optimization.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to omit write columns from data file metadata when a data evolution file contains all non-dedicated columns. Readers always support the omitted metadata, but writing it is disabled by default for compatibility with older readers.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
@@ -741,6 +777,18 @@ under the License.
             <td>Format table commit hive sync uri.</td>
         </tr>
         <tr>
+            <td><h5>format-table.commit.cleanup-thread-num</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent deletions of old data files during overwrite commits for an internal Format Table with catalog-managed partitions. Supported values are 1 through 64. Other Format Tables use serial cleanup. This limit uses a separate thread pool and is independent of file-operation.thread-num, so the total file-operation concurrency in one process may be the sum of both limits.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.commit.publish-thread-num</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent file publications during commits for a partitioned Format Table with catalog-managed partitions. Supported values are 1 through 64. Other Format Tables publish serially.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -792,7 +840,7 @@ under the License.
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
-            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged and may make the index stale.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index. IGNORE leaves existing index files unchanged during the update and enables a later incremental index build to refresh affected row ranges.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li><li>"IGNORE"</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.enabled</h5></td>
@@ -1030,12 +1078,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>For DELETE manifest entry in manifest file, drop stats to reduce memory and storage. Default value is false only for compatibility of old reader.</td>
         </tr>
         <tr>
-            <td><h5>manifest.format</h5></td>
-            <td style="word-wrap: break-word;">"avro"</td>
-            <td>String</td>
-            <td>Specify the message format of manifest files.</td>
-        </tr>
-        <tr>
             <td><h5>manifest.full-compaction-threshold-size</h5></td>
             <td style="word-wrap: break-word;">16 mb</td>
             <td>MemorySize</td>
@@ -1046,6 +1088,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">30</td>
             <td>Integer</td>
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.<br />Note: when 'manifest-sort.enabled' is true, this minimum-count gate is only applied to the trailing sub-segment of a section that exceeds 'manifest-sort.max-rewrite-size'. Small under-budget sections are sorted and rewritten directly, so two small manifest files may be merged into one even when their count is below this threshold and full compaction is not triggered.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge-optimize.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable block-aware ordinary manifest merging. When disabled, ordinary manifest compaction uses the legacy full-entry merger.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
@@ -1279,10 +1327,22 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-fm.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns indexed by primary-key FM indexes.</td>
+        </tr>
+        <tr>
             <td><h5>pk-full-text.index.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Comma-separated character columns indexed by primary-key full-text indexes. The first release supports exactly one column.</td>
+        </tr>
+        <tr>
+            <td><h5>pk-multivalue.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated ARRAY columns indexed by primary-key Multivalue indexes.</td>
         </tr>
         <tr>
             <td><h5>pk-vector.index.columns</h5></td>
@@ -1300,13 +1360,19 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>postpone.batch-write-fixed-bucket.max-parallelism</h5></td>
             <td style="word-wrap: break-word;">2048</td>
             <td>Integer</td>
-            <td>The number of partitions for global index.</td>
+            <td>Maximum bucket number inferred for a partition by a fixed-bucket batch write. The inferred number is rounded up to a power of two before applying this limit.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.batch-write-fixed-bucket.rescale-load-factor</h5></td>
+            <td style="word-wrap: break-word;">32</td>
+            <td>Integer</td>
+            <td>Maximum tolerated ratio between the required bucket number and the existing bucket number before a fixed-bucket batch write enlarges the existing layout. Rescaling also requires the configured maximum parallelism to permit a larger bucket number.</td>
         </tr>
         <tr>
             <td><h5>postpone.default-bucket-num</h5></td>
-            <td style="word-wrap: break-word;">1</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
-            <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
+            <td>Optional bucket number for partitions receiving real buckets for the first time and for fixed-bucket overwrite writes. The configured value is used exactly and takes precedence over automatic bucket estimation. When unset, Paimon estimates the bucket number from the target row count or target file size.</td>
         </tr>
         <tr>
             <td><h5>postpone.merge-on-read</h5></td>
@@ -1318,19 +1384,25 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>postpone.target-row-num-per-bucket</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
-            <td>Target row number per bucket when batch writing fixed buckets or compacting postpone bucket files for a partition without real bucket data.</td>
+            <td>Target postpone row count per bucket when estimating the required bucket number from staged or committed postpone files. When configured, this option takes precedence over 'postpone.target-size-per-bucket'.</td>
         </tr>
         <tr>
             <td><h5>postpone.target-size-per-bucket</h5></td>
             <td style="word-wrap: break-word;">1 gb</td>
             <td>MemorySize</td>
-            <td>Target uncompressed serialized data size per bucket when Spark batch writes fixed buckets for a partition without real bucket data. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
+            <td>Target postpone file size per bucket when estimating the required bucket number from staged or committed postpone files. This option is ignored when 'postpone.target-row-num-per-bucket' is configured.</td>
         </tr>
         <tr>
             <td><h5>primary-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>primary-key.nullable</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether primary key fields can contain null values. Null values use null-safe equality when records are merged.</td>
         </tr>
         <tr>
             <td><h5>query-auth.enabled</h5></td>
@@ -1456,7 +1528,7 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>scan.mode</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
-            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"default": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp", and if "scan.snapshot-id" or "scan.tag-name" is set the actual startup mode will be "from-snapshot". Otherwise the actual startup mode will be "latest-full".</li><li>"latest-full": For streaming sources, produces the latest snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce the latest snapshot but does not read new changes.</li><li>"full": Deprecated. Same as "latest-full".</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "latest-full" startup mode.</li><li>"compacted-full": For streaming sources, produces a snapshot after the latest compaction on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot after the latest compaction but does not read new changes. Snapshots of full compaction are picked when scheduled full-compaction is enabled.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li><li>"from-creation-timestamp": For streaming sources and batch sources, If timestamp specified by "scan.creation-time-millis" is during in the range of earliest snapshot and latest snapshot: mode is from-snapshot which snapshot is equal or later the timestamp. If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time.</li><li>"from-file-creation-time": For streaming and batch sources, consumes a snapshot and filters the data files by creation time. For streaming sources, upon first startup, and continue to read the latest changes.</li><li>"from-snapshot": For streaming sources, continuously reads changes starting from snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning. For batch sources, produces a snapshot specified by "scan.snapshot-id" or "scan.tag-name" but does not read new changes.</li><li>"from-snapshot-full": For streaming sources, produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes. For batch sources, produces a snapshot specified by "scan.snapshot-id" but does not read new changes.</li><li>"incremental": Read incremental changes between start and end snapshot or timestamp.</li></ul></td>
+            <td>Specify the scanning behavior of the source.<br /><br />Possible values:<ul><li>"default": Determines actual startup mode according to other table properties. If "scan.timestamp-millis" is set the actual startup mode will be "from-timestamp", and if "scan.snapshot-id" or "scan.tag-name" is set the actual startup mode will be "from-snapshot". Otherwise the actual startup mode will be "latest-full".</li><li>"latest-full": For streaming sources, produces the latest snapshot on the table upon first startup, and continue to read the latest changes. For batch sources, just produce the latest snapshot but does not read new changes.</li><li>"full": Deprecated. Same as "latest-full".</li><li>"latest": For streaming sources, continuously reads latest changes without producing a snapshot at the beginning. For batch sources, behaves the same as the "latest-full" startup mode.</li><li>"latest-delta": For batch sources, reads newly changed files from the latest snapshot. This mode does not search backwards for an APPEND snapshot, so a latest COMPACT or OVERWRITE snapshot produces no records. Streaming sources are not supported.</li><li>"compacted-full": For streaming sources, produces a snapshot after the latest compaction on the table upon first startup, and continue to read the latest changes. For batch sources, just produce a snapshot after the latest compaction but does not read new changes. Snapshots of full compaction are picked when scheduled full-compaction is enabled.</li><li>"from-timestamp": For streaming sources, continuously reads changes starting from timestamp specified by "scan.timestamp-millis", without producing a snapshot at the beginning. For batch sources, produces a snapshot at timestamp specified by "scan.timestamp-millis" but does not read new changes.</li><li>"from-creation-timestamp": For streaming sources and batch sources, If timestamp specified by "scan.creation-time-millis" is during in the range of earliest snapshot and latest snapshot: mode is from-snapshot which snapshot is equal or later the timestamp. If timestamp is earlier than earliest snapshot or later than latest snapshot, mode is from-file-creation-time.</li><li>"from-file-creation-time": For streaming and batch sources, consumes a snapshot and filters the data files by creation time. For streaming sources, upon first startup, and continue to read the latest changes.</li><li>"from-snapshot": For streaming sources, continuously reads changes starting from snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning. For batch sources, produces a snapshot specified by "scan.snapshot-id" or "scan.tag-name" but does not read new changes.</li><li>"from-snapshot-full": For streaming sources, produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes. For batch sources, produces a snapshot specified by "scan.snapshot-id" but does not read new changes.</li><li>"incremental": Read incremental changes between start and end snapshot or timestamp.</li></ul></td>
         </tr>
         <tr>
             <td><h5>scan.plan-auto-tag-for-read.time-retained</h5></td>
@@ -1594,8 +1666,8 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td><h5>sort-compaction.range-strategy</h5></td>
             <td style="word-wrap: break-word;">SIZE</td>
             <td><p>Enum</p></td>
-            <td>The range strategy of sort compaction, the default value is quantity.
-If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
+            <td>The range strategy of sort compaction, the default value is size.
+The size strategy ranges by the data size allocated to each sorting task, which avoids the performance bottlenecks caused by uneven data size. The config can be set to quantity to range by the number of rows instead.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>
@@ -1760,12 +1832,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Type of the table.<br /><br />Possible values:<ul><li>"table": Normal Paimon table.</li><li>"format-table": A file format table refers to a directory that contains multiple files of the same format.</li><li>"materialized-table": A materialized table combines normal Paimon table and materialized SQL.</li><li>"object-table": An object table combines normal Paimon table and object location.</li><li>"lance-table": A lance table, see 'https://lancedb.github.io/lance/'.</li><li>"iceberg-table": An iceberg table, see 'https://iceberg.apache.org/'.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>upsert-key</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.</td>
-        </tr>
-        <tr>
             <td><h5>variant.inferShreddingSchema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1854,6 +1920,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>Target size of a vector-store file. Default is the same as TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
+            <td><h5>video-frame-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specifies comma-separated scalar BLOB fields whose logical rows are video frames. Complete encoded videos and embedded frame-run indexes are packed into '.video' files. Payload boundaries may be nested across fields, but every change must occur at a logical episode boundary. The first version supports append-only data-evolution tables and exact VideoFrameDescriptor input.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.check-interval</h5></td>

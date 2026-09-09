@@ -26,6 +26,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.InnerTable;
@@ -244,10 +245,10 @@ public class ReadBuilderImpl implements ReadBuilder {
             read.withReadType(readType);
         }
         if (queryAuthEnabled) {
-            // Skip TopN (engine re-applies it); apply the limit after auth only without a TopN,
-            // else an unordered limit could drop sorted rows.
+            // the reader does not evaluate the query filter on an auth-enabled table, so
+            // capping the rows here would cut away rows that actually match
             if (topN == null && limit != null) {
-                return new LimitTableRead(read, limit);
+                return new LimitTableRead(read, limit, filter != null);
             }
             return read;
         }
@@ -290,10 +291,15 @@ public class ReadBuilderImpl implements ReadBuilder {
 
         private final TableRead delegate;
         private final int limit;
+        // with a filter the reader only evaluates it once executeFilter() is requested;
+        // otherwise the engine does, after this limit, so capping here would drop matches
+        private final boolean filterPresent;
+        private boolean filterExecutedByReader = false;
 
-        private LimitTableRead(TableRead delegate, int limit) {
+        private LimitTableRead(TableRead delegate, int limit, boolean filterPresent) {
             this.delegate = delegate;
             this.limit = limit;
+            this.filterPresent = filterPresent;
         }
 
         @Override
@@ -305,12 +311,19 @@ public class ReadBuilderImpl implements ReadBuilder {
         @Override
         public TableRead executeFilter() {
             delegate.executeFilter();
+            this.filterExecutedByReader = true;
             return this;
         }
 
         @Override
         public TableRead withIOManager(IOManager ioManager) {
             delegate.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public TableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            delegate.withReadBatchSizer(sizer);
             return this;
         }
 
@@ -331,6 +344,9 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
 
         private RecordReader<InternalRow> limit(RecordReader<InternalRow> reader) {
+            if (filterPresent && !filterExecutedByReader) {
+                return reader;
+            }
             // Stop reading once the limit is reached (return EOF), rather than filtering and
             // draining the rest of the data.
             return new RecordReader<InternalRow>() {

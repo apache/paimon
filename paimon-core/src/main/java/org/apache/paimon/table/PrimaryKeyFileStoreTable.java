@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.predicate.Predicate;
@@ -149,7 +150,11 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public InnerTableRead newRead() {
         return new KeyValueTableRead(
-                () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
+                () -> store().newRead(),
+                () -> store().newBatchRawFileRead(),
+                schema(),
+                coreOptions(),
+                catalogEnvironment.dependencyReadContext());
     }
 
     @Override
@@ -173,10 +178,20 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
+        return newWrite(store().newWrite(commitUser, writeId));
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        return newWrite(store().newPostponeFixedBucketWrite(commitUser));
+    }
+
+    private TableWriteImpl<KeyValue> newWrite(AbstractFileStoreWrite<KeyValue> storeWrite) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
-                store().newWrite(commitUser, writeId),
+                storeWrite,
                 createRowKeyExtractor(),
                 (record, rowKind) ->
                         kv.replace(

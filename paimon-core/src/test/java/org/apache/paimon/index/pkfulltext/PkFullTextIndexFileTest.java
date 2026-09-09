@@ -273,6 +273,7 @@ class PkFullTextIndexFileTest {
         public GlobalIndexReader createReader(
                 GlobalIndexFileReader fileReader,
                 List<GlobalIndexIOMeta> files,
+                long totalRowCount,
                 ExecutorService executor) {
             throw new UnsupportedOperationException();
         }

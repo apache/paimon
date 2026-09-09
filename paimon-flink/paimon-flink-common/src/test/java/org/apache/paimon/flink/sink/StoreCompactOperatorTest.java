@@ -327,6 +327,11 @@ public class StoreCompactOperatorTest extends TableTestBase {
         }
 
         @Override
+        public SinkRecord write(InternalRow rowData, int bucket, int totalBuckets) {
+            return null;
+        }
+
+        @Override
         public void compact(BinaryRow partition, int bucket, boolean fullCompaction) {
             compactTime++;
         }

@@ -105,6 +105,7 @@ CREATE TABLE all_types_table (
     _bin BYTEA,
     -- json
     _json JSON,
+    _jsonb JSONB,
     -- UUID
     _uuid UUID,
     _array VARCHAR[],
@@ -131,7 +132,7 @@ INSERT INTO all_types_table (
     _time, _time0,
     _char, _varchar, _text,
     _bin,
-    _json, _uuid,
+    _json, _jsonb, _uuid,
     _array
 ) VALUES (
     1, 1.1,
@@ -150,7 +151,7 @@ INSERT INTO all_types_table (
     '10:13:23'::TIME, '10:13:23'::TIME,
     'Paimon', 'Apache Paimon', 'Apache Paimon PostgreSQL Test Data',
     'bytes',
-    '{"a": "b"}'::JSON, '123e4567-e89b-12d3-a456-426655440000'::UUID,
+    '{"a": "b"}'::JSON, '{"c": "d"}'::JSONB, '123e4567-e89b-12d3-a456-426655440000'::UUID,
     ARRAY['item1', 'item2']::VARCHAR[]
     ), (
     2, 2.2,
@@ -169,7 +170,7 @@ INSERT INTO all_types_table (
     NULL, NULL,
     NULL, NULL, NULL,
     NULL,
-    NULL, NULL,
+    NULL, NULL, NULL,
     NULL
     );
 

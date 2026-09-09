@@ -75,6 +75,10 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     protected boolean buildImpl() throws Exception {
+        if (bucketsSpecified()) {
+            throw new IllegalArgumentException(
+                    "Specifying buckets is not supported for sort compact.");
+        }
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {

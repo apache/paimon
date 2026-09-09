@@ -39,32 +39,59 @@ case class PaimonStatistics(
     splits: Array[Split],
     readRowType: RowType,
     tableRowType: RowType,
-    paimonStats: Optional[stats.Statistics]
+    paimonStats: Optional[stats.Statistics],
+    scanRowCount: OptionalLong = OptionalLong.empty()
 ) extends Statistics {
 
+  private lazy val fileTotalSize: Long = splits.map(SplitUtils.splitSize).sum
+
   lazy val numRows: OptionalLong = {
-    if (splits.exists(_.rowCount() == -1)) {
-      OptionalLong.empty()
+    if (scanRowCount.isPresent) {
+      val rowCount = scanRowCount.getAsLong
+      // A scan may use a non-positive row count for unknown. Only zero from a scan with no splits
+      // proves that the result is empty.
+      if (rowCount > 0 || (rowCount == 0 && splits.isEmpty)) {
+        scanRowCount
+      } else {
+        OptionalLong.empty()
+      }
     } else {
-      OptionalLong.of(splits.map(_.rowCount()).sum)
+      sumSplitRowCounts
     }
   }
 
+  private def sumSplitRowCounts: OptionalLong = {
+    var totalRowCount = 0L
+    var index = 0
+    while (index < splits.length) {
+      val rowCount = splits(index).rowCount()
+      if (rowCount <= 0) {
+        return OptionalLong.empty()
+      }
+      try {
+        totalRowCount = Math.addExact(totalRowCount, rowCount)
+      } catch {
+        case _: ArithmeticException => return OptionalLong.empty()
+      }
+      index += 1
+    }
+    OptionalLong.of(totalRowCount)
+  }
+
   lazy val sizeInBytes: OptionalLong = {
-    if (numRows.isPresent) {
+    if (numRows.isPresent && numRows.getAsLong > 0) {
       val sizeInBytes = numRows.getAsLong * estimateRowSize(readRowType)
       // Avoid return 0 bytes if there are some valid rows.
       // Avoid return too small size in bytes which may less than row count,
       // note the compression ratio on disk is usually bigger than memory.
       OptionalLong.of(Math.max(sizeInBytes, numRows.getAsLong))
+    } else if (fileTotalSize > 0) {
+      // Zero rows times any row size is zero, so weigh the files instead.
+      OptionalLong.of((fileTotalSize * readRowSizeRatio).toLong)
+    } else if (numRows.isPresent) {
+      OptionalLong.of(0L)
     } else {
-      val fileTotalSize = splits.map(SplitUtils.splitSize).sum
-      if (fileTotalSize == 0) {
-        OptionalLong.empty()
-      } else {
-        val size = (fileTotalSize * readRowSizeRatio).toLong
-        OptionalLong.of(size)
-      }
+      OptionalLong.empty()
     }
   }
 

@@ -675,6 +675,9 @@ public class JdbcUtils {
                             });
             return insertRecord == 1;
         } catch (SQLException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             throw new RuntimeException("Failed to insert table: " + tableName, e);
         }
     }

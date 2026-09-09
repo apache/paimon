@@ -30,21 +30,28 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /** Schema for global index. */
 public class GlobalIndexMeta {
+
+    public static final String ROW_RANGE_START = "_ROW_RANGE_START";
+    public static final String ROW_RANGE_END = "_ROW_RANGE_END";
+    public static final String INDEX_FIELD_ID = "_INDEX_FIELD_ID";
+    public static final String EXTRA_FIELD_IDS = "_EXTRA_FIELD_IDS";
+    public static final String INDEX_META = "_INDEX_META";
+    public static final String SOURCE_META = "_SOURCE_META";
 
     public static final RowType SCHEMA =
             new RowType(
                     true,
                     Arrays.asList(
-                            new DataField(0, "_ROW_RANGE_START", new BigIntType(false)),
-                            new DataField(1, "_ROW_RANGE_END", new BigIntType(false)),
-                            new DataField(2, "_INDEX_FIELD_ID", new IntType(false)),
-                            new DataField(
-                                    3, "_EXTRA_FIELD_IDS", DataTypes.ARRAY(new IntType(false))),
-                            new DataField(4, "_INDEX_META", DataTypes.BYTES()),
-                            new DataField(5, "_SOURCE_META", DataTypes.BYTES())));
+                            new DataField(0, ROW_RANGE_START, new BigIntType(false)),
+                            new DataField(1, ROW_RANGE_END, new BigIntType(false)),
+                            new DataField(2, INDEX_FIELD_ID, new IntType(false)),
+                            new DataField(3, EXTRA_FIELD_IDS, DataTypes.ARRAY(new IntType(false))),
+                            new DataField(4, INDEX_META, DataTypes.BYTES()),
+                            new DataField(5, SOURCE_META, DataTypes.BYTES())));
 
     private final long rowRangeStart;
     private final long rowRangeEnd;
@@ -152,5 +159,31 @@ public class GlobalIndexMeta {
             names.add(rowType.getField(id).name());
         }
         return names;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        GlobalIndexMeta that = (GlobalIndexMeta) o;
+        return rowRangeStart == that.rowRangeStart
+                && rowRangeEnd == that.rowRangeEnd
+                && indexFieldId == that.indexFieldId
+                && Arrays.equals(extraFieldIds, that.extraFieldIds)
+                && Arrays.equals(indexMeta, that.indexMeta)
+                && Arrays.equals(sourceMeta, that.sourceMeta);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(rowRangeStart, rowRangeEnd, indexFieldId);
+        result = 31 * result + Arrays.hashCode(extraFieldIds);
+        result = 31 * result + Arrays.hashCode(indexMeta);
+        result = 31 * result + Arrays.hashCode(sourceMeta);
+        return result;
     }
 }

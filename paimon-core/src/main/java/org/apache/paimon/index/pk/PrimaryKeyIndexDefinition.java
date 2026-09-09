@@ -28,7 +28,13 @@ public class PrimaryKeyIndexDefinition {
         VECTOR,
         BTREE,
         BITMAP,
-        FULL_TEXT
+        MULTI_VALUE,
+        FM,
+        FULL_TEXT;
+
+        public boolean isScalar() {
+            return this == BTREE || this == BITMAP || this == MULTI_VALUE || this == FM;
+        }
     }
 
     private final String column;

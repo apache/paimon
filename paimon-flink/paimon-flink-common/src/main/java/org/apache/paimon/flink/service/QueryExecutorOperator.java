@@ -60,6 +60,8 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
 
     private transient IOManager ioManager;
 
+    private transient KvQueryServer server;
+
     public QueryExecutorOperator(Table table) {
         this.table = table;
     }
@@ -86,7 +88,7 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
                         .newLocalTableQuery()
                         .withIOManager(ioManager)
                         .withMetrics(metrics);
-        KvQueryServer server =
+        this.server =
                 new KvQueryServer(
                         RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext()),
                         RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext()),
@@ -128,6 +130,10 @@ public class QueryExecutorOperator extends AbstractStreamOperator<InternalRow>
     @Override
     public void close() throws Exception {
         super.close();
+        // shut down the server first, so that no in-flight request can hit the closed query
+        if (server != null) {
+            server.shutdown();
+        }
         if (query != null) {
             query.close();
         }

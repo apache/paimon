@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
@@ -73,7 +74,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
         ProductionSearch production =
                 new ProductionSearch(table, definition, textField, query, limit);
         this.limit = limit;
-        this.indexedSearch = production::searchIndexed;
+        this.indexedSearch = production::searchIndexedAsync;
     }
 
     PrimaryKeyFullTextRead(
@@ -115,7 +116,10 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
 
     private PrimaryKeyScoredResult read(long snapshotId, List<FullTextSearchSplit> splits) {
         List<DataSplit> sourceSplits = new ArrayList<>(splits.size());
-        List<List<PrimaryKeySearchPosition>> rankings = new ArrayList<>();
+        List<CompletableFuture<List<List<PrimaryKeySearchPosition>>>> futures =
+                new ArrayList<>(splits.size());
+        // Start from the caller because each bucket submits payload searches to the same executor.
+        // Wrapping the whole bucket in that executor and waiting inside it can starve leaf work.
         for (FullTextSearchSplit searchSplit : splits) {
             checkArgument(
                     searchSplit instanceof PrimaryKeyFullTextSearchSplit,
@@ -125,7 +129,12 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                     split.dataSplit().snapshotId() == snapshotId,
                     "Full-text bucket split snapshot does not match its plan.");
             sourceSplits.add(split.dataSplit());
-            rankings.addAll(indexedSearch.search(split));
+            futures.add(indexedSearch.searchAsync(split));
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        List<List<PrimaryKeySearchPosition>> rankings = new ArrayList<>();
+        for (CompletableFuture<List<List<PrimaryKeySearchPosition>>> future : futures) {
+            rankings.addAll(future.join());
         }
         List<PrimaryKeySearchPosition> positions =
                 rankings.isEmpty()
@@ -136,7 +145,8 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
 
     @FunctionalInterface
     interface BucketRankingSearch {
-        List<List<PrimaryKeySearchPosition>> search(PrimaryKeyFullTextSearchSplit split);
+        CompletableFuture<List<List<PrimaryKeySearchPosition>>> searchAsync(
+                PrimaryKeyFullTextSearchSplit split);
     }
 
     private static class ProductionSearch {
@@ -170,13 +180,13 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
             this.archiveReader = meta -> fileIO.newInputStream(meta.filePath());
         }
 
-        private List<List<PrimaryKeySearchPosition>> searchIndexed(
+        private CompletableFuture<List<List<PrimaryKeySearchPosition>>> searchIndexedAsync(
                 PrimaryKeyFullTextSearchSplit split) {
             if (split.payloadFiles().isEmpty()) {
-                return Collections.emptyList();
+                return CompletableFuture.completedFuture(Collections.emptyList());
             }
             return bucketSearch(split)
-                    .searchRankings(
+                    .searchRankingsAsync(
                             split,
                             deletionVectors(split.dataSplit()),
                             textField.name(),
@@ -189,7 +199,7 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                     indexFileHandler.pkFullTextIndex(
                             split.dataSplit().partition(), split.dataSplit().bucket());
             return new PrimaryKeyFullTextBucketSearch(
-                    payload -> {
+                    (payload, totalRowCount) -> {
                         GlobalIndexMeta meta = checkNotNull(payload.globalIndexMeta());
                         GlobalIndexIOMeta ioMeta =
                                 new GlobalIndexIOMeta(
@@ -198,7 +208,10 @@ public class PrimaryKeyFullTextRead implements FullTextRead {
                                         meta.indexMeta());
                         GlobalIndexReader reader =
                                 indexer.createReader(
-                                        archiveReader, Collections.singletonList(ioMeta), executor);
+                                        archiveReader,
+                                        Collections.singletonList(ioMeta),
+                                        totalRowCount,
+                                        executor);
                         return reader;
                     });
         }

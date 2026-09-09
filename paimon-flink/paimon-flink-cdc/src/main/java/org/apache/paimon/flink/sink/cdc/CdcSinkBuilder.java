@@ -23,7 +23,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -121,7 +121,8 @@ public class CdcSinkBuilder<T> {
                                 parsed, CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
                         .process(
                                 new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(dataTable.fileIO(), dataTable.location()),
+                                        new FileSystemSchemaManager(
+                                                dataTable.fileIO(), dataTable.location()),
                                         identifier,
                                         catalogLoader,
                                         typeMapping))

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 
 import org.apache.flink.table.api.Schema;
@@ -94,8 +96,13 @@ public class FormatCatalogTable implements CatalogTable {
                             cachedOptions.put(k, v);
                         }
                     });
-            if (options.containsKey("field-delimiter")) {
-                cachedOptions.put("csv.field-delimiter", options.get("field-delimiter"));
+            if ("csv".equals(format)) {
+                Options csvOptions = Options.fromMap(options);
+                if (csvOptions.contains(CsvOptions.FIELD_DELIMITER)) {
+                    cachedOptions.put(
+                            CsvOptions.FIELD_DELIMITER.key(),
+                            csvOptions.get(CsvOptions.FIELD_DELIMITER));
+                }
             }
             cachedOptions.put(CONNECTOR.key(), "filesystem");
             cachedOptions.put(PATH.key(), table.location());

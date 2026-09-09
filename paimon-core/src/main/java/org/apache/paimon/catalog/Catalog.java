@@ -31,6 +31,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -709,7 +711,7 @@ public interface Catalog extends AutoCloseable {
      * will throw an {@link UnsupportedOperationException}, affect the following methods:
      *
      * <ul>
-     *   <li>{@link #commitSnapshot(Identifier, String, Snapshot, List)}.
+     *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
@@ -729,6 +731,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier Path of the table
      * @param tableUuid Uuid of the table to avoid wrong commit
+     * @param baseSnapshotUuid Uuid of the snapshot on which the commit is based
      * @param snapshot Snapshot to be committed
      * @param statistics statistics information of this change
      * @return Success or not
@@ -739,6 +742,7 @@ public interface Catalog extends AutoCloseable {
     boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;
@@ -874,6 +878,37 @@ public interface Catalog extends AutoCloseable {
      */
     default void rollbackSchema(Identifier identifier, long schemaId)
             throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Return the schema of a table for the given version. The version can be {@code EARLIEST},
+     * {@code LATEST}, or a schema ID.
+     *
+     * @param identifier path of the table
+     * @param version version of the schema
+     * @return the requested schema
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support loading schemas
+     */
+    default Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Get a paged schema list of a table in descending schema ID order.
+     *
+     * @param identifier path of the table
+     * @param maxResults maximum number of results, or {@code null} for the server default
+     * @param pageToken token from the previous response, or {@code null} for the first page
+     * @return schemas and the token for the next page
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not support listing schemas
+     */
+    default PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 
@@ -1038,21 +1073,23 @@ public interface Catalog extends AutoCloseable {
     // ==================== Partition Modifications ==========================
 
     /**
-     * Whether this catalog supports partition modification for tables.
+     * Whether committing a table through this catalog maintains that table's partitions in the
+     * catalog.
      *
-     * <p>If not, following methods will do nothing:
+     * <p>What this gates is the handler a table is given: {@link
+     * CatalogEnvironment#partitionModification()} is null for a catalog that says false, so the
+     * commits of a table loaded from it register, alter and drop nothing. It does not disable the
+     * methods themselves, which is how a Format Table with catalog-managed partitions registers
+     * what a commit wrote even though its catalog reports false here:
      *
      * <ul>
      *   <li>{@link #createPartitions(Identifier, List)}.
      *   <li>{@link #alterPartitions(Identifier, List)}.
-     * </ul>
-     *
-     * <p>If not, following method will be exactly the same as directly using {@link
-     * BatchTableCommit#truncatePartitions}:
-     *
-     * <ul>
      *   <li>{@link #dropPartitions(Identifier, List)}.
      * </ul>
+     *
+     * <p>A catalog that keeps no partitions of its own inherits defaults that match: creating and
+     * altering do nothing, and dropping is exactly {@link BatchTableCommit#truncatePartitions}.
      */
     boolean supportsPartitionModification();
 
@@ -1067,17 +1104,29 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
-     * Create partitions of the specify table with explicit existence semantics.
-     *
-     * @param identifier path of the table to create partitions
-     * @param partitions partitions to be created
-     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
-     *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
-     * @throws TableNotExistException if the table does not exist
+     * Create partitions atomically unless existing entries are ignored, with optional statistics
+     * and position-aligned options.
      */
     default void createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics,
+            @Nullable List<Map<String, String>> partitionOptions)
             throws TableNotExistException {
+        if (partitionOptions != null) {
+            if (partitionOptions.size() != partitions.size() || partitionOptions.contains(null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must contain one non-null map per partition.");
+            }
+            if (partitionOptions.stream().anyMatch(options -> !options.isEmpty())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s does not support partition options.",
+                                getClass().getName()));
+            }
+        }
         if (!ignoreIfExists) {
             throw new UnsupportedOperationException(
                     String.format(

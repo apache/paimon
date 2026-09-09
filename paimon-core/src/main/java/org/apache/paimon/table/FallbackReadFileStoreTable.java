@@ -35,6 +35,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataFilePlan;
@@ -192,6 +193,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         // then convert millisecond to other branch snapshot id
         String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
         String scanSnapshotId = options.get(scanSnapshotIdOptionKey);
+        String scanVersionOptionKey = CoreOptions.SCAN_VERSION.key();
+        String scanVersion = options.get(scanVersionOptionKey);
+        if (scanSnapshotId == null
+                && scanVersion != null
+                && scanVersion.chars().allMatch(Character::isDigit)
+                && !wrapped.tagManager().tagExists(scanVersion)) {
+            scanSnapshotId = scanVersion;
+            result.remove(scanVersionOptionKey);
+        }
         if (scanSnapshotId != null) {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();
@@ -307,11 +317,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         private void writeObject(ObjectOutputStream out) throws IOException {
-            serialize(new DataOutputViewStreamWrapper(out));
+            SplitSerializer.serialize(this, new DataOutputViewStreamWrapper(out));
         }
 
         private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-            assign(deserialize(new DataInputViewStreamWrapper(in)));
+            Split split = SplitSerializer.deserialize(new DataInputViewStreamWrapper(in));
+            if (!(split instanceof FallbackSplitImpl)) {
+                throw new IOException("Deserialized split is not a FallbackSplitImpl: " + split);
+            }
+            assign((FallbackSplitImpl) split);
         }
 
         private void assign(FallbackSplitImpl other) {
@@ -320,15 +334,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         public void serialize(DataOutputView out) throws IOException {
-            SplitSerializer.serialize(this, out);
+            out.writeBoolean(isFallback);
+            SplitSerializer.serialize(split, out);
         }
 
         public static FallbackSplitImpl deserialize(DataInputView in) throws IOException {
+            boolean isFallback = in.readBoolean();
             Split split = SplitSerializer.deserialize(in);
-            if (!(split instanceof FallbackSplitImpl)) {
-                throw new IOException("Deserialized split is not a FallbackSplitImpl: " + split);
-            }
-            return (FallbackSplitImpl) split;
+            return new FallbackSplitImpl(split, isFallback);
         }
     }
 
@@ -692,6 +705,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public TableRead withIOManager(IOManager ioManager) {
             mainRead.withIOManager(ioManager);
             fallbackRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            mainRead.withReadBatchSizer(sizer);
+            fallbackRead.withReadBatchSizer(sizer);
             return this;
         }
 

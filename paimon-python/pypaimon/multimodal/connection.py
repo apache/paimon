@@ -34,7 +34,7 @@ _DEFAULT_OPTIONS = {
     "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
     "global-index.search-mode": "full",
-    "vector.file.format": "vortex",
+    "vector.file.format": "parquet",
 }
 
 _DEFAULT_DATABASE = Catalog.DEFAULT_DATABASE
@@ -71,18 +71,35 @@ class MultimodalConnection:
         """Create a multimodal table and optionally add initial data."""
         identifier = self._identifier(name)
         already_exists = _table_exists(self.catalog, identifier)
-        paimon_schema = _to_paimon_schema(schema, data, options, partitioned)
+        if already_exists and ignore_if_exists:
+            try:
+                return self.get_table(name)
+            except (DatabaseNotExistException, TableNotExistException):
+                pass
+        try:
+            paimon_schema = _to_paimon_schema(
+                schema, data, options, partitioned)
+            _validate_multimodal_schema(paimon_schema, identifier)
+        except ValueError:
+            if ignore_if_exists:
+                try:
+                    return self.get_table(name)
+                except (DatabaseNotExistException, TableNotExistException):
+                    pass
+            raise
 
         self._create_database_for(identifier)
+        created = False
         try:
             self.catalog.create_table(
-                identifier, paimon_schema, ignore_if_exists)
+                identifier, paimon_schema, False)
+            created = True
         except TableAlreadyExistException:
             if not ignore_if_exists:
                 raise
 
         table = self.get_table(name)
-        if data is not None and not already_exists:
+        if data is not None and created:
             table.add(data)
         return table
 
@@ -94,6 +111,81 @@ class MultimodalConnection:
             self.catalog,
             identifier,
             raw_table,
+        )
+
+    def load_from_hdf5(
+            self,
+            table_name: str,
+            paths,
+            *,
+            transform,
+            source_options=None):
+        """Load HDF5 transforms into an existing table as one append commit.
+
+        Repeating a call appends the rows again. A commit exception has an
+        unknown result and is not safe to retry without checking table state.
+        Source filesystem options are isolated from the target warehouse.
+        """
+        from pypaimon.multimodal.hdf5 import load_from_hdf5
+        return load_from_hdf5(
+            self.get_table(table_name),
+            paths,
+            transform=transform,
+            source_options=source_options,
+        )
+
+    def load_from_lerobot(
+            self,
+            table_name: str,
+            source,
+            *,
+            batch_size: int = 1024,
+            options=None,
+            source_options=None,
+            tag_name=None) -> None:
+        """Import LeRobot Dataset v3 into a new Paimon table group."""
+        from pypaimon.multimodal.lerobot import load_from_lerobot
+        load_from_lerobot(
+            self,
+            table_name,
+            source,
+            batch_size=batch_size,
+            options=options,
+            source_options=source_options,
+            tag_name=tag_name,
+        )
+
+    def create_lerobot_tag(self, table_name: str, tag_name: str):
+        """Pin all LeRobot components; pause group writes until this returns.
+
+        Returns component snapshot IDs. Use the tag only after success and
+        retain it on every component for the lifetime of a training run.
+        """
+        from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag
+        return create_lerobot_tag(self, table_name, tag_name)
+
+    def load_from_rosbag(
+            self,
+            table_name: str,
+            paths,
+            *,
+            transform,
+            default_typestore=None,
+            typestore_factory=None,
+            source_options=None,
+            staging=None,
+            allow_storage_fragment: bool = False):
+        """Validate and append ROS1/ROS2 transforms in one commit."""
+        from pypaimon.multimodal.rosbag import load_from_rosbag
+        return load_from_rosbag(
+            self.get_table(table_name),
+            paths,
+            transform=transform,
+            default_typestore=default_typestore,
+            typestore_factory=typestore_factory,
+            source_options=source_options,
+            staging=staging,
+            allow_storage_fragment=allow_storage_fragment,
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
@@ -129,7 +221,10 @@ def _table_exists(catalog, identifier: str) -> bool:
 
 
 def _validate_multimodal_table(table, identifier: str):
-    table_schema = table.table_schema
+    _validate_multimodal_schema(table.table_schema, identifier)
+
+
+def _validate_multimodal_schema(table_schema, identifier: str):
     options = table_schema.options
     if str(options.get("data-evolution.enabled", "false")).lower() != "true":
         raise ValueError(

@@ -60,7 +60,7 @@ case class WriteIntoPaimonTable(
 
     val writer = PaimonSparkWriter(table, batchId = batchId)
     if (overwritePartition != null) {
-      writer.writeBuilder.withOverwrite(overwritePartition.asJava)
+      writer.withOverwrite(overwritePartition.asJava)
     }
     val operation = Option(options.get(PaimonWriteOptions.OPERATION_OPTION))
       .map(Snapshot.Operation.valueOf)
@@ -71,10 +71,7 @@ case class WriteIntoPaimonTable(
           Snapshot.Operation.WRITE
         }
       }
-    val commitMessages =
-      writer.write(
-        replacedData,
-        overwriteExistingData = overwritePartition != null || dynamicPartitionOverwriteMode)
+    val commitMessages = writer.write(replacedData)
     writer.commit(commitMessages, operation)
 
     Seq.empty

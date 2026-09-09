@@ -180,17 +180,18 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(VariantType variantType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Lance file format does not support type VARIANT");
         }
 
         @Override
         public Void visit(BlobType blobType) {
-            return null;
+            throw new UnsupportedOperationException("Lance file format does not support type BLOB");
         }
 
         @Override
         public Void visit(ArrayType arrayType) {
-            return null;
+            return arrayType.getElementType().accept(this);
         }
 
         @Override

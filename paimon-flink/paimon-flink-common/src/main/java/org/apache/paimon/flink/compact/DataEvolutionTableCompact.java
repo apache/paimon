@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.DataEvolutionTableCompactSink;
@@ -30,6 +31,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
@@ -56,8 +58,10 @@ public class DataEvolutionTableCompact {
     }
 
     public void build() {
+        DataEvolutionCompactCoordinator.validateOptions(table.coreOptions());
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         if (snapshot == null) {
+            env.fromSequence(0, 0).name("Nothing to Compact Source").sinkTo(new DiscardingSink<>());
             return;
         }
         DataEvolutionTableCompactSource source =

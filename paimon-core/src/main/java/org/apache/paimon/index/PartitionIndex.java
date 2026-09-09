@@ -49,6 +49,7 @@ public class PartitionIndex {
     public final List<Integer> totalBucketArray;
 
     private final long targetBucketRowNumber;
+    private boolean bucketUpperBoundReached;
 
     public boolean accessed;
 
@@ -67,7 +68,7 @@ public class PartitionIndex {
         this.accessed = true;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
+    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -92,7 +93,7 @@ public class PartitionIndex {
         }
 
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
-        if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
+        if (!bucketUpperBoundReached) {
             // 3. create a new bucket
             for (int i = 0; i <= globalMaxBucketId; i++) {
                 if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
@@ -107,8 +108,9 @@ public class PartitionIndex {
                 throw new RuntimeException(
                         String.format(
                                 "Too more bucket %s, you should increase target bucket row number %s.",
-                                maxBucketId, targetBucketRowNumber));
+                                globalMaxBucketId, targetBucketRowNumber));
             }
+            bucketUpperBoundReached = true;
         }
 
         // 4. exceed buckets upper bound

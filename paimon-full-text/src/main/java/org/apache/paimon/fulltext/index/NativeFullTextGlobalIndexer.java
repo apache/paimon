@@ -50,6 +50,7 @@ public class NativeFullTextGlobalIndexer implements GlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new NativeFullTextGlobalIndexReader(fileReader, files, executor);
     }

@@ -28,6 +28,7 @@ import java.time.ZoneId;
 
 import static org.apache.paimon.data.variant.VariantMetadataUtils.VariantRowTypeBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VariantMetadataUtils}. */
 public class VariantMetadataUtilsTest {
@@ -36,6 +37,13 @@ public class VariantMetadataUtilsTest {
     public void testBuildVariantMetadata() {
         String metadata = VariantMetadataUtils.buildVariantMetadata("$.a.b", true, "UTC");
         assertThat(metadata).isEqualTo("__VARIANT_METADATA$.a.b;true;UTC");
+    }
+
+    @Test
+    public void testBuildVariantMetadataRejectsPathWithDelimiter() {
+        assertThatThrownBy(() -> VariantMetadataUtils.buildVariantMetadata("$.a;b", true, "UTC"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must not contain ';'");
     }
 
     @Test

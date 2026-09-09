@@ -79,6 +79,7 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
     public GlobalIndexReader createReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
+            long totalRowCount,
             ExecutorService executor) {
         return new NativeVectorGlobalIndexReader(fileReader, files, fieldType, executor);
     }

@@ -45,14 +45,17 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Read plan that rebuilds logical MAP values from shared-shredding physical ROW values. */
+/**
+ * Read plan that rebuilds logical MAP values from shared-shredding physical ROW values and projects
+ * selected keys from legacy default-layout MAP values.
+ */
 public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
 
     private static final int FIELD_MAPPING_POSITION = 0;
 
     private final RowType logicalType;
     private final RowType physicalType;
-    private final Map<Integer, SharedShreddingContext> contextByFieldIndex;
+    private final Map<Integer, MapReadContext> contextByFieldIndex;
 
     public MapSharedShreddingReadPlan(
             RowType logicalType, Map<String, MapSharedShreddingFieldMeta> fieldMetas) {
@@ -81,15 +84,21 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         return new MapSharedShreddingBatchAssembler();
     }
 
-    private static Map<Integer, SharedShreddingContext> createContexts(
+    private static Map<Integer, MapReadContext> createContexts(
             RowType logicalType,
             RowType physicalType,
             Map<String, MapSharedShreddingFieldMeta> fieldMetas) {
-        Map<Integer, SharedShreddingContext> contexts = new LinkedHashMap<>();
+        Map<Integer, MapReadContext> contexts = new LinkedHashMap<>();
         for (int i = 0; i < logicalType.getFieldCount(); i++) {
             DataField field = logicalType.getFields().get(i);
             MapSharedShreddingFieldMeta fieldMeta = fieldMetas.get(field.name());
             if (fieldMeta == null) {
+                if (MapSelectedKeysMetadataUtils.isMapSelectedKeysField(field)) {
+                    contexts.put(
+                            i,
+                            new NormalMapSelectedKeysContext(
+                                    (RowType) field.type(), field.description()));
+                }
                 continue;
             }
 
@@ -117,14 +126,13 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         public VectorizedColumnBatch assemble(VectorizedColumnBatch physicalBatch) {
             ColumnVector[] logicalVectors = new ColumnVector[logicalType.getFieldCount()];
             for (int i = 0; i < logicalVectors.length; i++) {
-                SharedShreddingContext context = contextByFieldIndex.get(i);
+                MapReadContext context = contextByFieldIndex.get(i);
                 if (context == null) {
                     logicalVectors[i] = physicalBatch.columns[i];
                 } else {
                     logicalVectors[i] =
                             context.materialize(
-                                    (RowColumnVector) physicalBatch.columns[i],
-                                    physicalBatch.getNumRows());
+                                    physicalBatch.columns[i], physicalBatch.getNumRows());
                 }
             }
             return physicalBatch.copy(logicalVectors);
@@ -201,6 +209,37 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
                         context,
                         ordinal,
                         selectedKeyVectors[ordinal]);
+            }
+            rowVector.appendRow();
+        }
+
+        return ColumnVectorUtils.createReadableColumnVector(selectedKeysType, rowVector);
+    }
+
+    private static ColumnVector materializeSelectedKeysRowVector(
+            MapColumnVector physicalVector, NormalMapSelectedKeysContext context, int rowCount) {
+        RowType selectedKeysType = context.selectedKeysType;
+        WritableColumnVector[] selectedKeyVectors =
+                new WritableColumnVector[selectedKeysType.getFieldCount()];
+        for (int i = 0; i < selectedKeyVectors.length; i++) {
+            selectedKeyVectors[i] =
+                    ColumnVectorUtils.createWritableColumnVector(
+                            rowCount, selectedKeysType.getTypeAt(i));
+        }
+        HeapRowVector rowVector = new HeapRowVector(rowCount, selectedKeyVectors);
+
+        for (int row = 0; row < rowCount; row++) {
+            if (physicalVector.isNullAt(row)) {
+                rowVector.appendNull();
+                continue;
+            }
+
+            InternalMap map = physicalVector.getMap(row);
+            InternalArray keys = map.keyArray();
+            InternalArray values = map.valueArray();
+            for (int ordinal = 0; ordinal < selectedKeyVectors.length; ordinal++) {
+                appendSelectedKeyValue(
+                        keys, values, map.size(), context, ordinal, selectedKeyVectors[ordinal]);
             }
             rowVector.appendRow();
         }
@@ -329,6 +368,23 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         valueVector.appendNull();
     }
 
+    private static void appendSelectedKeyValue(
+            InternalArray keys,
+            InternalArray values,
+            int size,
+            NormalMapSelectedKeysContext context,
+            int ordinal,
+            WritableColumnVector valueVector) {
+        BinaryString selectedKey = context.selectedKeys[ordinal];
+        for (int i = 0; i < size; i++) {
+            if (!keys.isNullAt(i) && selectedKey.equals(keys.getString(i))) {
+                appendValue(context.selectedValueConverters[ordinal], values, i, valueVector);
+                return;
+            }
+        }
+        valueVector.appendNull();
+    }
+
     private static void appendValue(
             RowToColumnConverter.ElementConverter converter,
             ColumnVector source,
@@ -401,9 +457,9 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         return overflowVector.isNullAt(row) ? null : ((MapColumnVector) overflowVector).getMap(row);
     }
 
-    private interface SharedShreddingContext {
+    private interface MapReadContext {
 
-        ColumnVector materialize(RowColumnVector physicalVector, int rowCount);
+        ColumnVector materialize(ColumnVector physicalVector, int rowCount);
     }
 
     private static class SharedPhysicalContext {
@@ -475,7 +531,7 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         }
     }
 
-    private static class FullMapContext implements SharedShreddingContext {
+    private static class FullMapContext implements MapReadContext {
 
         private final SharedPhysicalContext physical;
         private final MapType mapType;
@@ -491,12 +547,12 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         }
 
         @Override
-        public ColumnVector materialize(RowColumnVector physicalVector, int rowCount) {
-            return materializeLogicalMapVector(physicalVector, this, rowCount);
+        public ColumnVector materialize(ColumnVector physicalVector, int rowCount) {
+            return materializeLogicalMapVector((RowColumnVector) physicalVector, this, rowCount);
         }
     }
 
-    private static class SelectedKeysContext implements SharedShreddingContext {
+    private static class SelectedKeysContext implements MapReadContext {
 
         private final SharedPhysicalContext physical;
         private final RowType selectedKeysType;
@@ -537,8 +593,9 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
         }
 
         @Override
-        public ColumnVector materialize(RowColumnVector physicalVector, int rowCount) {
-            return materializeSelectedKeysRowVector(physicalVector, this, rowCount);
+        public ColumnVector materialize(ColumnVector physicalVector, int rowCount) {
+            return materializeSelectedKeysRowVector(
+                    (RowColumnVector) physicalVector, this, rowCount);
         }
 
         private static int[] candidateColumns(MapSharedShreddingFieldMeta fieldMeta, int fieldId) {
@@ -551,6 +608,37 @@ public class MapSharedShreddingReadPlan implements ShreddingReadPlan {
                 result[i] = columns.get(i);
             }
             return result;
+        }
+    }
+
+    private static class NormalMapSelectedKeysContext implements MapReadContext {
+
+        private final RowType selectedKeysType;
+        private final BinaryString[] selectedKeys;
+        private final RowToColumnConverter.ElementConverter[] selectedValueConverters;
+
+        private NormalMapSelectedKeysContext(
+                RowType selectedKeysType, String selectedKeysMetadata) {
+            this.selectedKeysType = selectedKeysType;
+            List<String> keys = MapSelectedKeysMetadataUtils.selectedKeys(selectedKeysMetadata);
+            checkArgument(
+                    keys.size() == selectedKeysType.getFieldCount(),
+                    "Selected-key metadata size %s does not match selected ROW field count %s.",
+                    keys.size(),
+                    selectedKeysType.getFieldCount());
+            this.selectedKeys = new BinaryString[keys.size()];
+            this.selectedValueConverters = new RowToColumnConverter.ElementConverter[keys.size()];
+            for (int i = 0; i < keys.size(); i++) {
+                this.selectedKeys[i] = BinaryString.fromString(keys.get(i));
+                this.selectedValueConverters[i] =
+                        RowToColumnConverter.createElementConverter(selectedKeysType.getTypeAt(i));
+            }
+        }
+
+        @Override
+        public ColumnVector materialize(ColumnVector physicalVector, int rowCount) {
+            return materializeSelectedKeysRowVector(
+                    (MapColumnVector) physicalVector, this, rowCount);
         }
     }
 }

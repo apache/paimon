@@ -27,6 +27,8 @@ import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 
+_LOG = logging.getLogger(__name__)
+
 
 def supports_pread(stream) -> bool:
     """Check if the stream supports position-based reads (thread-safe I/O)."""
@@ -53,6 +55,15 @@ def pread(stream, length: int, offset: int) -> bytes:
 _COALESCE_GAP = 1 << 20
 _COALESCE_SPAN = 8 << 20
 _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION = 2.0
+# Bound per-object opens; 16 cuts them by 75% for default 64-range batches.
+_MAX_RANGE_LANES_PER_PATH = 16
+_RANGE_REQUEST_WEIGHT = 1 << 20
+
+
+def create_temp_path(path: str) -> str:
+    """Create the hidden temporary path used for an atomic write."""
+    separator = max(path.rfind('/'), path.rfind('\\'))
+    return f"{path[:separator + 1]}.{path[separator + 1:]}.{uuid.uuid4()}.tmp"
 
 
 def _coalesce_ranges(items, max_gap, max_span):
@@ -180,8 +191,9 @@ class FileIO(ABC):
                               max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
         """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
         bytes in the same order. Same-file nearby ranges are merged into one read
-        to cut round trips, then sliced; reads run on a thread pool. Negative
-        length (read to EOF) is read on its own, never merged.
+        to cut round trips, then sliced. Each worker lane reuses one exclusive
+        stream for consecutive spans of the same path. Negative length (read to
+        EOF) is read on its own, never merged.
 
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
@@ -226,12 +238,131 @@ class FileIO(ABC):
                 coalescible.append((index, path, offset, length))
 
         spans = _coalesce_ranges(coalescible, max_gap, max_span)
+        tasks_by_path = {}
+        for span in spans:
+            tasks_by_path.setdefault(span[0], []).append(("span", span))
+        for singleton in singletons:
+            tasks_by_path.setdefault(singleton[1], []).append(
+                ("one", singleton))
+        task_count = sum(len(path_tasks)
+                         for path_tasks in tasks_by_path.values())
+        if task_count == 0:
+            return results
 
-        def _run(task):
+        workers = max(1, min(parallelism, task_count))
+
+        def _task_weight(task):
+            kind, payload = task
+            length = payload[2] if kind == "span" else payload[3]
+            return _RANGE_REQUEST_WEIGHT + max(0, length)
+
+        lanes = [[] for _ in range(workers)]
+        lane_loads = [0] * workers
+        path_task_groups = list(tasks_by_path.values())
+        path_loads = [
+            sum(_task_weight(task) for task in path_tasks)
+            for path_tasks in path_task_groups
+        ]
+        total_load = sum(path_loads)
+        path_capacities = [
+            min(len(path_tasks), _MAX_RANGE_LANES_PER_PATH)
+            for path_tasks in path_task_groups
+        ]
+        path_lane_counts = [
+            min(
+                capacity,
+                max(
+                    1,
+                    (workers * path_load + total_load - 1) // total_load,
+                ),
+            )
+            for path_load, capacity in zip(path_loads, path_capacities)
+        ]
+        remaining_lanes = max(
+            0,
+            min(workers, sum(path_capacities)) - sum(path_lane_counts),
+        )
+        for _ in range(remaining_lanes):
+            candidates = [
+                index for index in range(len(path_task_groups))
+                if path_lane_counts[index] < path_capacities[index]
+            ]
+            if not candidates:
+                break
+            index = max(
+                candidates,
+                key=lambda value: (
+                    path_loads[value] / path_lane_counts[value]
+                ),
+            )
+            path_lane_counts[index] += 1
+
+        for path_tasks, path_lanes in zip(
+                path_task_groups, path_lane_counts):
+            selected = sorted(
+                range(workers), key=lane_loads.__getitem__)[:path_lanes]
+            for task in sorted(path_tasks, key=_task_weight, reverse=True):
+                lane = min(selected, key=lane_loads.__getitem__)
+                lanes[lane].append(task)
+                lane_loads[lane] += _task_weight(task)
+        lanes = [lane for lane in lanes if lane]
+
+        class _RangeLane:
+            def __init__(self, file_io):
+                self._file_io = file_io
+                self._path = None
+                self._stream = None
+                self._close_error = None
+
+            def _close_current(self):
+                stream = self._stream
+                self._stream = None
+                self._path = None
+                if stream is None:
+                    return None
+                try:
+                    stream.close()
+                except BaseException as error:
+                    if self._close_error is None:
+                        self._close_error = error
+                    return error
+                return None
+
+            def _stream_for(self, path):
+                if self._stream is not None and self._path == path:
+                    return self._stream
+                close_error = self._close_current()
+                if close_error is not None:
+                    raise close_error
+                self._stream = self._file_io.new_input_stream(path)
+                self._path = path
+                return self._stream
+
+            def read(self, path, offset, length):
+                try:
+                    stream = self._stream_for(path)
+                    if length >= 0 and supports_pread(stream):
+                        return pread(stream, length, offset)
+                    stream.seek(offset)
+                    return (stream.read() if length < 0
+                            else stream.read(length))
+                except Exception as read_error:
+                    self._close_current()
+                    if self._close_error is not None:
+                        raise read_error
+                    return self._file_io.read_file_range(
+                        path, offset, length)
+
+            def close(self):
+                self._close_current()
+                if self._close_error is not None:
+                    raise self._close_error
+
+        def _run_task(reader, task):
             kind, payload = task
             if kind == "span":
                 path, span_off, span_len, members = payload
-                buf = self.read_file_range(path, span_off, span_len)
+                buf = reader.read(path, span_off, span_len)
                 if return_views:
                     buf = memoryview(buf)
                     useful = sum(length for _, _, length in members)
@@ -240,22 +371,48 @@ class FileIO(ABC):
                         or span_len <= useful * max_retained_amplification
                     )
                 for idx, off, length in members:
-                    s = off - span_off
-                    value = buf[s:s + length]
+                    start = off - span_off
+                    value = buf[start:start + length]
                     if return_views and not share_buffer:
                         value = memoryview(bytes(value))
                     results[idx] = value
             else:
-                idx, path, off, length = payload
-                result = self.read_file_range(path, off, length)
-                results[idx] = memoryview(result) if return_views else result
+                idx, path, offset, length = payload
+                result = reader.read(path, offset, length)
+                results[idx] = (
+                    memoryview(result) if return_views else result)
 
-        tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
-        if not tasks:
-            return results
-        workers = max(1, min(parallelism, len(tasks)))
-        with ThreadPoolExecutor(workers) as pool:
-            list(pool.map(_run, tasks))
+        def _run_lane(lane):
+            reader = _RangeLane(self)
+            read_error = None
+            try:
+                for task in lane:
+                    _run_task(reader, task)
+            except BaseException as error:
+                read_error = error
+            close_error = None
+            try:
+                reader.close()
+            except BaseException as error:
+                close_error = error
+            return read_error, close_error
+
+        with ThreadPoolExecutor(len(lanes)) as pool:
+            outcomes = list(pool.map(_run_lane, lanes))
+        read_error = next(
+            (error for error, _ in outcomes if error is not None), None)
+        close_error = next(
+            (error for _, error in outcomes if error is not None), None)
+        if read_error is not None:
+            if close_error is not None:
+                _LOG.warning(
+                    "Failed to close a range input stream",
+                    exc_info=(type(close_error), close_error,
+                              close_error.__traceback__),
+                )
+            raise read_error
+        if close_error is not None:
+            raise close_error
         return results
 
     def read_blobs_concurrent(self, blobs, parallelism):
@@ -292,7 +449,7 @@ class FileIO(ABC):
             if self.is_dir(path):
                 return False
 
-        temp_path = path + str(uuid.uuid4()) + ".tmp"
+        temp_path = create_temp_path(path)
         success = False
         try:
             self.write_file(temp_path, content, False)

@@ -76,6 +76,16 @@ public class ApplyDeletionFileRecordIterator
     }
 
     @Override
+    public boolean skip() throws IOException {
+        while (iterator.skip()) {
+            if (!deletionVector.isDeleted(returnedPosition())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public void releaseBatch() {
         iterator.releaseBatch();
     }

@@ -129,7 +129,7 @@ scores through its configured `rrf`, `weighted_score`, or `mrr` ranker.
 CALL sys.full_text_search(
     `table` => 'default.articles',
     `column` => 'content',
-    query => '{"match":{"column":"content","terms":"paimon lake"}}',
+    query => '{"match":{"query":"paimon lake"}}',
     top_k => 10,
     projection => 'id,content,__paimon_search_score'
 );
@@ -178,16 +178,18 @@ Available tokenizer options:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `full-text.tokenizer` | `default` | Tokenizer used by the full-text index. Supported values: `default`, `simple`, `whitespace`, `raw`, `ngram`, `jieba`. |
-| `full-text.ngram.min-gram` | `2` | Minimum gram length for the `ngram` tokenizer. |
-| `full-text.ngram.max-gram` | `2` | Maximum gram length for the `ngram` tokenizer. |
+| `full-text.ngram.min-gram` | `3` | Minimum gram length for the `ngram` tokenizer. |
+| `full-text.ngram.max-gram` | `3` | Maximum gram length for the `ngram` tokenizer. |
 | `full-text.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
+| `full-text.jieba.search-mode` | `true` | Whether the `jieba` tokenizer uses search mode. |
+| `full-text.jieba.ordinal-position` | `true` | Whether the `jieba` tokenizer uses ordinal positions. |
 | `full-text.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
 | `full-text.max-token-length` | `40` | Maximum token length kept by configurable tokenizers. |
-| `full-text.ascii-folding` | `false` | Whether to normalize non-ASCII Latin characters to ASCII. |
-| `full-text.stem` | `false` | Whether to apply stemming to emitted tokens. |
+| `full-text.ascii-folding` | `true` | Whether to normalize non-ASCII Latin characters to ASCII. |
+| `full-text.stem` | `true` | Whether to apply stemming to emitted tokens. |
 | `full-text.language` | `english` | Language used by stemming and built-in stop word filters. |
-| `full-text.remove-stop-words` | `false` | Whether to remove built-in stop words for the configured language. |
-| `full-text.stop-words` | ` ` | Semicolon-separated custom stop words to remove. |
+| `full-text.remove-stop-words` | `true` | Whether to remove built-in stop words for the configured language. |
+| `full-text.stop-words` | empty | Semicolon-separated custom stop words to remove. Requires `full-text.remove-stop-words=true`. |
 | `full-text.with-position` | `true` | Whether to store term positions for phrase queries. |
 
 Tokenizer settings are persisted in each global index file's metadata. Readers use that metadata

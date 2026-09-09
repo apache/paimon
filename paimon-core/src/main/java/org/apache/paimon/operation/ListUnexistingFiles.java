@@ -38,14 +38,14 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ExecutorService;
 
 /** List what data files recorded in manifests are missing from the filesystem. */
 public class ListUnexistingFiles {
 
     private final FileStoreTable table;
     private final FileStorePathFactory pathFactory;
-    private final ThreadPoolExecutor executor;
+    private final ExecutorService executor;
 
     public ListUnexistingFiles(FileStoreTable table) {
         this.table = table;

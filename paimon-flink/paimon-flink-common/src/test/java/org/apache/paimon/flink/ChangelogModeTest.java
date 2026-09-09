@@ -24,8 +24,8 @@ import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.IntType;
@@ -43,7 +43,9 @@ import java.util.Collections;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.INPUT;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for changelog mode with flink source and sink. */
 public class ChangelogModeTest {
@@ -59,9 +61,8 @@ public class ChangelogModeTest {
         path = new Path(temp.toUri().toString());
     }
 
-    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
-            throws Exception {
-        new SchemaManager(LocalFileIO.create(), path)
+    private FileStoreTable createTable(Options options) throws Exception {
+        new FileSystemSchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(
                                 RowType.of(new IntType(), new IntType()).getFields(),
@@ -69,13 +70,30 @@ public class ChangelogModeTest {
                                 Collections.singletonList("f0"),
                                 options.toMap(),
                                 ""));
-        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        return FileStoreTableFactory.create(LocalFileIO.create(), path);
+    }
+
+    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
+            throws Exception {
+        FileStoreTable table = createTable(options);
 
         DataTableSource source = new DataTableSource(identifier, table, true, null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
         FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
+    }
+
+    @Test
+    public void testNullablePrimaryKey() throws Exception {
+        Options options = new Options();
+        options.set(PRIMARY_KEY_NULLABLE, true);
+        FileStoreTable table = createTable(options);
+
+        DataTableSource source = new DataTableSource(identifier, table, true, null);
+        assertThatThrownBy(source::getChangelogMode)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("nullable primary keys require a full changelog");
     }
 
     @Test

@@ -31,7 +31,9 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -43,22 +45,43 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for {@link AuditLogTable}. */
 public class AuditLogTableTest extends TableTestBase {
+
+    @Test
+    public void testReadBatchSizerPropagatesToDataRead() {
+        FileStoreTable wrapped = mock(FileStoreTable.class);
+        InnerTableRead dataRead = mock(InnerTableRead.class);
+        when(wrapped.options()).thenReturn(Collections.emptyMap());
+        when(wrapped.rowType()).thenReturn(RowType.of(DataTypes.INT()));
+        when(wrapped.newRead()).thenReturn(dataRead);
+        when(dataRead.forceKeepDelete()).thenReturn(dataRead);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+
+        new AuditLogTable(wrapped).newRead().withReadBatchSizer(sizer);
+
+        verify(dataRead).withReadBatchSizer(sizer);
+    }
 
     @Test
     public void testReadAuditLogFromLatest() throws Exception {
@@ -84,7 +107,7 @@ public class AuditLogTableTest extends TableTestBase {
         FileIO fileIO = LocalFileIO.create();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         Schema.newBuilder()
                                 .column("pk", DataTypes.INT())
                                 .column("score", DataTypes.INT())
@@ -127,7 +150,7 @@ public class AuditLogTableTest extends TableTestBase {
     public void testChainTableAuditLogPreservesChainScan() throws Exception {
         Path tablePath = new Path(String.format("%s/%s.db/chain_audit_table", warehouse, database));
         FileIO fileIO = LocalFileIO.create();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.createTable(
                 Schema.newBuilder()
                         .column("dt", DataTypes.STRING())
@@ -157,8 +180,8 @@ public class AuditLogTableTest extends TableTestBase {
                         SchemaChange.setOption("partition.timestamp-pattern", "$dt"),
                         SchemaChange.setOption("partition.timestamp-formatter", "yyyyMMdd"));
         schemaManager.commitChanges(chainOptions);
-        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainOptions);
-        new SchemaManager(fileIO, tablePath, "delta").commitChanges(chainOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "delta").commitChanges(chainOptions);
 
         FileStoreTable snapshotTable = branchTable(fileIO, tablePath, "snapshot");
         FileStoreTable deltaTable = branchTable(fileIO, tablePath, "delta");
@@ -221,7 +244,7 @@ public class AuditLogTableTest extends TableTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         Schema.newBuilder()
                                 .column("pk", DataTypes.INT())
                                 .column("pt", DataTypes.INT())
@@ -298,7 +321,7 @@ public class AuditLogTableTest extends TableTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath), schemaBuilder.build());
+                        new FileSystemSchemaManager(fileIO, tablePath), schemaBuilder.build());
         FileStoreTable table =
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
@@ -311,7 +334,7 @@ public class AuditLogTableTest extends TableTestBase {
 
     private FileStoreTable branchTable(FileIO fileIO, Path tablePath, String branch) {
         TableSchema branchSchema =
-                new SchemaManager(fileIO, tablePath, branch)
+                new FileSystemSchemaManager(fileIO, tablePath, branch)
                         .latest()
                         .orElseThrow(AssertionError::new);
         Options dynamicOptions = new Options();

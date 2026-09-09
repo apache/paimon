@@ -32,10 +32,13 @@ from pypaimon.ray.data_evolution_merge_into import (
     _normalize_source,
     _reraise_inner,
     _require_ray_join,
-    _resolve_num_partitions,
 )
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
+from pypaimon.ray.partitioning import (
+    _estimate_dataset_num_rows,
+    _estimate_dataset_size_bytes,
+)
 from pypaimon.schema.data_types import is_blob_file_field
 
 __all__ = ["update_by_row_id"]
@@ -75,8 +78,6 @@ def update_by_row_id(
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
     update_cols = list(dict.fromkeys(update_cols))  # de-dup, keep order
-    num_partitions = _resolve_num_partitions(num_partitions)
-
     table = CatalogFactory.create(catalog_options).get_table(target)
     if not table.options.data_evolution_enabled():
         raise ValueError(
@@ -114,6 +115,13 @@ def update_by_row_id(
             "update_by_row_id does not accept a table-name source; pass a ray.data."
             f"Dataset / pyarrow.Table / pandas.DataFrame carrying the target {rid}.")
     source_ds = _normalize_source(source, catalog_options)
+    estimated_size_bytes = None
+    estimated_num_rows = None
+    data_context = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
+        estimated_num_rows = _estimate_dataset_num_rows(source_ds)
+        data_context = getattr(source_ds, "context", None)
     src_cols = set(source_ds.schema().names)
     missing = [c for c in [rid] + update_cols if c not in src_cols]
     if missing:
@@ -145,6 +153,9 @@ def update_by_row_id(
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
             base_snapshot_id=base.id,
+            estimated_size_bytes=estimated_size_bytes,
+            estimated_num_rows=estimated_num_rows,
+            data_context=data_context,
         )
     except Exception as e:
         _reraise_inner(e)
@@ -156,52 +167,20 @@ def update_by_row_id(
 
 
 def _commit_update_messages(table, commit_messages) -> None:
-    pending_msgs: list = list(commit_messages)
-    commit_started = False
-
-    try:
-        table_commit = None
-        try:
-            table_commit = table.new_batch_write_builder().new_commit()
-            commit_started = True
-            table_commit.commit(pending_msgs)
-        finally:
-            if table_commit is not None:
-                try:
-                    table_commit.close()
-                except Exception as close_error:
-                    logger.warning(
-                        "Failed to close update_by_row_id commit: %s",
-                        close_error,
-                        exc_info=close_error,
-                    )
-    except Exception as e:
-        if not commit_started:
-            _abort_pending_update_messages(table, pending_msgs)
-        _reraise_inner(e)
-
-
-def _abort_pending_update_messages(table, commit_messages) -> None:
-    if not commit_messages:
-        return
-
+    messages = list(commit_messages)
     table_commit = None
     try:
         table_commit = table.new_batch_write_builder().new_commit()
-        table_commit.abort(commit_messages)
-    except Exception as abort_error:
-        logger.warning(
-            "Failed to abort pending update_by_row_id commit messages: %s",
-            abort_error,
-            exc_info=abort_error,
-        )
+        table_commit.commit(messages)
+    except Exception as e:
+        _reraise_inner(e)
     finally:
         if table_commit is not None:
             try:
                 table_commit.close()
             except Exception as close_error:
                 logger.warning(
-                    "Failed to close update_by_row_id abort commit: %s",
+                    "Failed to close update_by_row_id commit: %s",
                     close_error,
                     exc_info=close_error,
                 )

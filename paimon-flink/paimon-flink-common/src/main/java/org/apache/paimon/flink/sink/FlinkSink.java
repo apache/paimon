@@ -90,11 +90,6 @@ public abstract class FlinkSink<T> implements Serializable {
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
-    @Nullable
-    protected StoreSinkWrite.Provider writeProviderOverride() {
-        return null;
-    }
-
     void setBlobDescriptorReaderFactory(UriReaderFactory uriReaderFactory) {
         this.blobDescriptorReaderFactory = uriReaderFactory;
     }
@@ -141,17 +136,10 @@ public abstract class FlinkSink<T> implements Serializable {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming = isStreaming(input);
 
-        boolean writeOnly = table.coreOptions().writeOnly();
-        StoreSinkWrite.Provider writeProvider = writeProviderOverride();
-        if (writeProvider == null) {
-            writeProvider =
-                    StoreSinkWrite.createWriteProvider(
-                            table,
-                            env.getCheckpointConfig(),
-                            isStreaming,
-                            ignorePreviousFiles,
-                            hasSinkMaterializer(input));
-        }
+        boolean writeOnly = writeOnly();
+        StoreSinkWrite.Provider writeProvider =
+                createWriteProvider(
+                        env.getCheckpointConfig(), isStreaming, hasSinkMaterializer(input));
         writeProvider =
                 StoreSinkWrite.withBlobDescriptorReaderFactory(
                         writeProvider, blobDescriptorReaderFactory);
@@ -206,16 +194,31 @@ public abstract class FlinkSink<T> implements Serializable {
         return written;
     }
 
+    protected boolean writeOnly() {
+        return table.coreOptions().writeOnly();
+    }
+
+    protected StoreSinkWrite.Provider createWriteProvider(
+            CheckpointConfig checkpointConfig, boolean isStreaming, boolean hasSinkMaterializer) {
+        return StoreSinkWrite.createWriteProvider(
+                table, checkpointConfig, isStreaming, ignorePreviousFiles, hasSinkMaterializer);
+    }
+
+    protected boolean ignorePreviousFiles() {
+        return ignorePreviousFiles;
+    }
+
     public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean streamingCheckpointEnabled =
                 isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
+        boolean coordinatorCommitEnabled = coordinatorCommitEnabled();
         if (streamingCheckpointEnabled) {
-            assertStreamingConfiguration(env);
+            assertStreamingConfiguration(env, coordinatorCommitEnabled);
         }
 
-        if (coordinatorCommitEnabled()) {
+        if (coordinatorCommitEnabled) {
             return doCoordinatorCommit(written, checkpointConfig, streamingCheckpointEnabled);
         }
         return doOperatorCommit(written, commitUser, streamingCheckpointEnabled);
@@ -306,8 +309,14 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
+        assertStreamingConfiguration(env, false);
+    }
+
+    private static void assertStreamingConfiguration(
+            StreamExecutionEnvironment env, boolean supportsUnalignedCheckpoints) {
         checkArgument(
-                !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
+                supportsUnalignedCheckpoints
+                        || !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "Paimon sink currently does not support unaligned checkpoints. Please set "
                         + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
@@ -406,14 +415,6 @@ public abstract class FlinkSink<T> implements Serializable {
                 "Could not enable coordinator commit because it requires "
                         + PRECOMMIT_COMPACT.key()
                         + " = false.");
-
-        // The OperatorCoordinator cannot tell a savepoint from a normal checkpoint.
-        // TODO support savepoint auto-tag.
-        checkArgument(
-                !options.get(SINK_AUTO_TAG_FOR_SAVEPOINT),
-                "Could not enable coordinator commit because "
-                        + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
-                        + " is enabled, which is not supported yet.");
 
         // TODO concurrent checkpoints are not supported yet.
         checkArgument(

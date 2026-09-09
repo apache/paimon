@@ -83,6 +83,14 @@ public class EqualiserCodeGeneratorTest {
                 DataTypeRoot.VARBINARY,
                 new GeneratedData(DataTypes.VARBINARY(1), Pair.of("7".getBytes(), "8".getBytes())));
         TEST_DATA.put(
+                DataTypeRoot.GEOMETRY,
+                new GeneratedData(
+                        DataTypes.GEOMETRY(), Pair.of("geom-1".getBytes(), "geom-2".getBytes())));
+        TEST_DATA.put(
+                DataTypeRoot.GEOGRAPHY,
+                new GeneratedData(
+                        DataTypes.GEOGRAPHY(), Pair.of("geog-1".getBytes(), "geog-2".getBytes())));
+        TEST_DATA.put(
                 DataTypeRoot.DECIMAL,
                 new GeneratedData(
                         DataTypes.DECIMAL(10, 0),

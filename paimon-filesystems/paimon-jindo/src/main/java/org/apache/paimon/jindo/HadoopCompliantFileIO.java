@@ -433,5 +433,15 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         public long getModificationTime() {
             return status.getModificationTime();
         }
+
+        @Override
+        public long getAccessTime() {
+            return status.getAccessTime();
+        }
+
+        @Override
+        public String getOwner() {
+            return status.getOwner();
+        }
     }
 }

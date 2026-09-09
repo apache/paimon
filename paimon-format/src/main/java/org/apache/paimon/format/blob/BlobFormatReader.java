@@ -111,6 +111,15 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
             }
 
             @Override
+            public boolean skip() {
+                if (currentPosition >= fileMeta.recordNumber()) {
+                    return false;
+                }
+                currentPosition++;
+                return true;
+            }
+
+            @Override
             public void releaseBatch() {}
         };
     }

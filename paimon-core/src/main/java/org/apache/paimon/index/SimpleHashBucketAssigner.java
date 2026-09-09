@@ -37,7 +37,6 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private final int assignId;
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
-    private int maxBucketId;
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
@@ -58,11 +57,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
             index = new SimplePartitionIndex();
             this.partitionIndex.put(partition, index);
         }
-        int assigned = index.assign(hash);
-        if (assigned > maxBucketId) {
-            maxBucketId = assigned;
-        }
-        return assigned;
+        return index.assign(hash);
     }
 
     @Override
@@ -82,6 +77,7 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
         private final Map<Integer, Long> bucketInformation;
         private final List<Integer> bucketList;
         private int currentBucket;
+        private boolean bucketUpperBoundReached;
 
         private SimplePartitionIndex() {
             bucketInformation = new LinkedHashMap<>();
@@ -104,29 +100,40 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                             });
 
             if (num >= targetBucketRowNumber) {
-                if (-1 == maxBucketsNum
-                        || bucketInformation.isEmpty()
-                        || maxBucketId < maxBucketsNum - 1) {
-                    loadNewBucket();
-                } else {
+                if (bucketUpperBoundReached || !loadNewBucket()) {
+                    bucketUpperBoundReached = true;
                     currentBucket = ListUtils.pickRandomly(bucketList);
                 }
             }
-            bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
+            // A bucket is created by exactly one of these two calls, so both have to register
+            // it and neither can double-register. The first bucket of a partition is created by
+            // the computeIfAbsent above. Every later one is created here instead: loadNewBucket()
+            // switches currentBucket to an id that is absent from bucketInformation, and this
+            // compute() is what puts it there, so the next assign() finds it present and that
+            // computeIfAbsent's mapping function never runs for it.
+            bucketInformation.compute(
+                    currentBucket,
+                    (i, l) -> {
+                        if (l == null) {
+                            bucketList.add(i);
+                            return 1L;
+                        }
+                        return l + 1;
+                    });
             hash2Bucket.put(hash, (short) currentBucket);
             return currentBucket;
         }
 
-        private void loadNewBucket() {
+        private boolean loadNewBucket() {
             for (int i = 0; i < Short.MAX_VALUE; i++) {
                 if (isMyBucket(i) && !bucketInformation.containsKey(i)) {
                     // The new bucketId may still be larger than the upper bound
                     if (-1 == maxBucketsNum || i <= maxBucketsNum - 1) {
                         currentBucket = i;
-                        return;
+                        return true;
                     }
                     // No need to enter the next iteration when upper bound exceeded
-                    return;
+                    return false;
                 }
             }
             throw new RuntimeException(

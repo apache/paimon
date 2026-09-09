@@ -16,7 +16,7 @@
 # under the License.
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO
 
@@ -47,11 +47,17 @@ class RenamingSnapshotCommit(SnapshotCommit):
         self.snapshot_manager = snapshot_manager
         self.file_io: FileIO = snapshot_manager.file_io
 
-    def commit(self, snapshot: Snapshot, statistics: List[PartitionStatistics]) -> bool:
+    def commit(
+            self,
+            base_snapshot_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics],
+    ) -> bool:
         """
         Commit the snapshot using file renaming.
 
         Args:
+            base_snapshot_uuid: UUID of the base snapshot (unused for renaming commits)
             snapshot: The snapshot to commit
             statistics: List of partition statistics (currently unused but kept for interface compatibility)
 

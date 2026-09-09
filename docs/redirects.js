@@ -257,10 +257,6 @@ module.exports = [
     "to": "/maintenance/manage-partitions"
   },
   {
-    "from": "/maintenance/manage-privileges.html",
-    "to": "/maintenance/manage-privileges"
-  },
-  {
     "from": "/maintenance/manage-snapshots.html",
     "to": "/maintenance/manage-snapshots"
   },
@@ -475,10 +471,6 @@ module.exports = [
   {
     "from": "/spark/sql-query.html",
     "to": "/spark/sql-query"
-  },
-  {
-    "from": "/spark/sql-upsert.html",
-    "to": "/spark/sql-upsert"
   },
   {
     "from": "/spark/sql-write.html",

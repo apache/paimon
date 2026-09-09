@@ -63,6 +63,7 @@ public class FlinkRowWrapper implements InternalRow {
     private final boolean checkBlobDescriptorExists;
     private final boolean writeNullOnFetchFailure;
     private final Set<Integer> blobFields;
+    private final Set<Integer> materializedBlobFields;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
@@ -111,7 +112,8 @@ public class FlinkRowWrapper implements InternalRow {
                 new UriReaderFactory(catalogContext),
                 checkBlobDescriptorExists,
                 writeNullOnFetchFailure,
-                blobFields);
+                blobFields,
+                Collections.emptySet());
     }
 
     public static FlinkRowWrapper fromUriReaderFactory(
@@ -120,12 +122,29 @@ public class FlinkRowWrapper implements InternalRow {
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure,
             Set<Integer> blobFields) {
+        return fromUriReaderFactory(
+                row,
+                uriReaderFactory,
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields,
+                Collections.emptySet());
+    }
+
+    public static FlinkRowWrapper fromUriReaderFactory(
+            org.apache.flink.table.data.RowData row,
+            UriReaderFactory uriReaderFactory,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields,
+            Set<Integer> materializedBlobFields) {
         return new FlinkRowWrapper(
                 row,
                 uriReaderFactory,
                 checkBlobDescriptorExists,
                 writeNullOnFetchFailure,
-                blobFields);
+                blobFields,
+                materializedBlobFields);
     }
 
     private FlinkRowWrapper(
@@ -133,12 +152,14 @@ public class FlinkRowWrapper implements InternalRow {
             UriReaderFactory uriReaderFactory,
             boolean checkBlobDescriptorExists,
             boolean writeNullOnFetchFailure,
-            Set<Integer> blobFields) {
+            Set<Integer> blobFields,
+            Set<Integer> materializedBlobFields) {
         this.row = row;
         this.uriReaderFactory = uriReaderFactory;
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.blobFields = blobFields;
+        this.materializedBlobFields = materializedBlobFields;
     }
 
     public static Set<Integer> blobFieldIndexes(org.apache.paimon.types.RowType rowType) {
@@ -253,6 +274,14 @@ public class FlinkRowWrapper implements InternalRow {
         }
 
         BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
+        // Materialized BLOB fields are copied into managed blob files. Their writer has to open
+        // HTTP resources and already maps HTTP 404 and other open failures to NULL according to
+        // the two write-null options. Avoid a redundant HEAD / range-GET existence check before
+        // that required GET. Inline descriptor and view fields keep the existence check because
+        // they have no later writer fetch.
+        if (materializedBlobFields.contains(pos) && isHttpUri(descriptor.uri())) {
+            return false;
+        }
         return !descriptorFileExists(pos, descriptor);
     }
 
@@ -301,7 +330,8 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     private static boolean isHttpUri(String uri) {
-        return uri.startsWith("http://") || uri.startsWith("https://");
+        return uri.regionMatches(true, 0, "http://", 0, "http://".length())
+                || uri.regionMatches(true, 0, "https://", 0, "https://".length());
     }
 
     /**

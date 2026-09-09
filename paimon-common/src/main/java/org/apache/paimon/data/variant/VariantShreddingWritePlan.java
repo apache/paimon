@@ -210,7 +210,7 @@ public class VariantShreddingWritePlan implements ShreddingWritePlan {
                 return null;
             }
             return PaimonShreddingUtils.castShredded(
-                    (GenericVariant) row.getVariant(fieldIndex), variantSchema);
+                    GenericVariant.fromVariant(row.getVariant(fieldIndex)), variantSchema);
         }
 
         @Override

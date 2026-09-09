@@ -33,6 +33,7 @@ import com.aliyun.oss.common.comm.RequestMessage;
 import com.aliyun.oss.common.comm.ResponseMessage;
 import com.aliyun.oss.common.comm.RetryStrategy;
 import com.aliyun.oss.common.comm.ServiceClient;
+import com.aliyun.oss.internal.OSSUtils;
 import com.aliyun.oss.model.AbortMultipartUploadRequest;
 import com.aliyun.oss.model.CompleteMultipartUploadRequest;
 import com.aliyun.oss.model.CopyObjectRequest;
@@ -541,6 +542,65 @@ public class OSSFileIOTest {
                 .containsEntry("x-oss-server-side-encryption", "KMS")
                 .containsEntry("x-oss-server-side-encryption-key-id", "my-cmk")
                 .containsEntry("x-oss-server-side-data-encryption", "SM4");
+    }
+
+    /**
+     * The SDK reads {@code isSupportCname()} while building every request, so an endpoint outside
+     * its exclude list loses the bucket from the host that gets signed. Disabling the heuristic
+     * must put the bucket back.
+     */
+    @Test
+    public void testDisableCnameRestoresTheBucketInTheSignedHost() throws Exception {
+        String endpoint = "http://oss-cn-x.inter.env99.example.com";
+        OSSClient client = hadoopStyleClient(endpoint);
+        try {
+            assertThat(signedHost(client, endpoint, "my-bucket"))
+                    .isEqualTo("oss-cn-x.inter.env99.example.com");
+
+            OSSFileIO.setSupportCname(client, false);
+
+            assertThat(signedHost(client, endpoint, "my-bucket"))
+                    .isEqualTo("my-bucket.oss-cn-x.inter.env99.example.com");
+        } finally {
+            client.shutdown();
+        }
+    }
+
+    /** A public-cloud endpoint already signs the bucket, and the flag must not disturb it. */
+    @Test
+    public void testDisableCnameLeavesPublicCloudEndpointsAlone() throws Exception {
+        String endpoint = "http://oss-cn-hangzhou.aliyuncs.com";
+        OSSClient client = hadoopStyleClient(endpoint);
+        try {
+            assertThat(signedHost(client, endpoint, "my-bucket"))
+                    .isEqualTo("my-bucket.oss-cn-hangzhou.aliyuncs.com");
+
+            OSSFileIO.setSupportCname(client, false);
+
+            assertThat(signedHost(client, endpoint, "my-bucket"))
+                    .isEqualTo("my-bucket.oss-cn-hangzhou.aliyuncs.com");
+        } finally {
+            client.shutdown();
+        }
+    }
+
+    /**
+     * A client configured the way hadoop-aliyun configures it. This matters: {@code
+     * AliyunOSSFileSystemStore} passes a bare {@link ClientConfiguration}, where {@code
+     * supportCname} defaults to true, while {@code OSSClientBuilder} would hand over a {@code
+     * ClientBuilderConfiguration} that turns it off. Only the former reaches this bug.
+     */
+    private static OSSClient hadoopStyleClient(String endpoint) {
+        return new OSSClient(
+                endpoint, new DefaultCredentialProvider("ak", "sk"), new ClientConfiguration());
+    }
+
+    /** The host the signer sees, resolved exactly as OSSRequestMessageBuilder resolves it. */
+    private static String signedHost(OSSClient client, String endpoint, String bucket)
+            throws Exception {
+        return OSSUtils.determineFinalEndpoint(
+                        new URI(endpoint), bucket, client.getClientConfiguration())
+                .getHost();
     }
 
     @Test

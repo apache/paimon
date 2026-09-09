@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+import locale
 import re
 import threading
 from datetime import datetime, timezone
@@ -86,6 +87,39 @@ class DLFSignerTest(unittest.TestCase):
 
         # Test identifier
         self.assertEqual("openapi", signer.identifier())
+
+    def test_openapi_date_format_with_chinese_locale(self):
+        """Date header must stay English RFC 1123 under zh_CN locale."""
+        original = locale.setlocale(locale.LC_TIME, None)
+        try:
+            self._set_lc_time_or_skip(["zh_CN.UTF-8", "zh_CN.utf8", "zh_CN"])
+            self._assert_openapi_date_in_english()
+        finally:
+            locale.setlocale(locale.LC_TIME, original)
+
+    def test_openapi_date_format_with_japanese_locale(self):
+        """Date header must stay English RFC 1123 under ja_JP locale."""
+        original = locale.setlocale(locale.LC_TIME, None)
+        try:
+            self._set_lc_time_or_skip(["ja_JP.UTF-8", "ja_JP.utf8", "ja_JP"])
+            self._assert_openapi_date_in_english()
+        finally:
+            locale.setlocale(locale.LC_TIME, original)
+
+    def _set_lc_time_or_skip(self, candidates):
+        for name in candidates:
+            try:
+                locale.setlocale(locale.LC_TIME, name)
+                return
+            except locale.Error:
+                continue
+        self.skipTest(f"None of the locales {candidates} is available on this system")
+
+    def _assert_openapi_date_in_english(self):
+        signer = DLFOpenApiSigner()
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        headers = signer.sign_headers(None, now, None, "dlfnext.cn-hangzhou.aliyuncs.com")
+        self.assertEqual("Wed, 16 Apr 2025 03:44:46 GMT", headers.get("Date"))
 
     def test_get_authorization(self):
         """Test exact signature output matches."""

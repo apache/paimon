@@ -190,3 +190,8 @@ class TagAlreadyExistException(CatalogException):
 class IllegalArgumentError(CatalogException):
     """Illegal argument exception"""
     pass
+
+
+class IllegalStateError(CatalogException):
+    """Illegal state exception"""
+    pass

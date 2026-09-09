@@ -83,6 +83,13 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLED = "fs.oss.sld.enabled";
+
+    /**
+     * Set to false for an OSS-compatible endpoint that is neither an official Aliyun domain nor a
+     * CNAME custom domain. The SDK otherwise treats such a host as a CNAME and drops the bucket
+     * from the host it signs, which the server rejects with SignatureDoesNotMatch.
+     */
+    private static final String OSS_CNAME_ENABLED = "fs.oss.cname.enabled";
     // Paimon OSS SSE keys, mapping 1:1 to the OSS headers; they take precedence over hadoop's
     // server-side-encryption-algorithm.
     /** SSE method -> x-oss-server-side-encryption (AES256 / KMS / SM4). */
@@ -209,6 +216,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                         enableSecondLevelDomain(fs);
                     }
 
+                    if (!hadoopOptions.getBoolean(OSS_CNAME_ENABLED, true)) {
+                        disableCname(fs);
+                    }
+
                     SseConfig sse = configuredSse();
                     if (sse != null) {
                         enableSse(fs, sse);
@@ -292,6 +303,26 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
             LOG.error("Failed to enable second level domain.", e);
             throw new RuntimeException("Failed to enable second level domain.", e);
         }
+    }
+
+    public void disableCname(AliyunOSSFileSystem fs) {
+        try {
+            setSupportCname(getOssClient(fs), false);
+        } catch (Exception e) {
+            LOG.error("Failed to disable CNAME support.", e);
+            throw new RuntimeException("Failed to disable CNAME support.", e);
+        }
+    }
+
+    /**
+     * Flip the SDK's CNAME heuristic; package-private so a test pins the reflected name. The
+     * configuration reached here is the one {@code OSSRequestMessageBuilder} reads while building
+     * every request, so this takes effect on an already-initialized client.
+     */
+    static void setSupportCname(OSSClient ossClient, boolean supportCname) throws Exception {
+        ServiceClient serviceClient =
+                ReflectionUtils.getPrivateFieldValue(ossClient, "serviceClient");
+        serviceClient.getClientConfiguration().setSupportCname(supportCname);
     }
 
     /** Reflectively extract the underlying {@link OSSClient} that hadoop-aliyun keeps private. */

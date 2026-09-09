@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -55,7 +56,10 @@ public class CompactManifestProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("options", StringType),
-                ProcedureParameter.optional("dry_run", BooleanType)
+                ProcedureParameter.optional("dry_run", BooleanType),
+                ProcedureParameter.optional("manifest_sort_enabled", BooleanType),
+                ProcedureParameter.optional("manifest_sort_partition_field", StringType),
+                ProcedureParameter.optional("manifest_sort_max_rewrite_size", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -84,10 +88,25 @@ public class CompactManifestProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String options = args.isNullAt(1) ? null : args.getString(1);
         boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
+        Boolean manifestSortEnabled = args.isNullAt(3) ? null : args.getBoolean(3);
+        String manifestSortPartitionField = args.isNullAt(4) ? null : args.getString(4);
+        String manifestSortMaxRewriteSize = args.isNullAt(5) ? null : args.getString(5);
 
         Table table = loadSparkTable(tableIdent).getTable();
         HashMap<String, String> dynamicOptions = new HashMap<>();
         ProcedureUtils.putAllOptions(dynamicOptions, options);
+        if (manifestSortEnabled != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.toString(manifestSortEnabled));
+        }
+        if (manifestSortPartitionField != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), manifestSortPartitionField);
+        }
+        if (manifestSortMaxRewriteSize != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), manifestSortMaxRewriteSize);
+        }
         table = table.copy(dynamicOptions);
 
         if (dryRun) {
