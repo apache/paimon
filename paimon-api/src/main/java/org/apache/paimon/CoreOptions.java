@@ -1116,8 +1116,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
-    public static final ConfigOption<String> CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT =
-            key("changelog-producer.preserve-sequence-on-retract")
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT =
+            key("changelog-producer.preserve-field-on-retract")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
@@ -3926,8 +3926,8 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
-    public List<String> changelogPreserveSequenceOnRetract() {
-        return options.getOptional(CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT)
+    public List<String> changelogPreserveFieldOnRetract() {
+        return options.getOptional(CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT)
                 .map(
                         s ->
                                 Arrays.stream(s.split(","))

@@ -323,7 +323,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
                 }
-                List<String> preserveColumns = options.changelogPreserveSequenceOnRetract();
+                List<String> preserveColumns = options.changelogPreserveFieldOnRetract();
                 int[] preserveFieldIndices = null;
                 if (!preserveColumns.isEmpty()) {
                     List<String> fieldNames = valueType.getFieldNames();
@@ -339,7 +339,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                                                             + "Available columns: %s",
                                                                     name,
                                                                     CoreOptions
-                                                                            .CHANGELOG_PRODUCER_PRESERVE_SEQUENCE_ON_RETRACT
+                                                                            .CHANGELOG_PRODUCER_PRESERVE_FIELD_ON_RETRACT
                                                                             .key(),
                                                                     fieldNames));
                                                 }
