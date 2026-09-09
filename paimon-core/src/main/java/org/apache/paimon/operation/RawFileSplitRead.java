@@ -38,10 +38,12 @@ import org.apache.paimon.io.FileIndexEvaluator;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.RangeSkipReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -94,6 +96,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private TopN topN;
     @Nullable private Integer limit;
     @Nullable private ReadBatchSizer readBatchSizer;
+    @Nullable private RowRange rowRange;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -163,6 +166,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
+    public RawFileSplitRead withRowRange(@Nullable RowRange rowRange) {
+        this.rowRange = rowRange;
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         if (s instanceof DataSplit) {
             DataSplit split = (DataSplit) s;
@@ -212,7 +221,31 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         Builder formatReaderMappingBuilder =
                 createFormatReaderMappingBuilder(outputRowType, topN, limit);
 
+        boolean hasFilter = filters != null && !filters.isEmpty();
+        boolean hasDv = hasDeletionVector(files, dvFactories);
+        boolean fullScanRange =
+                rowRange != null && !hasFilter && topN == null && limit == null && !hasDv;
+        boolean canPushdown =
+                fullScanRange
+                        && !files.isEmpty()
+                        && formatReaderMapping(files.get(0), formatReaderMappingBuilder)
+                                .getReaderFactory()
+                                .supportsRowRangeSkip();
+
+        long fileStartGlobal = 0L;
         for (DataFileMeta file : files) {
+            RowRange fileRowRange = null;
+            Map<String, IOExceptionSupplier<DeletionVector>> fileDvFactories = dvFactories;
+            if (canPushdown) {
+                fileRowRange = RowRange.localOf(rowRange, fileStartGlobal, file.rowCount());
+                fileStartGlobal += file.rowCount();
+                if (fileRowRange != null && fileRowRange.isEmpty()) {
+                    final EmptyFileRecordReader<InternalRow> empty = new EmptyFileRecordReader<>();
+                    suppliers.add(() -> empty);
+                    continue;
+                }
+                fileDvFactories = null;
+            }
             suppliers.add(
                     createFileReader(
                             partition,
@@ -220,16 +253,46 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             file,
                             formatReaderMappingBuilder,
                             outputRowType,
-                            dvFactories,
-                            null));
+                            fileDvFactories,
+                            null,
+                            fileRowRange));
         }
 
         RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
+        // When the range could not be pushed into the formats, enforce it once over the
+        // effective-row output stream with a naive skip + limit. The pushdown path (canPushdown)
+        // already returns exactly the range per file, so no wrap is added there.
+        if (rowRange != null && !canPushdown) {
+            return new RangeSkipReader<>(reader, rowRange.startInclusive(), rowRange.count());
+        }
         // Apply the final limit after deletion vectors when no later predicate can drop rows.
         if (topN == null && (filters == null || filters.isEmpty())) {
             return LimitRecordReader.limit(reader, limit);
         }
         return reader;
+    }
+
+    /** Whether any file in the split carries a non-empty deletion vector. */
+    private boolean hasDeletionVector(
+            List<DataFileMeta> files,
+            @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories) {
+        if (dvFactories == null) {
+            return false;
+        }
+        for (DataFileMeta file : files) {
+            IOExceptionSupplier<DeletionVector> supplier = dvFactories.get(file.fileName());
+            if (supplier != null) {
+                try {
+                    DeletionVector dv = supplier.get();
+                    if (dv != null && !dv.isEmpty()) {
+                        return true;
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return false;
     }
 
     FileRecordReader<InternalRow> createFileReader(
@@ -254,7 +317,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                                 createFormatReaderMappingBuilder(outputRowType, null, null),
                                 outputRowType,
                                 dvFactories,
-                                selectedPositions)
+                                selectedPositions,
+                                null)
                         .get();
     }
 
@@ -284,20 +348,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             Builder formatBuilder,
             RowType outputRowType,
             @Nullable Map<String, IOExceptionSupplier<DeletionVector>> dvFactories,
-            @Nullable RoaringBitmap32 selectedPositions) {
-        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
-        long schemaId = file.schemaId();
-
-        FormatReaderMapping formatReaderMapping =
-                formatReaderMappings.computeIfAbsent(
-                        new FormatKey(file.schemaId(), formatIdentifier),
-                        key ->
-                                formatBuilder.build(
-                                        formatIdentifier,
-                                        schema,
-                                        schemaId == schema.id()
-                                                ? schema
-                                                : schemaManager.schema(schemaId)));
+            @Nullable RoaringBitmap32 selectedPositions,
+            @Nullable RowRange fileRowRange) {
+        FormatReaderMapping formatReaderMapping = formatReaderMapping(file, formatBuilder);
 
         IOExceptionSupplier<DeletionVector> dvFactory =
                 dvFactories == null ? null : dvFactories.get(file.fileName());
@@ -309,21 +362,58 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         formatReaderMapping,
                         outputRowType,
                         dvFactory,
-                        selectedPositions);
+                        selectedPositions,
+                        fileRowRange);
     }
 
-    private FileRecordReader<InternalRow> createFileReader(
+    /** Resolve (and cache) the {@link FormatReaderMapping} for a file's format and schema. */
+    private FormatReaderMapping formatReaderMapping(DataFileMeta file, Builder formatBuilder) {
+        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+        long schemaId = file.schemaId();
+        return formatReaderMappings.computeIfAbsent(
+                new FormatKey(file.schemaId(), formatIdentifier),
+                key ->
+                        formatBuilder.build(
+                                formatIdentifier,
+                                schema,
+                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId)));
+    }
+
+    private RecordReader<InternalRow> createFileReader(
             BinaryRow partition,
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
             RowType outputRowType,
             IOExceptionSupplier<DeletionVector> dvFactory,
-            @Nullable RoaringBitmap32 selectedPositions)
+            @Nullable RoaringBitmap32 selectedPositions,
+            @Nullable RowRange fileRowRange)
             throws IOException {
         FileIndexResult fileIndexResult = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
-        if (fileIndexReadEnabled) {
+        // fileRowRange is non-null only on the canPushdown path (parquet full-scan range read);
+        // see createReader. Push the local range as a selection bitmap so the reader returns
+        // exactly [localStart, localEnd]. When fileRowRange is null the regular file-index path
+        // runs and any range is enforced by the outer RangeSkipReader.
+        boolean rangePushdown =
+                fileRowRange != null
+                        && formatReaderMapping.getReaderFactory().supportsRowRangeSkip();
+        if (rangePushdown) {
+            fileIndexResult =
+                    FileIndexEvaluator.evaluate(
+                            fileIO,
+                            formatReaderMapping.getDataSchema(),
+                            null,
+                            null,
+                            null,
+                            fileRowRange,
+                            dataFilePathFactory,
+                            file,
+                            deletionVector);
+            if (!fileIndexResult.remain()) {
+                return new EmptyFileRecordReader<>();
+            }
+        } else if (fileIndexReadEnabled) {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
@@ -382,8 +472,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         }
 
         if (deletionVector != null && !deletionVector.isEmpty()) {
-            return new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
+            fileRecordReader = new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
+        // fileRowRange is non-null only on the canPushdown path (parquet), where the selection
+        // bitmap above already makes the reader return exactly [localStart, localEnd] with no
+        // extra rows — so no RangeSkipReader is needed. The non-pushdown case (fileRowRange ==
+        // null) is handled by the single outer RangeSkipReader in createReader.
         return fileRecordReader;
     }
 }
