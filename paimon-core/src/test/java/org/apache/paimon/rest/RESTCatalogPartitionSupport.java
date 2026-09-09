@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,11 +75,7 @@ final class RESTCatalogPartitionSupport {
             if (partitionOptions == null) {
                 throw new IllegalArgumentException("partitionOptions must not contain null maps.");
             }
-            if (partitionOptions.entrySet().stream()
-                    .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
-                throw new IllegalArgumentException(
-                        "partitionOptions must not contain null keys or values.");
-            }
+            CreatePartitionsRequest.checkOptionValues(partitionOptions);
             hasOptions |= !partitionOptions.isEmpty();
         }
         if (!hasOptions) {
@@ -141,7 +138,7 @@ final class RESTCatalogPartitionSupport {
 
     static Partition newPartition(Map<String, String> spec, @Nullable Map<String, String> options) {
         return new Partition(
-                spec,
+                new LinkedHashMap<>(spec),
                 PartitionStatistics.UNKNOWN,
                 PartitionStatistics.UNKNOWN,
                 PartitionStatistics.UNKNOWN,
@@ -152,6 +149,109 @@ final class RESTCatalogPartitionSupport {
                 null,
                 null,
                 null,
+                normalizeNewPartitionOptions(options));
+    }
+
+    static List<Partition> copyPartitions(List<Partition> partitions) {
+        List<Partition> copied = new ArrayList<>(partitions.size());
+        for (Partition partition : partitions) {
+            copied.add(copyPartition(partition, copyOptions(partition.options())));
+        }
+        return copied;
+    }
+
+    static void validateNoAdditiveStatisticsForCustomPartitions(
+            List<Partition> stored,
+            @Nullable List<PartitionStatistics> statistics,
+            @Nullable Boolean replaceStatistics) {
+        if (statistics == null || statistics.isEmpty() || Boolean.TRUE.equals(replaceStatistics)) {
+            return;
+        }
+        Set<Map<String, String>> reportedSpecs = new HashSet<>();
+        for (PartitionStatistics statistic : statistics) {
+            reportedSpecs.add(statistic.spec());
+        }
+        for (Partition partition : stored) {
+            if (customLocation(partition) != null && reportedSpecs.contains(partition.spec())) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot add statistics to custom-location partition %s; "
+                                        + "reset its path with replacement statistics first.",
+                                PartitionUtils.buildPartitionName(partition.spec())));
+            }
+        }
+    }
+
+    static void applyPathResets(
+            List<Partition> partitions,
+            List<Map<String, String>> requestedSpecs,
+            @Nullable List<Map<String, String>> requestedOptions) {
+        if (requestedOptions == null) {
+            return;
+        }
+        Set<Map<String, String>> resetSpecs = new HashSet<>();
+        for (int i = 0; i < requestedOptions.size(); i++) {
+            if (isPathReset(requestedOptions.get(i))) {
+                resetSpecs.add(requestedSpecs.get(i));
+            }
+        }
+        if (resetSpecs.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < partitions.size(); i++) {
+            Partition partition = partitions.get(i);
+            if (resetSpecs.contains(partition.spec())) {
+                partitions.set(i, copyPartition(partition, withoutPath(partition.options())));
+            }
+        }
+    }
+
+    private static boolean isPathReset(Map<String, String> options) {
+        return options.containsKey(PATH.key()) && options.get(PATH.key()) == null;
+    }
+
+    @Nullable
+    private static Map<String, String> normalizeNewPartitionOptions(
+            @Nullable Map<String, String> options) {
+        Map<String, String> copied = copyOptions(options);
+        if (copied == null) {
+            return null;
+        }
+        if (copied.get(PATH.key()) == null) {
+            copied.remove(PATH.key());
+        }
+        return copied.isEmpty() ? null : copied;
+    }
+
+    @Nullable
+    private static Map<String, String> withoutPath(@Nullable Map<String, String> options) {
+        Map<String, String> copied = copyOptions(options);
+        if (copied == null) {
+            return null;
+        }
+        copied.remove(PATH.key());
+        return copied.isEmpty() ? null : copied;
+    }
+
+    @Nullable
+    private static Map<String, String> copyOptions(@Nullable Map<String, String> options) {
+        return options == null ? null : new HashMap<>(options);
+    }
+
+    private static Partition copyPartition(
+            Partition partition, @Nullable Map<String, String> options) {
+        return new Partition(
+                new LinkedHashMap<>(partition.spec()),
+                partition.recordCount(),
+                partition.fileSizeInBytes(),
+                partition.fileCount(),
+                partition.lastFileCreationTime(),
+                partition.totalBuckets(),
+                partition.done(),
+                partition.createdAt(),
+                partition.createdBy(),
+                partition.updatedAt(),
+                partition.updatedBy(),
                 options);
     }
 

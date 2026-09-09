@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.requests;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -30,8 +31,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -40,7 +43,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Statistics ride along optionally, matched to {@code partitionSpecs} by {@link
  * PartitionStatistics#spec()} rather than by position, so they may cover only some of them. Both
- * statistics fields are absent unless the client reports.
+ * statistics fields are absent unless the client reports. Partition options align with {@code
+ * partitionSpecs} by position; {@code path:null} resets a partition to its default location and
+ * needs replacement statistics for that partition.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreatePartitionsRequest implements RESTRequest {
@@ -106,19 +111,65 @@ public class CreatePartitionsRequest implements RESTRequest {
         checkArgument(
                 partitionOptions == null || !partitionOptions.contains(null),
                 "partitionOptions must not contain null maps.");
-        checkArgument(
-                partitionOptions == null
-                        || partitionOptions.stream()
-                                .flatMap(options -> options.entrySet().stream())
-                                .noneMatch(
-                                        entry ->
-                                                entry.getKey() == null || entry.getValue() == null),
-                "partitionOptions must not contain null keys or values.");
+        Set<Map<String, String>> resetSpecs = new HashSet<>();
+        if (partitionOptions != null) {
+            for (int i = 0; i < partitionOptions.size(); i++) {
+                Map<String, String> options = partitionOptions.get(i);
+                checkOptionValues(options);
+                if (options.containsKey(CoreOptions.PATH.key())
+                        && options.get(CoreOptions.PATH.key()) == null) {
+                    Map<String, String> spec = partitionSpecs.get(i);
+                    checkArgument(spec != null, "path=null requires a non-null partition spec.");
+                    resetSpecs.add(spec);
+                }
+            }
+        }
+        if (!resetSpecs.isEmpty()) {
+            checkArgument(
+                    Boolean.TRUE.equals(replaceStatistics),
+                    "path=null requires replaceStatistics=true.");
+            checkArgument(
+                    partitionStatistics != null,
+                    "path=null requires replacement statistics for the same partition.");
+            Set<Map<String, String>> requestSpecs = new HashSet<>(partitionSpecs);
+            Set<Map<String, String>> reportedSpecs = new HashSet<>();
+            for (PartitionStatistics statistic : partitionStatistics) {
+                checkArgument(
+                        statistic != null && statistic.spec() != null,
+                        "partitionStatistics must not contain null entries or specs.");
+                checkArgument(
+                        requestSpecs.contains(statistic.spec()),
+                        "Statistics for partition %s do not match any partition in this request.",
+                        statistic.spec());
+                checkArgument(
+                        reportedSpecs.add(statistic.spec()),
+                        "Statistics for partition %s are reported more than once.",
+                        statistic.spec());
+                resetSpecs.remove(statistic.spec());
+            }
+            checkArgument(
+                    resetSpecs.isEmpty(),
+                    "path=null requires replacement statistics for the same partition; missing %s.",
+                    resetSpecs);
+        }
         this.partitionSpecs = partitionSpecs;
         this.ignoreIfExists = ignoreIfExists == null || ignoreIfExists;
         this.partitionStatistics = partitionStatistics;
         this.replaceStatistics = replaceStatistics;
         this.partitionOptions = partitionOptions;
+    }
+
+    /**
+     * Null is allowed only for {@code path}, where it resets the partition to its default location.
+     */
+    public static void checkOptionValues(Map<String, String> options) {
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            checkArgument(entry.getKey() != null, "Partition options must not contain null keys.");
+            checkArgument(
+                    entry.getValue() != null || CoreOptions.PATH.key().equals(entry.getKey()),
+                    "Partition option %s must not be null; only path may be null, which resets the location.",
+                    entry.getKey());
+        }
     }
 
     @JsonGetter(FIELD_PARTITION_SPECS)
@@ -148,7 +199,10 @@ public class CreatePartitionsRequest implements RESTRequest {
         return replaceStatistics;
     }
 
-    /** Options aligned with partition specs; a null list omits the field. */
+    /**
+     * Options aligned with partition specs; {@code path:null} resets the location. A null list
+     * omits the field.
+     */
     @JsonGetter(FIELD_PARTITION_OPTIONS)
     @Nullable
     public List<Map<String, String>> getPartitionOptions() {

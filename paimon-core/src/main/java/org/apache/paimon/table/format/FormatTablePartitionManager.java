@@ -78,7 +78,11 @@ public interface FormatTablePartitionManager extends Serializable {
      * holds or add to it, and is ignored when {@code statistics} is null. A field reported as
      * unknown says nothing about itself and leaves the stored one as it was, so a measurement that
      * could not take a number does not erase the last one that could. Reporting never unregisters a
-     * partition. {@code partitionOptions}, when present, align with {@code partitions} by position.
+     * partition. {@code partitionOptions}, when present, align with {@code partitions} by position;
+     * {@code path:null} resets a registered partition to its default location and needs replacement
+     * statistics for that partition, and additive statistics are rejected for a partition that
+     * already has a custom location. Implementations validate all arguments first and may split the
+     * request into catalog-sized batches; each batch is atomic, the whole call is not.
      *
      * <p>This is the method an implementation provides, so that none can report nothing by
      * accident: a decorator that forwards only the two-argument form would otherwise drop every

@@ -269,14 +269,25 @@ function validateCatalogOpenApi() {
       requestOptions.type.includes('null') &&
       requestOptions.items.type === 'object' &&
       requestOptions.items.additionalProperties.type === 'string',
-    'CreatePartitionsRequest.partitionOptions must be a nullable array of string maps',
+    'CreatePartitionsRequest.partitionOptions must be a nullable array of option maps',
+  );
+  const pathOption = requestOptions.items.properties && requestOptions.items.properties.path;
+  contract.checkSpec(
+    pathOption &&
+      Array.isArray(pathOption.type) &&
+      pathOption.type.includes('string') &&
+      pathOption.type.includes('null'),
+    'CreatePartitionsRequest.partitionOptions.path must accept string and null',
   );
   contract.checkSpec(
     requestOptions.description.includes('partitionSpecs') &&
       requestOptions.description.toLowerCase().includes('position') &&
       requestOptions.description.toLowerCase().includes('same length') &&
-      requestOptions.description.toLowerCase().includes('empty object'),
-    'CreatePartitionsRequest.partitionOptions must document positional alignment and empty options',
+      requestOptions.description.toLowerCase().includes('empty object') &&
+      requestOptions.description.includes('replaceStatistics=true') &&
+      requestOptions.description.includes('partitionStatistics') &&
+      requestOptions.description.toLowerCase().includes('null path'),
+    'CreatePartitionsRequest.partitionOptions must document alignment and null path resets',
   );
   contract.requireProperties('Partition', ['options']);
   contract.requireProperties('ConfigResponse', ['defaults', 'overrides']);

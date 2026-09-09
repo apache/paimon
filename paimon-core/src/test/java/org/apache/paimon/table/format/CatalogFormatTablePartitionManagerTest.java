@@ -38,6 +38,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -426,6 +427,93 @@ class CatalogFormatTablePartitionManagerTest {
                 .containsExactly(1000, 1000, 500);
         assertThat(flatten(specCaptor.getAllValues())).isEqualTo(specs);
         assertThat(flatten(optionCaptor.getAllValues())).isEqualTo(options);
+    }
+
+    @Test
+    void testPathResetsStayWithReplacementStatisticsAcrossBatches() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(2001);
+        List<Map<String, String>> options = new ArrayList<>(specs.size());
+        List<PartitionStatistics> statistics = new ArrayList<>(specs.size());
+        for (int i = 0; i < specs.size(); i++) {
+            if (i == 999 || i == 1000 || i == 2000) {
+                Map<String, String> reset = new HashMap<>();
+                reset.put("path", null);
+                options.add(reset);
+            } else {
+                options.add(Collections.emptyMap());
+            }
+        }
+        // Resets straddle both split points. Reports are deliberately reversed: options align
+        // by original position while statistics align by spec, so sharing either indexing rule
+        // between them would silently authorize the wrong reset.
+        for (int i = specs.size() - 1; i >= 0; i--) {
+            statistics.add(statistics(specs.get(i), i));
+        }
+
+        partitionManager(catalog).createPartitions(specs, true, statistics, true, options);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> specCaptor = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<PartitionStatistics>> statisticsCaptor =
+                ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, String>>> optionCaptor =
+                ArgumentCaptor.forClass(List.class);
+        verify(catalog, times(3))
+                .createPartitions(
+                        eq(IDENTIFIER),
+                        specCaptor.capture(),
+                        eq(true),
+                        statisticsCaptor.capture(),
+                        eq(true),
+                        optionCaptor.capture());
+
+        assertThat(specCaptor.getAllValues()).extracting(List::size).containsExactly(1000, 1000, 1);
+        assertThat(statisticsCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 1);
+        assertThat(optionCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(1000, 1000, 1);
+        for (int batch = 0; batch < specCaptor.getAllValues().size(); batch++) {
+            List<Map<String, String>> batchSpecs = specCaptor.getAllValues().get(batch);
+            List<PartitionStatistics> batchStatistics = statisticsCaptor.getAllValues().get(batch);
+            List<Map<String, String>> batchOptions = optionCaptor.getAllValues().get(batch);
+            int offset = batch * REQUEST_SIZE;
+            assertThat(batchOptions)
+                    .containsExactlyElementsOf(options.subList(offset, offset + batchSpecs.size()));
+            assertThat(batchStatistics)
+                    .extracting(PartitionStatistics::spec)
+                    .containsExactlyInAnyOrderElementsOf(batchSpecs);
+        }
+    }
+
+    @Test
+    void testInvalidPathResetAfterBatchBoundaryTouchesNoCatalog() {
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> specs = specs(1001);
+        List<Map<String, String>> options = new ArrayList<>(specs.size());
+        for (int i = 0; i < 1000; i++) {
+            options.add(Collections.emptyMap());
+        }
+        Map<String, String> reset = new HashMap<>();
+        reset.put("path", null);
+        options.add(reset);
+
+        assertThatThrownBy(
+                        () ->
+                                partitionManager(catalog)
+                                        .createPartitions(
+                                                specs,
+                                                true,
+                                                Collections.singletonList(
+                                                        statistics(specs.get(0), 0L)),
+                                                true,
+                                                options))
+                .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(catalog);
     }
 
     @Test

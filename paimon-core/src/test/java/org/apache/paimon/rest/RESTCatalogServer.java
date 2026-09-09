@@ -2213,7 +2213,7 @@ public class RESTCatalogServer {
                     throw new Catalog.TableNotExistException(tableIdentifier);
                 }
                 List<Partition> storedPartitions =
-                        new ArrayList<>(
+                        RESTCatalogPartitionSupport.copyPartitions(
                                 tablePartitionsStore.getOrDefault(
                                         tableName, Collections.emptyList()));
                 Set<Map<String, String>> existingSpecs =
@@ -2246,6 +2246,13 @@ public class RESTCatalogServer {
                                     conflictingLocation.get()),
                             409);
                 }
+                boolean formatTable = isFormatTable(tableMetadata.schema().toSchema());
+                if (formatTable) {
+                    RESTCatalogPartitionSupport.validateNoAdditiveStatisticsForCustomPartitions(
+                            storedPartitions,
+                            request.getPartitionStatistics(),
+                            request.replaceStatistics());
+                }
                 List<Map<String, String>> created = new ArrayList<>();
                 List<Map<String, String>> existed = new ArrayList<>();
                 for (int i = 0; i < request.getPartitionSpecs().size(); i++) {
@@ -2261,7 +2268,9 @@ public class RESTCatalogServer {
                         existed.add(spec);
                     }
                 }
-                if (isFormatTable(tableMetadata.schema().toSchema())) {
+                RESTCatalogPartitionSupport.applyPathResets(
+                        storedPartitions, request.getPartitionSpecs(), requestedOptions);
+                if (formatTable) {
                     RESTCatalogPartitionSupport.validateFormatTablePartitionLocations(
                             storedPartitions, tableMetadata, tableName, catalogContext);
                 }

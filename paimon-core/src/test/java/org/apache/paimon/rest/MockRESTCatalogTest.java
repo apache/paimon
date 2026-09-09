@@ -685,7 +685,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                                                 Collections.singletonList(options)),
                                         restCatalog.api().authFunction()))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("null keys or values");
+                .hasMessageContaining("only path may be null");
         assertThat(restCatalog.listPartitions(identifier)).isEmpty();
     }
 
@@ -747,6 +747,345 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(restCatalog.listPartitions(identifier))
                 .extracting(Partition::spec, MockRESTCatalogTest::customLocation)
                 .containsExactly(tuple(spec, originalLocation));
+    }
+
+    @Test
+    void testExistingPartitionAcceptsTheSameCustomLocationIdempotently() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> originalOptions = new HashMap<>();
+        originalOptions.put(CoreOptions.PATH.key(), "file:/archive/original");
+        originalOptions.put("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                null,
+                false,
+                Collections.singletonList(originalOptions));
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                null,
+                false,
+                partitionOptions("file:/archive/original"));
+
+        // An idempotent retry with the same path must preserve unrelated stored options.
+        assertThat(onlyPartition(identifier).options())
+                .containsExactlyInAnyOrderEntriesOf(originalOptions);
+    }
+
+    @Test
+    void testReplacementStatisticsWithoutPathResetPreserveCustomLocation() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> originalOptions = new HashMap<>();
+        originalOptions.put(CoreOptions.PATH.key(), "file:/archive/original");
+        originalOptions.put("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 9L)),
+                true,
+                Collections.singletonList(originalOptions));
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 3L)),
+                true,
+                null);
+
+        Partition partition = onlyPartition(identifier);
+        assertThat(partition.recordCount()).isEqualTo(3L);
+        // ANALYZE has this request shape. Keying reset off replaceStatistics alone would silently
+        // move an analyzed external partition back under the table directory.
+        assertThat(partition.options()).containsExactlyInAnyOrderEntriesOf(originalOptions);
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 4L)),
+                true,
+                Collections.singletonList(
+                        Collections.singletonMap("owner", "must-not-overwrite-existing-options")));
+
+        partition = onlyPartition(identifier);
+        assertThat(partition.recordCount()).isEqualTo(4L);
+        // An aligned non-path option is not a path reset and does not patch stored options.
+        assertThat(partition.options()).containsExactlyInAnyOrderEntriesOf(originalOptions);
+    }
+
+    @Test
+    void testPathResetRemovesOnlyLocationAndIsReplaySafe() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> newSpec = Collections.singletonMap("dt", "20260718");
+        String releasedLocation = "file:/archive/original";
+        Map<String, String> originalOptions = new HashMap<>();
+        originalOptions.put(CoreOptions.PATH.key(), releasedLocation);
+        originalOptions.put("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 9L)),
+                true,
+                Collections.singletonList(originalOptions));
+
+        List<Map<String, String>> specs = Arrays.asList(spec, newSpec);
+        List<PartitionStatistics> replacement =
+                Arrays.asList(partitionStatistics(spec, 3L), partitionStatistics(newSpec, 7L));
+        Map<String, String> resetOptions = pathReset();
+        resetOptions.put("owner", "must-not-overwrite-existing-options");
+        List<Map<String, String>> resetAndReuse =
+                Arrays.asList(
+                        resetOptions,
+                        Collections.singletonMap(CoreOptions.PATH.key(), releasedLocation));
+        restCatalog.createPartitions(identifier, specs, true, replacement, true, resetAndReuse);
+
+        assertThat(restCatalog.listPartitions(identifier))
+                .extracting(Partition::spec, Partition::recordCount, Partition::options)
+                .containsExactlyInAnyOrder(
+                        tuple(spec, 3L, Collections.singletonMap("owner", "data-platform")),
+                        tuple(
+                                newSpec,
+                                7L,
+                                Collections.singletonMap(
+                                        CoreOptions.PATH.key(), releasedLocation)));
+
+        restCatalog.createPartitions(identifier, specs, true, replacement, true, resetAndReuse);
+
+        // Replaying the final-state transition replaces, rather than adds, both statistics rows.
+        assertThat(restCatalog.listPartitions(identifier))
+                .extracting(Partition::spec, Partition::recordCount, Partition::options)
+                .containsExactlyInAnyOrder(
+                        tuple(spec, 3L, Collections.singletonMap("owner", "data-platform")),
+                        tuple(
+                                newSpec,
+                                7L,
+                                Collections.singletonMap(
+                                        CoreOptions.PATH.key(), releasedLocation)));
+    }
+
+    @Test
+    void testNewPartitionPathResetDoesNotPersistNullOption() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> ordinarySpec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260718");
+        restCatalog.createPartitions(identifier, Collections.singletonList(ordinarySpec));
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(resetSpec),
+                true,
+                Collections.singletonList(partitionStatistics(resetSpec, 7L)),
+                true,
+                Collections.singletonList(pathReset()));
+
+        // A reset is an instruction, never stored data: the new row uses exactly the same
+        // options representation as a normal default-location registration.
+        assertThat(restCatalog.listPartitions(identifier))
+                .extracting(Partition::spec, Partition::recordCount, Partition::options)
+                .containsExactlyInAnyOrder(
+                        tuple(ordinarySpec, PartitionStatistics.UNKNOWN, null),
+                        tuple(resetSpec, 7L, null));
+    }
+
+    @Test
+    void testAdditiveStatisticsOnCustomPartitionRejectsWholeBatchWithoutMutation()
+            throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> ordinary = Collections.singletonMap("dt", "20260717");
+        Map<String, String> custom = Collections.singletonMap("dt", "20260718");
+        Map<String, String> createdByRejectedBatch = Collections.singletonMap("dt", "20260719");
+        restCatalog.createPartitions(
+                identifier,
+                Arrays.asList(ordinary, custom),
+                true,
+                Arrays.asList(partitionStatistics(ordinary, 10L), partitionStatistics(custom, 20L)),
+                true,
+                Arrays.asList(
+                        Collections.emptyMap(),
+                        Collections.singletonMap(CoreOptions.PATH.key(), "file:/archive/custom")));
+        List<Partition> before = restCatalog.listPartitions(identifier);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.createPartitions(
+                                        identifier,
+                                        Arrays.asList(ordinary, createdByRejectedBatch, custom),
+                                        true,
+                                        Arrays.asList(
+                                                partitionStatistics(ordinary, 1L),
+                                                partitionStatistics(createdByRejectedBatch, 1L),
+                                                partitionStatistics(custom, 1L)),
+                                        false,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // The ordinary row comes first so an implementation cannot mutate while walking the
+        // request and only then discover the custom row at the end.
+        assertThat(restCatalog.listPartitions(identifier)).containsExactlyElementsOf(before);
+    }
+
+    @Test
+    void testPostValidationFailureRollsBackPathStatisticsAndRegistration() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> stableSpec = Collections.singletonMap("dt", "20260718");
+        Map<String, String> newSpec = Collections.singletonMap("dt", "20260719");
+        Map<String, String> resetOptions = new HashMap<>();
+        resetOptions.put(CoreOptions.PATH.key(), "file:/archive/reset-target");
+        resetOptions.put("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Arrays.asList(resetSpec, stableSpec),
+                true,
+                Arrays.asList(
+                        partitionStatistics(resetSpec, 10L), partitionStatistics(stableSpec, 20L)),
+                true,
+                Arrays.asList(
+                        resetOptions,
+                        Collections.singletonMap(CoreOptions.PATH.key(), "file:/archive/stable")));
+        List<Partition> before = restCatalog.listPartitions(identifier);
+        String resource =
+                ResourcePaths.forCatalogProperties(restCatalog.api().options())
+                        .partitions(identifier.getDatabaseName(), identifier.getObjectName());
+        restCatalogServer.clearReceivedHeaders();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.createPartitions(
+                                        identifier,
+                                        Arrays.asList(resetSpec, newSpec),
+                                        true,
+                                        Arrays.asList(
+                                                partitionStatistics(resetSpec, 1L),
+                                                partitionStatistics(newSpec, 1L)),
+                                        true,
+                                        Arrays.asList(
+                                                pathReset(),
+                                                Collections.singletonMap(
+                                                        CoreOptions.PATH.key(),
+                                                        "file:/archive/stable"))))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // This must be a server-side prospective-registry rejection, not a client-side shortcut.
+        assertThat(restCatalogServer.getReceivedHeaders(resource)).hasSize(1);
+        // Partition equality covers all statistics, audit fields, done state, and every option.
+        assertThat(restCatalog.listPartitions(identifier)).containsExactlyElementsOf(before);
+    }
+
+    @Test
+    void testUnregisteredExtraStatisticsRejectPathResetAtomically() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260717");
+        Map<String, String> absentSpec = Collections.singletonMap("dt", "20260718");
+        Map<String, String> originalOptions = new HashMap<>();
+        originalOptions.put(CoreOptions.PATH.key(), "file:/archive/reset-target");
+        originalOptions.put("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(resetSpec),
+                true,
+                Collections.singletonList(partitionStatistics(resetSpec, 10L)),
+                true,
+                Collections.singletonList(originalOptions));
+        List<Partition> before = restCatalog.listPartitions(identifier);
+        String resource =
+                ResourcePaths.forCatalogProperties(restCatalog.api().options())
+                        .partitions(identifier.getDatabaseName(), identifier.getObjectName());
+        HttpClient client = new HttpClient(restCatalogServer.getUrl());
+        restCatalogServer.clearReceivedHeaders();
+
+        assertThatThrownBy(
+                        () ->
+                                client.post(
+                                        resource,
+                                        new RawCreatePartitionsRequest(
+                                                Collections.singletonList(resetSpec),
+                                                Arrays.asList(
+                                                        partitionStatistics(resetSpec, 1L),
+                                                        partitionStatistics(absentSpec, 99L)),
+                                                true,
+                                                Collections.singletonList(pathReset())),
+                                        restCatalog.api().authFunction()))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("20260718");
+
+        // Sending the raw request bypasses client validation. The server must reject it without
+        // changing the path, statistics, or audit fields.
+        assertThat(restCatalogServer.getReceivedHeaders(resource)).hasSize(1);
+        assertThat(restCatalog.listPartitions(identifier)).containsExactlyElementsOf(before);
+    }
+
+    @Test
+    void testRawPathResetWithoutReplacementReportIsRejectedBeforeMutation() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260717");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(resetSpec),
+                true,
+                Collections.singletonList(partitionStatistics(resetSpec, 10L)),
+                true,
+                partitionOptions("file:/archive/reset-target"));
+        List<Partition> before = restCatalog.listPartitions(identifier);
+        String resource =
+                ResourcePaths.forCatalogProperties(restCatalog.api().options())
+                        .partitions(identifier.getDatabaseName(), identifier.getObjectName());
+        HttpClient client = new HttpClient(restCatalogServer.getUrl());
+        restCatalogServer.clearReceivedHeaders();
+
+        assertThatThrownBy(
+                        () ->
+                                client.post(
+                                        resource,
+                                        new RawCreatePartitionsRequest(
+                                                Collections.singletonList(resetSpec),
+                                                null,
+                                                null,
+                                                Collections.singletonList(pathReset())),
+                                        restCatalog.api().authFunction()))
+                .isInstanceOf(BadRequestException.class);
+
+        assertThat(restCatalogServer.getReceivedHeaders(resource)).hasSize(1);
+        assertThat(restCatalog.listPartitions(identifier)).containsExactlyElementsOf(before);
+    }
+
+    @Test
+    void testUnsupportedProviderRejectsPathResetWithoutMutation() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 10L)),
+                true,
+                partitionOptions("file:/archive/reset-target"));
+        List<Partition> before = restCatalog.listPartitions(identifier);
+        restCatalogServer.setPartitionOptionsCreateSupported(false);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.createPartitions(
+                                        identifier,
+                                        Collections.singletonList(spec),
+                                        true,
+                                        Collections.singletonList(partitionStatistics(spec, 0L)),
+                                        true,
+                                        Collections.singletonList(pathReset())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support partition options");
+
+        assertThat(restCatalog.listPartitions(identifier)).containsExactlyElementsOf(before);
     }
 
     @Test
@@ -897,10 +1236,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         Identifier identifier = createFormatTableWithCatalogManagedPartitions();
         Map<String, String> spec = Collections.singletonMap("dt", "20260717");
         List<Map<String, String>> specs = Collections.singletonList(spec);
-        String location = "file:/archive/dt=20260717";
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PATH.key(), location);
-        options.put("owner", "data-platform");
+        Map<String, String> options = Collections.singletonMap("owner", "data-platform");
         FormatTablePartitionManager partitionManager =
                 ((FormatTable) restCatalog.getTable(identifier)).partitionManager();
         assertThat(partitionManager).isNotNull();
@@ -1056,6 +1392,23 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                             : Collections.singletonMap(CoreOptions.PATH.key(), location));
         }
         return options;
+    }
+
+    private static Map<String, String> pathReset() {
+        Map<String, String> reset = new HashMap<>();
+        reset.put(CoreOptions.PATH.key(), null);
+        return reset;
+    }
+
+    private static PartitionStatistics partitionStatistics(
+            Map<String, String> spec, long recordCount) {
+        return new PartitionStatistics(
+                spec,
+                recordCount,
+                recordCount * 100,
+                recordCount == 0 ? 0 : 1,
+                1756684800000L,
+                PartitionStatistics.UNKNOWN_TOTAL_BUCKETS);
     }
 
     private static String customLocation(Partition partition) {
@@ -1473,12 +1826,24 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     private static class RawCreatePartitionsRequest implements RESTRequest {
 
         private final List<Map<String, String>> partitionSpecs;
+        private final List<PartitionStatistics> partitionStatistics;
+        private final Boolean replaceStatistics;
         private final List<Map<String, String>> partitionOptions;
 
         private RawCreatePartitionsRequest(
                 List<Map<String, String>> partitionSpecs,
                 List<Map<String, String>> partitionOptions) {
+            this(partitionSpecs, null, null, partitionOptions);
+        }
+
+        private RawCreatePartitionsRequest(
+                List<Map<String, String>> partitionSpecs,
+                List<PartitionStatistics> partitionStatistics,
+                Boolean replaceStatistics,
+                List<Map<String, String>> partitionOptions) {
             this.partitionSpecs = partitionSpecs;
+            this.partitionStatistics = partitionStatistics;
+            this.replaceStatistics = replaceStatistics;
             this.partitionOptions = partitionOptions;
         }
 
@@ -1490,6 +1855,16 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         @JsonGetter("partitionOptions")
         public List<Map<String, String>> getPartitionOptions() {
             return partitionOptions;
+        }
+
+        @JsonGetter("partitionStatistics")
+        public List<PartitionStatistics> getPartitionStatistics() {
+            return partitionStatistics;
+        }
+
+        @JsonGetter("replaceStatistics")
+        public Boolean replaceStatistics() {
+            return replaceStatistics;
         }
 
         @JsonGetter("ignoreIfExists")
