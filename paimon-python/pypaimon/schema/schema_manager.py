@@ -661,12 +661,6 @@ class SchemaManager:
                 comment=schema.comment,
             )
 
-            _validate_blob_fields(
-                schema.fields,
-                schema.options,
-                schema.primary_keys,
-                schema.partition_keys,
-            )
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
