@@ -516,6 +516,9 @@ case class PaimonSparkWriter(
           // very batch, so there is no need to list them to prove that they still exist.
           tableCommit
             .checkFilesExistence(false)
+            // This committer is closed right after the batch, so maintenance cannot be left to an
+            // executor that is about to be shut down, nor a failure to a commit that never comes.
+            .inlineMaintenance(true)
             .filterAndCommit(
               Collections.singletonMap(Long.box(identifier), commitMessages.toList.asJava))
         case None =>

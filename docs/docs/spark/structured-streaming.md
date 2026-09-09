@@ -63,12 +63,14 @@ after failing between the sink writing the batch and Spark recording that batch 
 Paimon commits every micro-batch under a commit user that is stable across restarts, and skips a
 batch that the same user already committed, so a replay does not write the data twice.
 
-The commit user is derived from the checkpoint location of the query, so a query keeps it as long
-as it keeps its checkpoint. If the checkpoint location never reaches the sink (for example when it
-comes from `spark.sql.streaming.checkpointLocation`), the query id Spark stores in the checkpoint
-is used instead. Set `write.stream.commit-user` to pin it explicitly, either as an option of the
-writer or as a `spark.paimon.write.stream.commit-user` session conf, which is only needed if a
-query has to keep its identity across a change of checkpoint location:
+What the commit user identifies is one incarnation of a checkpoint, not the place it is stored:
+reusing it across two different queries would make Paimon skip the data of the second one, while
+changing it within one query would bring the duplicate back. It is therefore derived from the query
+id that Spark persists in the checkpoint, which is new when a checkpoint is recreated, unchanged
+when a query resumes from one, and independent of how the location is spelled. Set
+`write.stream.commit-user` to pin it explicitly, either as an option of the writer or as a
+`spark.paimon.write.stream.commit-user` session conf, which is only needed if a query has to keep
+its identity across a new checkpoint:
 
 ```scala
 val stream = df
@@ -86,8 +88,8 @@ A skipped replay leaves the data files it wrote behind, uncommitted. They are re
 [orphan file cleaning](../maintenance/manage-snapshots#remove-orphan-files), like any other
 uncommitted file.
 
-Starting a query from a new checkpoint location gives it a new commit user, so a micro-batch
-committed by the previous run is not recognised and its data is written again.
+A query that starts from a new checkpoint gets a new commit user, so a micro-batch the previous
+run committed is not recognised and its data is written again.
 
 A table using postpone bucket with `postpone.batch-write-fixed-bucket` commits through a staged
 committer that cannot skip a replay; a warning is logged for every such micro-batch.

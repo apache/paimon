@@ -95,6 +95,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
     private boolean checkFilesExistence = true;
+    private boolean inlineMaintenance = false;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -173,6 +174,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl checkFilesExistence(boolean checkFilesExistence) {
         this.checkFilesExistence = checkFilesExistence;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl inlineMaintenance(boolean inlineMaintenance) {
+        this.inlineMaintenance = inlineMaintenance;
         return this;
     }
 
@@ -420,7 +427,7 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        if (batchCommitted) {
+        if (batchCommitted || inlineMaintenance) {
             maintain(identifier, doExpire);
         } else {
             executor.execute(

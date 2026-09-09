@@ -65,6 +65,19 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
      */
     InnerTableCommit checkFilesExistence(boolean checkFilesExistence);
 
+    /**
+     * If this is set to true, maintenance runs on the committing thread and its failure is thrown
+     * to the caller, instead of running through an executor which stores the failure for the next
+     * commit to report.
+     *
+     * <p>A committer which commits once and is then closed has to do this: it is about to shut the
+     * executor down, so maintenance dispatched to it may never run, and there is no next commit to
+     * report a failure to. {@link BatchTableCommit#commit(List)} already behaves this way; a caller
+     * which commits through {@link StreamTableCommit#filterAndCommit} with the same one-shot
+     * lifecycle has to ask for it.
+     */
+    InnerTableCommit inlineMaintenance(boolean inlineMaintenance);
+
     InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
     InnerTableCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
