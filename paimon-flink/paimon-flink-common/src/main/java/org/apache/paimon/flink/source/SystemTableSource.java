@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -45,6 +46,7 @@ public class SystemTableSource extends FlinkTableSource {
     private final boolean unbounded;
     private final int splitBatchSize;
     private final FlinkConnectorOptions.SplitAssignMode splitAssignMode;
+    @Nullable private final SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc;
     private final ObjectIdentifier tableIdentifier;
 
     public SystemTableSource(Table table, boolean unbounded, ObjectIdentifier tableIdentifier) {
@@ -53,6 +55,10 @@ public class SystemTableSource extends FlinkTableSource {
         Options options = Options.fromMap(table.options());
         this.splitBatchSize = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
         this.splitAssignMode = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
+        this.splitWeightFunc =
+                usesStaticSource(table, unbounded)
+                        ? SplitWeightUtils.splitWeightFunc(options)
+                        : null;
         this.tableIdentifier = tableIdentifier;
     }
 
@@ -65,10 +71,36 @@ public class SystemTableSource extends FlinkTableSource {
             int splitBatchSize,
             FlinkConnectorOptions.SplitAssignMode splitAssignMode,
             ObjectIdentifier tableIdentifier) {
+        this(
+                table,
+                unbounded,
+                predicate,
+                projectFields,
+                limit,
+                splitBatchSize,
+                splitAssignMode,
+                usesStaticSource(table, unbounded)
+                        ? SplitWeightUtils.splitWeightFunc(
+                                Options.fromMap(table.options()), splitAssignMode)
+                        : null,
+                tableIdentifier);
+    }
+
+    private SystemTableSource(
+            Table table,
+            boolean unbounded,
+            @Nullable Predicate predicate,
+            @Nullable int[][] projectFields,
+            @Nullable Long limit,
+            int splitBatchSize,
+            FlinkConnectorOptions.SplitAssignMode splitAssignMode,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc,
+            ObjectIdentifier tableIdentifier) {
         super(table, predicate, projectFields, limit);
         this.unbounded = unbounded;
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
+        this.splitWeightFunc = splitWeightFunc;
         this.tableIdentifier = tableIdentifier;
     }
 
@@ -111,6 +143,8 @@ public class SystemTableSource extends FlinkTableSource {
                             splitAssignMode,
                             null,
                             rowData,
+                            splitWeightFunc,
+                            null,
                             Boolean.parseBoolean(
                                     table.options()
                                             .getOrDefault(
@@ -145,6 +179,7 @@ public class SystemTableSource extends FlinkTableSource {
                 limit,
                 splitBatchSize,
                 splitAssignMode,
+                splitWeightFunc,
                 tableIdentifier);
     }
 
@@ -156,6 +191,10 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public boolean isUnbounded() {
         return unbounded;
+    }
+
+    private static boolean usesStaticSource(Table table, boolean unbounded) {
+        return !unbounded || !(table instanceof DataTable);
     }
 
     private static boolean isUnordered(Table table) {

@@ -181,6 +181,16 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "The mode used by StaticFileStoreSplitEnumerator to assign splits.");
 
+    public static final ConfigOption<SplitWeightMode> SCAN_SPLIT_ENUMERATOR_WEIGHT_MODE =
+            key("scan.split-enumerator.weight-mode")
+                    .enumType(SplitWeightMode.class)
+                    .defaultValue(SplitWeightMode.ROW_COUNT)
+                    .withDescription(
+                            "The weight metric used by StaticFileStoreSplitEnumerator. "
+                                    + "'row-count' balances by split row count. "
+                                    + "'file-size' only works with 'scan.split-enumerator.mode' = 'fair', "
+                                    + "balances by total data file size for DataSplit, and falls back to row count otherwise.");
+
     /* Sink writer allocate segments from managed memory. */
     public static final ConfigOption<Boolean> SINK_USE_MANAGED_MEMORY =
             ConfigOptions.key("sink.use-managed-memory-allocator")
@@ -667,6 +677,34 @@ public class FlinkConnectorOptions {
         private final String description;
 
         CompactionBucketDistributionStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /**
+     * Split weight mode for {@link org.apache.paimon.flink.source.StaticFileStoreSplitEnumerator}.
+     */
+    public enum SplitWeightMode implements DescribedEnum {
+        ROW_COUNT("row-count", "Balance splits by row count."),
+        FILE_SIZE(
+                "file-size",
+                "Balance splits by total data file size for DataSplit and fall back to row count otherwise. Only works with fair assign mode.");
+
+        private final String value;
+        private final String description;
+
+        SplitWeightMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
