@@ -81,7 +81,7 @@ public class PostponeBucketCompactOperator
                         table.store().newScan(),
                         table.store().newIndexFileHandler(),
                         snapshotId));
-        rowKeyExtractor = new FixedBucketRowKeyExtractor(table.schema());
+        rowKeyExtractor = (FixedBucketRowKeyExtractor) table.createRowKeyExtractor();
         buckets = new LinkedHashSet<>();
         endedInputs = new boolean[2];
     }

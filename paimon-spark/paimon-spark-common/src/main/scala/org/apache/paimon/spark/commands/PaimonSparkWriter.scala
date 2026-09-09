@@ -124,6 +124,12 @@ case class PaimonSparkWriter(
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
+    if (coreOptions.bucketPerPartitionCountEnabled()) {
+      throw new UnsupportedOperationException(
+        "Spark does not support writing tables with per-partition bucket counts. " +
+          "Use Flink to write this table or disable 'bucket.per-partition-count-enabled'.")
+    }
+
     val sparkSession = data.sparkSession
     val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._

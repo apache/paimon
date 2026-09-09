@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -51,6 +52,12 @@ import java.util.concurrent.ExecutorService;
 public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<T>>> {
 
     FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore);
+
+    /** Provides the preloaded partition-to-bucket mapping for fixed-bucket writes. */
+    default FileStoreWrite<T> withPartitionBucketMapping(
+            PartitionBucketMapping partitionBucketMapping) {
+        return this;
+    }
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
 
