@@ -32,6 +32,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -107,7 +108,8 @@ public class FullHistoryMetadataRewriter {
 
     private void rewriteSchemas(FileStoreTable sourceBranchTable, String branch) throws Exception {
         SchemaManager sourceSchemaManager = sourceBranchTable.schemaManager();
-        SchemaManager targetSchemaManager = new SchemaManager(targetFileIO, targetRoot, branch);
+        SchemaManager targetSchemaManager =
+                new FileSystemSchemaManager(targetFileIO, targetRoot, branch);
         for (TableSchema sourceSchema : sourceSchemaManager.listAll()) {
             FullHistoryClonePlanner.validateSupportedSchema(sourceSchema);
             TableSchema targetSchema =
@@ -432,6 +434,7 @@ public class FullHistoryMetadataRewriter {
                     changelogManifestList == null ? null : changelogManifestList.getRight(),
                     indexManifest,
                     snapshot.commitUser(),
+                    snapshot.writerVersion(),
                     snapshot.commitIdentifier(),
                     snapshot.commitKind(),
                     snapshot.timeMillis(),

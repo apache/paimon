@@ -206,6 +206,7 @@ class FullHistoryRootValidator {
             }
 
             digest.addString(snapshot.commitUser());
+            digest.addString(snapshot.writerVersion());
             digest.addLong(snapshot.commitIdentifier());
             digest.addString(snapshot.commitKind().name());
             digest.addLong(snapshot.timeMillis());

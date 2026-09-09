@@ -71,6 +71,7 @@ public class CloneActionTest {
                         null,
                         null,
                         targetCatalogConfig,
+                        Collections.emptyMap(),
                         1,
                         null,
                         null,
@@ -97,6 +98,7 @@ public class CloneActionTest {
                         "target_db",
                         "target_table",
                         Collections.singletonMap("warehouse", warehouse("target")),
+                        Collections.emptyMap(),
                         1,
                         null,
                         null,
@@ -114,6 +116,33 @@ public class CloneActionTest {
     }
 
     @Test
+    public void testRejectTargetTableConfigForFullHistoryMode() {
+        assertThatThrownBy(
+                        () ->
+                                new CloneAction(
+                                        "default",
+                                        "source_table",
+                                        Collections.singletonMap("warehouse", warehouse("source")),
+                                        "target_db",
+                                        "target_table",
+                                        Collections.singletonMap("warehouse", warehouse("target")),
+                                        Collections.singletonMap("bucket", "2"),
+                                        1,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        "paimon",
+                                        "full-history",
+                                        Collections.emptyList(),
+                                        false,
+                                        true))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("target_table_conf")
+                .hasMessageContaining("full-history");
+    }
+
+    @Test
     public void testRejectFullHistoryModeForHiveSource() {
         assertThatThrownBy(
                         () ->
@@ -124,6 +153,7 @@ public class CloneActionTest {
                                         "target_db",
                                         "target_table",
                                         Collections.singletonMap("warehouse", warehouse("target")),
+                                        Collections.emptyMap(),
                                         1,
                                         null,
                                         null,

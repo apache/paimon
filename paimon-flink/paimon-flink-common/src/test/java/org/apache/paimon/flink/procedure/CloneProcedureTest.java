@@ -61,10 +61,11 @@ public class CloneProcedureTest {
                                 "clone_from",
                                 "meta_only",
                                 "clone_if_exists",
+                                "target_table_conf",
                                 "clone_mode",
                                 "path_mapping"));
         assertThat(inference.getOptionalArguments())
-                .hasValue(Collections.nCopies(16, Boolean.TRUE));
+                .hasValue(Collections.nCopies(17, Boolean.TRUE));
     }
 
     private static class TestingDataTypeFactory implements DataTypeFactory {

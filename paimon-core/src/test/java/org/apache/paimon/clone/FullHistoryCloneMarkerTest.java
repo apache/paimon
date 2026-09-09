@@ -23,9 +23,9 @@ import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -433,7 +433,7 @@ public class FullHistoryCloneMarkerTest {
                     globalIndexExternalPath.toString());
         }
         Schema schema = builder.build();
-        SchemaUtils.forceCommit(new SchemaManager(fileIO, path), schema);
+        SchemaUtils.forceCommit(new FileSystemSchemaManager(fileIO, path), schema);
         return FileStoreTableFactory.create(fileIO, path);
     }
 

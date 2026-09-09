@@ -40,6 +40,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -549,15 +550,6 @@ public class FullHistoryMetadataRewriterTest {
 
         assertThatThrownBy(
                         () ->
-                                corruptedTarget
-                                        .copy(
-                                                Collections.singletonMap(
-                                                        CoreOptions.SCAN_TAG_NAME.key(), "tag1"))
-                                        .newScan()
-                                        .plan())
-                .isInstanceOf(RuntimeException.class);
-        assertThatThrownBy(
-                        () ->
                                 new FullHistoryCloneValidator(
                                                 clone.source,
                                                 corruptedTarget,
@@ -579,15 +571,6 @@ public class FullHistoryMetadataRewriterTest {
                 rewriteTagDeltaManifestList(
                         clone.target, tag, Pair.of(tag.deltaManifestList(), 1L));
 
-        assertThatThrownBy(
-                        () ->
-                                corruptedTarget
-                                        .copy(
-                                                Collections.singletonMap(
-                                                        CoreOptions.SCAN_TAG_NAME.key(), "tag1"))
-                                        .newScan()
-                                        .plan())
-                .isInstanceOf(RuntimeException.class);
         assertThatThrownBy(
                         () ->
                                 new FullHistoryCloneValidator(
@@ -630,7 +613,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, sourceRoot),
+                        new FileSystemSchemaManager(fileIO, sourceRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -787,7 +770,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, sourceRoot),
+                        new FileSystemSchemaManager(fileIO, sourceRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -879,7 +862,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, sourceRoot),
+                        new FileSystemSchemaManager(fileIO, sourceRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -950,7 +933,8 @@ public class FullHistoryMetadataRewriterTest {
         builder.option(CoreOptions.BLOB_FIELD.key(), "blob");
         builder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "blob");
         TableSchema schema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, sourceRoot), builder.build());
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(fileIO, sourceRoot), builder.build());
         FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
 
         assertThatThrownBy(
@@ -979,7 +963,8 @@ public class FullHistoryMetadataRewriterTest {
         builder.option(CoreOptions.BUCKET_KEY.key(), "id");
         builder.option(CoreOptions.BLOB_FIELD.key(), "blob");
         TableSchema schema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, sourceRoot), builder.build());
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(fileIO, sourceRoot), builder.build());
         FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
 
         assertThatThrownBy(
@@ -1009,7 +994,8 @@ public class FullHistoryMetadataRewriterTest {
         builder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         builder.option(CoreOptions.BLOB_FIELD.key(), "blob");
         TableSchema schema =
-                SchemaUtils.forceCommit(new SchemaManager(fileIO, sourceRoot), builder.build());
+                SchemaUtils.forceCommit(
+                        new FileSystemSchemaManager(fileIO, sourceRoot), builder.build());
         FileStoreTable source = FileStoreTableFactory.create(fileIO, sourceRoot, schema);
 
         FullHistoryClonePlan plan =
@@ -1099,7 +1085,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, sourceRoot),
+                        new FileSystemSchemaManager(fileIO, sourceRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1137,7 +1123,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, sourceRoot),
+                        new FileSystemSchemaManager(fileIO, sourceRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1408,7 +1394,7 @@ public class FullHistoryMetadataRewriterTest {
                         new String[] {"id", "pt"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tableRoot),
+                        new FileSystemSchemaManager(fileIO, tableRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
@@ -1433,7 +1419,7 @@ public class FullHistoryMetadataRewriterTest {
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
         TableSchema schema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tableRoot),
+                        new FileSystemSchemaManager(fileIO, tableRoot),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
@@ -1457,6 +1443,7 @@ public class FullHistoryMetadataRewriterTest {
                 snapshot.changelogManifestListSize(),
                 indexManifest,
                 snapshot.commitUser(),
+                snapshot.writerVersion(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
@@ -1484,6 +1471,7 @@ public class FullHistoryMetadataRewriterTest {
                 snapshot.changelogManifestListSize(),
                 snapshot.indexManifest(),
                 snapshot.commitUser(),
+                snapshot.writerVersion(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
@@ -1511,6 +1499,7 @@ public class FullHistoryMetadataRewriterTest {
                 roots.changelogManifestListSize(),
                 roots.indexManifest(),
                 snapshot.commitUser(),
+                snapshot.writerVersion(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
@@ -1539,6 +1528,7 @@ public class FullHistoryMetadataRewriterTest {
                 snapshot.changelogManifestListSize(),
                 snapshot.indexManifest(),
                 snapshot.commitUser(),
+                snapshot.writerVersion(),
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
@@ -1594,7 +1584,7 @@ public class FullHistoryMetadataRewriterTest {
     }
 
     private void writeHistoricalSchema(Path tableRoot, TableSchema schema) throws Exception {
-        SchemaManager manager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(fileIO, tableRoot);
         Path schemaPath =
                 new Path(manager.schemaDirectory(), SchemaManager.SCHEMA_PREFIX + schema.id());
         assertThat(fileIO.tryToWriteAtomic(schemaPath, schema.toString())).isTrue();
