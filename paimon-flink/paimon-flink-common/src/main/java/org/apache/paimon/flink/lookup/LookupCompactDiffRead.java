@@ -23,6 +23,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -33,6 +34,8 @@ import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -60,7 +63,9 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     }
 
     @Override
-    public RecordReader<InternalRow> reader(Split split) throws IOException {
+    public RecordReader<InternalRow> reader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
+        // rowRange is not supported by lookup reads; ignored.
         if (split instanceof DataSplit) {
             return fullPhaseMergeRead.createReader(split); // full reading phase
         } else {

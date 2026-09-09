@@ -42,7 +42,9 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.EmptyRecordReader;
+import org.apache.paimon.reader.RangeSkipReader;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -96,6 +98,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private List<Predicate> filtersForKeys;
     @Nullable private List<Predicate> filtersForAll;
+
+    @Nullable private RowRange rowRange;
 
     private boolean forceKeepDelete = false;
 
@@ -193,6 +197,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
+    public MergeFileSplitRead withRowRange(@Nullable RowRange rowRange) {
+        this.rowRange = rowRange;
+        return this;
+    }
+
+    @Override
     public MergeFileSplitRead forceKeepDelete() {
         this.forceKeepDelete = true;
         return this;
@@ -250,21 +260,32 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
+        RecordReader<KeyValue> reader;
         if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
-            return createNoMergeReader(
-                    split.partition(),
-                    split.bucket(),
-                    split.dataFiles(),
-                    split.deletionFiles().orElse(null),
-                    split.isStreaming());
+            reader =
+                    createNoMergeReader(
+                            split.partition(),
+                            split.bucket(),
+                            split.dataFiles(),
+                            split.deletionFiles().orElse(null),
+                            split.isStreaming());
         } else {
-            return createMergeReader(
-                    split.partition(),
-                    split.bucket(),
-                    split.dataFiles(),
-                    split.deletionFiles().orElse(null),
-                    forceKeepDelete);
+            reader =
+                    createMergeReader(
+                            split.partition(),
+                            split.bucket(),
+                            split.dataFiles(),
+                            split.deletionFiles().orElse(null),
+                            forceKeepDelete);
         }
+        // Primary-key table cannot skip row groups physically (merge-tree reorders rows), but the
+        // sort-merge output stream has a deterministic row order, so apply a naive skip+limit over
+        // the effective output stream. This also naturally handles deletion vectors / filters
+        // (already applied upstream in the merge reader).
+        if (rowRange != null) {
+            reader = new RangeSkipReader<>(reader, rowRange.startInclusive(), rowRange.count());
+        }
+        return reader;
     }
 
     /** Reads a writer-grouped postpone split with key predicates only. */

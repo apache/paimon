@@ -24,9 +24,12 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -63,6 +66,21 @@ public interface TableRead {
     }
 
     RecordReader<InternalRow> createReader(Split split) throws IOException;
+
+    /**
+     * Read a single {@link Split} restricted to the given {@link RowRange}.
+     *
+     * <p>{@code rowRange} is expressed in the 0-based effective-row position space of this split
+     * (concatenated effective rows of the split's files, deletion-vector-aware). It is a
+     * split-local parameter applied to this read invocation.
+     *
+     * @param split the split to read
+     * @param rowRange the effective-row range to read, {@code null} to read the whole split
+     */
+    default RecordReader<InternalRow> createReader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
+        return createReader(split);
+    }
 
     default RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
         List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();

@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
@@ -58,6 +59,14 @@ public interface SplitRead<T> {
         return this;
     }
 
+    /**
+     * Set a {@link RowRange} to restrict the read to a 0-based effective-row interval of the split.
+     * Default no-op; implementations supporting range reads override this.
+     */
+    default SplitRead<T> withRowRange(@Nullable RowRange rowRange) {
+        return this;
+    }
+
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(Split split) throws IOException;
 
@@ -91,6 +100,12 @@ public interface SplitRead<T> {
             @Override
             public SplitRead<R> withReadBatchSizer(ReadBatchSizer sizer) {
                 read.withReadBatchSizer(sizer);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withRowRange(@Nullable RowRange rowRange) {
+                read.withRowRange(rowRange);
                 return this;
             }
 

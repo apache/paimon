@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -54,7 +55,9 @@ public class DataEvolutionTableRead extends AppendTableRead {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split split, @Nullable RowRange rowRange)
+            throws IOException {
+        this.rowRange = rowRange;
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
@@ -74,7 +77,11 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     topN,
                     limit,
                     executeFilter,
-                    () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
+                    () ->
+                            createDataReader(
+                                    queryAuthContext.split(),
+                                    queryAuthContext.authResult(),
+                                    rowRange),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
                         if (sizer != null) {
@@ -87,6 +94,6 @@ public class DataEvolutionTableRead extends AppendTableRead {
                         return prescanRead;
                     });
         }
-        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult());
+        return createDataReader(queryAuthContext.split(), queryAuthContext.authResult(), rowRange);
     }
 }
