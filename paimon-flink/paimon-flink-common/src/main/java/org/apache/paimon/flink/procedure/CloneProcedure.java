@@ -85,6 +85,14 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "target_table_conf",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_mode",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "path_mapping",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -103,7 +111,9 @@ public class CloneProcedure extends ProcedureBase {
             String cloneFrom,
             Boolean metaOnly,
             Boolean cloneIfExists,
-            String targetTableConfigStr)
+            String targetTableConfigStr,
+            String cloneMode,
+            String pathMappingStr)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
@@ -121,6 +131,12 @@ public class CloneProcedure extends ProcedureBase {
                 StringUtils.isNullOrWhitespaceOnly(excludedTablesStr)
                         ? null
                         : Arrays.asList(StringUtils.split(excludedTablesStr, ","));
+        List<String> pathMappings =
+                StringUtils.isNullOrWhitespaceOnly(pathMappingStr)
+                        ? null
+                        : Arrays.asList(StringUtils.split(pathMappingStr, ","));
+        String normalizedCloneMode =
+                StringUtils.isNullOrWhitespaceOnly(cloneMode) ? "logical" : cloneMode.trim();
 
         CloneAction action =
                 new CloneAction(
@@ -137,8 +153,12 @@ public class CloneProcedure extends ProcedureBase {
                         excludedTables,
                         preferFileFormat,
                         cloneFrom,
+                        normalizedCloneMode,
+                        pathMappings,
                         metaOnly != null && metaOnly,
-                        cloneIfExists == null || cloneIfExists);
+                        cloneIfExists == null
+                                ? !"full-history".equalsIgnoreCase(normalizedCloneMode)
+                                : cloneIfExists);
         return execute(procedureContext, action, "Clone Job");
     }
 
