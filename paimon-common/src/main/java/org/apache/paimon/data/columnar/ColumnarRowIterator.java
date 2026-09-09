@@ -115,6 +115,10 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
 
     public ColumnarRowIterator mapping(
             @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
+        if (partitionInfo == null && isIdentityMapping(indexMapping, row.batch().getArity())) {
+            return this;
+        }
+
         if (partitionInfo != null || indexMapping != null) {
             VectorizedColumnBatch vectorizedColumnBatch = row.batch();
             ColumnVector[] vectors = vectorizedColumnBatch.columns;
@@ -127,6 +131,19 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             return copy(vectors);
         }
         return this;
+    }
+
+    private static boolean isIdentityMapping(@Nullable int[] indexMapping, int arity) {
+        if (indexMapping == null || indexMapping.length != arity) {
+            return false;
+        }
+
+        for (int i = 0; i < indexMapping.length; i++) {
+            if (indexMapping[i] != i) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public ColumnarRowIterator assignRowTracking(

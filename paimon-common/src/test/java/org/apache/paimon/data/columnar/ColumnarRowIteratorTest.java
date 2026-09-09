@@ -18,8 +18,13 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.heap.HeapIntVector;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongIterator;
 
 import org.junit.jupiter.api.Test;
@@ -60,6 +65,68 @@ public class ColumnarRowIteratorTest {
                 rowIterator.next();
             }
             assertThat(rowIterator.returnedPosition()).isEqualTo(positions[rowIterator.index - 1]);
+        }
+    }
+
+    @Test
+    public void testIdentityMappingPreservesSpecializedIterator() {
+        HeapIntVector firstVector = new HeapIntVector(1);
+        HeapIntVector secondVector = new HeapIntVector(1);
+        VectorizedColumnBatch batch =
+                new VectorizedColumnBatch(new ColumnVector[] {firstVector, secondVector});
+        batch.setNumRows(1);
+        ColumnarRowIterator rowIterator = new TestingSpecializedIterator(batch);
+        rowIterator.reset(0);
+
+        assertThat(rowIterator.mapping(null, new int[] {0, 1})).isSameAs(rowIterator);
+    }
+
+    @Test
+    public void testNonIdentityMappingCopiesIterator() {
+        HeapIntVector firstVector = new HeapIntVector(1);
+        HeapIntVector secondVector = new HeapIntVector(1);
+        VectorizedColumnBatch batch =
+                new VectorizedColumnBatch(new ColumnVector[] {firstVector, secondVector});
+        batch.setNumRows(1);
+        ColumnarRowIterator rowIterator = new TestingSpecializedIterator(batch);
+        rowIterator.reset(0);
+
+        ColumnarRowIterator reordered = rowIterator.mapping(null, new int[] {1, 0});
+        assertThat(reordered).isNotSameAs(rowIterator);
+        assertThat(reordered.batch().columns).containsExactly(secondVector, firstVector);
+
+        ColumnarRowIterator projected = rowIterator.mapping(null, new int[] {0});
+        assertThat(projected).isNotSameAs(rowIterator);
+        assertThat(projected.batch().columns).containsExactly(firstVector);
+    }
+
+    @Test
+    public void testPartitionMappingCopiesIterator() {
+        HeapIntVector dataVector = new HeapIntVector(1);
+        dataVector.setInt(0, 7);
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {dataVector});
+        batch.setNumRows(1);
+        ColumnarRowIterator rowIterator = new TestingSpecializedIterator(batch);
+        rowIterator.reset(0);
+
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(partition);
+        writer.writeInt(0, 42);
+        writer.complete();
+        PartitionInfo partitionInfo =
+                new PartitionInfo(new int[] {1, -1, 0}, RowType.of(DataTypes.INT()), partition);
+
+        ColumnarRowIterator mapped = rowIterator.mapping(partitionInfo, new int[] {0, 1});
+        assertThat(mapped).isNotSameAs(rowIterator);
+        assertThat(mapped.batch().getArity()).isEqualTo(2);
+        assertThat(mapped.batch().getInt(0, 0)).isEqualTo(7);
+        assertThat(mapped.batch().getInt(0, 1)).isEqualTo(42);
+    }
+
+    private static class TestingSpecializedIterator extends ColumnarRowIterator {
+
+        private TestingSpecializedIterator(VectorizedColumnBatch batch) {
+            super(new Path("test"), new ColumnarRow(batch), null);
         }
     }
 }
