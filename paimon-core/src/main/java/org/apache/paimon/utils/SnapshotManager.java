@@ -360,16 +360,20 @@ public class SnapshotManager implements Serializable {
      * mills. If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
-        Long latest = latestSnapshotId();
-        if (latest == null) {
+        Snapshot latestSnapshot = latestSnapshot();
+        if (latestSnapshot == null) {
             return null;
+        }
+        if (latestSnapshot.timeMillis() <= timestampMills) {
+            return latestSnapshot;
         }
 
-        Snapshot earliestSnapShot = earliestSnapshot(latest);
-        if (earliestSnapShot == null || earliestSnapShot.timeMillis() > timestampMills) {
+        Snapshot earliestSnapshot = earliestSnapshot(latestSnapshot.id());
+        if (earliestSnapshot == null || earliestSnapshot.timeMillis() > timestampMills) {
             return null;
         }
-        long earliest = earliestSnapShot.id();
+        long earliest = earliestSnapshot.id();
+        long latest = latestSnapshot.id() - 1;
 
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
@@ -382,8 +386,8 @@ public class SnapshotManager implements Serializable {
                 earliest = mid + 1; // Search in the right half
                 finalSnapshot = snapshot;
             } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
+                finalSnapshot = snapshot;
+                earliest = mid + 1;
             }
         }
         return finalSnapshot;
@@ -394,16 +398,21 @@ public class SnapshotManager implements Serializable {
      * If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {
-        Long earliest = earliestSnapshotId();
-        Long latest = latestSnapshotId();
-        if (earliest == null || latest == null) {
+        Snapshot latestSnapshot = latestSnapshot();
+        if (latestSnapshot == null || latestSnapshot.timeMillis() < timestampMills) {
             return null;
         }
 
-        Snapshot latestSnapShot = snapshot(latest);
-        if (latestSnapShot.timeMillis() < timestampMills) {
+        Snapshot earliestSnapshot = earliestSnapshot(latestSnapshot.id());
+        if (earliestSnapshot == null) {
             return null;
         }
+        if (earliestSnapshot.timeMillis() >= timestampMills) {
+            return earliestSnapshot;
+        }
+
+        long earliest = earliestSnapshot.id() + 1;
+        long latest = latestSnapshot.id();
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
@@ -415,8 +424,8 @@ public class SnapshotManager implements Serializable {
             } else if (commitTime < timestampMills) {
                 earliest = mid + 1; // Search in the right half
             } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
+                finalSnapshot = snapshot;
+                latest = mid - 1;
             }
         }
         return finalSnapshot;

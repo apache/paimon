@@ -423,6 +423,64 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualTimeMills(millis + 10001)).isNull();
     }
 
+    @Test
+    public void testEarlierOrEqualTimeMillsWithDuplicateCommitTimes() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis).id()).isEqualTo(2);
+    }
+
+    @Test
+    public void testLaterOrEqualTimeMillsWithDuplicateCommitTimes() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(0);
+    }
+
+    @Test
+    public void testEarlierOrEqualTimeMillsWithConcurrentRollback() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new LatestSnapshotRollbackRaceManager(localFileIO, new Path(tempDir.toString()));
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        snapshotManager.commitLatestHint(2);
+
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis).id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLaterOrEqualTimeMillsWithConcurrentExpiration() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), true);
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        snapshotManager.commitEarliestHint(0);
+
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(1);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {
@@ -951,6 +1009,30 @@ public class SnapshotManagerTest {
                     throw new RuntimeException(e);
                 }
                 expireLatestSnapshot = false;
+            }
+            return snapshotId;
+        }
+    }
+
+    /** Simulates a rollback after finding the latest snapshot ID. */
+    private static class LatestSnapshotRollbackRaceManager extends SnapshotManager {
+        private boolean rollbackLatestSnapshot = true;
+
+        private LatestSnapshotRollbackRaceManager(FileIO fileIO, Path tablePath) {
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
+        }
+
+        @Override
+        public @Nullable Long latestSnapshotIdFromFileSystem() {
+            Long snapshotId = super.latestSnapshotIdFromFileSystem();
+            if (snapshotId != null && rollbackLatestSnapshot) {
+                try {
+                    commitLatestHint(snapshotId - 1);
+                    fileIO().delete(snapshotPath(snapshotId), true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                rollbackLatestSnapshot = false;
             }
             return snapshotId;
         }
