@@ -628,7 +628,8 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         .collect(Collectors.toList());
         assertThat(normalFiles.size()).isGreaterThan(1);
         assertThat(normalFiles.stream().mapToLong(DataFileMeta::rowCount).sum()).isEqualTo(2500);
-        assertThat(files).doesNotContainAnyElementsOf(blobs);
+        assertThat(files.stream().filter(file -> isBlobFile(file.fileName())))
+                .containsExactlyInAnyOrderElementsOf(blobs);
         assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expected);
         List<String> expectedAnchors = new ArrayList<>();
         for (DataFileMeta file : normalFiles) {
@@ -648,6 +649,52 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
             reader.forEachRemaining(row -> assertThat(row.getLong(4)).isEqualTo(row.getInt(0)));
         }
+        ReadBuilder blobRead = table.newReadBuilder().withReadType(table.rowType().project("f3"));
+        List<Byte> actualBlobs = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                blobRead.newRead().createReader(blobRead.newScan().plan())) {
+            reader.forEachRemaining(row -> actualBlobs.add(row.getBlob(0).toData()[0]));
+        }
+        List<Byte> expectedBlobs = new ArrayList<>();
+        for (int rowId = 0; rowId < 2500; rowId++) {
+            if (rowId != 0 && rowId != 999 && rowId != 2000 && rowId != 2499) {
+                expectedBlobs.add((byte) rowId);
+            }
+        }
+        assertThat(actualBlobs).containsExactlyElementsOf(expectedBlobs);
+    }
+
+    @Test
+    public void testNormalCompactRetainsSpanningBlobFile() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        writeBlobRange(table, 5L, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114);
+        List<DataFileMeta> blobs =
+                currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
+                        .filter(file -> isBlobFile(file.fileName()))
+                        .collect(Collectors.toList());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        compactDataEvolutionTable(table.copy(options), false);
+
+        assertThat(
+                        currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
+                                .filter(file -> isBlobFile(file.fileName())))
+                .containsExactlyInAnyOrderElementsOf(blobs);
+        List<String> expectedRows = new ArrayList<>();
+        for (int rowId = 0; rowId < 15; rowId++) {
+            expectedRows.add(
+                    rowId
+                            + "|name-"
+                            + rowId
+                            + "|base-"
+                            + rowId
+                            + "|"
+                            + (rowId < 5 ? rowId : rowId + 100));
+        }
+        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
     }
 
     @Test

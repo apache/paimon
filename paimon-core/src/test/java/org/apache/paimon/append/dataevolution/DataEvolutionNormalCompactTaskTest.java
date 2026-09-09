@@ -241,7 +241,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
     }
 
     @Test
-    public void testSplitAlignsMultipleBlobColumnsAndVectorFiles() throws Exception {
+    public void testSplitRetainsMultipleBlobColumnsAndVectorFiles() throws Exception {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -275,6 +275,15 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                 Collections.singletonList(SchemaChange.renameColumn("v", "renamed_v")),
                 false);
         table = getTableDefault();
+        List<DataFileMeta> dedicatedFiles =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .filter(
+                                file ->
+                                        isBlobFile(file.fileName())
+                                                || isVectorStoreFile(file.fileName()))
+                        .collect(Collectors.toList());
+        assertThat(dedicatedFiles).hasSize(3);
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
@@ -285,7 +294,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         .plan();
         assertThat(tasks).hasSize(1);
         DataEvolutionCompactTask task = tasks.get(0);
-        assertThat(task.compactBefore()).hasSize(4);
+        assertThat(task.compactBefore()).hasSize(1);
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(task.doCompact(table, "split-dedicated")));
         }
@@ -302,17 +311,52 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                 .allSatisfy(
                         file ->
                                 assertThat(
-                                                normalRanges.stream()
-                                                        .anyMatch(
-                                                                range ->
-                                                                        range.from
-                                                                                        <= file
-                                                                                                .nonNullFirstRowId()
-                                                                                && range.to
-                                                                                        >= file
-                                                                                                .nonNullRowIdRange()
-                                                                                                .to))
-                                        .isTrue());
+                                                isBlobFile(file.fileName())
+                                                        || isVectorStoreFile(file.fileName()))
+                                        .isFalse());
+        assertThat(
+                        table.store().newScan().plan().files().stream()
+                                .map(ManifestEntry::file)
+                                .filter(
+                                        file ->
+                                                isBlobFile(file.fileName())
+                                                        || isVectorStoreFile(file.fileName()))
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(dedicatedFiles);
+
+        // Reading the new layout does not depend on the compaction option remaining enabled.
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "false");
+        table = table.copy(options);
+        assertDedicatedValues(table);
+
+        // Merging split normal files must also leave spanning dedicated files untouched.
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "128 mb");
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        table = table.copy(options);
+        tasks =
+                new DataEvolutionCompactCoordinator(
+                                table, false, false, table.snapshotManager().latestSnapshot())
+                        .plan();
+        assertThat(tasks).hasSize(1);
+        task = tasks.get(0);
+        assertThat(task.compactBefore()).hasSize(normalRanges.size());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(task.doCompact(table, "merge-split-normal")));
+        }
+        assertThat(task.compactAfter()).hasSize(1);
+        assertThat(
+                        table.store().newScan().plan().files().stream()
+                                .map(ManifestEntry::file)
+                                .filter(
+                                        file ->
+                                                isBlobFile(file.fileName())
+                                                        || isVectorStoreFile(file.fileName()))
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(dedicatedFiles);
+        assertDedicatedValues(table);
+    }
+
+    private void assertDedicatedValues(FileStoreTable table) throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Integer> ids = new ArrayList<>();
         try (RecordReader<InternalRow> reader =

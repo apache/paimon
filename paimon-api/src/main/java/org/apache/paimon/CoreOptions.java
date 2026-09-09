@@ -2642,8 +2642,8 @@ public class CoreOptions implements Serializable {
                             "Whether data-evolution compaction selects normal data files larger than "
                                     + "twice target-file-size, even below compaction.min.file-num. "
                                     + "When enabled, normal compaction output rolls at target-file-size "
-                                    + "while preserving row IDs and logical deletions. Associated dedicated "
-                                    + "files are rewritten to stay within the new normal-file boundaries.");
+                                    + "while preserving row IDs and logical deletions. This option does not "
+                                    + "rewrite associated BLOB or VECTOR files.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
             key("data-evolution.compaction.rewrite-row-ids")

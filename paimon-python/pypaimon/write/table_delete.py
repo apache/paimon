@@ -27,12 +27,9 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.scanner.data_evolution_split_generator import (
-    DataEvolutionSplitGenerator,
-)
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
-from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
+from pypaimon.utils.data_evolution_utils import retrieve_anchor_file, split_normal_file_groups
 from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
@@ -144,7 +141,7 @@ class TableDeleteByRowId:
                 for file in split.files
                 if file.row_id_range() is not None
             ]
-            for group in DataEvolutionSplitGenerator._split_by_row_id(files):
+            for group in split_normal_file_groups(files):
                 anchor = retrieve_anchor_file(group)
                 anchors.append(
                     _AnchorRange(

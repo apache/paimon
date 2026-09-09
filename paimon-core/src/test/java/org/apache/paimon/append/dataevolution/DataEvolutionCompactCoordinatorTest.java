@@ -128,6 +128,27 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testSplitLargeFilesAndMergeSmallFilesKeepDedicatedFiles() {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("large.parquet", 0L, 10L, 0, 201L),
+                        makeEntryWithSize("small1.parquet", 10L, 10L, 0, 20L),
+                        makeEntryWithSize("small2.parquet", 20L, 10L, 0, 20L),
+                        makeBlobEntry("original.blob", 0L, 30L, 1000L),
+                        makeVectorStoreEntry("original.vector.lance", 0L, 30L, 1000L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false, false, true, 100L, 100L, 1L, 2L, schemaId -> null, null);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0).compactBefore()).containsExactly(entries.get(0).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
+    }
+
+    @Test
     public void testCompactPlannerContiguousFiles() {
         // Multiple contiguous files should be grouped together
         List<ManifestEntry> entries = new ArrayList<>();

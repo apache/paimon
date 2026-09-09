@@ -171,8 +171,9 @@ class BlobBunch(_SpecialFieldBunch):
         physical_row_count = sum(row_range.count() for row_range in merged)
         if self.expected_row_range is not None:
             for row_range in merged:
-                if (row_range.from_ < self.expected_row_range.from_
-                        or row_range.to > self.expected_row_range.to):
+                if (not self.row_id_push_down
+                        and (row_range.from_ < self.expected_row_range.from_
+                             or row_range.to > self.expected_row_range.to)):
                     raise ValueError(
                         f"Blob file range {row_range} should be within normal "
                         f"file range {self.expected_row_range}."
@@ -235,6 +236,33 @@ class BlobBunch(_SpecialFieldBunch):
 
 class VectorBunch(_SpecialFieldBunch):
     """Files for partial field (vector files)."""
+
+    def __init__(self, expected_row_count: int, row_id_push_down: bool = False,
+                 expected_row_range: Optional[Range] = None, field_id: Optional[int] = None):
+        super().__init__(expected_row_count, row_id_push_down)
+        self.expected_row_range = expected_row_range
+        self.field_id = field_id
+
+    def add(self, file: DataFileMeta) -> None:
+        if not self._is_special_file(file.file_name):
+            raise ValueError("Only vector file can be added to a vector bunch.")
+        self._files.append(file)
+
+    def segments(self):
+        """Select the newest physical file for each part of the normal range."""
+        covered = []
+        segments = []
+        for file in sorted(self._files,
+                           key=lambda f: (-f.max_sequence_number, f.file_name)):
+            selected = ([file.row_id_range()] if self.expected_row_range is None
+                        else Range.and_([file.row_id_range()], [self.expected_row_range]))
+            for row_range in selected:
+                segments.extend((visible, file) for visible in row_range.exclude(covered))
+                covered.append(row_range)
+        return sorted(segments, key=lambda segment: segment[0].from_)
+
+    def row_count(self) -> int:
+        return sum(row_range.count() for row_range, _ in self.segments())
 
     def _is_special_file(self, file_name: str) -> bool:
         return DataFileMeta.is_vector_file(file_name)

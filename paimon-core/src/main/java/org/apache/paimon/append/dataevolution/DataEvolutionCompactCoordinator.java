@@ -46,7 +46,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -326,10 +325,10 @@ public class DataEvolutionCompactCoordinator {
                     }
                 }
 
-                if (compactBlob || splitLargeFiles) {
+                if (compactBlob) {
                     associateDedicatedFiles(blobFiles, treeMap, dataFileToBlobFiles);
                 }
-                if (compactVector || splitLargeFiles) {
+                if (compactVector) {
                     associateDedicatedFiles(vectorStoreFiles, treeMap, dataFileToVectorStoreFiles);
                 }
 
@@ -430,23 +429,6 @@ public class DataEvolutionCompactCoordinator {
                                                             isLargeFile(
                                                                     f.fileSize(), targetFileSize)));
             if (triggerNormalFile) {
-                if (splitLargeFiles) {
-                    // Dedicated files must be rewritten with the normal files so that their
-                    // row-id ranges remain within the new normal-file boundaries.
-                    Set<DataFileMeta> filesToRewrite = new LinkedHashSet<>(dataFiles);
-                    for (DataFileMeta dataFile : dataFiles) {
-                        filesToRewrite.addAll(
-                                dataFileToBlobFiles.getOrDefault(
-                                        dataFile, Collections.emptyList()));
-                        filesToRewrite.addAll(
-                                dataFileToVectorStoreFiles.getOrDefault(
-                                        dataFile, Collections.emptyList()));
-                    }
-                    tasks.add(
-                            new DataEvolutionNormalCompactTask(
-                                    partition, new ArrayList<>(filesToRewrite)));
-                    return tasks;
-                }
                 tasks.add(new DataEvolutionNormalCompactTask(partition, dataFiles));
             }
 

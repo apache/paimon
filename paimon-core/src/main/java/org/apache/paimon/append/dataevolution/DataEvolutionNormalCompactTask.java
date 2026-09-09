@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +50,6 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
@@ -88,22 +86,10 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                         fieldNamesInBlobFile(table.rowType(), options.blobInlineField()),
                         fieldNamesInVectorFile(table.rowType(), options.withVectorFormat()));
 
-        Function<Long, TableSchema> schemaLoader = table.schemaManager()::schema;
-        Set<Integer> dedicatedFieldsToRewrite =
-                compactBefore.stream()
-                        .filter(
-                                file ->
-                                        isBlobFile(file.fileName())
-                                                || isVectorStoreFile(file.fileName()))
-                        .flatMap(file -> fileFields(schemaLoader, file).stream())
-                        .map(DataField::id)
-                        .collect(Collectors.toSet());
         Map<String, String> writeOptions = new HashMap<>(DYNAMIC_WRITE_OPTIONS);
         if (options.dataEvolutionCompactionSplitLargeFiles()) {
             writeOptions.put(
                     CoreOptions.TARGET_FILE_SIZE.key(), options.targetFileSize(false) + " b");
-            writeOptions.put(
-                    CoreOptions.BLOB_TARGET_FILE_SIZE.key(), options.blobTargetFileSize() + " b");
         }
         table = table.copy(writeOptions);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
@@ -111,11 +97,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         RowType readWriteType =
                 new RowType(
                         table.rowType().getFields().stream()
-                                .filter(
-                                        f ->
-                                                !fieldsInDedicatedFile.contains(f.name())
-                                                        || dedicatedFieldsToRewrite.contains(
-                                                                f.id()))
+                                .filter(f -> !fieldsInDedicatedFile.contains(f.name()))
                                 .collect(Collectors.toList()));
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
@@ -158,30 +140,24 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
         long minSequenceNumber = minSequenceId(compactBefore);
         long maxSequenceNumber = maxSequenceId(compactBefore);
-        Map<List<String>, Long> nextRowIds = new HashMap<>();
-        Map<List<String>, long[]> columnSequences = new HashMap<>();
+        long nextRowId = firstRowId;
+        long[] columnMaxSequenceNumbers =
+                options.ignoreIndexColumnUpdate() && !writeResult.isEmpty()
+                        ? compactedColumnMaxSequenceNumbers(
+                                table,
+                                writeResult
+                                        .get(0)
+                                        .assignSequenceNumber(minSequenceNumber, maxSequenceNumber))
+                        : null;
         for (DataFileMeta file : writeResult) {
-            List<String> columnGroup =
-                    isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())
-                            ? file.writeCols()
-                            : Collections.emptyList();
-            long fileFirstRowId = nextRowIds.getOrDefault(columnGroup, firstRowId);
             DataFileMeta dataFileMeta =
-                    file.assignFirstRowId(fileFirstRowId)
+                    file.assignFirstRowId(nextRowId)
                             .assignSequenceNumber(minSequenceNumber, maxSequenceNumber);
-            if (options.ignoreIndexColumnUpdate()) {
-                if (!columnSequences.containsKey(columnGroup)) {
-                    columnSequences.put(
-                            columnGroup, compactedColumnMaxSequenceNumbers(table, dataFileMeta));
-                }
-                long[] columnMaxSequenceNumbers = columnSequences.get(columnGroup);
-                if (columnMaxSequenceNumbers != null) {
-                    dataFileMeta =
-                            dataFileMeta.withColumnMaxSequenceNumbers(columnMaxSequenceNumbers);
-                }
+            if (columnMaxSequenceNumbers != null) {
+                dataFileMeta = dataFileMeta.withColumnMaxSequenceNumbers(columnMaxSequenceNumbers);
             }
             compactAfter.add(dataFileMeta);
-            nextRowIds.put(columnGroup, fileFirstRowId + dataFileMeta.rowCount());
+            nextRowId += dataFileMeta.rowCount();
         }
         checkSameRowRange("Normal file", compactBefore, compactAfter);
 

@@ -516,7 +516,7 @@ under the License.
             <td><h5>data-evolution.compaction.split-large-files</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether data-evolution compaction selects normal data files larger than twice target-file-size, even below compaction.min.file-num. When enabled, normal compaction output rolls at target-file-size while preserving row IDs and logical deletions. Associated dedicated files are rewritten to stay within the new normal-file boundaries.</td>
+            <td>Whether data-evolution compaction selects normal data files larger than twice target-file-size, even below compaction.min.file-num. When enabled, normal compaction output rolls at target-file-size while preserving row IDs and logical deletions. This option does not rewrite associated BLOB or VECTOR files.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>

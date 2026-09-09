@@ -51,7 +51,7 @@ public class DataEvolutionReadTest {
 
     @BeforeEach
     public void setUp() {
-        vectorBunch = new VectorFileBunch(Long.MAX_VALUE, false);
+        vectorBunch = new VectorFileBunch(0, null);
     }
 
     @Test
@@ -94,81 +94,69 @@ public class DataEvolutionReadTest {
     }
 
     @Test
-    public void testAddVectorFileWithSameFirstRowId() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 0, 50, 2);
+    public void testNewVectorVersionPreservesOldTail() {
+        DataFileMeta oldFile = createVectorFile("old", 0, 100, 1);
+        DataFileMeta newFile = createVectorFile("new", 0, 50, 2);
+        vectorBunch.add(oldFile);
+        vectorBunch.add(newFile);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with same firstRowId but higher sequence number should throw exception
-        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Vector file with same first row id should have decreasing sequence number.");
+        assertVectorSelection(vectorBunch, newFile, new Range(0, 49), oldFile, new Range(50, 99));
     }
 
     @Test
-    public void testAddVectorFileWithSameFirstRowIdAndLowerSequenceNumber() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 2);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 0, 50, 1);
+    public void testNewVectorVersionReplacesCoveredOldRows() {
+        DataFileMeta newFile = createVectorFile("new", 0, 100, 2);
+        DataFileMeta oldFile = createVectorFile("old", 0, 50, 1);
+        vectorBunch.add(newFile);
+        vectorBunch.add(oldFile);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with same firstRowId and lower sequence number should be ignored
-        vectorBunch.add(vectorEntry2);
-
-        assertThat(vectorBunch.files).hasSize(1);
-        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry1);
+        assertThat(vectorBunch.rowCount()).isEqualTo(100);
+        assertThat(vectorBunch.selectedFiles()).hasSize(1);
+        assertThat(vectorBunch.selectedFiles().get(0).file).isEqualTo(newFile);
+        assertThat(vectorBunch.selectedFiles().get(0).range).isEqualTo(new Range(0, 99));
     }
 
     @Test
-    public void testAddVectorFileWithOverlappingRowId() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 2);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 50, 150, 1);
+    public void testOlderOverlappingVectorFileSuppliesUncoveredTail() {
+        DataFileMeta newFile = createVectorFile("new", 0, 100, 2);
+        DataFileMeta oldFile = createVectorFile("old", 50, 150, 1);
+        vectorBunch.add(newFile);
+        vectorBunch.add(oldFile);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with overlapping row id and lower sequence number should be ignored
-        vectorBunch.add(vectorEntry2);
-
-        assertThat(vectorBunch.files).hasSize(1);
-        assertThat(vectorBunch.files.get(0)).isEqualTo(vectorEntry1);
+        assertVectorSelection(vectorBunch, newFile, new Range(0, 99), oldFile, new Range(100, 199));
     }
 
     @Test
-    public void testAddVectorFileWithOverlappingRowIdAndHigherSequenceNumber() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 50, 150, 2);
+    public void testNewOverlappingVectorFilePreservesOldPrefix() {
+        DataFileMeta oldFile = createVectorFile("old", 0, 100, 1);
+        DataFileMeta newFile = createVectorFile("new", 50, 150, 2);
+        vectorBunch.add(oldFile);
+        vectorBunch.add(newFile);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with overlapping row id and higher sequence number should throw exception
-        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Vector file with overlapping row id should have decreasing sequence number.");
+        assertVectorSelection(vectorBunch, oldFile, new Range(0, 49), newFile, new Range(50, 199));
     }
 
     @Test
-    public void testAddVectorFileWithNonContinuousRowId() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 200, 300, 1);
+    public void testVectorSelectionRetainsGaps() {
+        DataFileMeta first = createVectorFile("first", 0, 100, 1);
+        DataFileMeta second = createVectorFile("second", 200, 300, 1);
+        vectorBunch.add(first);
+        vectorBunch.add(second);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with non-continuous row id should throw exception
-        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Vector file first row id should be continuous, expect 100 but got 200");
+        assertVectorSelection(vectorBunch, first, new Range(0, 99), second, new Range(200, 499));
     }
 
     @Test
-    public void testAddVectorFileWithDifferentWriteCols() {
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        DataFileMeta vectorEntry2 =
-                createVectorFileWithCols("vector2", 100, 200, 1, Arrays.asList("different_col"));
+    public void testVectorSelectionRetainsPhysicalColumnNames() {
+        DataFileMeta oldFile = createVectorFile("old", 0, 100, 1);
+        DataFileMeta renamedFile =
+                createVectorFileWithCols(
+                        "renamed", 100, 200, 2, Collections.singletonList("renamed_vector"));
+        vectorBunch.add(oldFile);
+        vectorBunch.add(renamedFile);
 
-        vectorBunch.add(vectorEntry1);
-        // Adding file with different write columns should throw exception
-        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("All files in this bunch should have the same write columns.");
+        assertVectorSelection(
+                vectorBunch, oldFile, new Range(0, 99), renamedFile, new Range(100, 299));
     }
 
     @Test
@@ -453,14 +441,13 @@ public class DataEvolutionReadTest {
     }
 
     @Test
-    void testAddVectorFilesWithDifferentSchemaId() {
-        DataFileMeta vectorEntry1 = createVectorFileWithSchema("vector1", 0, 100, 1, 0L);
-        DataFileMeta vectorEntry2 = createVectorFileWithSchema("vector2", 100, 200, 1, 1L);
+    void testVectorSelectionAcrossSchemas() {
+        DataFileMeta oldFile = createVectorFileWithSchema("old", 0, 100, 1, 0L);
+        DataFileMeta newFile = createVectorFileWithSchema("new", 100, 200, 2, 1L);
+        vectorBunch.add(oldFile);
+        vectorBunch.add(newFile);
 
-        vectorBunch.add(vectorEntry1);
-        assertThatThrownBy(() -> vectorBunch.add(vectorEntry2))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("All files in this bunch should have the same schema id.");
+        assertVectorSelection(vectorBunch, oldFile, new Range(0, 99), newFile, new Range(100, 299));
     }
 
     @Test
@@ -498,25 +485,30 @@ public class DataEvolutionReadTest {
     }
 
     @Test
-    public void testRowIdPushDown() {
-        VectorFileBunch vectorBunch = new VectorFileBunch(Long.MAX_VALUE, true);
-        DataFileMeta vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        DataFileMeta vectorEntry2 = createVectorFile("vector2", 200, 300, 1);
-        vectorBunch.add(vectorEntry1);
-        VectorFileBunch finalVectorBunch = vectorBunch;
-        DataFileMeta finalVectorEntry = vectorEntry2;
-        assertThatCode(() -> finalVectorBunch.add(finalVectorEntry)).doesNotThrowAnyException();
+    public void testVectorSelectionClipsToNormalRange() {
+        VectorFileBunch clipped = new VectorFileBunch(0, new Range(50, 149));
+        DataFileMeta oldFile = createVectorFile("old", 0, 200, 1);
+        DataFileMeta newFile = createVectorFile("new", 100, 100, 2);
+        clipped.add(oldFile);
+        clipped.add(newFile);
 
-        vectorBunch = new VectorFileBunch(Long.MAX_VALUE, true);
-        vectorEntry1 = createVectorFile("vector1", 0, 100, 1);
-        vectorEntry2 = createVectorFile("vector2", 50, 200, 2);
-        vectorBunch.add(vectorEntry1);
-        vectorBunch.add(vectorEntry2);
-        assertThat(vectorBunch.files).containsExactlyInAnyOrder(vectorEntry2);
+        assertVectorSelection(clipped, oldFile, new Range(50, 99), newFile, new Range(100, 149));
+        assertThat(oldFile.nonNullRowIdRange()).isEqualTo(new Range(0, 199));
+        assertThat(newFile.nonNullRowIdRange()).isEqualTo(new Range(100, 199));
+    }
 
-        VectorFileBunch finalVectorBunch2 = vectorBunch;
-        DataFileMeta vectorEntry3 = createVectorFile("vector2", 250, 100, 2);
-        assertThatCode(() -> finalVectorBunch2.add(vectorEntry3)).doesNotThrowAnyException();
+    private static void assertVectorSelection(
+            VectorFileBunch bunch,
+            DataFileMeta first,
+            Range firstRange,
+            DataFileMeta second,
+            Range secondRange) {
+        assertThat(bunch.selectedFiles()).hasSize(2);
+        assertThat(bunch.selectedFiles().get(0).file).isEqualTo(first);
+        assertThat(bunch.selectedFiles().get(0).range).isEqualTo(firstRange);
+        assertThat(bunch.selectedFiles().get(1).file).isEqualTo(second);
+        assertThat(bunch.selectedFiles().get(1).range).isEqualTo(secondRange);
+        assertThat(bunch.rowCount()).isEqualTo(firstRange.count() + secondRange.count());
     }
 
     /** Creates a normal (non-blob) file for testing. */

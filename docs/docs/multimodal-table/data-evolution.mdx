@@ -628,11 +628,15 @@ range and rolls normal output files near `target-file-size`. Actual sizes depend
 compression and the writer's size-check granularity; the last file may be smaller.
 The write-time `target-file-row-num` limit does not apply to compaction.
 
-Row IDs, column updates, and logical deletions are preserved. Associated dedicated
-BLOB and VECTOR files are rewritten along with the normal files to keep their row-ID
-ranges aligned, which adds read and write work for those columns. Their sizes alone
-do not trigger splitting. Compaction rewrites files in the current snapshot; files referenced by older snapshots or tags remain until those references
-expire and snapshot expiration removes them.
+Row IDs, column updates, and logical deletions are preserved. This option only rewrites
+normal files: associated BLOB and VECTOR files keep their existing contents and file names,
+and their sizes do not trigger splitting. Separate dedicated-file compaction options keep
+their existing behavior. Files referenced by older snapshots or tags remain until those
+references expire and snapshot expiration removes them.
+
+After splitting, one dedicated file can cover multiple normal-file row-ID ranges.
+All Java and PyPaimon readers must support this layout before enabling the option.
+Disabling the option later does not undo this layout change.
 
 ### Materialize Deletion Vectors
 
