@@ -30,6 +30,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -233,7 +234,7 @@ public class SortCompactSparkCommitTest {
         String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         FileIO fileIO = FileIOFinder.find(new Path(root));
-        SchemaManager schemaManage = new SchemaManager(new LocalFileIO(), path);
+        SchemaManager schemaManage = new FileSystemSchemaManager(new LocalFileIO(), path);
 
         Map<String, String> options = new HashMap<>(dynamicOptions);
         options.put(CoreOptions.PATH.key(), root);

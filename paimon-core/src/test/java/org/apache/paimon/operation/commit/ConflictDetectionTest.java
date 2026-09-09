@@ -759,17 +759,13 @@ class ConflictDetectionTest {
     @Test
     void testCompactDeletionConflictWithDvHasActionableMessage() {
         ConflictDetection detection =
-                new ConflictDetection(
+                new AppendConflictDetection(
                         "test-table",
                         "test-user",
                         RowType.of(),
                         null,
-                        null,
                         BucketMode.BUCKET_UNAWARE,
                         true,
-                        false,
-                        false,
-                        null,
                         null,
                         null);
 
