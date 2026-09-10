@@ -126,6 +126,28 @@ public class HadoopSecuredFileSystemTest {
         assertThat(fileIO.readFileUtf8(target)).isEqualTo("content");
     }
 
+    @Test
+    public void testAtomicRenameSurfacesDelegateIOExceptionThroughDoAs() throws Exception {
+        File dir = new File(tmp.toFile(), "atomic-failure");
+        assertThat(dir.mkdirs()).isTrue();
+        Path target = new Path(new File(dir, "LATEST").toURI());
+
+        FailingRenameFileSystem delegate = new FailingRenameFileSystem();
+        delegate.initialize(target.toUri(), new Configuration());
+        HadoopFileIO fileIO = new HadoopFileIO(target);
+        Options options = kerberosOptions();
+        fileIO.configure(CatalogContext.create(options));
+        fileIO.setFileSystem(
+                HadoopSecuredFileSystem.trySecureFileSystem(
+                        delegate, options, new Configuration()));
+
+        // Method.invoke wraps the delegate IOException in InvocationTargetException, which doAs
+        // would rewrap as UndeclaredThrowableException; without translation this surfaces as a
+        // RuntimeException and escapes HintFileUtils.commitHint's IOException retry loop.
+        assertThatThrownBy(() -> fileIO.tryAtomicOverwriteViaRename(target, "content"))
+                .isInstanceOf(IOException.class);
+    }
+
     /** A local file system exposing {@link FileSystem}'s 3-arg rename as public. */
     private static class AtomicRenameFileSystem extends RawLocalFileSystem {
 
@@ -143,6 +165,19 @@ public class HadoopSecuredFileSystemTest {
             if (!rename(src, dst)) {
                 throw new IOException("rename failed");
             }
+        }
+    }
+
+    /** A local file system whose public 3-arg rename always fails with {@link IOException}. */
+    private static class FailingRenameFileSystem extends RawLocalFileSystem {
+
+        @Override
+        public void rename(
+                org.apache.hadoop.fs.Path src,
+                org.apache.hadoop.fs.Path dst,
+                org.apache.hadoop.fs.Options.Rename... options)
+                throws IOException {
+            throw new IOException("rename failed");
         }
     }
 
