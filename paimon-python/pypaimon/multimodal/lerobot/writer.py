@@ -215,6 +215,19 @@ def _compute_stats(episode, features):
     return result
 
 
+def _aggregate_stats(stats_list, features):
+    aggregate_stats = _lerobot_stats_functions()[0]
+    result = {}
+    for name, feature in features.items():
+        if feature.get("dtype") == "string":
+            continue
+        key = "image" if feature.get("dtype") == "image" else "feature"
+        result[name] = aggregate_stats([
+            {key: stats[name]} for stats in stats_list
+        ])[key]
+    return result
+
+
 class PaimonLeRobotWriter:
     """Collect LeRobot frames and commit completed episodes to Paimon."""
 
@@ -427,9 +440,8 @@ class PaimonLeRobotWriter:
             }
             for name, feature_stats in stats.items()
         }
-        aggregate_stats = _lerobot_stats_functions()[0]
         try:
-            aggregate_stats([numpy_stats])
+            _aggregate_stats([numpy_stats], self.features)
         except (TypeError, ValueError) as error:
             raise ValueError(
                 "Existing LeRobot stats metadata is invalid.") from error
@@ -557,9 +569,8 @@ class PaimonLeRobotWriter:
 
         episode = self._episode_table()
         episode_stats = _compute_stats(episode, self.features)
-        aggregate_stats = _lerobot_stats_functions()[0]
         stats = (
-            aggregate_stats([self._stats, episode_stats])
+            _aggregate_stats([self._stats, episode_stats], self.features)
             if self._stats is not None else episode_stats
         )
         try:

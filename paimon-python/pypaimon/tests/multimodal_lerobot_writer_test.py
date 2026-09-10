@@ -16,6 +16,7 @@
 # under the License.
 
 import io
+import importlib
 import json
 import shutil
 import tempfile
@@ -39,6 +40,12 @@ try:
 except ImportError:
     Image = None
 
+try:
+    importlib.import_module("lerobot.datasets.compute_stats")
+    LEROBOT_AVAILABLE = True
+except ImportError:
+    LEROBOT_AVAILABLE = False
+
 
 def _catalog_rows(connection, name):
     table = connection.catalog.get_table(connection._identifier(name))
@@ -50,6 +57,9 @@ def _catalog_rows(connection, name):
 class PaimonLeRobotWriterTest(unittest.TestCase):
 
     def setUp(self):
+        if not LEROBOT_AVAILABLE and self._testMethodName != \
+                "test_missing_lerobot_stats_dependency_fails_before_table_creation":
+            self.skipTest("LeRobot is required for writer tests")
         self.temp_dir = Path(tempfile.mkdtemp(
             prefix="pypaimon_lerobot_writer_"))
         self.connection = pmm.connect(options={
@@ -479,6 +489,41 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             np.testing.assert_allclose(expected, stats["action"][stat])
         self.assertIn("timestamp", stats)
         self.assertIn("index", stats)
+
+    def test_aggregates_numeric_feature_with_image_in_its_name(self):
+        features = {
+            "observation.image_embedding": {
+                "dtype": "float32",
+                "shape": (2,),
+                "names": None,
+            },
+        }
+        writer = PaimonLeRobotWriter(
+            self.connection,
+            "numeric_image_name",
+            fps=10,
+            features=features,
+        )
+        for offset in (0.0, 4.0):
+            for value in (1.0, 2.0):
+                writer.add_frame({
+                    "observation.image_embedding": np.array(
+                        [value + offset, value + offset + 1],
+                        dtype=np.float32,
+                    ),
+                    "task": "inspect",
+                })
+            writer.save_episode()
+        writer.finalize()
+
+        resumed = PaimonLeRobotWriter(
+            self.connection,
+            "numeric_image_name",
+            fps=10,
+            features=features,
+        )
+        self.assertEqual(2, resumed.num_episodes)
+        resumed.finalize()
 
     def test_metadata_read_projects_only_resume_columns(self):
         writer = PaimonLeRobotWriter(
