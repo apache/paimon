@@ -118,8 +118,7 @@ public abstract class AbstractRecordParser
             Map<String, String> rowData, CdcSchema.Builder schemaBuilder) {
         computedColumns.forEach(
                 computedColumn -> {
-                    String result =
-                            computedColumn.eval(rowData.get(computedColumn.fieldReference()));
+                    String result = computedColumn.evalFromRecord(rowData);
 
                     rowData.put(computedColumn.columnName(), result);
                     schemaBuilder.column(computedColumn.columnName(), computedColumn.columnType());
