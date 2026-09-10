@@ -248,16 +248,68 @@ const sidebars = {
     },
     "items": [
       "spark/quick-start",
-      "spark/sql-ddl",
-      "spark/sql-functions",
-      "spark/sql-write",
-      "spark/sql-query",
-      "spark/sql-alter",
-      "spark/auxiliary",
-      "spark/default-value",
-      "spark/dataframe",
-      "spark/structured-streaming",
-      "spark/procedures"
+      {
+        "type": "category",
+        "label": "Setup and Configuration",
+        "items": [
+          "spark/installation",
+          "spark/catalogs",
+          "spark/configuration"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tables and Schemas",
+        "items": [
+          "spark/sql-ddl",
+          "spark/sql-alter",
+          "spark/format-table",
+          "spark/data-types",
+          "spark/default-value"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Reading and Writing",
+        "items": [
+          "spark/sql-query",
+          "spark/sql-write",
+          "spark/dataframe",
+          "spark/copy-into",
+          "spark/schema-evolution",
+          "spark/sql-functions"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Streaming",
+        "items": [
+          "spark/structured-streaming",
+          "spark/streaming-recovery"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Operations",
+        "items": [
+          "spark/auxiliary",
+          {
+            "type": "category",
+            "label": "Procedures",
+            "link": {
+              "type": "doc",
+              "id": "spark/procedures"
+            },
+            "items": [
+              "spark/procedures/maintenance",
+              "spark/procedures/versions",
+              "spark/procedures/migration",
+              "spark/procedures/indexes",
+              "spark/procedures/metadata"
+            ]
+          }
+        ]
+      }
     ]
   },
   {
