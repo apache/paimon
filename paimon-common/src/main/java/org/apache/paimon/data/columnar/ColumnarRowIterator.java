@@ -129,16 +129,38 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return this;
     }
 
+    /**
+     * Strips a row-tracking wrapper previously installed by {@link #assignRowTracking}, so repeated
+     * assignment re-wraps the base vector instead of nesting.
+     */
+    private static ColumnVector unwrapLong(ColumnVector vector) {
+        return vector instanceof TrackingLongColumnVector
+                ? ((TrackingLongColumnVector) vector).base
+                : vector;
+    }
+
+    /** Row-tracking wrapper installed by {@link #assignRowTracking}. */
+    private abstract static class TrackingLongColumnVector implements LongColumnVector {
+        final ColumnVector base;
+
+        TrackingLongColumnVector(ColumnVector base) {
+            this.base = base;
+        }
+    }
+
     public ColumnarRowIterator assignRowTracking(
             Long firstRowId, Long snapshotId, Map<String, Integer> meta) {
         VectorizedColumnBatch vectorizedColumnBatch = row.batch();
         ColumnVector[] vectors = vectorizedColumnBatch.columns;
 
-        if (meta.containsKey(SpecialFields.ROW_ID.name())) {
+        if (meta.containsKey(SpecialFields.ROW_ID.name()) && firstRowId != null) {
             Integer index = meta.get(SpecialFields.ROW_ID.name());
-            final ColumnVector rowIdVector = vectors[index];
+            // Wrap the base vector once: assignRowTracking runs per batch and the
+            // wrapped vector persists, so re-wrapping would nest one delegation
+            // level per batch (O(batches) depth, every read O(depth)).
+            final ColumnVector rowIdVector = unwrapLong(vectors[index]);
             vectors[index] =
-                    new LongColumnVector() {
+                    new TrackingLongColumnVector(rowIdVector) {
                         @Override
                         public long getLong(int i) {
                             if (rowIdVector.isNullAt(i)) {
@@ -155,11 +177,11 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
                     };
         }
 
-        if (meta.containsKey(SpecialFields.SEQUENCE_NUMBER.name())) {
+        if (meta.containsKey(SpecialFields.SEQUENCE_NUMBER.name()) && snapshotId != null) {
             Integer index = meta.get(SpecialFields.SEQUENCE_NUMBER.name());
-            final ColumnVector versionVector = vectors[index];
+            final ColumnVector versionVector = unwrapLong(vectors[index]);
             vectors[index] =
-                    new LongColumnVector() {
+                    new TrackingLongColumnVector(versionVector) {
                         @Override
                         public long getLong(int i) {
                             if (versionVector.isNullAt(i)) {
