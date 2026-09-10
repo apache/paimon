@@ -130,6 +130,135 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                 "table_group", "training")),
         )
 
+    def test_writes_and_resumes_frame_subtasks(self):
+        features = {
+            "action": {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": None,
+            },
+            "subtask_index": {
+                "dtype": "int64",
+                "shape": (1,),
+                "names": None,
+            },
+        }
+        writer = PaimonLeRobotWriter(
+            self.connection,
+            "with_subtasks",
+            fps=10,
+            features=features,
+            subtasks=["approach", "grasp"],
+            episodes_per_commit=1,
+        )
+        for index in (0, 1):
+            writer.add_frame({
+                "action": np.array([index], dtype=np.float32),
+                "subtask_index": np.array([index], dtype=np.int64),
+                "task": "pick",
+            })
+        writer.save_episode()
+        writer.add_frame({
+            "action": np.array([2], dtype=np.float32),
+            "subtask_index": np.array([0], dtype=np.int64),
+            "task": "pick",
+        })
+        writer.save_episode()
+        writer.finalize()
+
+        frames = self.connection.get_table("with_subtasks")
+        self.assertEqual([0, 1, 0], frames.scan().select([
+            "index", "subtask_index"
+        ]).to_arrow().sort_by("index").column(
+            "subtask_index").to_pylist())
+        self.assertEqual([
+            {"subtask_index": 0, "subtask": "approach"},
+            {"subtask_index": 1, "subtask": "grasp"},
+        ], _catalog_rows(self.connection, "with_subtasks__subtasks"))
+        self.assertEqual(
+            "default.with_subtasks__subtasks",
+            frames.raw_table.table_schema.options[
+                "pypaimon.lerobot.subtasks-table"],
+        )
+        self.assertEqual(
+            {"frames", "episodes", "tasks", "info", "stats", "subtasks"},
+            set(self.connection.create_lerobot_tag(
+                "with_subtasks", "training")),
+        )
+
+        with self.assertRaisesRegex(ValueError, "do not match"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "with_subtasks",
+                fps=10,
+                features=features,
+                subtasks=["approach", "release"],
+            )
+
+        resumed = PaimonLeRobotWriter(
+            self.connection,
+            "with_subtasks",
+            fps=10,
+            features=features,
+        )
+        self.assertEqual(("approach", "grasp"), resumed.subtasks)
+        self.assertEqual(2, resumed.num_episodes)
+        resumed.finalize()
+
+    def test_validates_subtask_contract_before_buffering(self):
+        action = {
+            "action": {
+                "dtype": "float32",
+                "shape": (1,),
+                "names": None,
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "require a subtask_index"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "subtasks_without_feature",
+                fps=10,
+                features=action,
+                subtasks=["approach"],
+            )
+
+        features = dict(action)
+        features["subtask_index"] = {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
+        with self.assertRaisesRegex(ValueError, "subtasks are required"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "missing_subtasks",
+                fps=10,
+                features=features,
+            )
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "duplicate_subtasks",
+                fps=10,
+                features=features,
+                subtasks=["approach", "approach"],
+            )
+
+        writer = PaimonLeRobotWriter(
+            self.connection,
+            "invalid_subtask_index",
+            fps=10,
+            features=features,
+            subtasks=["approach"],
+        )
+        with self.assertRaisesRegex(ValueError, "outside"):
+            writer.add_frame({
+                "action": np.array([1], dtype=np.float32),
+                "subtask_index": np.array([1], dtype=np.int64),
+                "task": "pick",
+            })
+        self.assertFalse(writer.has_pending_frames())
+
     def test_default_commits_only_on_finalize_and_returns_none(self):
         writer = PaimonLeRobotWriter(
             self.connection,

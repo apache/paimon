@@ -706,8 +706,9 @@ The writer preserves native LeRobot recording metadata in a managed Paimon
 table group. The named table stores frames, while `<table>__episodes`,
 `<table>__tasks`, `<table>__info`, and `<table>__stats` store episode
 boundaries, task labels, JSON-encoded dataset information, and global
-statistics. The root table's managed options identify these companions. Direct
-capture does not create the optional subtasks table.
+statistics. When `subtask_index` is declared, `<table>__subtasks` stores its
+ordered text vocabulary. The root table's managed options identify these
+companions.
 
 ```python
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
@@ -717,6 +718,8 @@ writer = PaimonLeRobotWriter(
     "robot_data",
     fps=30,
     features=dataset_features,
+    # Required for a new table when features includes subtask_index:
+    # subtasks=["approach object", "grasp object"],
 )
 
 # LeRobot's record_loop only needs writer.fps, writer.features, and
@@ -735,9 +738,12 @@ must be NumPy arrays (Torch tensors are converted) with the declared dtype and
 shape. Image dimension names may declare CHW or native HWC layout; image values
 may be CHW, HWC, or PIL. Images are encoded as PNG bytes and stored in Paimon
 `BLOB` columns; no LeRobot data directory or MP4 is created. `video` features
-remain unsupported. `subtask_index` is also rejected until direct capture
-supports a matching subtasks companion table. Task text is stored once in the
-tasks table; frame rows retain only `task_index`.
+remain unsupported. Task text is stored once in the tasks table; frame rows
+retain only `task_index`. Optional subtask text is likewise stored once in the
+subtasks table, while each frame supplies its declared NumPy `subtask_index`.
+Subtask labels must be non-empty and unique, and frame indices must reference
+that ordered vocabulary. On resume, the writer restores the vocabulary from
+the existing table; an explicitly supplied vocabulary must match it exactly.
 
 When `save_episode()` accepts an episode, the writer uses LeRobot's native
 statistics implementation to calculate `min`, `max`, `mean`, `std`, `count`,
@@ -765,19 +771,21 @@ group. Before writing, it requires the root columns, order, Arrow types,
 nullability, LeRobot feature metadata, managed options, companion schemas, and
 component counts to match. A legacy frame-only writer table is not implicitly
 migrated. An existing group must have the stats companion and must not have a
-subtasks companion. On resume, new `index` and `episode_index` values continue
-after the published metadata, existing task mappings come from the tasks table,
-and the episode-local `frame_index` starts again at zero. Snapshot properties
-retain only the next global frame and episode indices; resume restores global
+subtasks companion unless its frame schema declares `subtask_index`. On resume,
+new `index` and `episode_index` values continue after the published metadata,
+existing task and subtask mappings come from their companion tables, and the
+episode-local `frame_index` starts again at zero. Snapshot properties retain
+only the next global frame and episode indices; resume restores global
 statistics from the stats table and does not scan frame data.
 
-Each `flush()` appends new tasks and episodes, replaces global stats and info,
-and commits frames last. Paimon does not provide a transaction across these
-tables. A component commit exception leaves the group result unknown, makes the
-writer terminal, and is not automatically retried. Reopening validates the
-component state and rejects a partial batch. Pause writes and use
-`create_lerobot_tag` before training to pin one named snapshot on every
-component.
+When configured, the first `flush()` writes the immutable subtask vocabulary.
+Each flush appends new tasks and episodes, replaces global stats and info, and
+commits frames last. Paimon
+does not provide a transaction across these tables. A component commit
+exception leaves the group result unknown, makes the writer terminal, and is
+not automatically retried. Reopening validates the component state and rejects
+a partial batch. Pause writes and use `create_lerobot_tag` before training to
+pin one named snapshot on every component.
 
 ## Overwrite
 

@@ -20,7 +20,7 @@
 import copy
 import io
 import json
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 import pyarrow as pa
@@ -34,6 +34,7 @@ from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
     _EMPTY_EPISODES_SCHEMA,
+    _EMPTY_SUBTASKS_SCHEMA,
     _EMPTY_TASKS_SCHEMA,
     _append_arrow,
     _companion_table_identifiers,
@@ -52,6 +53,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _feature_shape,
     _schema_from_info,
     _validate_lerobot_schema,
+    _validate_v3_required_features,
 )
 from pypaimon.multimodal.table import _target_schema
 
@@ -228,6 +230,31 @@ def _aggregate_stats(stats_list, features):
     return result
 
 
+def _subtasks_table(subtasks):
+    return pa.Table.from_pylist([
+        {"subtask_index": index, "subtask": subtask}
+        for index, subtask in enumerate(subtasks)
+    ], schema=_EMPTY_SUBTASKS_SCHEMA)
+
+
+def _validate_subtasks(subtasks, has_feature):
+    if subtasks is None:
+        return None
+    if not has_feature:
+        raise ValueError(
+            "subtasks require a subtask_index feature.")
+    if isinstance(subtasks, (str, bytes)) \
+            or not isinstance(subtasks, Sequence):
+        raise ValueError("subtasks must be a sequence of strings.")
+    result = tuple(subtasks)
+    if not result or any(not isinstance(value, str) or not value
+                         for value in result):
+        raise ValueError("subtasks must contain non-empty strings.")
+    if len(set(result)) != len(result):
+        raise ValueError("subtasks must not contain duplicates.")
+    return result
+
+
 class PaimonLeRobotWriter:
     """Collect LeRobot frames and commit completed episodes to Paimon."""
 
@@ -238,6 +265,7 @@ class PaimonLeRobotWriter:
             *,
             fps: int,
             features: Mapping[str, Mapping[str, object]],
+            subtasks: Optional[Sequence[str]] = None,
             episodes_per_commit: int = -1,
             options: Optional[Mapping[str, object]] = None):
         if isinstance(fps, bool) or not isinstance(fps, int) or fps <= 0:
@@ -252,9 +280,8 @@ class PaimonLeRobotWriter:
             raise ValueError("features must be a non-empty mapping.")
         if "task" in features:
             raise ValueError("task is managed by PaimonLeRobotWriter.")
-        if "subtask_index" in features:
-            raise ValueError(
-                "subtask_index is not supported by PaimonLeRobotWriter.")
+        requested_subtasks = _validate_subtasks(
+            subtasks, "subtask_index" in features)
         _lerobot_stats_functions()
 
         self.fps = fps
@@ -262,8 +289,10 @@ class PaimonLeRobotWriter:
         self.features = copy.deepcopy(dict(features))
         self._user_features = copy.deepcopy(dict(features))
         self.features.update(copy.deepcopy(_DEFAULT_FEATURES))
+        _validate_v3_required_features({"features": self.features})
         self._source_schema = _schema_from_info({"features": self.features})
-        metadata = self._writer_metadata(fps, self.features)
+        metadata = self._writer_metadata(
+            fps, self.features, requested_subtasks)
         self._episodes_schema = metadata["episodes_schema"]
         create_options = dict(options or {})
         reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
@@ -278,6 +307,11 @@ class PaimonLeRobotWriter:
             self._table = connection.get_table(table_name)
             created = False
         except (DatabaseNotExistException, TableNotExistException):
+            if "subtask_index" in self.features \
+                    and requested_subtasks is None:
+                raise ValueError(
+                    "subtasks are required when creating a table with "
+                    "subtask_index.")
             self._table = connection.create_table(
                 table_name,
                 schema=self._source_schema,
@@ -298,11 +332,23 @@ class PaimonLeRobotWriter:
             _prepare_metadata_tables(
                 connection, self._table.raw_table, metadata)
             if created else self._open_metadata_tables(
-                connection, self._table.raw_table, self._episodes_schema)
+                connection, self._table.raw_table, metadata)
         )
 
         (self.num_frames, self.num_episodes, self._task_indices,
-         self._stats) = self._load_existing_state()
+         self._stats, stored_subtasks) = self._load_existing_state()
+        if stored_subtasks is not None:
+            if requested_subtasks is not None \
+                    and requested_subtasks != stored_subtasks:
+                raise ValueError(
+                    "subtasks do not match the existing LeRobot table.")
+            self.subtasks = stored_subtasks
+        else:
+            self.subtasks = requested_subtasks
+        if "subtask_index" in self.features and self.subtasks is None:
+            raise ValueError(
+                "subtasks are required when creating a table with "
+                "subtask_index.")
         self._next_task_index = (
             max(self._task_indices.values()) + 1
             if self._task_indices else 0
@@ -311,6 +357,7 @@ class PaimonLeRobotWriter:
         self._episode_frames = []
         self._pending_episode_rows = []
         self._committed_task_count = len(self._task_indices)
+        self._subtasks_committed = self.num_frames > 0
         self._table_write = None
         self._table_commit = None
         self._snapshot_recorder = None
@@ -318,7 +365,7 @@ class PaimonLeRobotWriter:
         self._failed = False
 
     @staticmethod
-    def _writer_metadata(fps, features):
+    def _writer_metadata(fps, features, subtasks):
         info = {
             "codebase_version": "v3.0",
             "fps": fps,
@@ -334,25 +381,30 @@ class PaimonLeRobotWriter:
             "tasks_table": pa.Table.from_pylist(
                 [], schema=_EMPTY_TASKS_SCHEMA),
             "stats_table": _metadata_table({}),
-            "subtasks_table": None,
+            "subtasks_table": (
+                _subtasks_table(subtasks or ())
+                if "subtask_index" in features else None
+            ),
         }
 
     @staticmethod
-    def _open_metadata_tables(connection, frames_table, episodes_schema):
+    def _open_metadata_tables(connection, frames_table, metadata):
         identifiers = _companion_table_identifiers(frames_table)
-        if set(identifiers) != {"info", "episodes", "tasks", "stats"}:
+        expected = {
+            "info": metadata["info_table"].schema,
+            "episodes": metadata["episodes_schema"],
+            "tasks": metadata["tasks_table"].schema,
+            "stats": metadata["stats_table"].schema,
+        }
+        if metadata["subtasks_table"] is not None:
+            expected["subtasks"] = metadata["subtasks_table"].schema
+        if set(identifiers) != set(expected):
             raise ValueError(
-                "PaimonLeRobotWriter requires exactly info, episodes, "
-                "tasks, and stats companion tables.")
+                "PaimonLeRobotWriter companion tables do not match "
+                "the declared features.")
         tables = {
             name: connection.catalog.get_table(identifier)
             for name, identifier in identifiers.items()
-        }
-        expected = {
-            "info": _metadata_table({}).schema,
-            "episodes": episodes_schema,
-            "tasks": _EMPTY_TASKS_SCHEMA,
-            "stats": _metadata_table({}).schema,
         }
         for name, table in tables.items():
             if not _target_schema(table).equals(
@@ -370,7 +422,7 @@ class PaimonLeRobotWriter:
                    for table in self._metadata_tables.values()):
                 raise ValueError(
                     "Existing LeRobot table group state is inconsistent.")
-            return 0, 0, {}, None
+            return 0, 0, {}, None, None
         properties = snapshot.properties or {}
         if _STATE_VERSION in properties:
             state = self._state_from_snapshot_properties(properties)
@@ -394,6 +446,25 @@ class PaimonLeRobotWriter:
                 raise ValueError(
                     "Existing LeRobot task metadata is invalid.")
             task_indices[task] = expected
+
+        subtasks = None
+        if "subtasks" in self._metadata_tables:
+            subtask_rows = _read_arrow(
+                self._metadata_tables["subtasks"]).to_pylist()
+            subtask_rows.sort(key=lambda row: row["subtask_index"])
+            labels = []
+            for expected, row in enumerate(subtask_rows):
+                label = row["subtask"]
+                if row["subtask_index"] != expected \
+                        or not isinstance(label, str) or not label \
+                        or label in labels:
+                    raise ValueError(
+                        "Existing LeRobot subtask metadata is invalid.")
+                labels.append(label)
+            if not labels:
+                raise ValueError(
+                    "Existing LeRobot subtask metadata is empty.")
+            subtasks = tuple(labels)
 
         episode_rows = _read_arrow(
             self._metadata_tables["episodes"],
@@ -449,7 +520,8 @@ class PaimonLeRobotWriter:
                 or numpy_stats["index"]["count"].tolist() != [next_index]:
             raise ValueError(
                 "Existing LeRobot stats metadata is inconsistent.")
-        return next_index, len(episode_rows), task_indices, numpy_stats
+        return (next_index, len(episode_rows), task_indices, numpy_stats,
+                subtasks)
 
     @staticmethod
     def _state_from_snapshot_properties(properties):
@@ -497,6 +569,11 @@ class PaimonLeRobotWriter:
             else:
                 value = self._normalize_frame_value(
                     frame[name], feature, name)
+            if name == "subtask_index" \
+                    and (value < 0 or value >= len(self.subtasks)):
+                raise ValueError(
+                    "LeRobot frame subtask_index %d outside [0, %d)."
+                    % (value, len(self.subtasks)))
             _safe_array(
                 [value],
                 self._source_schema.field(name),
@@ -617,6 +694,12 @@ class PaimonLeRobotWriter:
         commit_started = False
         try:
             messages = self._table_write.prepare_commit()
+            if "subtasks" in self._metadata_tables \
+                    and not self._subtasks_committed:
+                _append_arrow(
+                    self._metadata_tables["subtasks"],
+                    _subtasks_table(self.subtasks),
+                )
             task_rows = [
                 {"task_index": index, "task": task}
                 for task, index in sorted(
@@ -667,6 +750,7 @@ class PaimonLeRobotWriter:
         self.pending_episodes = 0
         self._pending_episode_rows = []
         self._committed_task_count = len(self._task_indices)
+        self._subtasks_committed = True
         return None
 
     def finalize(self):

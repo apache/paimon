@@ -51,6 +51,10 @@ _EMPTY_TASKS_SCHEMA = pa.schema([
     pa.field("task_index", pa.int64(), nullable=False),
     pa.field("task", pa.string(), nullable=False),
 ])
+_EMPTY_SUBTASKS_SCHEMA = pa.schema([
+    pa.field("subtask_index", pa.int64(), nullable=False),
+    pa.field("subtask", pa.string(), nullable=False),
+])
 _EMPTY_EPISODES_SCHEMA = pa.schema([
     pa.field("episode_index", pa.int64(), nullable=False),
     pa.field("dataset_from_index", pa.int64(), nullable=False),
