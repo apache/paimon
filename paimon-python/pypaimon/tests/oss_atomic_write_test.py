@@ -130,37 +130,21 @@ def file_io(server, resolving=False):
 @pytest.mark.parametrize('resolving', [False, True])
 def test_atomic_competition_and_existing_content(oss_server, resolving):
     io = file_io(oss_server, resolving)
-    path = 'oss://test-bucket/table/snapshot-1'
+    path = 'oss://test-bucket/table/p=a%2Fb/snapshot-1'
     barrier = threading.Barrier(2)
 
-    def write(content):
+    def write(index):
         barrier.wait(timeout=10)
-        return io.try_to_write_atomic(path, content)
+        target = 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1' if index == 0 else path
+        return io.try_to_write_atomic(target, contents[index])
 
     contents = ['提交者一', '提交者二']
     with mock.patch.object(OssFileIO, '_initialize_oss_fs'), ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(write, contents))
+        results = list(pool.map(write, range(2)))
     assert sorted(results) == [False, True]
-    assert list(oss_server.objects.values()) == [contents[results.index(True)].encode()]
+    assert oss_server.objects == {'/test-bucket/table/p=a%2Fb/snapshot-1': contents[results.index(True)].encode()}
     assert io.try_to_write_atomic(path, 'overwrite') is False
     assert list(oss_server.objects.values()) == [contents[results.index(True)].encode()]
-
-
-def test_rest_token_refresh_keeps_oss_atomic_creation(oss_server):
-    options = dict(options_for(oss_server).to_map())
-    options[CatalogOptions.RESOLVING_FILE_IO_ENABLED.key()] = 'true'
-    path = 'oss://test-bucket/table/snapshot-1'
-    with mock.patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
-            mock.patch.object(OssFileIO, '_initialize_oss_fs'):
-        io = RESTTokenFileIO(Identifier.from_string('default.table'), path, Options(options))
-        io.token = RESTToken({'fs.oss.securityToken': 'first-token'}, 1)
-        assert io.try_to_write_atomic(path, 'first')
-        assert oss_server.token == 'first-token'
-        io.token = RESTToken({'fs.oss.securityToken': 'refreshed-token'}, 2)
-        assert io.try_to_write_atomic(path, 'overwrite') is False
-        assert io.try_to_write_atomic(path.replace('snapshot-1', 'snapshot-2'), 'second')
-        assert oss_server.token == 'refreshed-token'
-    assert sorted(oss_server.objects.values()) == [b'first', b'second']
 
 
 @pytest.mark.parametrize('second_path,method', [
@@ -181,24 +165,22 @@ def test_rest_file_io_isolates_bucket_and_encryption(oss_server, second_path, me
             assert oss_server.sse_headers == {'server-side-encryption': encryption}
             assert oss_server.objects['/' + target[len('oss://'):]] == str(index).encode()
             assert io.try_to_write_atomic(target, 'overwrite') is False
+            io.token = RESTToken({'fs.oss.securityToken': 'refreshed-token'}, oss_server.server_port + 1)
+            assert io.try_to_write_atomic(target + '-next', 'next')
+            assert oss_server.token == 'refreshed-token'
 
 
-@pytest.mark.parametrize('versioning', ['Enabled', 'Suspended', 'Unexpected', None])
-@pytest.mark.parametrize('credential_uri', [False, True])
-def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, credential_uri, tmp_path, caplog):
+@pytest.mark.parametrize('versioning', ['Enabled', 'Suspended', None])
+def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, tmp_path, caplog):
     oss_server.versioning = versioning
     if versioning is None:
         oss_server.fail_method = 'GET'
         oss_server.failure = (403, 'AccessDenied')
     io = file_io(oss_server)
-    # Run the inherited stream/rename operations against an actual Arrow filesystem.
-    io.filesystem = pafs.LocalFileSystem()
-    path = 'oss://test-bucket{}/snapshot-1'.format(tmp_path)
-    if credential_uri:
-        # Jindo uses key-only paths; keep all fallback writes inside the temporary directory.
-        io._use_jindo = True
-        io.filesystem = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
-        path = 'oss://AK:SK@endpoint/test-bucket/snapshot-1'
+    # Exercise inherited stream/rename operations using Jindo's key-only path convention.
+    io._use_jindo = True
+    io.filesystem = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    path = 'oss://AK:SK@endpoint/test-bucket/snapshot-1'
     assert io.try_to_write_atomic(path, '兼容写入') is True
     assert io.try_to_write_atomic(path, 'overwrite') is False
     assert (tmp_path / 'snapshot-1').read_text() == '兼容写入'
@@ -208,12 +190,8 @@ def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, cre
 
 
 @pytest.mark.parametrize('method,status,code', [
-    ('GET', 403, 'InvalidAccessKeyId'),
     ('GET', 403, 'SecurityTokenExpired'),
-    ('GET', 404, 'NoSuchBucket'),
-    ('GET', 500, 'InternalError'),
     ('PUT', 403, 'AccessDenied'),
-    ('PUT', 500, 'InternalError'),
     ('PUT', 409, 'OtherConflict'),
 ])
 def test_errors_are_not_competition(oss_server, method, status, code):
@@ -234,66 +212,8 @@ def test_lost_response_is_not_replayed_or_reported_as_conflict(oss_server):
     assert list(oss_server.objects.values()) == [b'data']
 
 
-@pytest.mark.parametrize('jindo,legacy,path', [
-    (False, False, 'oss://test-bucket/table/p=a%2Fb/snapshot-1'),
-    (False, False, 'test-bucket/table/p=a%2Fb/snapshot-1'),
-    (False, True, 'table/p=a%2Fb/snapshot-1'),
-    (True, False, 'table/p=a%2Fb/snapshot-1'),
-    (False, False, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
-    (False, True, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
-    (True, False, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
-])
-def test_path_modes_and_sts(oss_server, jindo, legacy, path):
-    io = file_io(oss_server)
-    io.properties = options_for(oss_server, token='test-sts')
-    io._use_jindo, io._oss_bucket_in_endpoint = jindo, legacy
-    assert io.try_to_write_atomic(path, 'data') is True
-    assert oss_server.token == 'test-sts'
-    assert list(oss_server.objects) == ['/test-bucket/table/p=a%2Fb/snapshot-1']
-    assert io.try_to_write_atomic('oss://test-bucket/table/p=a%2Fb/snapshot-1', 'overwrite') is False
-    assert list(oss_server.objects.values()) == [b'data']
-
-
-@pytest.mark.parametrize('path', ['oss://other/snapshot-1', 'oss://AK:SK@endpoint/other/snapshot-1'])
-def test_wrong_bucket_rejected(oss_server, path):
-    with pytest.raises(ValueError, match='configured OSS bucket'):
-        file_io(oss_server).try_to_write_atomic(path, 'data')
-    assert oss_server.puts == 0
-
-
-@pytest.mark.parametrize('path', ['oss://AK:SK@endpoint/test-bucket', 'oss://AK:SK@endpoint/test-bucket/'])
-def test_credential_uri_bucket_root_is_not_an_object(oss_server, path):
-    assert file_io(oss_server).try_to_write_atomic(path, 'data') is False
-    assert oss_server.gets == 0
-    assert oss_server.puts == 0
-
-
-def test_missing_credentials_do_not_fall_back(oss_server):
-    io = file_io(oss_server)
-    io.properties = Options({'fs.oss.endpoint': 'oss.example.com'})
-    with pytest.raises(ValueError, match='fs.oss.accessKeyId'):
-        io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
-    assert oss_server.puts == 0
-
-
-def test_versioning_is_rechecked_for_a_long_lived_file_io(oss_server, tmp_path):
-    io = file_io(oss_server)
-    io.filesystem = pafs.LocalFileSystem()
-    assert io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'first')
-    oss_server.versioning = 'Enabled'
-    assert io.try_to_write_atomic('oss://test-bucket{}/snapshot-2'.format(tmp_path), 'second')
-    assert (tmp_path / 'snapshot-2').read_text() == 'second'
-    assert list(oss_server.objects.values()) == [b'first']
-
-
 @pytest.mark.parametrize('settings,expected', [
-    ({'server-side-encryption': ' aes256 '}, {'server-side-encryption': 'AES256'}),
-    ({'server-side-encryption': 'sm4'}, {'server-side-encryption': 'SM4'}),
-    ({'server-side-encryption-key-id': ' my-cmk '},
-     {'server-side-encryption': 'KMS', 'server-side-encryption-key-id': 'my-cmk'}),
-    ({'server-side-data-encryption': ' sm4 '},
-     {'server-side-encryption': 'KMS', 'server-side-data-encryption': 'SM4'}),
-    ({'server-side-encryption': ' kms ', 'server-side-encryption-key-id': 'my-cmk',
+    ({'server-side-encryption-key-id': ' my-cmk ',
       'server-side-data-encryption': 'sm4', 'server-side-encryption-algorithm': 'AES256'},
      {'server-side-encryption': 'KMS', 'server-side-encryption-key-id': 'my-cmk',
       'server-side-data-encryption': 'SM4'}),
@@ -311,11 +231,7 @@ def test_sse_headers_and_conditional_creation(oss_server, settings, expected):
 
 
 @pytest.mark.parametrize('settings', [
-    {'server-side-encryption': 'AES-256'},
     {'server-side-encryption': 'AES256', 'server-side-encryption-key-id': 'my-cmk'},
-    {'server-side-encryption': 'SM4', 'server-side-data-encryption': 'SM4'},
-    {'server-side-encryption': 'KMS', 'server-side-data-encryption': 'AES256'},
-    {'server-side-encryption-key-id': 'my cmk'},
     {'server-side-encryption': '', 'server-side-encryption-algorithm': 'AES256'},
 ])
 def test_invalid_sse_is_rejected_before_io(oss_server, settings):

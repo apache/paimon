@@ -50,19 +50,19 @@ class OSSFileIOTest(unittest.TestCase):
         if not endpoint:
             self.skipTest("test endpoint is not configured")
             return
-
+        
         self.root_path = f"oss://{self.bucket}/"
-
+        
         self.catalog_options = Options({
             OssOptions.OSS_ACCESS_KEY_ID.key(): access_key_id,
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): access_key_secret,
             OssOptions.OSS_ENDPOINT.key(): endpoint,
             OssOptions.OSS_IMPL.key(): oss_impl,
         })
-
+        
         # Create OssFileIO instance
         self.file_io = OssFileIO(self.root_path, self.catalog_options)
-
+        
         # Create unique test prefix to avoid conflicts
         self.test_prefix = f"test-{uuid.uuid4().hex[:8]}/"
 
@@ -96,41 +96,41 @@ class OSSFileIOTest(unittest.TestCase):
         # Create test data
         test_data = b"Hello, World! This is a test file for OSS input stream."
         test_file = self._get_test_path("test-input-stream.txt")
-
+        
         # Write test data to file
         with self.file_io.new_output_stream(test_file) as out_stream:
             out_stream.write(test_data)
-
+        
         # Test new_input_stream
         input_stream = self.file_io.new_input_stream(test_file)
         self.assertIsNotNone(input_stream)
-
+        
         # Test read without nbytes (read all)
         input_stream.seek(0)
         read_data = input_stream.read()
         self.assertEqual(read_data, test_data)
-
+        
         # Test read with nbytes
         input_stream.seek(0)
         read_partial = input_stream.read(5)
         self.assertEqual(read_partial, b"Hello")
-
+        
         # Test read more bytes
         read_partial2 = input_stream.read(7)
         self.assertEqual(read_partial2, b", World")
-
+        
         # Test read remaining
         read_remaining = input_stream.read()
         self.assertEqual(read_remaining, b"! This is a test file for OSS input stream.")
-
+        
         # Verify complete data
         input_stream.seek(0)
         complete_data = input_stream.read()
         self.assertEqual(complete_data, test_data)
-
+        
         # Close the stream
         input_stream.close()
-
+        
         # Test context manager
         with self.file_io.new_input_stream(test_file) as input_stream2:
             data = input_stream2.read()
@@ -141,11 +141,11 @@ class OSSFileIOTest(unittest.TestCase):
         # Create larger test data (1MB)
         test_data = b"X" * (1024 * 1024)
         test_file = self._get_test_path("test-large-input-stream.bin")
-
+        
         # Write test data
         with self.file_io.new_output_stream(test_file) as out_stream:
             out_stream.write(test_data)
-
+        
         # Test reading in chunks
         chunk_size = 64 * 1024  # 64KB chunks
         with self.file_io.new_input_stream(test_file) as input_stream:
@@ -155,12 +155,12 @@ class OSSFileIOTest(unittest.TestCase):
                 if not chunk:
                     break
                 read_chunks.append(chunk)
-
+            
             # Verify all data was read
             read_data = b''.join(read_chunks)
             self.assertEqual(len(read_data), len(test_data))
             self.assertEqual(read_data, test_data)
-
+        
         # Test read_at method if available
         with self.file_io.new_input_stream(test_file) as input_stream:
             if hasattr(input_stream, 'read_at'):
@@ -173,7 +173,7 @@ class OSSFileIOTest(unittest.TestCase):
     def test_new_input_stream_file_not_found(self):
         """Test new_input_stream with non-existent file."""
         non_existent_file = self._get_test_path("non-existent-file.txt")
-
+        
         with self.assertRaises(FileNotFoundError):
             self.file_io.new_input_stream(non_existent_file)
 
@@ -210,7 +210,7 @@ class OSSFileIOTest(unittest.TestCase):
     def test_exists_does_not_catch_exception(self):
         """Test that exists does not catch exceptions."""
         test_file = self._get_test_path("test_file.txt")
-
+        
         # Write a test file
         with self.file_io.new_output_stream(test_file) as out_stream:
             out_stream.write(b"test")
@@ -242,7 +242,7 @@ class OSSFileIOTest(unittest.TestCase):
     def test_mkdirs_raises_error_when_path_is_file(self):
         """Test that mkdirs raises error when path is a file."""
         test_file = self._get_test_path("test_file.txt")
-
+        
         # Create a file
         with self.file_io.new_output_stream(test_file) as out_stream:
             out_stream.write(b"test")
@@ -255,7 +255,7 @@ class OSSFileIOTest(unittest.TestCase):
         """Test that rename returns False when destination exists."""
         src_file = self._get_test_path("src.txt")
         dst_file = self._get_test_path("dst.txt")
-
+        
         # Create source and destination files
         with self.file_io.new_output_stream(src_file) as out_stream:
             out_stream.write(b"src")
@@ -274,7 +274,7 @@ class OSSFileIOTest(unittest.TestCase):
         test_file = self._get_test_path("test_file.txt")
         with self.file_io.new_output_stream(test_file) as out_stream:
             out_stream.write(b"test content")
-
+        
         file_info = self.file_io.get_file_status(test_file)
         self.assertEqual(file_info.type, pafs.FileType.File)
         self.assertIsNotNone(file_info.size)
@@ -291,30 +291,30 @@ class OSSFileIOTest(unittest.TestCase):
         """Test copy_file method."""
         source_file = self._get_test_path("source.txt")
         target_file = self._get_test_path("target.txt")
-
+        
         # Create source file
         with self.file_io.new_output_stream(source_file) as out_stream:
             out_stream.write(b"source content")
-
+        
         # Test 1: Raises FileExistsError when target exists and overwrite=False
         with self.file_io.new_output_stream(target_file) as out_stream:
             out_stream.write(b"target content")
-
+        
         with self.assertRaises(FileExistsError) as context:
             self.file_io.copy_file(source_file, target_file, overwrite=False)
         self.assertIn("already exists", str(context.exception))
-
+        
         # Verify target content unchanged
         with self.file_io.new_input_stream(target_file) as in_stream:
             content = in_stream.read()
             self.assertEqual(content, b"target content")
-
+        
         # Test 2: Overwrites when overwrite=True
         self.file_io.copy_file(source_file, target_file, overwrite=True)
         with self.file_io.new_input_stream(target_file) as in_stream:
             content = in_stream.read()
             self.assertEqual(content, b"source content")
-
+        
         # Test 3: Creates parent directory if it doesn't exist
         target_file_in_subdir = self._get_test_path("subdir/target.txt")
         self.file_io.copy_file(source_file, target_file_in_subdir, overwrite=False)
@@ -327,33 +327,33 @@ class OSSFileIOTest(unittest.TestCase):
         """Test try_to_write_atomic method."""
         target_dir = self._get_test_path("target_dir/")
         normal_file = self._get_test_path("normal_file.txt")
-
+        
         # Create target directory
         self.file_io.mkdirs(target_dir)
         self.assertFalse(
             self.file_io.try_to_write_atomic(target_dir, "test content"),
             "OssFileIO should return False when target is a directory")
-
+        
         # Verify no file was created inside the directory
         # List directory contents to verify it's empty
         selector = pafs.FileSelector(self.file_io.to_filesystem_path(target_dir), recursive=False, allow_not_found=True)
         dir_contents = self.file_io.filesystem.get_file_info(selector)
         self.assertEqual(len(dir_contents), 0, "No file should be created inside the directory")
-
+        
         self.assertTrue(self.file_io.try_to_write_atomic(normal_file, "test content"))
         content = self.file_io.read_file_utf8(normal_file)
         self.assertEqual(content, "test content")
-
+        
         # Delete and test again
         self.file_io.delete(normal_file)
         self.assertFalse(
             self.file_io.try_to_write_atomic(target_dir, "test content"),
             "OssFileIO should return False when target is a directory")
-
+        
         # Verify no file was created inside the directory
         dir_contents = self.file_io.filesystem.get_file_info(selector)
         self.assertEqual(len(dir_contents), 0, "No file should be created inside the directory")
-
+        
         self.assertTrue(self.file_io.try_to_write_atomic(normal_file, "test content"))
         content = self.file_io.read_file_utf8(normal_file)
         self.assertEqual(content, "test content")
