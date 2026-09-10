@@ -1,0 +1,191 @@
+---
+title: "Streaming"
+sidebar_position: 1
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Streaming
+
+Flink can continuously write to and read from an append table. New data becomes visible after a snapshot is committed;
+end-to-end latency depends on checkpointing, commit time, and the reader's discovery interval.
+
+This page uses the default unaware-bucket layout (`bucket = -1`). For ordering within a fixed bucket, see
+[Bucketed streaming](./bucketed#bucketed-streaming).
+
+## Write a Stream
+
+Run an `INSERT INTO` from an insert-only source in streaming mode. For example, after creating `my_table` from the
+[overview](./) and a source table with the same columns:
+
+```sql
+SET 'execution.runtime-mode' = 'streaming';
+SET 'execution.checkpointing.interval' = '1 min';
+
+INSERT INTO my_table SELECT product_id, price, sales, dt FROM source_table;
+```
+
+Short checkpoint intervals can produce many small data files. Choose a compaction approach together with your
+checkpoint interval and write parallelism.
+
+## Manage Small Files
+
+| Approach | When it runs | How to select it |
+| --- | --- | --- |
+| Pre-commit compaction | Merges newly written files from the same partition before they enter a snapshot. | Set `precommit-compact = true`; the default is `false`. |
+| Background compaction in the ingestion job | Plans compaction from files already committed to the table. | Included in a normal Flink streaming sink for an unaware-bucket append table. |
+| Dedicated compaction | Merges committed files in a separate job. | Set `write-only = true` on ingestion jobs and run a [dedicated compaction job](../maintenance/dedicated-compaction). |
+
+### Pre-Commit Compaction
+
+```sql
+ALTER TABLE my_table SET ('precommit-compact' = 'true');
+```
+
+This adds a coordinator and workers after the writer to merge newly created **data files**. The compaction runs before
+commit, so its work contributes to the time needed to make those files visible. Configure the option before starting
+the ingestion job.
+
+### Background Compaction
+
+For a normal unaware-bucket append table, the writer does not compact files itself. The Flink streaming sink adds a
+compact coordinator and compact workers. The coordinator discovers committed small files, and the workers rewrite
+selected files while forwarding ingestion committables to the committer.
+
+![Flink append sink with a writer, background compact coordinator and workers, and a snapshot committer.](/img/append-streaming-compaction.svg)
+
+The compaction work runs asynchronously, but it still consumes CPU, memory, and storage I/O. Size those resources for
+both ingestion and compaction. Setting `write-only = true` removes the background compaction operators from ingestion;
+`precommit-compact` is configured separately.
+
+:::note Incremental clustering
+
+For unaware-bucket tables with `clustering.incremental = true`, the sink does not add this background compaction path.
+Schedule [incremental clustering](./incremental-clustering#run-incremental-clustering) to merge small files and maintain
+the clustered layout. Bucketed tables use a different compaction path, described in that guide.
+
+:::
+
+### Dedicated Compaction
+
+To move background compaction out of the ingestion job, apply `write-only` to that job. For example, use this insert
+instead of the one in [Write a stream](#write-a-stream):
+
+```sql
+INSERT INTO my_table /*+ OPTIONS('write-only' = 'true') */
+SELECT product_id, price, sales, dt FROM source_table;
+```
+
+Then run a [dedicated compaction job](../maintenance/dedicated-compaction), or a scheduled clustering job if incremental
+clustering is enabled. `write-only` also skips snapshot expiration in the ingestion job, so the dedicated maintenance
+job must handle that work. It does not disable separately configured pre-commit compaction.
+
+## Read a Stream
+
+By default, a streaming read first reads the latest snapshot and then follows new records. To read only records
+committed after the reader starts, use `scan.mode = latest`:
+
+```sql
+SET 'execution.runtime-mode' = 'streaming';
+
+-- Read the current snapshot, then follow new records.
+SELECT * FROM my_table;
+
+-- Start from new records only.
+SELECT * FROM my_table /*+ OPTIONS('scan.mode' = 'latest') */;
+```
+
+These are alternative queries, each starting its own read. For a specific starting snapshot or timestamp, see
+[Flink streaming time travel](../flink/sql-query#streaming-time-travel). That guide covers `scan.snapshot-id`,
+`scan.timestamp-millis`, and `scan.file-creation-time-millis` with their corresponding scan modes.
+
+Unaware-bucket tables do not guarantee row order. Bucketing can provide ordering within one partition and bucket;
+it does not establish an order across the whole table.
+
+### Overwrite Commits
+
+Streaming reads ignore `INSERT OVERWRITE` commits by default. To include the added data files from an append-table
+overwrite, enable `streaming-read-append-overwrite` on the read:
+
+```sql
+SELECT * FROM my_table /*+ OPTIONS('streaming-read-append-overwrite' = 'true') */;
+```
+
+This reads the added rows; it does not emit retractions for the rows replaced by the overwrite. A downstream append
+consumer can therefore see both the old rows and their replacements. The similarly named `streaming-read-overwrite`
+option is for primary key tables and is not supported on append tables.
+
+Row tracking and deletion vectors do not make a regular append-table stream a complete row-level change feed. Use a
+batch snapshot query to read the current table state after [row-level operations](./row-level-operations).
+
+## Event-Time Watermarks {#watermark-definition}
+
+You can declare a watermark when reading a Paimon table in Flink:
+
+```sql
+CREATE TABLE events (
+    user_id BIGINT,
+    product STRING,
+    order_time TIMESTAMP(3),
+    WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND
+) WITH (
+    'bucket' = '-1'
+);
+
+SELECT window_start, window_end, COUNT(user_id)
+FROM TABLE(TUMBLE(TABLE events, DESCRIPTOR(order_time), INTERVAL '10' MINUTES))
+GROUP BY window_start, window_end;
+```
+
+Watermarks describe event-time progress; they do not sort records. For watermark alignment across sources, configure:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `scan.watermark.alignment.group` | Not set | Sources in the same group align their watermarks. |
+| `scan.watermark.alignment.max-drift` | Not set | Maximum allowed drift before consumption is paused. |
+| `scan.watermark.alignment.update-interval` | `1 s` | How often watermark alignment information is exchanged. |
+
+## Bounded Streaming {#bounded-stream}
+
+Set `scan.bounded.watermark` to end a streaming read when the reader encounters a snapshot whose stored watermark is
+**greater than** the configured value. The value is a long integer, expressed in milliseconds for event-time watermarks.
+
+```sql
+SELECT * FROM events
+/*+ OPTIONS('scan.bounded.watermark' = '1799625600000') */;
+```
+
+The stopping condition uses the watermark committed by the **writer**. The upstream source must produce watermarks
+and the ingestion job must propagate them into Paimon snapshots. Declaring a watermark only on the read side does not
+populate snapshot watermarks. If snapshots have no watermark, or never advance beyond the threshold, this condition
+will not end the read.
+
+This is a snapshot-level stopping condition. Add a `WHERE` predicate if the result must also satisfy a precise
+row-level event-time cutoff.
+
+The starting snapshot and subsequent snapshots are handled differently:
+
+- If the selected startup mode reads an initial snapshot, that snapshot is read even if its watermark already exceeds
+  the bound; the stream then stops.
+- When following subsequent snapshots, the reader stops **before** reading the first snapshot whose watermark exceeds
+  the bound. A watermark equal to the bound does not stop the read.
+
+Choose the [scan startup mode](#read-a-stream) together with the bound. The bound does not trim an initial snapshot
+to the rows that existed at the corresponding event time.
