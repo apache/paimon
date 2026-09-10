@@ -137,12 +137,17 @@ Wait for the insert job to finish before building an index.
 
 <TabItem value="python-sdk" label="Python SDK">
 
+For the partition-scoped Python build and rebuild examples, create the table with
+this setup. It puts `dt` first to work around the current SDK's partition-predicate
+handling; keep the partition column in that position when following those examples.
+
 ```python
 import pyarrow as pa
 from pypaimon import Schema
 
 # `catalog` is the configured Paimon catalog; database `db` already exists.
 pa_schema = pa.schema([
+    ('dt', pa.string()),
     ('id', pa.int32()),
     ('name', pa.string()),
     ('category', pa.string()),
@@ -150,7 +155,6 @@ pa_schema = pa.schema([
     ('tags', pa.list_(pa.string())),
     ('embedding', pa.list_(pa.float32())),
     ('content', pa.string()),
-    ('dt', pa.string()),
 ])
 schema = Schema.from_pyarrow_schema(
     pa_schema,
@@ -163,6 +167,7 @@ schema = Schema.from_pyarrow_schema(
 catalog.create_table('db.my_table', schema, ignore_if_exists=False)
 table = catalog.get_table('db.my_table')
 data = pa.Table.from_pydict({
+    'dt': ['2026-06-18', '2026-06-18', '2026-06-19'],
     'id': [101, 102, 103],
     'name': ['a200', 'a300', 'a400'],
     'category': ['electronics', 'electronics', 'books'],
@@ -171,7 +176,6 @@ data = pa.Table.from_pydict({
     'embedding': [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.0, 1.0, 0.0]],
     'content': ['paimon lake format and search', 'paimon full text search',
                 'vector search tutorial'],
-    'dt': ['2026-06-18', '2026-06-18', '2026-06-19'],
 }, schema=pa_schema)
 
 builder = table.new_batch_write_builder()

@@ -434,7 +434,7 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.data_types import AtomicType
 
 catalog.alter_table(
-    'default.image_table',
+    'my_db.image_table',
     [SchemaChange.add_column('picture', AtomicType('BLOB'))]
 )
 ```

@@ -340,7 +340,7 @@ from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.data_types import AtomicType, VectorType
 
 catalog.alter_table(
-    'default.vector_table',
+    'my_db.vector_table',
     [SchemaChange.add_column('embed2', VectorType(True, AtomicType('FLOAT'), 768))]
 )
 ```
