@@ -178,8 +178,14 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
 
         if (iterator instanceof ColumnarRowIterator) {
-            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+            ColumnarRowIterator sourceIterator = (ColumnarRowIterator) iterator;
+            iterator = sourceIterator.mapping(partitionInfo, indexMapping);
             if (rowTrackingEnabled) {
+                if (iterator == sourceIterator) {
+                    // Row tracking replaces columns in place, so isolate reusable reader batches.
+                    ColumnarRowIterator columnarIterator = (ColumnarRowIterator) iterator;
+                    iterator = columnarIterator.copy(columnarIterator.batch().columns.clone());
+                }
                 iterator =
                         ((ColumnarRowIterator) iterator)
                                 .assignRowTracking(firstRowId, maxSequenceNumber, systemFields);
