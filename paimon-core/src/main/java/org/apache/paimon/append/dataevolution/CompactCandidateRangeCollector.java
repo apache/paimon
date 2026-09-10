@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 
-import static org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator.isLargeFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -54,7 +53,7 @@ final class CompactCandidateRangeCollector {
     private final long blobTargetFileSize;
     private final long openFileCost;
     private final long compactMinFileNum;
-    private final boolean splitLargeFiles;
+    private final long largeFileThreshold;
     private final List<SortedEntryChunk> sortedChunks = new ArrayList<>();
     private long[] words;
     private int chunkSize;
@@ -67,7 +66,7 @@ final class CompactCandidateRangeCollector {
             long blobTargetFileSize,
             long openFileCost,
             long compactMinFileNum,
-            boolean splitLargeFiles) {
+            long largeFileThreshold) {
         checkArgument(expectedFileCount >= 0, "Expected live file count cannot be negative.");
         checkArgument(targetFileSize > 0, "Target file size must be positive.");
         checkArgument(blobTargetFileSize > 0, "Blob target file size must be positive.");
@@ -78,7 +77,7 @@ final class CompactCandidateRangeCollector {
         this.blobTargetFileSize = blobTargetFileSize;
         this.openFileCost = openFileCost;
         this.compactMinFileNum = compactMinFileNum;
-        this.splitLargeFiles = splitLargeFiles;
+        this.largeFileThreshold = largeFileThreshold;
         int initialEntries = Math.max(16, Math.min(expectedFileCount, ENTRY_CHUNK_SIZE));
         this.words = new long[Math.multiplyExact(initialEntries, ENTRY_WORDS)];
     }
@@ -141,7 +140,7 @@ final class CompactCandidateRangeCollector {
                             blobTargetFileSize,
                             openFileCost,
                             compactMinFileNum,
-                            splitLargeFiles,
+                            largeFileThreshold,
                             consumer);
             if (chunks.size() == 1) {
                 SortedEntryChunk chunk = chunks.get(0);
@@ -407,7 +406,7 @@ final class CompactCandidateRangeCollector {
         private final long blobTargetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
-        private final boolean splitLargeFiles;
+        private final long largeFileThreshold;
         private final CandidateRangeConsumer consumer;
         private final CandidateBin bin = new CandidateBin();
         private final Map<Integer, BlobFieldAccumulator> blobFields = new HashMap<>();
@@ -429,13 +428,13 @@ final class CompactCandidateRangeCollector {
                 long blobTargetFileSize,
                 long openFileCost,
                 long compactMinFileNum,
-                boolean splitLargeFiles,
+                long largeFileThreshold,
                 CandidateRangeConsumer consumer) {
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
-            this.splitLargeFiles = splitLargeFiles;
+            this.largeFileThreshold = largeFileThreshold;
             this.consumer = consumer;
         }
 
@@ -466,7 +465,7 @@ final class CompactCandidateRangeCollector {
             normalEnd = end;
             normalFileCount = 1L;
             normalWeight = Math.max(fileSize, openFileCost);
-            largeFile = splitLargeFiles && isLargeFile(fileSize, targetFileSize);
+            largeFile = fileSize > largeFileThreshold;
             vectorFileCount = 0L;
             componentFileCount = 1;
             blobFields.clear();
@@ -482,7 +481,7 @@ final class CompactCandidateRangeCollector {
                 checkState(
                         normalEnd == end,
                         "Normal files in one overlapping row-id group must have the same row-id range.");
-                largeFile |= splitLargeFiles && isLargeFile(fileSize, targetFileSize);
+                largeFile |= fileSize > largeFileThreshold;
                 normalFileCount = Math.addExact(normalFileCount, 1L);
                 normalWeight = Math.addExact(normalWeight, Math.max(fileSize, openFileCost));
                 componentFileCount = Math.addExact(componentFileCount, 1);

@@ -41,6 +41,7 @@ import org.apache.paimon.utils.RangeHelper;
 
 import javax.annotation.Nullable;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -99,6 +100,11 @@ public class DataEvolutionCompactCoordinator {
         validateOptions(options);
 
         long targetFileSize = options.targetFileSize(false);
+        long largeFileThreshold =
+                options.dataEvolutionCompactionSplitLargeFiles()
+                        ? largeFileThreshold(
+                                targetFileSize, options.dataEvolutionCompactionLargeFileRatio())
+                        : Long.MAX_VALUE;
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();
         Set<String> blobInlineFields = options.blobInlineField();
@@ -118,7 +124,7 @@ public class DataEvolutionCompactCoordinator {
                 new DataEvolutionCompactRangePlanner.CandidateOptions(
                         compactBlob,
                         compactVector,
-                        options.dataEvolutionCompactionSplitLargeFiles(),
+                        largeFileThreshold,
                         targetFileSize,
                         options.blobTargetFileSize(),
                         openFileCost,
@@ -138,7 +144,7 @@ public class DataEvolutionCompactCoordinator {
                 new CompactPlanner(
                         compactBlob,
                         compactVector,
-                        options.dataEvolutionCompactionSplitLargeFiles(),
+                        largeFileThreshold,
                         targetFileSize,
                         options.blobTargetFileSize(),
                         openFileCost,
@@ -147,9 +153,12 @@ public class DataEvolutionCompactCoordinator {
                         currentBlobFieldIds);
     }
 
-    static boolean isLargeFile(long fileSize, long targetFileSize) {
-        // Subtraction avoids overflowing twice the target size.
-        return fileSize > targetFileSize && fileSize - targetFileSize > targetFileSize;
+    static long largeFileThreshold(long targetFileSize, double ratio) {
+        // Preserve decimal boundaries and saturate thresholds beyond the largest possible file.
+        return BigDecimal.valueOf(targetFileSize)
+                .multiply(BigDecimal.valueOf(ratio))
+                .min(BigDecimal.valueOf(Long.MAX_VALUE))
+                .longValue();
     }
 
     public static void validateOptions(CoreOptions options) {
@@ -242,7 +251,7 @@ public class DataEvolutionCompactCoordinator {
 
         private final boolean compactBlob;
         private final boolean compactVector;
-        private final boolean splitLargeFiles;
+        private final long largeFileThreshold;
         private final long targetFileSize;
         private final long blobTargetFileSize;
         private final long openFileCost;
@@ -260,7 +269,7 @@ public class DataEvolutionCompactCoordinator {
             this(
                     compactBlob,
                     compactVector,
-                    false,
+                    Long.MAX_VALUE,
                     targetFileSize,
                     targetFileSize,
                     openFileCost,
@@ -275,7 +284,7 @@ public class DataEvolutionCompactCoordinator {
         CompactPlanner(
                 boolean compactBlob,
                 boolean compactVector,
-                boolean splitLargeFiles,
+                long largeFileThreshold,
                 long targetFileSize,
                 long blobTargetFileSize,
                 long openFileCost,
@@ -284,7 +293,7 @@ public class DataEvolutionCompactCoordinator {
                 @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
-            this.splitLargeFiles = splitLargeFiles;
+            this.largeFileThreshold = largeFileThreshold;
             this.targetFileSize = targetFileSize;
             this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
@@ -422,12 +431,7 @@ public class DataEvolutionCompactCoordinator {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
             boolean triggerNormalFile =
                     dataFiles.size() >= compactMinFileNum
-                            || (splitLargeFiles
-                                    && dataFiles.stream()
-                                            .anyMatch(
-                                                    f ->
-                                                            isLargeFile(
-                                                                    f.fileSize(), targetFileSize)));
+                            || dataFiles.stream().anyMatch(f -> f.fileSize() > largeFileThreshold);
             if (triggerNormalFile) {
                 tasks.add(new DataEvolutionNormalCompactTask(partition, dataFiles));
             }

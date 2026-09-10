@@ -48,6 +48,9 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -62,6 +65,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator.largeFileThreshold;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -90,6 +94,82 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testLargeFileRatioOptions() {
+        assertThat(new CoreOptions(new Options()).dataEvolutionCompactionLargeFileRatio())
+                .isEqualTo(2.0d);
+        for (double ratio : new double[] {1.0d, 1.15d, Double.MAX_VALUE}) {
+            Options options = new Options();
+            options.set(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO, ratio);
+            assertThat(new CoreOptions(options).dataEvolutionCompactionLargeFileRatio())
+                    .isEqualTo(ratio);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            doubles = {
+                0.0d,
+                0.99d,
+                -1.0d,
+                Double.NaN,
+                Double.NEGATIVE_INFINITY,
+                Double.POSITIVE_INFINITY
+            })
+    public void testRejectsInvalidLargeFileRatio(double ratio) {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO, ratio);
+        assertThatThrownBy(() -> new CoreOptions(options).dataEvolutionCompactionLargeFileRatio())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key());
+    }
+
+    @Test
+    public void testLargeFileThresholdPreservesByteBoundaries() {
+        // Direct double multiplication rounds 100 * 1.15 below 115.
+        assertThat(largeFileThreshold(100L, 1.15d)).isEqualTo(115L);
+        assertThat(largeFileThreshold(3L, 1.5d)).isEqualTo(4L);
+        assertThat(largeFileThreshold((1L << 53) + 1, 1.0d)).isEqualTo((1L << 53) + 1);
+        assertThat(largeFileThreshold(Long.MAX_VALUE / 2, 2.0d)).isEqualTo(Long.MAX_VALUE - 1);
+        assertThat(largeFileThreshold(Long.MAX_VALUE / 2 + 1, 2.0d)).isEqualTo(Long.MAX_VALUE);
+        assertThat(largeFileThreshold(Long.MAX_VALUE, 1.0d)).isEqualTo(Long.MAX_VALUE);
+        assertThat(largeFileThreshold(100L, Double.MAX_VALUE)).isEqualTo(Long.MAX_VALUE);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1.0,100", "1.15,115", "1.5,150", "3.0,300"})
+    public void testCustomLargeFileRatioUsesIndividualPhysicalFileSize(
+            double ratio, long threshold) {
+        long versionSize = threshold * 3 / 4;
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("below.parquet", 0L, 10L, 0, threshold - 1),
+                        makeEntryWithSize("boundary.parquet", 10L, 10L, 0, threshold),
+                        makeEntryWithSize("base.parquet", 20L, 10L, 0, 10L),
+                        makeEntryWithSize("large-update.parquet", 20L, 10L, 1, threshold + 1),
+                        makeEntryWithSize("version1.parquet", 30L, 10L, 0, versionSize),
+                        makeEntryWithSize("version2.parquet", 30L, 10L, 1, versionSize),
+                        makeBlobEntry("large.blob", 0L, 10L, 1000L),
+                        makeVectorStoreEntry("large.vector.lance", 10L, 10L, 1000L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false,
+                        false,
+                        largeFileThreshold(100L, ratio),
+                        100L,
+                        100L,
+                        1000L,
+                        10L,
+                        schemaId -> null,
+                        null);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
     public void testCompactPlannerSingleFile() {
         // Single file should not produce compaction tasks
         List<ManifestEntry> entries = new ArrayList<>();
@@ -115,7 +195,15 @@ public class DataEvolutionCompactCoordinatorTest {
         for (boolean enabled : new boolean[] {false, true}) {
             DataEvolutionCompactCoordinator.CompactPlanner planner =
                     new DataEvolutionCompactCoordinator.CompactPlanner(
-                            false, false, enabled, 100L, 100L, 1000L, 10L, schemaId -> null, null);
+                            false,
+                            false,
+                            enabled ? 200L : Long.MAX_VALUE,
+                            100L,
+                            100L,
+                            1000L,
+                            10L,
+                            schemaId -> null,
+                            null);
             List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
             if (enabled) {
                 assertThat(tasks).hasSize(1);
@@ -138,7 +226,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeVectorStoreEntry("original.vector.lance", 0L, 30L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
-                        false, false, true, 100L, 100L, 1L, 2L, schemaId -> null, null);
+                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
 
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
@@ -920,7 +1008,7 @@ public class DataEvolutionCompactCoordinatorTest {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
                 true,
                 false,
-                false,
+                Long.MAX_VALUE,
                 targetFileSize,
                 targetFileSize,
                 openFileCost,

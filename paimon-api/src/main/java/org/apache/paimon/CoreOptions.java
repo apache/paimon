@@ -2640,10 +2640,22 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether data-evolution compaction selects normal data files larger than "
-                                    + "twice target-file-size, even below compaction.min.file-num. "
+                                    + "data-evolution.compaction.large-file-ratio times target-file-size, "
+                                    + "even below compaction.min.file-num. "
                                     + "When enabled, normal compaction output rolls at target-file-size "
                                     + "while preserving row IDs and logical deletions. This option does not "
                                     + "rewrite associated BLOB or VECTOR files.");
+
+    public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
+            key("data-evolution.compaction.large-file-ratio")
+                    .doubleType()
+                    .defaultValue(2.0d)
+                    .withDescription(
+                            "Size multiplier relative to target-file-size for selecting large normal "
+                                    + "files when data-evolution.compaction.split-large-files is enabled. "
+                                    + "An individual file must strictly exceed this threshold. The value "
+                                    + "must be finite and at least 1.0. This does not change the target "
+                                    + "size of compacted output files.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
             key("data-evolution.compaction.rewrite-row-ids")
@@ -4403,6 +4415,15 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionCompactionSplitLargeFiles() {
         return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
+    }
+
+    public double dataEvolutionCompactionLargeFileRatio() {
+        double ratio = options.get(DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO);
+        checkArgument(
+                Double.isFinite(ratio) && ratio >= 1.0d,
+                "The option %s must be finite and at least 1.0.",
+                DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key());
+        return ratio;
     }
 
     public boolean dataEvolutionCompactionRewriteRowIds() {

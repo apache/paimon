@@ -400,7 +400,7 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
         return new DataEvolutionCompactRangePlanner.CandidateOptions(
                 compactBlob,
                 compactVector,
-                false,
+                Long.MAX_VALUE,
                 100L,
                 100L,
                 1L,

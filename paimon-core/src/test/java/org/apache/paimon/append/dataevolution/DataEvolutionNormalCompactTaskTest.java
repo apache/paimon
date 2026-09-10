@@ -187,12 +187,17 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         options.put(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "ignore");
         table = table.copy(options);
         long targetSize = table.coreOptions().targetFileSize(false);
-        assertThat(original.fileSize()).isGreaterThan(2 * targetSize);
+        assertThat(original.fileSize()).isGreaterThan(3 * targetSize);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
                 .isEmpty();
 
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key(), "1000.0");
+        table = table.copy(options);
+        assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
+                .isEmpty();
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key(), "3.0");
         table = table.copy(options);
         List<DataEvolutionCompactTask> tasks =
                 new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();

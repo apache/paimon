@@ -507,6 +507,12 @@ under the License.
             <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
+            <td style="word-wrap: break-word;">2.0</td>
+            <td>Double</td>
+            <td>Size multiplier relative to target-file-size for selecting large normal files when data-evolution.compaction.split-large-files is enabled. An individual file must strictly exceed this threshold. The value must be finite and at least 1.0. This does not change the target size of compacted output files.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -516,7 +522,7 @@ under the License.
             <td><h5>data-evolution.compaction.split-large-files</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether data-evolution compaction selects normal data files larger than twice target-file-size, even below compaction.min.file-num. When enabled, normal compaction output rolls at target-file-size while preserving row IDs and logical deletions. This option does not rewrite associated BLOB or VECTOR files.</td>
+            <td>Whether data-evolution compaction selects normal data files larger than data-evolution.compaction.large-file-ratio times target-file-size, even below compaction.min.file-num. When enabled, normal compaction output rolls at target-file-size while preserving row IDs and logical deletions. This option does not rewrite associated BLOB or VECTOR files.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
