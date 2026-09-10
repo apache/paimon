@@ -3741,6 +3741,79 @@ class RawBatchSearchFromArrowTest(unittest.TestCase):
             self.assertEqual(selected, [1, 2],
                              "tie-break failed for metric=%s" % metric)
 
+    def test_numpy_topk_row_tiling_matches_small(self):
+        """_numpy_topk with rows > ROW_TILE must return the same results as a small array."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_topk
+
+        np.random.seed(99)
+        n_rows, dim, limit = 70000, 8, 10
+        row_ids = np.arange(n_rows, dtype=np.int64)
+        stored = np.random.randn(n_rows, dim).astype(np.float32)
+        query = np.random.randn(dim).astype(np.float32)
+
+        for metric in ("l2", "cosine", "inner_product"):
+            result = _numpy_topk(row_ids, stored, query, metric, limit)
+            selected = sorted(result.results())
+            self.assertEqual(len(selected), limit,
+                             "expected %d results for metric=%s" % (limit, metric))
+
+    def test_numpy_topk_row_tiling_correctness(self):
+        """Row-tiled _numpy_topk must select the globally best rows, not per-tile best."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_topk
+
+        n_rows, dim, limit = 70000, 4, 5
+        stored = np.zeros((n_rows, dim), dtype=np.float32)
+        query = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+
+        best_row_ids = [100, 65537, 66000, 69000, 69999]
+        for rid in best_row_ids:
+            stored[rid] = query
+
+        row_ids = np.arange(n_rows, dtype=np.int64)
+        result = _numpy_topk(row_ids, stored, query, "cosine", limit)
+        selected = sorted(result.results())
+        self.assertEqual(selected, sorted(best_row_ids))
+
+    def test_numpy_batch_topk_row_tiling_matches_single(self):
+        """Batch row-tiled path must match single-query results."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import (
+            _numpy_topk, _numpy_batch_topk,
+        )
+
+        np.random.seed(77)
+        n_rows, dim, limit = 70000, 8, 10
+        row_ids = np.arange(n_rows, dtype=np.int64)
+        stored = np.random.randn(n_rows, dim).astype(np.float32)
+        queries = [np.random.randn(dim).astype(np.float32) for _ in range(3)]
+        query_matrix = np.array(queries, dtype=np.float32)
+
+        for metric in ("l2", "cosine", "inner_product"):
+            batch_results = _numpy_batch_topk(
+                row_ids, stored, query_matrix, metric, limit)
+            for i, qv in enumerate(queries):
+                single = _numpy_topk(row_ids, stored, qv, metric, limit)
+                self.assertEqual(
+                    sorted(batch_results[i].results()),
+                    sorted(single.results()),
+                    "query %d mismatch for metric=%s" % (i, metric))
+
+    def test_topk_indices_row_tiling_tie_break(self):
+        """Tie-break across row tile boundaries must prefer smaller row_id."""
+        import numpy as np
+        from pypaimon.table.source.vector_search_read import _numpy_topk
+
+        n_rows = 70000
+        stored = np.tile(np.array([1.0, 0.0], dtype=np.float32), (n_rows, 1))
+        query = np.array([1.0, 0.0], dtype=np.float32)
+        row_ids = np.arange(n_rows, dtype=np.int64)
+
+        result = _numpy_topk(row_ids, stored, query, "cosine", 5)
+        selected = sorted(result.results())
+        self.assertEqual(selected, [0, 1, 2, 3, 4])
+
 
 if __name__ == "__main__":
     unittest.main()
