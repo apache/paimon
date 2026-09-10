@@ -507,10 +507,22 @@ under the License.
             <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
+            <td style="word-wrap: break-word;">2.0</td>
+            <td>Double</td>
+            <td>Size multiplier relative to target-file-size for selecting large normal files when data-evolution.compaction.split-large-files is enabled. An individual file must strictly exceed this threshold. The value must be finite and at least 1.0. This does not change the target size of compacted output files.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions. Use the 'materialize_deletion_vectors' procedure to apply deletion vectors to the latest table state and assign new row IDs. Reclaiming files retained by historical snapshots or tags requires snapshot expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.compaction.split-large-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether data-evolution compaction selects normal data files larger than data-evolution.compaction.large-file-ratio times target-file-size, even below compaction.min.file-num when dedicated-file ranges allow splitting. Normal output ranges are estimated from input file sizes and row counts toward target-file-size, then adjusted to avoid cutting through any BLOB or VECTOR file range. Actual output sizes may differ from the target. Row IDs and logical deletions are preserved, and associated BLOB and VECTOR files are not rewritten by this option.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
@@ -1817,7 +1829,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>target-file-row-num</h5></td>
             <td style="word-wrap: break-word;">9223372036854775807</td>
             <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction produces a single file unless data-evolution.compaction.split-large-files is enabled. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

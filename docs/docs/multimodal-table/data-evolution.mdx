@@ -608,6 +608,47 @@ Ordinary compaction **does not physically remove rows hidden by deletion
 vectors**. Removing their positions would change the alignment with untouched
 column files.
 
+### Splitting Large Files During Compaction
+
+To resize existing large normal data files, enable
+`data-evolution.compaction.split-large-files` (default: `false`) and run compaction:
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'target-file-size' = '128 MB',
+    'data-evolution.compaction.split-large-files' = 'true',
+    'data-evolution.compaction.large-file-ratio' = '3.0'
+);
+CALL sys.compact('default.my_table');
+```
+
+The example uses Spark SQL and selects normal files strictly larger than 384 MB.
+`data-evolution.compaction.large-file-ratio` controls the multiplier relative to
+`target-file-size`; it defaults to `2.0` and accepts finite values of at least `1.0`,
+including fractional values such as `1.5`. Files strictly exceeding the threshold
+qualify for compaction below `compaction.min.file-num` when their dedicated-file
+ranges allow splitting.
+Changing the ratio does not change the output target size. Compaction includes all
+column updates for the same row-ID range. Before writing, it estimates rows per output
+from the total normal input file size, the logical row count, and `target-file-size`.
+It then adjusts the estimated cut points to safe dedicated-file boundaries.
+Actual output sizes can differ from the target because of compression, data skew,
+overwritten column versions, and dedicated-file ranges; the last file may be smaller.
+The write-time `target-file-row-num` limit does not apply to compaction.
+
+Row IDs, column updates, and logical deletions are preserved. This option only rewrites
+normal files: associated BLOB and VECTOR files keep their existing contents and file names,
+and their sizes do not trigger splitting. Separate dedicated-file compaction options keep
+their existing behavior. Files referenced by older snapshots or tags remain until those
+references expire and snapshot expiration removes them.
+
+Every BLOB or VECTOR file must remain fully contained in a single normal file's
+row-ID range. An estimated cut inside a dedicated file moves to the end of its range,
+including any overlapping ranges from different columns or versions and ranges produced
+by dedicated compaction in the same batch. Output files may therefore exceed
+`target-file-size`. If these ranges prevent any split, file size alone does not trigger a compaction task. Normal
+merging based on `compaction.min.file-num` remains available.
+
 ### Materialize Deletion Vectors
 
 To remove deleted positions from the latest table state, run:
