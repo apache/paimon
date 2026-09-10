@@ -42,9 +42,9 @@ CREATE TABLE my_table (
     a BIGINT,
     b STRING DEFAULT 'my_value',
     c INT DEFAULT 5,
-    tags ARRAY<STRING> DEFAULT ARRAY('tag1', 'tag2', 'tag3'),
-    properties MAP<STRING, STRING> DEFAULT MAP('key1', 'value1', 'key2', 'value2'),
-    nested STRUCT<x: INT, y: STRING> DEFAULT STRUCT(42, 'default_value')
+    numbers ARRAY<INT> DEFAULT ARRAY(1, 2, 3),
+    scores MAP<INT, INT> DEFAULT MAP(1, 10, 2, 20),
+    nested STRUCT<x: INT, y: INT> DEFAULT STRUCT(42, 7)
 );
 ```
 
@@ -74,8 +74,8 @@ The complex columns receive the defaults declared above. Inspect individual fiel
 of printing an entire nested row:
 
 ```sql
-SELECT tags, properties['key1'], nested.x FROM my_table WHERE a = 3;
--- [tag1, tag2, tag3]  value1  42
+SELECT numbers, scores[1], nested.x FROM my_table WHERE a = 3;
+-- [1, 2, 3]  10  42
 ```
 
 If a column has no default, an omitted or null value remains null, subject to the column's
@@ -101,16 +101,21 @@ SELECT * FROM default_example ORDER BY a;
 Change complex defaults with the same statement:
 
 ```sql
-ALTER TABLE my_table ALTER COLUMN tags SET DEFAULT ARRAY('new_tag1', 'new_tag2');
-ALTER TABLE my_table ALTER COLUMN properties SET DEFAULT MAP('new_key', 'new_value');
+ALTER TABLE my_table ALTER COLUMN numbers SET DEFAULT ARRAY(4, 5);
+ALTER TABLE my_table ALTER COLUMN scores SET DEFAULT MAP(3, 30);
 INSERT INTO my_table (a) VALUES (4);
 
-SELECT a, tags, properties['new_key'] FROM my_table WHERE a = 4;
--- 4  [new_tag1, new_tag2]  new_value
+SELECT a, numbers, scores[3] FROM my_table WHERE a = 4;
+-- 4  [4, 5]  30
 ```
 
 ## Limitation
 
+- Complex default expressions currently have a string-quoting limitation: single quotes in
+  `ARRAY`, `MAP`, and `STRUCT` string elements can be retained in the stored values. For example,
+  `MAP('key1', 'value1')` stores a key containing the quote characters, so looking up `['key1']`
+  returns `NULL`. The examples above use numeric elements to avoid this limitation. Supply
+  complex values containing strings explicitly in the incoming query or DataFrame instead.
 - `ALTER TABLE ADD COLUMN` cannot include a default. Add the column first, then set its default
   with a separate statement as shown below.
 - Dynamic default expressions such as `current_timestamp()` and `current_date()` are not supported.
