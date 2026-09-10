@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Choose what to read at startup</title>
+<desc id="desc">Batch reads the latest snapshot and stops. Default streaming reads the latest full snapshot then subsequent changes. Latest streaming mode skips the initial full snapshot and reads new changes.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="498" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Choose what to read at startup</text>
+<text x="28" y="78" font-size="18" fill="#526277" font-weight="400" text-anchor="start">These examples assume no time-travel option or restored consumer progress.</text>
+<text x="305" y="119" font-size="16" fill="#526277" font-weight="700" text-anchor="start">AT STARTUP</text>
+<text x="647" y="119" font-size="16" fill="#526277" font-weight="700" text-anchor="start">AFTER STARTUP</text>
+<rect x="28" y="138" width="904" height="93" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="170" font-size="22" fill="#2463b4" font-weight="700" text-anchor="start">Batch</text>
+<text x="46" y="199" font-size="17" fill="#526277" font-weight="400" text-anchor="start">latest snapshot</text>
+<rect x="285" y="148" width="276" height="72" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="301" y="180" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Full snapshot</text>
+<text x="301" y="202" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Current table contents</text>
+<path d="M 563 184 H 623" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="648" y="192" font-size="21" fill="#526277" font-weight="700" text-anchor="start">Query finishes</text>
+<rect x="28" y="247" width="904" height="93" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="279" font-size="22" fill="#10705d" font-weight="700" text-anchor="start">Streaming</text>
+<text x="46" y="308" font-size="17" fill="#526277" font-weight="400" text-anchor="start">default startup</text>
+<rect x="285" y="257" width="276" height="72" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="301" y="289" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">Full snapshot</text>
+<text x="301" y="311" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Current table contents</text>
+<path d="M 563 293 H 623" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="626" y="257" width="264" height="72" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="642" y="289" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">New changes</text>
+<text x="642" y="311" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Keep reading</text>
+<path d="M 892 293 H 918" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="356" width="904" height="93" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="388" font-size="22" fill="#7051a3" font-weight="700" text-anchor="start">Streaming</text>
+<text x="46" y="417" font-size="17" fill="#526277" font-weight="400" text-anchor="start">scan.mode = latest</text>
+<text x="307" y="410" font-size="20" fill="#526277" font-weight="400" text-anchor="start">Skip the full snapshot</text>
+<path d="M 563 402 H 623" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="626" y="366" width="264" height="72" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="642" y="398" font-size="21" fill="#7051a3" font-weight="700" text-anchor="start">New changes</text>
+<text x="642" y="420" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Keep reading</text>
+<path d="M 892 402 H 918" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="479" font-size="18" fill="#526277" font-weight="400" text-anchor="start">For a historical start, select a snapshot, timestamp, or incremental range in the query.</text>
+</g>
+</svg>

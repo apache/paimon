@@ -224,18 +224,67 @@ const sidebars = {
       "id": "flink/index"
     },
     "items": [
-      "flink/quick-start",
-      "flink/sql-ddl",
-      "flink/sql-write",
-      "flink/sql-query",
-      "flink/consumer-id",
-      "flink/sql-lookup",
-      "flink/sql-alter",
-      "flink/default-value",
-      "flink/procedures",
-      "flink/action-jars",
-      "flink/savepoint",
-      "flink/lineage"
+      {
+        "type": "category",
+        "label": "Getting Started",
+        "collapsed": true,
+        "items": [
+          "flink/quick-start",
+          "flink/installation"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tables and Schemas",
+        "collapsed": true,
+        "items": [
+          "flink/sql-ddl",
+          "flink/sql-alter",
+          "flink/default-value"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Reads and Writes",
+        "collapsed": true,
+        "items": [
+          "flink/sql-write",
+          "flink/sql-query",
+          "flink/sql-lookup"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Operations",
+        "collapsed": true,
+        "items": [
+          "flink/configuration",
+          "flink/consumer-id",
+          "flink/savepoint",
+          "flink/lineage",
+          "flink/troubleshooting"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Procedures",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "flink/procedures"
+        },
+        "items": [
+          "flink/procedures/compaction",
+          "flink/procedures/snapshots",
+          "flink/procedures/tags-and-branches",
+          "flink/procedures/table-operations",
+          "flink/procedures/indexes",
+          "flink/procedures/consumers",
+          "flink/procedures/repair",
+          "flink/procedures/catalog"
+        ]
+      },
+      "flink/action-jars"
     ]
   },
   {
