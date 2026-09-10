@@ -1019,6 +1019,11 @@ public class RESTApi {
      * as unknown leaves the stored one alone either way, and a report never creates or removes a
      * partition row.
      *
+     * <p>For an existing partition, omitting {@code path} keeps its location, and naming the
+     * partition's own default directory returns it there without deleting data, which needs
+     * replacement statistics for that partition. Additive statistics are rejected for a Format
+     * Table partition that already has a custom location.
+     *
      * @param identifier database name and table name
      * @param partitions partitions to be created
      * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
@@ -1027,7 +1032,8 @@ public class RESTApi {
      *     PartitionStatistics#spec()} rather than by position, or null to report none
      * @param replaceStatistics whether the report replaces the stored values rather than adding to
      *     them; ignored when {@code statistics} is null, and not sent at all in that case
-     * @param partitionOptions options aligned with {@code partitions} by position, or null
+     * @param partitionOptions options aligned with {@code partitions} by position, or null; a
+     *     {@code path} naming the partition's default directory returns it there
      * @return the partitions the server created and the ones it already held
      */
     public CreatePartitionsResponse createPartitions(

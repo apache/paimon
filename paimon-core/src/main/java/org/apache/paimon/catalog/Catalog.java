@@ -1106,6 +1106,11 @@ public interface Catalog extends AutoCloseable {
     /**
      * Create partitions atomically unless existing entries are ignored, with optional statistics
      * and position-aligned options.
+     *
+     * <p>For an existing partition, omitting {@code path} keeps its location, and naming the
+     * partition's own default directory returns it there without deleting data, which needs
+     * replacement statistics for that partition. Additive statistics are rejected for a Format
+     * Table partition that already has a custom location. Each call is atomic on its own.
      */
     default void createPartitions(
             Identifier identifier,

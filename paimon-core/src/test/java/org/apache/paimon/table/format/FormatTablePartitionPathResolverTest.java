@@ -47,6 +47,57 @@ class FormatTablePartitionPathResolverTest {
     private static final Path TABLE_PATH = new Path("file:/warehouse/table");
     private static final String TABLE_NAME = "db.table";
 
+    @Test
+    void testADefaultDirectoryIsRecognizedWhateverItsSchemeOrEscapes() {
+        // The table's own directory is where a partition goes back to, so recognizing it may not
+        // depend on rules written for a location someone typed: a scheme without an authority is
+        // a supported table location, and an escaped value is one directory name.
+        LinkedHashMap<String, String> escaped = new LinkedHashMap<>();
+        escaped.put("dt", "a%b");
+        escaped.put("hh", "a/b");
+        for (Path tablePath :
+                Arrays.asList(
+                        new Path("viewfs:/warehouse/table"),
+                        new Path("cfs:/data/warehouse/table"),
+                        new Path("oss://bucket/warehouse/table"))) {
+            Path defaultPath =
+                    FormatTablePartitionPathResolver.defaultPartitionPath(
+                            tablePath, escaped, false);
+            assertThat(defaultPath.toString()).contains("dt=a%25b/hh=a%2Fb");
+            assertThat(
+                            FormatTablePartitionPathResolver.isDefaultPartitionPath(
+                                    tablePath, escaped, false, defaultPath.toString(), null))
+                    .as("%s must recognize its own partition directory", tablePath)
+                    .isTrue();
+            assertThat(
+                            FormatTablePartitionPathResolver.isDefaultPartitionPath(
+                                    tablePath,
+                                    escaped,
+                                    false,
+                                    new Path(tablePath, "dt=a%25b").toString(),
+                                    null))
+                    .as("%s must not mistake another directory for it", tablePath)
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void testATableDirectoryNeedsNoAuthorityButAPartitionOwnsNoSuchPlace() {
+        // A catalog whose warehouse has no authority still names one directory per partition, and
+        // a request returns a partition there by naming it; what a partition may own is stricter.
+        assertThat(
+                        FormatTablePartitionPathResolver.canonicalizeLocation(
+                                        "cfs:/data/warehouse/db/table/dt=2026", null)
+                                .toString())
+                .isEqualTo("cfs:/data/warehouse/db/table/dt=2026");
+        assertThatThrownBy(
+                        () ->
+                                FormatTablePartitionPathResolver.canonicalizeCustomLocation(
+                                        "cfs:/data/warehouse/db/table/dt=2026", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid custom partition location");
+    }
+
     @ParameterizedTest
     @ValueSource(
             strings = {
