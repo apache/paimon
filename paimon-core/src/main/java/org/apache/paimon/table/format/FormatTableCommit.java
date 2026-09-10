@@ -159,6 +159,16 @@ public class FormatTableCommit implements BatchTableCommit {
                             "Format Table publish thread number must be between 1 and %s, but was %s.",
                             MAX_COMMIT_THREAD_NUM, publishThreadNum));
         }
+        if (partitionManager != null && new Path(location).toUri().getScheme() == null) {
+            // The catalog names every partition directory of such a table, and a request returns a
+            // partition to one by naming it, so the table directory has to say which filesystem it
+            // is on. Refused here, before a commit deletes or publishes anything.
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Format Table %s with catalog-managed partitions must have a location "
+                                    + "with a scheme, but was %s.",
+                            tableIdentifier.getFullName(), location));
+        }
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;

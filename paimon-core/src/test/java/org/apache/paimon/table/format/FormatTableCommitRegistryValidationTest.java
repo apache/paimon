@@ -51,6 +51,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** Partition registry validation tests for {@link FormatTableCommit}. */
@@ -212,6 +213,35 @@ class FormatTableCommitRegistryValidationTest {
                 partitionManager,
                 tablePath,
                 Arrays.asList(exactOutsidePrefix, exactInsidePrefix, prefixOnly));
+    }
+
+    @Test
+    void testCatalogManagedTableWithoutASchemeIsRefusedBeforeMutation() throws Exception {
+        MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "table-without-scheme");
+        Path oldData = new Path(tablePath, "year=2025/month=10/data-old.csv");
+        fileIO.writeFile(oldData, "old", false);
+        Path withoutScheme = new Path(tablePath.toUri().getPath());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        fileIO.startTrackingMutations();
+
+        for (boolean overwrite : new boolean[] {true, false}) {
+            assertThatThrownBy(
+                            () ->
+                                    commit(
+                                            withoutScheme,
+                                            fileIO,
+                                            partitionManager,
+                                            overwrite,
+                                            null,
+                                            true))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must have a location with a scheme");
+        }
+
+        assertThat(fileIO.exists(oldData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isZero();
+        verifyNoInteractions(partitionManager);
     }
 
     @Test
