@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="661" viewBox="0 0 900 661" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Compaction and deletion materialization do different work</title>
+<desc id="desc">Starting with a normal range 0 to 3 and row 1 logically deleted, ordinary compaction keeps all four positions and the deletion vector. Materialization removes the deleted position and rewrites the surviving rows with illustrative new row IDs 100, 101, and 102. Historical snapshots can retain replaced files.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="659" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Compaction and deletion materialization do different work</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Example: row ID 1 is deleted. The latest table has 3 visible rows.</text>
+<text x="153" y="129" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Row ID</text>
+<text x="153" y="171" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Value</text>
+<rect x="165" y="106" width="136" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="233.0" y="131" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">0</text>
+<rect x="165" y="147" width="136" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="233.0" y="173" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">A</text>
+<rect x="305" y="106" width="136" height="36" rx="4" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="373.0" y="131" font-size="20" font-weight="700" text-anchor="middle" fill="#b42332">1</text>
+<rect x="305" y="147" width="136" height="39" rx="4" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="373.0" y="173" font-size="18" font-weight="700" text-anchor="middle" fill="#b42332">deleted</text>
+<line x1="319" y1="124" x2="427" y2="124" stroke="#b42332" stroke-width="2"/>
+<rect x="445" y="106" width="136" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="513.0" y="131" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="445" y="147" width="136" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="513.0" y="173" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">C</text>
+<rect x="585" y="106" width="136" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="653.0" y="131" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">3</text>
+<rect x="585" y="147" width="136" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="653.0" y="173" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">D</text>
+<text x="445" y="213" font-size="19" font-weight="400" text-anchor="middle" fill="#526277">Current normal range [0, 3] + deletion vector {1}</text>
+<rect x="28" y="246" width="844" height="155" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="279" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Ordinary compaction</text>
+<text x="46" y="308" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Consolidate files.</text>
+<text x="46" y="337" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Keep IDs and deletion vector.</text>
+<text x="419" y="291" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Row ID</text>
+<text x="419" y="333" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Value</text>
+<rect x="431" y="268" width="98" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="480.0" y="293" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">0</text>
+<rect x="431" y="309" width="98" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="480.0" y="335" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">A</text>
+<rect x="533" y="268" width="98" height="36" rx="4" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="582.0" y="293" font-size="20" font-weight="700" text-anchor="middle" fill="#b42332">1</text>
+<rect x="533" y="309" width="98" height="39" rx="4" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="582.0" y="335" font-size="18" font-weight="700" text-anchor="middle" fill="#b42332">deleted</text>
+<line x1="547" y1="286" x2="617" y2="286" stroke="#b42332" stroke-width="2"/>
+<rect x="635" y="268" width="98" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="684.0" y="293" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="635" y="309" width="98" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="684.0" y="335" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">C</text>
+<rect x="737" y="268" width="98" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="786.0" y="293" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">3</text>
+<rect x="737" y="309" width="98" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="786.0" y="335" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">D</text>
+<text x="635" y="382" font-size="19" font-weight="700" text-anchor="middle" fill="#2463b4">Still [0, 3]; 3 visible rows</text>
+<rect x="28" y="420" width="844" height="170" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="46" y="455" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Materialize deletion vectors</text>
+<text x="46" y="484" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Rewrite surviving rows.</text>
+<text x="46" y="513" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Remove applied deletion vector.</text>
+<text x="476" y="465" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Row ID</text>
+<text x="476" y="507" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Value</text>
+<rect x="488" y="442" width="110" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="543.0" y="467" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">100</text>
+<rect x="488" y="483" width="110" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="543.0" y="509" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">A</text>
+<rect x="602" y="442" width="110" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="657.0" y="467" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">101</text>
+<rect x="602" y="483" width="110" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="657.0" y="509" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">C</text>
+<rect x="716" y="442" width="110" height="36" rx="4" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="771.0" y="467" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">102</text>
+<rect x="716" y="483" width="110" height="39" rx="4" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="771.0" y="509" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">D</text>
+<text x="645" y="556" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">New IDs shown as [100, 102]</text>
+<text x="450" y="627" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">Replaced files can remain in historical snapshots until expiration.</text>
+</g>
+</svg>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="564" viewBox="0 0 900 564" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Read each column from its newest provider</title>
+<desc id="desc">Three normal files all cover row IDs 0 to 2. N0 version 1 contains id, b, c; N1 version 2 contains b; N2 version 3 contains c. The result takes id from N0, b from N1, and c from N2, combining them at matching row positions.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="562" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Read each column from its newest provider</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">All three files cover [0, 2]. Newer files override only the columns they contain.</text>
+<rect x="28" y="101" width="294" height="139" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="131" font-size="22" font-weight="700" text-anchor="start" fill="#2463b4">N0 · id, b, c</text>
+<text x="44" y="158" font-size="18" font-weight="400" text-anchor="start" fill="#526277">version 1</text>
+<rect x="348" y="101" width="242" height="139" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="364" y="131" font-size="22" font-weight="700" text-anchor="start" fill="#9a5200">N1 · b</text>
+<text x="364" y="158" font-size="18" font-weight="400" text-anchor="start" fill="#526277">version 2</text>
+<rect x="616" y="101" width="256" height="139" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="632" y="131" font-size="22" font-weight="700" text-anchor="start" fill="#10705d">N2 · c</text>
+<text x="632" y="158" font-size="18" font-weight="400" text-anchor="start" fill="#526277">version 3</text>
+<text x="44" y="187" font-size="20" font-weight="700" text-anchor="start" fill="#2463b4">id: 10, 20, 30</text>
+<text x="44" y="211" font-size="17" font-weight="400" text-anchor="start" fill="#526277">b, c superseded by N1, N2</text>
+<text x="364" y="198" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">b: 1, 22, 3</text>
+<text x="632" y="198" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">c: 101, 200, 300</text>
+<path d="M 175 242 L 175 269 L 329 269 L 329 296" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 469 242 L 469 269 L 495 269 L 495 296" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 744 242 L 744 269 L 661 269 L 661 296" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="136" y="300" width="110" height="41" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="191.0" y="328" font-size="19" font-weight="700" text-anchor="middle" fill="#526277">Row ID</text>
+<rect x="246" y="300" width="166" height="41" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="329.0" y="328" font-size="19" font-weight="700" text-anchor="middle" fill="#2463b4">id ← N0</text>
+<rect x="412" y="300" width="166" height="41" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="495.0" y="328" font-size="19" font-weight="700" text-anchor="middle" fill="#9a5200">b ← N1</text>
+<rect x="578" y="300" width="166" height="41" rx="0" fill="#e5f5ef" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="661.0" y="328" font-size="19" font-weight="700" text-anchor="middle" fill="#10705d">c ← N2</text>
+<rect x="136" y="341" width="110" height="43" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="191.0" y="369" font-size="21" font-weight="400" text-anchor="middle" fill="#526277">0</text>
+<rect x="246" y="341" width="166" height="43" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="329.0" y="369" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">10</text>
+<rect x="412" y="341" width="166" height="43" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="495.0" y="369" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">1</text>
+<rect x="578" y="341" width="166" height="43" rx="0" fill="#e5f5ef" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="661.0" y="369" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">101</text>
+<rect x="136" y="384" width="110" height="43" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="191.0" y="412" font-size="21" font-weight="400" text-anchor="middle" fill="#526277">1</text>
+<rect x="246" y="384" width="166" height="43" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="329.0" y="412" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">20</text>
+<rect x="412" y="384" width="166" height="43" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="495.0" y="412" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">22</text>
+<rect x="578" y="384" width="166" height="43" rx="0" fill="#e5f5ef" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="661.0" y="412" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">200</text>
+<rect x="136" y="427" width="110" height="43" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="191.0" y="455" font-size="21" font-weight="400" text-anchor="middle" fill="#526277">2</text>
+<rect x="246" y="427" width="166" height="43" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="329.0" y="455" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">30</text>
+<rect x="412" y="427" width="166" height="43" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="495.0" y="455" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">3</text>
+<rect x="578" y="427" width="166" height="43" rx="0" fill="#e5f5ef" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="661.0" y="455" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">300</text>
+<rect x="28" y="496" width="844" height="45" rx="8" fill="#eaf2ff" stroke="#eaf2ff" stroke-width="1.5"/>
+<text x="44" y="523" font-size="18" font-weight="400" text-anchor="start" fill="#2463b4">Merge by row position: N2 does not replace b, because N2 contains only c.</text>
+</g>
+</svg>
