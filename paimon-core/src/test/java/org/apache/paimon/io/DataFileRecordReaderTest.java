@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.data.columnar.heap.HeapLongVector;
@@ -28,11 +29,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -85,6 +88,46 @@ public class DataFileRecordReaderTest {
             assertThat(delegate.readerOwnedColumns)
                     .containsExactly(delegate.rowIdVector, delegate.sequenceNumberVector);
         }
+        reader.close();
+    }
+
+    @Test
+    public void testEmptyRowTrackingFieldsPreserveSpecializedIdentityIterator() throws Exception {
+        HeapLongVector dataVector = new HeapLongVector(1);
+        dataVector.setLong(0, 42L);
+        VectorizedColumnBatch batch = new VectorizedColumnBatch(new ColumnVector[] {dataVector});
+        batch.setNumRows(1);
+        ColumnarRowIterator specializedIterator =
+                new ColumnarRowIterator(new Path("test"), new ColumnarRow(batch), null) {};
+        specializedIterator.reset(0);
+
+        FileRecordReader<InternalRow> delegate =
+                new FileRecordReader<InternalRow>() {
+                    @Override
+                    public FileRecordIterator<InternalRow> readBatch() {
+                        return specializedIterator;
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        DataFileRecordReader reader =
+                new DataFileRecordReader(
+                        RowType.of(DataTypes.BIGINT()),
+                        delegate,
+                        false,
+                        false,
+                        new int[] {0},
+                        null,
+                        null,
+                        true,
+                        100L,
+                        7L,
+                        Collections.emptyMap(),
+                        null,
+                        new Path("test"));
+
+        assertThat(reader.readBatch()).isSameAs(specializedIterator);
         reader.close();
     }
 

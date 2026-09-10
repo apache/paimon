@@ -181,7 +181,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         if (iterator instanceof ColumnarRowIterator) {
             ColumnarRowIterator sourceIterator = (ColumnarRowIterator) iterator;
             iterator = sourceIterator.mapping(partitionInfo, indexMapping);
-            if (rowTrackingEnabled) {
+            if (rowTrackingEnabled && !systemFields.isEmpty()) {
                 if (iterator == sourceIterator) {
                     // Copy to a ColumnVector[] because cloning a subtype array preserves its
                     // runtime type and cannot accept row-tracking wrapper vectors.
