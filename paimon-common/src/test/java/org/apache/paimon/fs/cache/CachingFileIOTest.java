@@ -95,7 +95,7 @@ class CachingFileIOTest {
     }
 
     @Test
-    void testMemoryModeServesFreshContentAfterInPlaceOverwrite() throws IOException {
+    void testMemoryModeDoesNotCacheInPlaceOverwrittenFiles() throws IOException {
         MockFileIO delegate = new MockFileIO();
         CachingFileIO cachingIO =
                 newCachingFileIO(
@@ -105,25 +105,50 @@ class CachingFileIOTest {
                         64);
         Path consumer = new Path("consumer-1");
 
-        // Same path overwritten in place with new content and a new mtime; the
-        // memory cache must not keep serving the first version's blocks.
-        delegate.addFile("consumer-1", "v1cc".getBytes(), 1000L);
+        // consumer-* is written in place by overwriteFileUtf8, so it is mutable and bypasses the
+        // cache: each read reaches the delegate and sees the current content.
+        delegate.addFile("consumer-1", "v1cc".getBytes());
         try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            assertThat(in).isNotInstanceOf(CachingSeekableInputStream.class);
             byte[] buf = new byte[4];
             in.read(buf, 0, 4);
             assertThat(new String(buf)).isEqualTo("v1cc");
         }
-        // one remote open, after which the first version's blocks are cached
         assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(1);
 
-        delegate.addFile("consumer-1", "v2cc".getBytes(), 2000L);
+        delegate.addFile("consumer-1", "v2cc".getBytes());
         try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
             byte[] buf = new byte[4];
             in.read(buf, 0, 4);
             assertThat(new String(buf)).isEqualTo("v2cc");
         }
-        // the new version has a different key, forcing a fresh remote read
+        // never cached: the overwrite is visible and the delegate was opened again
         assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(2);
+    }
+
+    @Test
+    void testMemoryModeImmutableCacheHitsDoNotRestatDelegate() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path snapshot = new Path("snapshot-1");
+        delegate.addFile("snapshot-1", "0123456789abcdef".getBytes());
+
+        for (int i = 0; i < 3; i++) {
+            try (SeekableInputStream in = cachingIO.newInputStream(snapshot)) {
+                assertThat(readAll(in, 16)).isEqualTo("0123456789abcdef".getBytes());
+            }
+        }
+
+        // An immutable file keeps the path-only memory key: opened once, then served from cache.
+        // Its size is resolved lazily and remembered, so repeated hits do not re-stat the
+        // delegate the way moving getFileStatus onto every open would.
+        assertThat(delegate.newInputStreamCallCount("snapshot-1")).isEqualTo(1);
+        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(1);
     }
 
     @Test
@@ -844,8 +869,7 @@ class CachingFileIOTest {
         CountDownLatch openGate = new CountDownLatch(1);
         delegate.blockOpensUntil(openGate);
 
-        // the file size is resolved lazily here, exercising the lazy path that only
-        // the testing constructor still uses
+        // the file size is resolved lazily here, as CachingFileIO does for the memory cache
         CachingSeekableInputStream stream =
                 new CachingSeekableInputStream(
                         delegate,
@@ -1027,7 +1051,6 @@ class CachingFileIOTest {
 
         private final Map<String, byte[]> files = new HashMap<>();
         private final Map<String, Long> reportedLengths = new HashMap<>();
-        private final Map<String, Long> mtimes = new HashMap<>();
         // concurrent so the thread-safety tests below can count from several reader threads
         private final Map<String, Integer> fileStatusCalls = new ConcurrentHashMap<>();
         private final Map<String, Integer> newInputStreamCalls = new ConcurrentHashMap<>();
@@ -1070,11 +1093,6 @@ class CachingFileIOTest {
         static int globalInputStreamCallCount(String name) {
             AtomicInteger count = GLOBAL_INPUT_STREAM_CALLS.get(name);
             return count == null ? 0 : count.get();
-        }
-
-        void addFile(String name, byte[] data, long mtime) {
-            files.put(name, data);
-            mtimes.put(name, mtime);
         }
 
         void addFile(String name, byte[] data) {
@@ -1162,7 +1180,7 @@ class CachingFileIOTest {
 
                 @Override
                 public long getModificationTime() {
-                    return mtimes.getOrDefault(name, 0L);
+                    return 0;
                 }
             };
         }

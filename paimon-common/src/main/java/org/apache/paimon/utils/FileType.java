@@ -114,8 +114,18 @@ public enum FileType {
 
     /** Returns {@code true} if the file is mutable and should not be cached. */
     public static boolean isMutable(Path filePath) {
-        String name = filePath.getName();
-        return "EARLIEST".equals(name) || "LATEST".equals(name);
+        String name = unwrapTempFileName(filePath.getName());
+        // Files rewritten in place under a stable path: caching them by path keeps serving the
+        // pre-overwrite content (and a len+mtime key still collides when a rewrite lands at the
+        // same size within the same clock second). Hint files, consumer and service progress
+        // files, replaceable tags and _SUCCESS all go through overwriteFileUtf8.
+        return "EARLIEST".equals(name)
+                || "LATEST".equals(name)
+                || "_SUCCESS".equals(name)
+                || name.endsWith("_SUCCESS")
+                || name.startsWith(CONSUMER_PREFIX)
+                || name.startsWith(SERVICE_PREFIX)
+                || name.startsWith(TAG_PREFIX);
     }
 
     /**
