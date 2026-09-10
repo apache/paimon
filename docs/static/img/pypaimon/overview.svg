@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="572" viewBox="0 0 960 572" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One table layer for Python data and AI</title>
+<desc id="desc">Python and multimodal APIs and compute integrations share Paimon catalogs, snapshots, and data files. Catalogs locate tables; readers and writers access table files through FileIO.</desc>
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+<path d="M0 0L9 4L0 8Z" fill="#63788e"/>
+</marker>
+</defs>
+<rect width="960" height="572" rx="16" fill="#ffffff"/>
+<g font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+<text x="32" y="43" font-size="25" fill="#142c40" font-weight="650" text-anchor="start">One table layer for Python data and AI</text>
+<text x="32" y="76" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Choose an interface; reuse the same Paimon tables.</text>
+<rect x="32" y="108" width="276" height="112" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="52" y="141" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">Python API</text>
+<text x="52" y="171" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Catalogs and schemas</text>
+<text x="52" y="196" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Scan and commit control</text>
+<rect x="342" y="108" width="276" height="112" rx="12" fill="#f3f0fb" stroke="#d7cdec" stroke-width="1.5"/>
+<text x="362" y="141" font-size="21" fill="#4a3674" font-weight="600" text-anchor="start">Multimodal API</text>
+<text x="362" y="171" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Text, vectors, and media</text>
+<text x="362" y="196" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Search and row operations</text>
+<rect x="652" y="108" width="276" height="112" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="672" y="141" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">Compute integrations</text>
+<text x="672" y="171" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Ray Data · Daft</text>
+<text x="672" y="196" font-size="18" fill="#526176" font-weight="400" text-anchor="start">PyTorch</text>
+<path d="M170 220V265" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M480 220V243H712V265" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M790 220V265" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="266" width="432" height="115" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="52" y="299" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">Catalogs</text>
+<text x="52" y="329" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Filesystem · JDBC · REST</text>
+<text x="52" y="354" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Resolve tables and manage metadata</text>
+<rect x="496" y="266" width="432" height="115" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="516" y="299" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">Table operations</text>
+<text x="516" y="329" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Schemas · snapshots · manifests</text>
+<text x="516" y="354" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Plan reads and publish commits</text>
+<path d="M464 324H496" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M712 381V429" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="430" width="896" height="104" rx="12" fill="#fff7e9" stroke="#e7d0a4" stroke-width="1.5"/>
+<text x="52" y="463" font-size="21" fill="#79521b" font-weight="600" text-anchor="start">Table storage through FileIO</text>
+<text x="52" y="493" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Columnar data · BLOB and video payloads · indexes</text>
+<text x="52" y="518" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Local filesystem or configured remote storage</text>
+</g>
+</svg>

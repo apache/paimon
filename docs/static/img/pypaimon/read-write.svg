@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="558" viewBox="0 0 960 558" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">From a batch to a readable snapshot</title>
+<desc id="desc">Write input batches, prepare commit messages once, and commit to publish a snapshot. A reader plans splits from a snapshot after applying predicates and projections, then reads those splits.</desc>
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+<path d="M0 0L9 4L0 8Z" fill="#63788e"/>
+</marker>
+</defs>
+<rect width="960" height="558" rx="16" fill="#ffffff"/>
+<g font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+<text x="32" y="43" font-size="25" fill="#142c40" font-weight="650" text-anchor="start">From a batch to a readable snapshot</text>
+<text x="32" y="79" font-size="15" fill="#17716f" font-weight="700" text-anchor="start">WRITE</text>
+<rect x="32" y="98" width="268" height="113" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="52" y="131" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">1  Write batches</text>
+<text x="52" y="161" font-size="18" fill="#526176" font-weight="400" text-anchor="start">write_arrow(data)</text>
+<text x="52" y="186" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Create data files</text>
+<rect x="346" y="98" width="268" height="113" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="366" y="131" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">2  Prepare once</text>
+<text x="366" y="161" font-size="18" fill="#526176" font-weight="400" text-anchor="start">prepare_commit()</text>
+<text x="366" y="186" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Return commit messages</text>
+<rect x="660" y="98" width="268" height="113" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="680" y="131" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">3  Commit</text>
+<text x="680" y="161" font-size="18" fill="#526176" font-weight="400" text-anchor="start">commit(messages)</text>
+<text x="680" y="186" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Publish a new snapshot</text>
+<path d="M300 154H346" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M614 154H660" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M794 211V252H480V284" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="346" y="284" width="268" height="83" rx="12" fill="#f3f0fb" stroke="#d7cdec" stroke-width="1.5"/>
+<text x="366" y="317" font-size="21" fill="#4a3674" font-weight="600" text-anchor="start">Published snapshot</text>
+<text x="366" y="347" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Visible table state</text>
+<text x="32" y="327" font-size="15" fill="#17716f" font-weight="700" text-anchor="start">READ</text>
+<path d="M480 367V407" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="408" width="268" height="112" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="52" y="441" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">1  Select data</text>
+<text x="52" y="471" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Predicate + projection</text>
+<text x="52" y="496" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Configure the read builder</text>
+<rect x="346" y="408" width="268" height="112" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="366" y="441" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">2  Plan splits</text>
+<text x="366" y="471" font-size="18" fill="#526176" font-weight="400" text-anchor="start">new_scan().plan()</text>
+<text x="366" y="496" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Describe read work</text>
+<rect x="660" y="408" width="268" height="112" rx="12" fill="#eef6f8" stroke="#b7d8de" stroke-width="1.5"/>
+<text x="680" y="441" font-size="21" fill="#153d49" font-weight="600" text-anchor="start">3  Read splits</text>
+<text x="680" y="471" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Arrow batches or rows</text>
+<text x="680" y="496" font-size="18" fill="#526176" font-weight="400" text-anchor="start">Consume the selected data</text>
+<path d="M300 464H346" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M614 464H660" fill="none" stroke="#63788e" stroke-width="2" marker-end="url(#arrow)"/>
+</g>
+</svg>

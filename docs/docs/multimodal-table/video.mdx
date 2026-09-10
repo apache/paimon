@@ -76,7 +76,7 @@ CREATE TABLE video_frames (
 </Tabs>
 
 Creating the table does not ingest or decode video files. Use the
-[PyPaimon video ingestion API](../pypaimon/multimodal-api#video-frame-storage)
+[PyPaimon video ingestion API](../pypaimon/video#video-frame-storage)
 to write complete videos and their logical frame rows.
 
 ## Descriptors and Physical Layout
@@ -157,4 +157,4 @@ This table property remains enabled for subsequent SQL reads.
 </Tabs>
 
 For Python ingestion and PyTorch `DataLoader` usage, including decoder-session reuse in workers,
-see [PyPaimon Multimodal API: Video Frame Storage](../pypaimon/multimodal-api#video-frame-storage).
+see [PyPaimon Multimodal API: Video Frame Storage](../pypaimon/video#video-frame-storage).
