@@ -25,12 +25,23 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# File index
+# File Index
 
-Define `file-index.${index_type}.columns`, Paimon will create its corresponding index file for each file. If the index
-file is too small, it will be stored directly in the manifest, or in the directory of the data file. Each data file
-corresponds to an index file, which has a separate file definition and can contain different types of indexes with
-multiple columns.
+Configure `file-index.${index_type}.columns` to build indexes for selected columns in each data
+file. A file index can contain multiple index types and columns. Small indexes can be embedded
+in the manifest; larger indexes are stored alongside the data file.
+
+This page describes the binary layout. For query-planning guidance, see
+[Query Performance](../../primary-key-table/query-performance). For dynamic bucket indexes and
+deletion vectors, see [Table Index](./tableindex).
+
+| Encoding | Section |
+| --- | --- |
+| Shared header and column offsets | [Index File](#index-file) |
+| Bloom filter | [BloomFilter](#index-bloomfilter) |
+| Bitmap | [Bitmap](#index-bitmap) |
+| Range bitmap | [Range Bitmap](#index-range-bitmap) |
+| Bit-slice bitmap | [Bit-Slice Index Bitmap](#index-bit-slice-index-bitmap) |
 
 ## Index File
 
@@ -174,8 +185,7 @@ index block format:
 +-------------------------------------------------+
 
 value x:                       var bytes for any data type (as bitmap identifier)
-offset:                        4 bytes int (when it is negative, it represents that there is only one value
-                                 and its position is the inverse of the negative value)
+offset:                        4 bytes int; a negative offset encodes a single row position as -offset - 1
 length:                        4 bytes int
   
 </pre>
@@ -220,8 +230,7 @@ Bitmap file index format (V1)
 +-------------------------------------------------+-----------------
 *
 value x:                       var bytes for any data type (as bitmap identifier)
-offset:                        4 bytes int (when it is negative, it represents that there is only one value
-                                 and its position is the inverse of the negative value)
+offset:                        4 bytes int; a negative offset encodes a single row position as -offset - 1
 </pre>
 
 </TabItem>
@@ -230,8 +239,8 @@ offset:                        4 bytes int (when it is negative, it represents t
 
 Integers are all BIG_ENDIAN.
 
-Bitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType,
-LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType.
+Bitmap supports boolean, integer, floating-point, character-string, date, time, and timestamp
+types, including local-zoned timestamps. `STRING` uses the `VarCharType` representation.
 
 ## Index: Range Bitmap
 
@@ -246,7 +255,8 @@ Shortcoming:
 
 Options:
 * `file-index.range-bitmap.columns`: specify the columns that need range-bitmap index.
-* `file-index.range-bitmap.<column_name>.chunk-size`: to config the chunk size, default value is 16kb.
+* `file-index.range-bitmap.<column_name>.chunk-size`: dictionary chunk size. The default is `16kb`
+  for most supported types; `BooleanType`, `TinyIntType`, and `SmallIntType` default to `0b`.
 
 Table supports using range-bitmap file index to optimize the `EQUALS`, `RANGE`, `AND/OR` and `TOPN` predicate. The bitmap and range-bitmap file index result will be merged and pushed down to the DataFile for filtering rowgroups and pages.
 
@@ -297,9 +307,9 @@ Range Bitmap file index format (V1)
 +-------------------------------------------------+
 | cardinality (4 bytes int)                       |       HEAD
 +-------------------------------------------------+
-| min value                                       |
+| min value (only when cardinality > 0)           |
 +-------------------------------------------------+
-| max value                                       |
+| max value (only when cardinality > 0)           |
 +-------------------------------------------------+
 | dictionary length (4 bytes int)                 |
 +-------------------------------------------------+-----------------
@@ -337,7 +347,7 @@ Bit-slice index bitmap format (V1)
 +-------------------------------------------------+
 | version (1 byte)                                |
 +-------------------------------------------------+
-| slices size (4 bytes int)                       |       HEAD
+| slices size (1 byte)                           |       HEAD
 +-------------------------------------------------+    
 | existence bitmap length (4 bytes int)           |       
 +-------------------------------------------------+
@@ -357,7 +367,16 @@ Bit-slice index bitmap format (V1)
 +-------------------------------------------------+-----------------
 </pre>
 
-RangeBitmap only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, TimeType, LocalZonedTimestampType, TimestampType, CharType, VarCharType, StringType, BooleanType, DoubleType, FloatType.
+RangeBitmap supports the following logical types:
+
+| Type family | Supported types and limits |
+| --- | --- |
+| Boolean and integers | BOOLEAN, TINYINT, SMALLINT, INT, BIGINT |
+| Floating point | FLOAT, DOUBLE |
+| Decimal | DECIMAL with precision at most 18 |
+| Character strings | CHAR, VARCHAR, STRING |
+| Date and time | DATE, TIME |
+| Timestamps | TIMESTAMP and local-zoned TIMESTAMP with precision at most 6 |
 
 ## Index: Bit-Slice Index Bitmap
 
@@ -414,5 +433,6 @@ BSI serialized format (V1)
 +-------------------------------------------------+
 </pre>
 
-BSI only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, DateType, LocalZonedTimestamp,
-TimestampType, DecimalType.
+Legacy BSI supports integer, date, time, timestamp (including local-zoned timestamp), and decimal
+types. A decimal's unscaled value must fit in a signed 64-bit integer. Use
+[Range Bitmap](#index-range-bitmap) for new indexes.

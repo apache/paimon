@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 586" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Snapshot conflict: retry against the latest state</title>
+<desc id="desc">Example: both writers start at N, and their file changes remain compatible.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1040" height="586" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Snapshot conflict: retry against the latest state</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Example: both writers start at N, and their file changes remain compatible.</text>
+<rect x="32" y="110" width="976" height="62" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="141" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Starting point: snapshot N</text>
+<text x="50" y="221" font-size="22" font-weight="700" text-anchor="start" fill="#172b4d">Writer A</text>
+<text x="581" y="221" font-size="22" font-weight="700" text-anchor="start" fill="#172b4d">Writer B</text>
+<rect x="32" y="244" width="445" height="91" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="275" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Prepare changes A</text>
+<text x="50" y="304" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Build a candidate for N + 1</text>
+<rect x="563" y="244" width="445" height="91" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="581" y="275" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Prepare changes B</text>
+<text x="581" y="304" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Build a candidate for N + 1</text>
+<path d="M 254 172 V 244" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 786 172 V 244" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="383" width="445" height="91" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="50" y="414" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Publish N + 1: succeeds</text>
+<text x="50" y="443" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Changes A are now committed</text>
+<rect x="563" y="383" width="445" height="91" rx="10" fill="#fff5e2" stroke="#985b00" stroke-width="1.5"/>
+<text x="581" y="414" font-size="21" font-weight="700" text-anchor="start" fill="#985b00">Publish N + 1: loses the race</text>
+<text x="581" y="443" font-size="18" font-weight="400" text-anchor="start" fill="#526277">N + 1 is already committed</text>
+<path d="M 254 335 V 383" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 786 335 V 383" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 477 429 H 563" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 786 474 V 514" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="514" width="976" height="44" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="520" y="543" font-size="20" font-weight="400" text-anchor="middle" fill="#10705d">Writer B reloads N + 1, revalidates changes B, and can publish N + 2.</text>
+</g>
+</svg>

@@ -24,77 +24,90 @@ under the License.
 
 # Catalog
 
-Paimon provides a Catalog abstraction to manage the table of contents and metadata. The Catalog abstraction provides
-a series of ways to help you better integrate with computing engines. We always recommend that you use Catalog to
-access the Paimon table.
+A catalog organizes databases, tables, and their metadata. It lets engines access tables by name
+and centralizes operations such as creating a table or changing its schema. Use a Paimon catalog
+to share tables across jobs and engines.
 
 ## Catalogs
 
-Paimon catalogs currently support four types of metastores:
+Choose a metastore based on where you want to manage catalog metadata and how clients connect.
+Data files remain in the configured filesystem or object store.
 
-* `filesystem` metastore (default), which stores both metadata and table files in filesystems.
-* `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
-* `jdbc` metastore, which additionally stores metadata in relational databases such as MySQL, Postgres, etc.
-* `rest` metastore, which is designed to provide a lightweight way to access any catalog backend from a single client.
+| Metastore | Metadata integration | Typical reason to choose it |
+| --- | --- | --- |
+| `filesystem` (default) | Uses the warehouse filesystem. | Set up a catalog without an external metastore service. |
+| `hive` | Registers databases and tables in Hive metastore. | Share table metadata with Hive-compatible tools. |
+| `jdbc` | Stores catalog metadata in a relational database. | Use a database-backed catalog, such as MySQL or PostgreSQL. |
+| `rest` | Sends catalog operations to a REST service. | Access a remote catalog with server-managed backend logic and authentication. |
+
+Catalog capabilities differ. See [Views](./views#catalog-support) for view support and
+[Concurrency Control](./concurrency-control#atomic-publication) for snapshot publication and
+locking requirements, especially with multiple writers on object storage.
+
+The examples below use Flink SQL. See [Spark catalog configuration](../spark/sql-ddl#catalog)
+for Spark syntax and [Catalog API](../program-api/catalog-api) for programmatic access.
 
 ## Filesystem Catalog
 
-Metadata and table files are stored under `hdfs:///path/to/warehouse`.
+Store catalog metadata and table files under the warehouse directory:
 
 ```sql
--- Flink SQL
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
+    'metastore' = 'filesystem',
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
 
 ## REST Catalog
 
-By using the Paimon REST catalog, changes to the catalog will be directly stored in a remote catalog server which exposed through REST API.
-See [Paimon REST Catalog](./rest/).
+Connect to a catalog service with `metastore = rest`, its URI, warehouse identifier, and an
+authentication provider. The service implements the catalog API and manages its backend.
+
+See [REST Catalog](./rest/) for the architecture, connection guides, and API references.
 
 ## Hive Catalog
 
-By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables
-created in such catalog can also be accessed directly from Hive. Metadata and table files are stored under
-`hdfs:///path/to/warehouse`. In addition, schema is also stored in Hive metastore.
+The Hive catalog registers table metadata in Hive metastore while storing Paimon files in the
+warehouse. Tables can also be accessed through the [Paimon Hive integration](../ecosystem/hive).
 
 ```sql
--- Flink SQL
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    -- 'warehouse' = 'hdfs:///path/to/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
-);
-```
-
-By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned
-table in Hive. Partition push-down will be carried out by filter push-down instead.
-
-If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore,
-please set the table option `metastore.partitioned-table` to true.
-
-## JDBC Catalog
-
-By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite,
-MySQL, postgres, etc.
-
-```sql
--- Flink SQL
-CREATE CATALOG my_jdbc WITH (
-    'type' = 'paimon',
-    'metastore' = 'jdbc',
-    'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
-    'jdbc.user' = '...', 
-    'jdbc.password' = '...', 
-    'catalog-key'='jdbc',
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
 
-The JDBC catalog also persists Paimon views. View metadata is stored in an automatically created
-`paimon_views` table, and table/view names share a single namespace per database (a name cannot be
-used by both a table and a view at the same time). See [Views](./views) for details on the JDBC
-catalog upgrade requirements, single-process locking semantics, and behavior of `DROP DATABASE`
-against view-only databases.
+If `warehouse` is omitted, the catalog uses `hive.metastore.warehouse.dir` from `HiveConf`.
+
+By default, Paimon does not synchronize newly created partitions into Hive metastore. Hive sees
+an unpartitioned table, and partition pruning is handled through filter pushdown. To register
+partitions in Hive metastore, set the table option `metastore.partitioned-table = true`.
+
+## JDBC Catalog
+
+Store catalog metadata in a relational database and table files in the warehouse:
+
+```sql
+CREATE CATALOG my_jdbc WITH (
+    'type' = 'paimon',
+    'metastore' = 'jdbc',
+    'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
+    'jdbc.user' = '<user>',
+    'jdbc.password' = '<password>',
+    'catalog-key' = 'jdbc',
+    'warehouse' = 'hdfs:///path/to/warehouse'
+);
+```
+
+The JDBC catalog also persists views in an automatically created `paimon_views` table. Tables
+and views share one identifier namespace within each database. See
+[JDBC catalog notes](./views#jdbc-catalog-notes) for upgrade permissions, locking scope, and
+`DROP DATABASE` behavior.
+
+## Next Steps
+
+- Define fields with [Data Types](./data-types), and manage [Views](./views) and [Functions](./functions).
+- Inspect table state and catalog metadata through [System Tables](./system-tables).
+- Find backend-specific options in [Configurations](../maintenance/configurations).
