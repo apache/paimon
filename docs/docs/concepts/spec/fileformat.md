@@ -1,5 +1,5 @@
 ---
-title: "FileFormat"
+title: "File Format"
 sidebar_position: 7
 ---
 
@@ -24,246 +24,86 @@ under the License.
 
 # File Format
 
-Currently, supports Parquet, Avro, ORC, CSV, JSON, Lance, Vortex, Mosaic, and Row file formats.
-- Recommended column format is Parquet, which has a high compression rate and fast column projection queries.
-- Recommended row based format is Avro, which has good performance on reading and writing full row (all columns).
-- Recommended format for wide tables is [Mosaic](https://paimon.apache.org/docs/mosaic/), a columnar-bucket hybrid format with column bucketing for parallel I/O.
-- Recommended columnar format for point lookups is [Vortex](https://github.com/spiraldb/vortex), which uses adaptive encoding for excellent point-query performance and efficient vector data compression.
-- Recommended format for row-number based O(1) lookups is Row, which stores data in row-oriented blocks with ZSTD compression and supports fast random access by row number.
-- Recommended testing format is CSV, which has better readability but the worst read-write performance.
-- Recommended format for ML workloads is Lance, which is optimized for vector search and machine learning use cases.
+Paimon stores records in files using the configured `file.format`. Parquet is the default.
+Choose a format supported by your table features and the engines that will read the table.
 
-## PARQUET
+Use this page for format-specific type mappings and configuration. The
+[Data Files](./datafile) specification describes the surrounding partition, bucket, and record
+layout; [Data Types](../data-types) describes Paimon's logical types.
+
+| Format | Reference |
+| --- | --- |
+| [Parquet](#parquet) | Default columnar format and type mappings |
+| [Avro](#avro) | Row-oriented format and type mappings |
+| [ORC](#orc) | Columnar format and type mappings |
+| [CSV](#csv) | Delimited text and type mappings |
+| [Text](#text) | Text records and line delimiters |
+| [JSON](#json) | JSON records and type mappings |
+| [Lance](#lance) | Format integration for ML and vector workloads |
+| [Vortex](#vortex) | Columnar format integration |
+| [Mosaic](#mosaic) | Column bucketing for wide tables |
+| [Row](#row) | Row-oriented blocks with row-number lookup; see the [binary specification](./rowformat) |
+| [BLOB](#blob) | Binary-object storage and [video](#video) handling |
+
+## Parquet
 
 Parquet is the default file format for Paimon.
 
 The following table lists the type mapping from Paimon type to Parquet type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon Type</th>
-        <th class="text-center">Parquet type</th>
-        <th class="text-center">Parquet logical type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td>CHAR / VARCHAR / STRING</td>
-      <td>BINARY</td>
-      <td>UTF8</td>
-    </tr>
-    <tr>
-      <td>BOOLEAN</td>
-      <td>BOOLEAN</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>BINARY / VARBINARY</td>
-      <td>BINARY</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>GEOMETRY(crs)</td>
-      <td>BINARY</td>
-      <td>GEOMETRY(crs)</td>
-    </tr>
-    <tr>
-      <td>GEOGRAPHY(crs, algorithm)</td>
-      <td>BINARY</td>
-      <td>GEOGRAPHY(crs, algorithm)</td>
-    </tr>
-    <tr>
-      <td>DECIMAL(P, S)</td>
-      <td>P <= 9: INT32, P <= 18: INT64, P > 18: FIXED_LEN_BYTE_ARRAY</td>
-      <td>DECIMAL(P, S)</td>
-    </tr>
-    <tr>
-      <td>TINYINT</td>
-      <td>INT32</td>
-      <td>INT_8</td>
-    </tr>
-    <tr>
-      <td>SMALLINT</td>
-      <td>INT32</td>
-      <td>INT_16</td>
-    </tr>
-    <tr>
-      <td>INT</td>
-      <td>INT32</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>BIGINT</td>
-      <td>INT64</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>FLOAT</td>
-      <td>FLOAT</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>DOUBLE</td>
-      <td>DOUBLE</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td>DATE</td>
-      <td>INT32</td>
-      <td>DATE</td>
-    </tr>
-    <tr>
-      <td>TIME</td>
-      <td>INT32</td>
-      <td>TIME_MILLIS</td>
-    </tr>
-    <tr>
-      <td>TIMESTAMP(P)</td>
-      <td>P <= 3: INT64, P <= 6: INT64, P > 6: INT96</td>
-      <td>P <= 3: MILLIS, P <= 6: MICROS, P > 6: NONE</td>
-    </tr>
-    <tr>
-      <td>TIMESTAMP_LOCAL_ZONE(P)</td>
-      <td>P <= 3: INT64, P <= 6: INT64, P > 6: INT96</td>
-      <td>P <= 3: MILLIS, P <= 6: MICROS, P > 6: NONE</td>
-    </tr>
-    <tr>
-      <td>ARRAY</td>
-      <td>3-LEVEL LIST</td>
-      <td>LIST</td>
-    </tr>
-    <tr>
-      <td>MAP</td>
-      <td>3-LEVEL MAP</td>
-      <td>MAP</td>
-    </tr>
-    <tr>
-      <td>MULTISET</td>
-      <td>3-LEVEL MAP</td>
-      <td>MAP</td>
-    </tr>
-    <tr>
-      <td>ROW</td>
-      <td>GROUP</td>
-      <td></td>
-    </tr>
-    </tbody>
-</table>
+| Paimon Type | Parquet type | Parquet logical type |
+| --- | --- | --- |
+| CHAR / VARCHAR / STRING | BINARY | UTF8 |
+| BOOLEAN | BOOLEAN |  |
+| BINARY / VARBINARY | BINARY |  |
+| GEOMETRY(crs) | BINARY | GEOMETRY(crs) |
+| GEOGRAPHY(crs, algorithm) | BINARY | GEOGRAPHY(crs, algorithm) |
+| DECIMAL(P, S) | P <= 9: INT32, P <= 18: INT64, P > 18: FIXED_LEN_BYTE_ARRAY | DECIMAL(P, S) |
+| TINYINT | INT32 | INT_8 |
+| SMALLINT | INT32 | INT_16 |
+| INT | INT32 |  |
+| BIGINT | INT64 |  |
+| FLOAT | FLOAT |  |
+| DOUBLE | DOUBLE |  |
+| DATE | INT32 | DATE |
+| TIME | INT32 | TIME_MILLIS |
+| TIMESTAMP(P) | P <= 3: INT64, P <= 6: INT64, P > 6: INT96 | P <= 3: MILLIS, P <= 6: MICROS, P > 6: NONE |
+| TIMESTAMP_LOCAL_ZONE(P) | P <= 3: INT64, P <= 6: INT64, P > 6: INT96 | P <= 3: MILLIS, P <= 6: MICROS, P > 6: NONE |
+| ARRAY | 3-LEVEL LIST | LIST |
+| MAP | 3-LEVEL MAP | MAP |
+| MULTISET | 3-LEVEL MAP | MAP |
+| ROW | GROUP |  |
 
 Limitations:
 
-1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes#maps).
+1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#maps).
 2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
 3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format.per.level`, and `changelog-file.format` when configured.
 
-## AVRO
+## Avro
 
 The following table lists the type mapping from Paimon type to Avro type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon type</th>
-        <th class="text-left">Avro type</th>
-        <th class="text-left">Avro logical type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td>CHAR / VARCHAR / STRING</td>
-      <td>string</td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>BOOLEAN</code></td>
-      <td><code>boolean</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>BINARY / VARBINARY</code></td>
-      <td><code>bytes</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>DECIMAL</code></td>
-      <td><code>bytes</code></td>
-      <td><code>decimal</code></td>
-    </tr>
-    <tr>
-      <td><code>TINYINT</code></td>
-      <td><code>int</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>SMALLINT</code></td>
-      <td><code>int</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>INT</code></td>
-      <td><code>int</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>BIGINT</code></td>
-      <td><code>long</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>FLOAT</code></td>
-      <td><code>float</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>DOUBLE</code></td>
-      <td><code>double</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>DATE</code></td>
-      <td><code>int</code></td>
-      <td><code>date</code></td>
-    </tr>
-    <tr>
-      <td><code>TIME</code></td>
-      <td><code>int</code></td>
-      <td><code>time-millis</code></td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP</code></td>
-      <td>P <= 3: long, P <= 6: long, P > 6: unsupported</td>
-      <td>P <= 3: timestampMillis, P <= 6: timestampMicros, P > 6: unsupported</td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
-      <td>P <= 3: long, P <= 6: long, P > 6: unsupported</td>
-      <td>P <= 3: localTimestampMillis, P <= 6: localTimestampMicros, P > 6: unsupported</td>
-    </tr>
-    <tr>
-      <td><code>ARRAY</code></td>
-      <td><code>array</code></td>
-      <td></td>
-    </tr>
-    <tr>
-      <td><code>MAP</code></td>
-      <td>string/char/varchar key: <code>map</code><br>
-      other key: <code>array</code> of key-value <code>record</code></td>
-      <td>other key: <code>map</code></td>
-    </tr>
-    <tr>
-      <td><code>MULTISET</code></td>
-      <td>string/char/varchar element: <code>map</code><br>
-      other element: <code>array</code> of element-count <code>record</code></td>
-      <td>other element: <code>map</code></td>
-    </tr>
-    <tr>
-      <td><code>ROW</code></td>
-      <td><code>record</code></td>
-      <td></td>
-    </tr>
-    </tbody>
-</table>
+| Paimon type | Avro type | Avro logical type |
+| --- | --- | --- |
+| CHAR / VARCHAR / STRING | string |  |
+| `BOOLEAN` | `boolean` |  |
+| `BINARY / VARBINARY` | `bytes` |  |
+| `DECIMAL` | `bytes` | `decimal` |
+| `TINYINT` | `int` |  |
+| `SMALLINT` | `int` |  |
+| `INT` | `int` |  |
+| `BIGINT` | `long` |  |
+| `FLOAT` | `float` |  |
+| `DOUBLE` | `double` |  |
+| `DATE` | `int` | `date` |
+| `TIME` | `int` | `time-millis` |
+| `TIMESTAMP` | P <= 3: long, P <= 6: long, P > 6: unsupported | P <= 3: timestampMillis, P <= 6: timestampMicros, P > 6: unsupported |
+| `TIMESTAMP_LOCAL_ZONE` | P <= 3: long, P <= 6: long, P > 6: unsupported | P <= 3: localTimestampMillis, P <= 6: localTimestampMicros, P > 6: unsupported |
+| `ARRAY` | `array` |  |
+| `MAP` | string/char/varchar key: `map`<br> other key: `array` of key-value `record` | other key: `map` |
+| `MULTISET` | string/char/varchar element: `map`<br> other element: `array` of element-count `record` | other element: `map` |
+| `ROW` | `record` |  |
 
 Note: 
 
@@ -276,107 +116,26 @@ You can refer to [Avro Specification](https://avro.apache.org/docs/1.12.0/specif
 
 The following table lists the type mapping from Paimon type to Orc type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon Type</th>
-        <th class="text-center">Orc physical type</th>
-        <th class="text-center">Orc logical type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td>CHAR</td>
-      <td>bytes</td>
-      <td>CHAR</td>
-    </tr>
-    <tr>
-      <td>VARCHAR</td>
-      <td>bytes</td>
-      <td>VARCHAR</td>
-    </tr>
-    <tr>
-      <td>STRING</td>
-      <td>bytes</td>
-      <td>STRING</td>
-    </tr>
-    <tr>
-      <td>BOOLEAN</td>
-      <td>long</td>
-      <td>BOOLEAN</td>
-    </tr>
-    <tr>
-      <td>BYTES</td>
-      <td>bytes</td>
-      <td>BINARY</td>
-    </tr>
-    <tr>
-      <td>DECIMAL</td>
-      <td>decimal</td>
-      <td>DECIMAL</td>
-    </tr>
-    <tr>
-      <td>TINYINT</td>
-      <td>long</td>
-      <td>BYTE</td>
-    </tr>
-    <tr>
-      <td>SMALLINT</td>
-      <td>long</td>
-      <td>SHORT</td>
-    </tr>
-    <tr>
-      <td>INT</td>
-      <td>long</td>
-      <td>INT</td>
-    </tr>
-    <tr>
-      <td>BIGINT</td>
-      <td>long</td>
-      <td>LONG</td>
-    </tr>
-    <tr>
-      <td>FLOAT</td>
-      <td>double</td>
-      <td>FLOAT</td>
-    </tr>
-    <tr>
-      <td>DOUBLE</td>
-      <td>double</td>
-      <td>DOUBLE</td>
-    </tr>
-    <tr>
-      <td>DATE</td>
-      <td>long</td>
-      <td>DATE</td>
-    </tr>
-    <tr>
-      <td>TIMESTAMP</td>
-      <td>timestamp</td>
-      <td>TIMESTAMP</td>
-    </tr>
-    <tr>
-      <td>TIMESTAMP_LOCAL_ZONE</td>
-      <td>timestamp</td>
-      <td>TIMESTAMP_INSTANT</td>
-    </tr>
-    <tr>
-      <td>ARRAY</td>
-      <td>-</td>
-      <td>LIST</td>
-    </tr>
-    <tr>
-      <td>MAP</td>
-      <td>-</td>
-      <td>MAP</td>
-    </tr>
-    <tr>
-      <td>ROW</td>
-      <td>-</td>
-      <td>STRUCT</td>
-    </tr>
-    </tbody>
-</table>
+| Paimon Type | Orc physical type | Orc logical type |
+| --- | --- | --- |
+| CHAR | bytes | CHAR |
+| VARCHAR | bytes | VARCHAR |
+| STRING | bytes | STRING |
+| BOOLEAN | long | BOOLEAN |
+| BYTES | bytes | BINARY |
+| DECIMAL | decimal | DECIMAL |
+| TINYINT | long | BYTE |
+| SMALLINT | long | SHORT |
+| INT | long | INT |
+| BIGINT | long | LONG |
+| FLOAT | double | FLOAT |
+| DOUBLE | double | DOUBLE |
+| DATE | long | DATE |
+| TIMESTAMP | timestamp | TIMESTAMP |
+| TIMESTAMP_LOCAL_ZONE | timestamp | TIMESTAMP_INSTANT |
+| ARRAY | - | LIST |
+| MAP | - | MAP |
+| ROW | - | STRUCT |
 
 Limitations:
 1. ORC has a time zone bias when mapping `TIMESTAMP_LOCAL_ZONE` type, saving the millis value corresponding to the UTC
@@ -388,163 +147,46 @@ Experimental feature, not recommended for production.
 
 Format Options:
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left" style="width: 25%">Option</th>
-        <th class="text-center" style="width: 7%">Default</th>
-        <th class="text-center" style="width: 10%">Type</th>
-        <th class="text-center" style="width: 42%">Description</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>csv.field-delimiter</h5></td>
-      <td style="word-wrap: break-word;"><code>,</code></td>
-      <td>String</td>
-      <td>Field delimiter character (<code>','</code> by default), must be single character. You can use backslash to specify special characters, e.g. <code>'\t'</code> represents the tab character.
-      </td>
-    </tr>
-    <tr>
-      <td><h5>csv.line-delimiter</h5></td>
-      <td style="word-wrap: break-word;"><code>\n</code></td>
-      <td>String</td>
-      <td>The line delimiter for CSV format</td>
-    </tr>
-    <tr>
-      <td><h5>csv.quote-character</h5></td>
-      <td style="word-wrap: break-word;"><code>"</code></td>
-      <td>String</td>
-      <td>Quote character for enclosing field values (<code>"</code> by default).</td>
-    </tr>
-    <tr>
-      <td><h5>csv.escape-character</h5></td>
-      <td style="word-wrap: break-word;">\</td>
-      <td>String</td>
-      <td>The escape character for CSV format.</td>
-    </tr>
-   <tr>
-      <td><h5>csv.include-header</h5></td>
-      <td style="word-wrap: break-word;">false</td>
-      <td>Boolean</td>
-      <td>Whether to include header in CSV files.</td>
-    </tr>
-    <tr>
-      <td><h5>csv.null-literal</h5></td>
-      <td style="word-wrap: break-word;"><code>""</code></td>
-      <td>String</td>
-      <td>Null literal string that is interpreted as a null value (disabled by default).</td>
-    </tr>
-    <tr>
-      <td><h5>csv.mode</h5></td>
-      <td style="word-wrap: break-word;"><code>PERMISSIVE</code></td>
-      <td>String</td>
-      <td>Allows a mode for dealing with corrupt records during reading. Currently supported values are <code>'PERMISSIVE'</code>, <code>'DROPMALFORMED'</code> and <code>'FAILFAST'</code>:
-      <ul>
-      <li>Option <code>'PERMISSIVE'</code> sets malformed fields to null.</li>
-      <li>Option <code>'DROPMALFORMED'</code> ignores the whole corrupted records.</li>
-      <li>Option <code>'FAILFAST'</code> throws an exception when it meets corrupted records.</li>
-      </ul>
-      </td>
-    </tr>
-    </tbody>
-</table>
+| Option | Default | Type | Description |
+| --- | --- | --- | --- |
+| `csv.field-delimiter` | `,` | String | Field delimiter character (`','` by default), must be single character. You can use backslash to specify special characters, e.g. `'\t'` represents the tab character. |
+| `csv.line-delimiter` | `\n` | String | The line delimiter for CSV format |
+| `csv.quote-character` | `"` | String | Quote character for enclosing field values (`"` by default). |
+| `csv.escape-character` | `\` | String | The escape character for CSV format. |
+| `csv.include-header` | false | Boolean | Whether to include header in CSV files. |
+| `csv.null-literal` | `""` | String | Null literal string that is interpreted as a null value (disabled by default). |
+| `csv.mode` | `PERMISSIVE` | String | Allows a mode for dealing with corrupt records during reading. Currently supported values are `'PERMISSIVE'`, `'DROPMALFORMED'` and `'FAILFAST'`: <ul> <li>Option `'PERMISSIVE'` sets malformed fields to null.</li> <li>Option `'DROPMALFORMED'` ignores the whole corrupted records.</li> <li>Option `'FAILFAST'` throws an exception when it meets corrupted records.</li> </ul> |
 
 Paimon CSV format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate CSV string.
 
 The following table lists the type mapping from Paimon type to CSV type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon type</th>
-        <th class="text-left">CSV type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>CHAR / VARCHAR / STRING</code></td>
-      <td><code>string</code></td>
-    </tr>
-    <tr>
-      <td><code>BOOLEAN</code></td>
-      <td><code>boolean</code></td>
-    </tr>
-    <tr>
-      <td><code>BINARY / VARBINARY</code></td>
-      <td><code>string with encoding: base64</code></td>
-    </tr>
-    <tr>
-      <td><code>DECIMAL</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>TINYINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>SMALLINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>INT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>BIGINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>FLOAT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>DOUBLE</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>DATE</code></td>
-      <td><code>string with format: date</code></td>
-    </tr>
-    <tr>
-      <td><code>TIME</code></td>
-      <td><code>string with format: time</code></td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP</code></td>
-      <td><code>string with format: date-time</code></td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
-      <td><code>string with format: date-time</code></td>
-    </tr>
-    </tbody>
-</table>
+| Paimon type | CSV type |
+| --- | --- |
+| `CHAR / VARCHAR / STRING` | `string` |
+| `BOOLEAN` | `boolean` |
+| `BINARY / VARBINARY` | `string with encoding: base64` |
+| `DECIMAL` | `number` |
+| `TINYINT` | `number` |
+| `SMALLINT` | `number` |
+| `INT` | `number` |
+| `BIGINT` | `number` |
+| `FLOAT` | `number` |
+| `DOUBLE` | `number` |
+| `DATE` | `string with format: date` |
+| `TIME` | `string with format: time` |
+| `TIMESTAMP` | `string with format: date-time` |
+| `TIMESTAMP_LOCAL_ZONE` | `string with format: date-time` |
 
-## TEXT
+## Text
 
 Experimental feature, not recommended for production.
 
 Format Options:
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left" style="width: 25%">Option</th>
-        <th class="text-center" style="width: 7%">Default</th>
-        <th class="text-center" style="width: 10%">Type</th>
-        <th class="text-center" style="width: 42%">Description</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>text.line-delimiter</h5></td>
-      <td style="word-wrap: break-word;"><code>\n</code></td>
-      <td>String</td>
-      <td>The line delimiter for TEXT format</td>
-    </tr>
-    </tbody>
-</table>
+| Option | Default | Type | Description |
+| --- | --- | --- | --- |
+| `text.line-delimiter` | `\n` | String | The line delimiter for TEXT format |
 
 The Paimon text table contains only one field, and it is of string type.
 
@@ -554,222 +196,68 @@ Experimental feature, not recommended for production.
 
 Format Options:
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left" style="width: 25%">Option</th>
-        <th class="text-center" style="width: 7%">Default</th>
-        <th class="text-center" style="width: 10%">Type</th>
-        <th class="text-center" style="width: 42%">Description</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>json.ignore-parse-errors</h5></td>
-      <td style="word-wrap: break-word;">false</td>
-      <td>Boolean</td>
-      <td>Whether to ignore parse errors for JSON format. Skip fields and rows with parse errors instead of failing. Fields are set to null in case of errors.</td>
-    </tr>
-    <tr>
-      <td><h5>json.map-null-key-mode</h5></td>
-      <td style="word-wrap: break-word;"><code>FAIL</code></td>
-      <td>String</td>
-      <td>How to handle map keys that are null. Currently supported values are <code>'FAIL'</code>, <code>'DROP'</code> and <code>'LITERAL'</code>:
-      <ul>
-      <li>Option <code>'FAIL'</code> will throw exception when encountering map with null key.</li>
-      <li>Option <code>'DROP'</code> will drop null key entries for map.</li>
-      <li>Option <code>'LITERAL'</code> will replace null key with string literal. The string literal is defined by <code>json.map-null-key-literal</code> option.</li>
-      </ul>
-      </td>
-    </tr>
-    <tr>
-      <td><h5>json.map-null-key-literal</h5></td>
-      <td style="word-wrap: break-word;"><code>null</code></td>
-      <td>String</td>
-      <td>Literal to use for null map keys when <code>json.map-null-key-mode</code> is LITERAL.</td>
-    </tr>
-    <tr>
-      <td><h5>json.line-delimiter</h5></td>
-      <td style="word-wrap: break-word;"><code>\n</code></td>
-      <td>String</td>
-      <td>The line delimiter for JSON format.</td>
-    </tr>
-    </tbody>
-</table>
+| Option | Default | Type | Description |
+| --- | --- | --- | --- |
+| `json.ignore-parse-errors` | false | Boolean | Whether to ignore parse errors for JSON format. Skip fields and rows with parse errors instead of failing. Fields are set to null in case of errors. |
+| `json.map-null-key-mode` | `FAIL` | String | How to handle map keys that are null. Currently supported values are `'FAIL'`, `'DROP'` and `'LITERAL'`: <ul> <li>Option `'FAIL'` will throw exception when encountering map with null key.</li> <li>Option `'DROP'` will drop null key entries for map.</li> <li>Option `'LITERAL'` will replace null key with string literal. The string literal is defined by `json.map-null-key-literal` option.</li> </ul> |
+| `json.map-null-key-literal` | `null` | String | Literal to use for null map keys when `json.map-null-key-mode` is LITERAL. |
+| `json.line-delimiter` | `\n` | String | The line delimiter for JSON format. |
 
 Paimon JSON format uses [jackson databind API](https://github.com/FasterXML/jackson-databind) to parse and generate JSON string.
 
 The following table lists the type mapping from Paimon type to JSON type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon type</th>
-        <th class="text-left">JSON type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>CHAR / VARCHAR / STRING</code></td>
-      <td><code>string</code></td>
-    </tr>
-    <tr>
-      <td><code>BOOLEAN</code></td>
-      <td><code>boolean</code></td>
-    </tr>
-    <tr>
-      <td><code>BINARY / VARBINARY</code></td>
-      <td><code>string with encoding: base64</code></td>
-    </tr>
-    <tr>
-      <td><code>DECIMAL</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>TINYINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>SMALLINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>INT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>BIGINT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>FLOAT</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>DOUBLE</code></td>
-      <td><code>number</code></td>
-    </tr>
-    <tr>
-      <td><code>DATE</code></td>
-      <td><code>string with format: date</code></td>
-    </tr>
-    <tr>
-      <td><code>TIME</code></td>
-      <td><code>string with format: time</code></td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP</code></td>
-      <td><code>string with format: date-time</code></td>
-    </tr>
-    <tr>
-      <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
-      <td><code>string with format: date-time (with UTC time zone)</code></td>
-    </tr>
-    <tr>
-      <td><code>ARRAY</code></td>
-      <td><code>array</code></td>
-    </tr>
-    <tr>
-      <td><code>MAP</code></td>
-      <td><code>object</code></td>
-    </tr>
-    <tr>
-      <td><code>MULTISET</code></td>
-      <td><code>object</code></td>
-    </tr>
-    <tr>
-      <td><code>ROW</code></td>
-      <td><code>object</code></td>
-    </tr>
-    </tbody>
-</table>
+| Paimon type | JSON type |
+| --- | --- |
+| `CHAR / VARCHAR / STRING` | `string` |
+| `BOOLEAN` | `boolean` |
+| `BINARY / VARBINARY` | `string with encoding: base64` |
+| `DECIMAL` | `number` |
+| `TINYINT` | `number` |
+| `SMALLINT` | `number` |
+| `INT` | `number` |
+| `BIGINT` | `number` |
+| `FLOAT` | `number` |
+| `DOUBLE` | `number` |
+| `DATE` | `string with format: date` |
+| `TIME` | `string with format: time` |
+| `TIMESTAMP` | `string with format: date-time` |
+| `TIMESTAMP_LOCAL_ZONE` | `string with format: date-time (with UTC time zone)` |
+| `ARRAY` | `array` |
+| `MAP` | `object` |
+| `MULTISET` | `object` |
+| `ROW` | `object` |
 
-## LANCE
+## Lance
 
 Lance is a modern columnar data format optimized for machine learning and vector search workloads. It provides high-performance read and write operations with native support for Apache Arrow.
 
 The following table lists the type mapping from Paimon type to Lance (Arrow) type.
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left">Paimon Type</th>
-        <th class="text-center">Lance (Arrow) type</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td>CHAR / VARCHAR / STRING</td>
-      <td>UTF8</td>
-    </tr>
-    <tr>
-      <td>BOOLEAN</td>
-      <td>BOOL</td>
-    </tr>
-    <tr>
-      <td>BINARY / VARBINARY</td>
-      <td>BINARY</td>
-    </tr>
-    <tr>
-      <td>DECIMAL(P, S)</td>
-      <td>DECIMAL128(P, S)</td>
-    </tr>
-    <tr>
-      <td>TINYINT</td>
-      <td>INT8</td>
-    </tr>
-    <tr>
-      <td>SMALLINT</td>
-      <td>INT16</td>
-    </tr>
-    <tr>
-      <td>INT</td>
-      <td>INT32</td>
-    </tr>
-    <tr>
-      <td>BIGINT</td>
-      <td>INT64</td>
-    </tr>
-    <tr>
-      <td>FLOAT</td>
-      <td>FLOAT</td>
-    </tr>
-    <tr>
-      <td>DOUBLE</td>
-      <td>DOUBLE</td>
-    </tr>
-    <tr>
-      <td>DATE</td>
-      <td>DATE32</td>
-    </tr>
-    <tr>
-      <td>TIME</td>
-      <td>TIME32 / TIME64</td>
-    </tr>
-    <tr>
-      <td>TIMESTAMP(P)</td>
-      <td>TIMESTAMP (unit based on precision)</td>
-    </tr>
-    <tr>
-      <td>ARRAY</td>
-      <td>LIST</td>
-    </tr>
-    <tr>
-      <td>MULTISET</td>
-      <td>LIST</td>
-    </tr>
-    <tr>
-      <td>ROW</td>
-      <td>STRUCT</td>
-    </tr>
-    </tbody>
-</table>
+| Paimon Type | Lance (Arrow) type |
+| --- | --- |
+| CHAR / VARCHAR / STRING | UTF8 |
+| BOOLEAN | BOOL |
+| BINARY / VARBINARY | BINARY |
+| DECIMAL(P, S) | DECIMAL128(P, S) |
+| TINYINT | INT8 |
+| SMALLINT | INT16 |
+| INT | INT32 |
+| BIGINT | INT64 |
+| FLOAT | FLOAT |
+| DOUBLE | DOUBLE |
+| DATE | DATE32 |
+| TIME | TIME32 / TIME64 |
+| TIMESTAMP(P) | TIMESTAMP (unit based on precision) |
+| ARRAY | LIST |
+| MULTISET | LIST |
+| ROW | STRUCT |
 
 Limitations:
 1. Lance file format does not support `MAP` type.
 2. Lance file format does not support `TIMESTAMP_LOCAL_ZONE` type.
 
-## VORTEX
+## Vortex
 
 [Vortex](https://github.com/spiraldb/vortex) is a columnar file format that uses adaptive, data-dependent encodings to achieve high compression ratios while maintaining fast scan performance. It supports native predicate pushdown and efficient column projection.
 
@@ -781,7 +269,7 @@ Key features:
 Limitations:
 1. Vortex does not support `MAP` or `MULTISET` types.
 
-## MOSAIC
+## Mosaic
 
 [Mosaic](https://paimon.apache.org/docs/mosaic/) is a columnar-bucket hybrid format optimized for wide tables. It groups columns into buckets and compresses each bucket independently with ZSTD, enabling efficient column projection that only reads the buckets containing requested columns.
 
@@ -793,49 +281,29 @@ Key features:
 
 Format Options:
 
-<table class="table table-bordered">
-    <thead>
-      <tr>
-        <th class="text-left" style="width: 25%">Option</th>
-        <th class="text-center" style="width: 7%">Default</th>
-        <th class="text-center" style="width: 10%">Type</th>
-        <th class="text-center" style="width: 42%">Description</th>
-      </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>mosaic.num-buckets</h5></td>
-      <td style="word-wrap: break-word;">auto</td>
-      <td>Integer</td>
-      <td>Number of column buckets for parallel I/O. When set to 0 or not specified, the format auto-determines the bucket count.</td>
-    </tr>
-    <tr>
-      <td><h5>mosaic.stats-columns</h5></td>
-      <td style="word-wrap: break-word;">(empty)</td>
-      <td>String</td>
-      <td>Comma-separated column names to collect min/max statistics for filter pushdown. Empty means no statistics are collected.</td>
-    </tr>
-    </tbody>
-</table>
+| Option | Default | Type | Description |
+| --- | --- | --- | --- |
+| `mosaic.num-buckets` | auto | Integer | Number of column buckets for parallel I/O. When set to 0 or not specified, the format auto-determines the bucket count. |
+| `mosaic.stats-columns` | (empty) | String | Comma-separated column names to collect min/max statistics for filter pushdown. Empty means no statistics are collected. |
 
 Limitations:
 1. Mosaic does not support complex types: ARRAY, MAP, MULTISET, ROW, VARIANT, BLOB, VECTOR.
 
 For more details, see the [Mosaic documentation](https://paimon.apache.org/docs/mosaic/).
 
-## ROW
+## Row
 
-The Row format is a row-oriented storage format designed for O(1) random access by row number. Data is organized in blocks with ZSTD Level 1 compression. Each block contains complete rows serialized in a compact binary format with an offset array for direct row positioning.
+The Row format stores complete rows in independently compressed ZSTD blocks. Each decompressed
+block contains a row-offset array for direct positioning. The compression level defaults to `1`
+and is configured with `file.compression.zstd-level`.
 
-Key features:
-- **O(1) Row Lookup**: Block index + in-block offset array enables direct access to any row by its global row number
-- **Block-level ZSTD Compression**: Each block is independently compressed for good compression ratio with fast decompression
-- **Compact Serialization**: Rows are serialized with a null bitmap followed by field values in sequence, minimizing overhead
-- **Selection Pushdown**: Supports RoaringBitmap-based row selection, skipping entire blocks that contain no selected rows
+- **Row positioning:** locating a row within a decompressed block is O(1); selecting and loading
+  its block adds index, I/O, and decompression work.
+- **Compact encoding:** a null bitmap precedes sequentially encoded field values.
+- **Row selection:** the reader selects blocks and rows from requested row positions, avoiding
+  decompression of unselected blocks. Vectored I/O can still read intervening bytes.
 
-The Row format supports all Paimon data types: BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE, CHAR, VARCHAR, BINARY, VARBINARY, DECIMAL, DATE, TIME, TIMESTAMP, TIMESTAMP_LOCAL_ZONE, VARIANT, ARRAY, MAP, ROW.
-
-For detailed file layout and binary format specification, see [Row Format](./rowformat).
+For field encodings, projection behavior, and configuration, see [Row Format](./rowformat).
 
 ## BLOB
 

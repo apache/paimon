@@ -11,24 +11,36 @@ const sidebars = {
       "id": "concepts/index"
     },
     "items": [
-      "concepts/basic-concepts",
-      "concepts/concurrency-control",
-      "concepts/catalog",
-      "concepts/system-tables",
-      "concepts/data-types",
-      "concepts/functions",
-      "concepts/views",
       {
         type: "category",
-        "label": "RESTCatalog",
-        "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "concepts/rest/index"
-        },
+        "label": "Core Concepts",
+        "collapsed": false,
         "items": [
-          "concepts/rest/bear",
-          "concepts/rest/dlf",
+          "concepts/basic-concepts",
+          "concepts/concurrency-control"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Catalog & Metadata",
+        "items": [
+          "concepts/catalog",
+          "concepts/data-types",
+          "concepts/views",
+          "concepts/functions",
+          "concepts/system-tables"
+        ]
+      },
+      {
+        type: "category",
+        "label": "REST Catalog",
+        "link": {type: "doc", "id": "concepts/rest/index"},
+        "items": [
+          {
+            type: "category",
+            "label": "Authentication",
+            "items": ["concepts/rest/bear", "concepts/rest/dlf"]
+          },
           "concepts/rest/tables",
           "concepts/rest/pvfs",
           "concepts/rest/rest-api",
@@ -37,21 +49,32 @@ const sidebars = {
       },
       {
         type: "category",
-        "label": "Specification",
-        "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "concepts/spec/index"
-        },
+        "label": "Storage Specification",
+        "link": {type: "doc", "id": "concepts/spec/index"},
         "items": [
-          "concepts/spec/schema",
-          "concepts/spec/snapshot",
-          "concepts/spec/manifest",
-          "concepts/spec/datafile",
-          "concepts/spec/fileformat",
-          "concepts/spec/rowformat",
-          "concepts/spec/tableindex",
-          "concepts/spec/fileindex"
+          {
+            type: "category",
+            "label": "Metadata",
+            "items": [
+              "concepts/spec/schema",
+              "concepts/spec/snapshot",
+              "concepts/spec/manifest"
+            ]
+          },
+          {
+            type: "category",
+            "label": "Data Files & Formats",
+            "items": [
+              "concepts/spec/datafile",
+              "concepts/spec/fileformat",
+              "concepts/spec/rowformat"
+            ]
+          },
+          {
+            type: "category",
+            "label": "Indexes",
+            "items": ["concepts/spec/tableindex", "concepts/spec/fileindex"]
+          }
         ]
       }
     ]

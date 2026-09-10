@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 604" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">File conflict: stale replacements are rejected</title>
+<desc id="desc">Example: two compactors independently replace the same live input files.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1040" height="604" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">File conflict: stale replacements are rejected</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Example: two compactors independently replace the same live input files.</text>
+<rect x="276" y="108" width="488" height="88" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="294" y="139" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Snapshot N: files A and B are live</text>
+<text x="294" y="168" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Both compactors select the same inputs</text>
+<path d="M 376 196 V 222 H 254 V 250" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 664 196 V 222 H 786 V 250" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="250" width="445" height="92" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="281" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Compactor 1: A + B → C</text>
+<text x="50" y="310" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Proposes DELETE A, B and ADD C</text>
+<rect x="563" y="250" width="445" height="92" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="581" y="281" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Compactor 2: A + B → D</text>
+<text x="581" y="310" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Proposes DELETE A, B and ADD D</text>
+<path d="M 254 342 V 392" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 786 342 V 392" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="392" width="445" height="94" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="50" y="423" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Commit succeeds</text>
+<text x="50" y="452" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Latest snapshot references C</text>
+<rect x="563" y="392" width="445" height="94" rx="10" fill="#fff0ee" stroke="#ad3b3b" stroke-width="1.5"/>
+<text x="581" y="423" font-size="21" font-weight="700" text-anchor="start" fill="#ad3b3b">Validation rejects the commit</text>
+<text x="581" y="452" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A and B are no longer live</text>
+<path d="M 477 438 H 563" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="526" width="976" height="50" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="520" y="558" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">Recover or recompute from the latest state; retrying the stale replacement is insufficient.</text>
+</g>
+</svg>
