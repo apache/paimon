@@ -146,12 +146,6 @@ public class ZIndexer implements Serializable {
     /** Type Visitor to generate function map from row column to z-index. */
     public static class TypeVisitor implements DataTypeVisitor<ZProcessFunction>, Serializable {
 
-        // Clamp bounds for the unscaled value of a non-compact decimal: clamping keeps the
-        // ordering non-decreasing where narrowing to a long would wrap. The lower bound stops
-        // one above Long.MIN_VALUE, whose z-value is the all-zero null sentinel.
-        private static final BigInteger MIN_UNSCALED = BigInteger.valueOf(Long.MIN_VALUE + 1);
-        private static final BigInteger MAX_UNSCALED = BigInteger.valueOf(Long.MAX_VALUE);
-
         private final int fieldIndex;
         private final int varTypeSize;
 
@@ -246,23 +240,28 @@ public class ZIndexer implements Serializable {
         public ZProcessFunction visit(DecimalType decimalType) {
             final InternalRow.FieldGetter fieldGetter =
                     InternalRow.createFieldGetter(decimalType, fieldIndex);
+            // An unscaled value of a DECIMAL(p, s) is up to p digits wide, past what a long holds
+            // for p > 18. Right-shift it into the signed-long range by a per-column amount before
+            // the long transform: an arithmetic shift by a fixed width is a monotonic projection
+            // that keeps the high-order bits, so separated values keep distinct z-keys instead of
+            // saturating to one bound the way clamping did. The widest magnitude for the column is
+            // below 10^p, so shifting off (bitLength(10^p) - 63) bits leaves at most 63, which fits
+            // a long without reaching Long.MIN_VALUE (whose z-value is the null sentinel). Compact
+            // decimals (p <= 18) always fit, so the shift is 0.
+            final int unscaledShift =
+                    Math.max(0, BigInteger.TEN.pow(decimalType.getPrecision()).bitLength() - 63);
             return (row, reuse) -> {
                 Object o = fieldGetter.getFieldOrNull(row);
                 if (o == null) {
                     return NULL_BYTES;
                 }
                 Decimal decimal = (Decimal) o;
-                // toUnscaledBytes is a variable-length two's-complement array, which is not
-                // order-preserving under the unsigned comparison a z-value gets. Map the
-                // unscaled value through the same sign-flipped long transform as BIGINT,
-                // clamped into the long range for the decimals that do not fit it.
                 long unscaled =
                         decimal.isCompact()
-                                ? decimal.toUnscaledLong()
+                                ? decimal.toUnscaledLong() >> unscaledShift
                                 : decimal.toBigDecimal()
                                         .unscaledValue()
-                                        .max(MIN_UNSCALED)
-                                        .min(MAX_UNSCALED)
+                                        .shiftRight(unscaledShift)
                                         .longValue();
                 return ZOrderByteUtils.longToOrderedBytes(unscaled, reuse).array();
             };

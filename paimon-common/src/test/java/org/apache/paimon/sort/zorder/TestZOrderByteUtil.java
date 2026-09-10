@@ -132,16 +132,16 @@ public class TestZOrderByteUtil {
         assertThat(compareUnsigned(zNull, z1)).isLessThan(0);
         assertThat(compareUnsigned(zNull, z2)).isLessThan(0);
 
-        // An unscaled value that does not fit in a long clamps to the top of the range:
-        // 2^63 narrowed to a long would be Long.MIN_VALUE and sink to the bottom instead.
+        // An unscaled value too wide for a long is shifted into range, not narrowed: it stays a
+        // large positive key above the small positives instead of wrapping to Long.MIN_VALUE.
         GenericRow big = new GenericRow(2);
         big.setField(0, Decimal.fromBigDecimal(new BigDecimal("92233720368547758.08"), 20, 2));
         big.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
         byte[] zBig = Arrays.copyOf(indexer.index(big), 16);
         assertThat(compareUnsigned(zBig, z2)).isGreaterThan(0);
 
-        // Clamping stops at Long.MIN_VALUE + 1, because Long.MIN_VALUE itself encodes to the
-        // all-zero null sentinel.
+        // Its negative counterpart shifts to a large negative key: below the small negatives, but
+        // still above the all-zero null sentinel.
         Decimal minUnscaled =
                 Decimal.fromBigDecimal(new BigDecimal("-92233720368547758.08"), 20, 2);
         GenericRow negativeBig = new GenericRow(2);
@@ -150,6 +150,45 @@ public class TestZOrderByteUtil {
         byte[] zNegativeBig = Arrays.copyOf(indexer.index(negativeBig), 16);
         assertThat(compareUnsigned(zNull, zNegativeBig)).isLessThan(0);
         assertThat(compareUnsigned(zNegativeBig, z1)).isLessThan(0);
+    }
+
+    /**
+     * High-precision decimals whose unscaled value exceeds the long range must still cluster:
+     * separated values keep distinct, correctly ordered z-keys rather than saturating to one bound.
+     */
+    @Test
+    public void testZIndexerHighPrecisionDecimalClustering() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new DecimalType(38, 18)),
+                                new DataField(1, "b", new DecimalType(38, 18))));
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        // Unscaled 10^19, 2*10^19 and 9*10^19 all exceed Long.MAX_VALUE; clamping collapsed them
+        // to one key, so the decimal column stopped clustering across its whole ordinary range.
+        byte[] z10 = highPrecisionKey(indexer, "10");
+        byte[] z20 = highPrecisionKey(indexer, "20");
+        byte[] z90 = highPrecisionKey(indexer, "90");
+        assertThat(compareUnsigned(z10, z20)).isLessThan(0);
+        assertThat(compareUnsigned(z20, z90)).isLessThan(0);
+
+        // Negatives past the long range stay ordered among themselves and below the positives.
+        byte[] zNeg90 = highPrecisionKey(indexer, "-90");
+        byte[] zNeg10 = highPrecisionKey(indexer, "-10");
+        assertThat(compareUnsigned(zNeg90, zNeg10)).isLessThan(0);
+        assertThat(compareUnsigned(zNeg10, z10)).isLessThan(0);
+
+        byte[] zNull = Arrays.copyOf(indexer.index(new GenericRow(2)), 16);
+        assertThat(compareUnsigned(zNull, zNeg90)).isLessThan(0);
+    }
+
+    private static byte[] highPrecisionKey(ZIndexer indexer, String value) {
+        GenericRow row = new GenericRow(2);
+        row.setField(0, Decimal.fromBigDecimal(new BigDecimal(value), 38, 18));
+        row.setField(1, Decimal.fromBigDecimal(new BigDecimal("0"), 38, 18));
+        return Arrays.copyOf(indexer.index(row), 16);
     }
 
     private static int compareUnsigned(byte[] left, byte[] right) {
