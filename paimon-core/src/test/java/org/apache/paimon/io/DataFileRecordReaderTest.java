@@ -34,7 +34,6 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -51,43 +50,61 @@ public class DataFileRecordReaderTest {
         assertThat(delegate.readerOwnedColumns.getClass()).isEqualTo(HeapLongVector[].class);
 
         Map<String, Integer> systemFields = new HashMap<>();
-        systemFields.put(SpecialFields.ROW_ID.name(), 0);
-        systemFields.put(SpecialFields.SEQUENCE_NUMBER.name(), 1);
+        systemFields.put(SpecialFields.ROW_ID.name(), 1);
+        systemFields.put(SpecialFields.SEQUENCE_NUMBER.name(), 2);
         DataFileRecordReader reader =
-                new DataFileRecordReader(
-                        new RowType(
-                                Arrays.asList(SpecialFields.ROW_ID, SpecialFields.SEQUENCE_NUMBER)),
+                createRowTrackingReader(
+                        SpecialFields.rowTypeWithRowTracking(RowType.of(DataTypes.BIGINT())),
                         delegate,
-                        false,
-                        false,
-                        new int[] {0, 1},
-                        null,
-                        null,
-                        true,
-                        100L,
-                        7L,
-                        systemFields,
-                        null,
-                        new Path("test"));
+                        new int[] {0, 1, 2},
+                        systemFields);
 
         for (int batchIndex = 0; batchIndex < 3; batchIndex++) {
             FileRecordIterator<InternalRow> iterator = reader.readBatch();
 
             assertThat(iterator).isNotSameAs(delegate.iterator);
             assertThat(iterator).isInstanceOf(VectorizedRowIterator.class);
-            assertThat(delegate.readerOwnedColumns)
-                    .containsExactly(delegate.rowIdVector, delegate.sequenceNumberVector);
+            assertReaderOwnedColumns(delegate);
 
             InternalRow row = iterator.next();
-            assertThat(row.getLong(0)).isEqualTo(100L + batchIndex);
-            assertThat(row.getLong(1)).isEqualTo(7L);
+            assertThat(row.getFieldCount()).isEqualTo(3);
+            assertThat(row.getLong(0)).isEqualTo(42L);
+            assertThat(row.getLong(1)).isEqualTo(100L + batchIndex);
+            assertThat(row.getLong(2)).isEqualTo(7L);
             assertThat(delegate.recycleCount).isEqualTo(batchIndex);
 
             iterator.releaseBatch();
             assertThat(delegate.recycleCount).isEqualTo(batchIndex + 1);
-            assertThat(delegate.readerOwnedColumns)
-                    .containsExactly(delegate.rowIdVector, delegate.sequenceNumberVector);
+            assertReaderOwnedColumns(delegate);
         }
+        reader.close();
+    }
+
+    @Test
+    public void testSingletonRowTrackingFieldAssigned() throws Exception {
+        ReusingColumnarReader delegate = new ReusingColumnarReader();
+        DataFileRecordReader reader =
+                createRowTrackingReader(
+                        SpecialFields.rowTypeWithRowId(RowType.of(DataTypes.BIGINT())),
+                        delegate,
+                        new int[] {0, 1},
+                        Collections.singletonMap(SpecialFields.ROW_ID.name(), 1));
+
+        FileRecordIterator<InternalRow> iterator = reader.readBatch();
+
+        assertThat(iterator).isNotSameAs(delegate.iterator);
+        assertThat(iterator).isInstanceOf(VectorizedRowIterator.class);
+        assertReaderOwnedColumns(delegate);
+
+        InternalRow row = iterator.next();
+        assertThat(row.getFieldCount()).isEqualTo(2);
+        assertThat(row.getLong(0)).isEqualTo(42L);
+        assertThat(row.getLong(1)).isEqualTo(100L);
+        assertThat(delegate.recycleCount).isZero();
+
+        iterator.releaseBatch();
+        assertThat(delegate.recycleCount).isEqualTo(1);
+        assertReaderOwnedColumns(delegate);
         reader.close();
     }
 
@@ -131,18 +148,48 @@ public class DataFileRecordReaderTest {
         reader.close();
     }
 
+    private static DataFileRecordReader createRowTrackingReader(
+            RowType rowType,
+            ReusingColumnarReader delegate,
+            int[] indexMapping,
+            Map<String, Integer> systemFields) {
+        return new DataFileRecordReader(
+                rowType,
+                delegate,
+                false,
+                false,
+                indexMapping,
+                null,
+                null,
+                true,
+                100L,
+                7L,
+                systemFields,
+                null,
+                new Path("test"));
+    }
+
+    private static void assertReaderOwnedColumns(ReusingColumnarReader delegate) {
+        assertThat(delegate.batch.columns).isSameAs(delegate.readerOwnedColumns);
+        assertThat(delegate.readerOwnedColumns)
+                .containsExactly(
+                        delegate.dataVector, delegate.rowIdVector, delegate.sequenceNumberVector);
+    }
+
     private static class ReusingColumnarReader implements FileRecordReader<InternalRow> {
 
+        private final HeapLongVector dataVector = new HeapLongVector(1);
         private final HeapLongVector rowIdVector = new HeapLongVector(1);
         private final HeapLongVector sequenceNumberVector = new HeapLongVector(1);
         private final ColumnVector[] readerOwnedColumns =
-                new HeapLongVector[] {rowIdVector, sequenceNumberVector};
+                new HeapLongVector[] {dataVector, rowIdVector, sequenceNumberVector};
         private final VectorizedColumnBatch batch = new VectorizedColumnBatch(readerOwnedColumns);
         private final VectorizedRowIterator iterator;
         private int nextPosition;
         private int recycleCount;
 
         private ReusingColumnarReader() {
+            dataVector.setLong(0, 42L);
             rowIdVector.fillWithNulls();
             sequenceNumberVector.fillWithNulls();
             batch.setNumRows(1);

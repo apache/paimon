@@ -95,6 +95,10 @@ public class ColumnarRowIteratorTest {
         assertThat(reordered).isNotSameAs(rowIterator);
         assertThat(reordered.batch().columns).containsExactly(secondVector, firstVector);
 
+        ColumnarRowIterator duplicated = rowIterator.mapping(null, new int[] {0, 0});
+        assertThat(duplicated).isNotSameAs(rowIterator);
+        assertThat(duplicated.batch().columns).containsExactly(firstVector, firstVector);
+
         ColumnarRowIterator projected = rowIterator.mapping(null, new int[] {0});
         assertThat(projected).isNotSameAs(rowIterator);
         assertThat(projected.batch().columns).containsExactly(firstVector);
