@@ -145,10 +145,32 @@ const sidebars = {
       "id": "multimodal-table/index"
     },
     "items": [
-      "multimodal-table/data-evolution",
-      "multimodal-table/variant",
-      "multimodal-table/blob",
-      "multimodal-table/vector",
+      "multimodal-table/quick-start",
+      {
+        type: "category",
+        "label": "Storage Types",
+        "collapsed": true,
+        "items": [
+          "multimodal-table/blob",
+          "multimodal-table/blob-references",
+          "multimodal-table/video",
+          "multimodal-table/vector",
+          "multimodal-table/variant"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Data Evolution",
+        "collapsed": true,
+        "link": {
+          type: "doc",
+          "id": "multimodal-table/data-evolution"
+        },
+        "items": [
+          "multimodal-table/data-evolution-file-layout",
+          "multimodal-table/data-evolution-maintenance"
+        ]
+      },
       {
         type: "category",
         "label": "Global Index",
@@ -158,6 +180,7 @@ const sidebars = {
           "id": "multimodal-table/global-index"
         },
         "items": [
+          "multimodal-table/global-index/manage-indexes",
           "multimodal-table/global-index/btree",
           "multimodal-table/global-index/bitmap",
           "multimodal-table/global-index/multivalue",

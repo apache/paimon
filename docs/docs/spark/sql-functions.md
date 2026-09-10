@@ -126,7 +126,7 @@ FROM image_table;
 Repeated short-term calls for the same descriptor reuse the materialized object and issue a fresh
 URL. Treat the URL as a bearer credential: send it immediately to the consumer and never log or
 persist it. Direct model `image_url` use is supported only for image formats verified with that
-model; PDF is not covered. See [Blob Storage](../multimodal-table/blob#presigned-urls-for-oss-blobs)
+model; PDF is not covered. See [Blob Storage](../multimodal-table/blob-references#presigned-urls-for-oss-blobs)
 for Java and Flink examples, caching behavior, and current limitations.
 
 ## User-defined Function
