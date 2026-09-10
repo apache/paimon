@@ -99,6 +99,22 @@ If you set `write-only` to true, the `Compact Coordinator` and `Compact Worker` 
 The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in Flink by
 Flink action in Paimon and disable all the other compactions by setting `write-only`.
 
+**Parquet RowGroup copy fast path**
+
+For Parquet files, compaction normally decodes every row and re-encodes it into new files. By setting
+`append.compaction.row-group-copy.enabled` to true, compaction instead concatenates the compressed RowGroups of the
+input files directly and only rewrites the file footer, which avoids decode/re-encode entirely and significantly
+reduces compaction cost. The fast path is applied only when all input files are eligible (same schema, same codec,
+no deletion vectors, no row tracking, no file index or bloom filter, not written with Parquet writer v2, etc.);
+otherwise compaction silently falls back to the traditional rewrite path.
+
+Two related options:
+- `append.compaction.row-group-copy.preserve-page-index` (default false): preserve the ColumnIndex/OffsetIndex of
+  input files so that page-level predicate pruning keeps working on compacted files, at the cost of reading and
+  rewriting page indexes during compaction.
+- `append.compaction.row-group-copy.footer-read.parallelism` (default 1): maximum number of footer metadata reads
+  performed in parallel when preparing one compaction batch.
+
 **Streaming Query**
 
 You can stream the Append table and use it like a Message Queue. As with primary key tables, there are two options
