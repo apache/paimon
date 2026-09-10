@@ -246,122 +246,160 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
     }
 
     @Test
-    public void testSplitRetainsMultipleBlobColumnsAndVectorFiles() throws Exception {
-        Schema schema =
+    public void testSplitAtBlobBoundariesRetainsDedicatedFiles() throws Exception {
+        FileStoreTable table = createBlobSegmentsTable();
+        List<DataFileMeta> dedicated = dedicatedFiles(table);
+        assertThat(dedicated).hasSize(3);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        DataEvolutionCompactTask merged = compactSingleTask(table.copy(options));
+        assertThat(merged.compactAfter()).hasSize(1);
+        assertThat(merged.compactAfter().get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 3749));
+
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "10");
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        table = table.copy(options);
+        DataEvolutionCompactTask split = compactSingleTask(table);
+        // Size rolling is checked after 1000 rows. It must wait another 250 rows for the BLOB end.
+        assertThat(split.compactAfter().stream().map(DataFileMeta::nonNullRowIdRange))
+                .containsExactly(new Range(0, 1249), new Range(1250, 2499), new Range(2500, 3749));
+        assertDedicatedFilesContained(table, dedicated);
+        assertBlobValues(table);
+        // Each resulting normal range is entirely protected, so another size-only pass is useless.
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table,
+                                        false,
+                                        false,
+                                        table.snapshotManager().latestSnapshot())
+                                .plan())
+                .isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testNormalSplitRespectsBlobCompactionOutputRange(boolean mergeNormalVersions)
+            throws Exception {
+        FileStoreTable table = createBlobSegmentsTable();
+        List<DataFileMeta> originalBlobs = dedicatedFiles(table);
+        assertThat(originalBlobs).hasSize(3);
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        DataEvolutionCompactTask initialMerge = compactSingleTask(table.copy(options));
+        assertThat(initialMerge.compactAfter()).hasSize(1);
+        DataFileMeta originalNormal = initialMerge.compactAfter().get(0);
+        if (mergeNormalVersions) {
+            writeProjectedRange(table, "id", 0, 3750, 0, true);
+        }
+
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        table = table.copy(options);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(table, true, false, snapshot).plan();
+        if (mergeNormalVersions) {
+            assertThat(tasks)
+                    .extracting(DataEvolutionCompactTask::type)
+                    .containsExactly(
+                            DataEvolutionCompactTask.TaskType.NORMAL,
+                            DataEvolutionCompactTask.TaskType.BLOB);
+        } else {
+            assertThat(tasks)
+                    .extracting(DataEvolutionCompactTask::type)
+                    .containsExactly(DataEvolutionCompactTask.TaskType.BLOB);
+        }
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        List<CommitMessage> messages = new ArrayList<>();
+        List<DataEvolutionCompactTask> restored = new ArrayList<>();
+        for (DataEvolutionCompactTask planned : tasks) {
+            DataEvolutionCompactTask task =
+                    serializer.deserialize(serializer.getVersion(), serializer.serialize(planned));
+            restored.add(task);
+            messages.add(task.doCompact(table, "compact-normal-and-blob"));
+        }
+        if (mergeNormalVersions) {
+            assertThat(restored.get(0).compactBefore()).hasSize(2);
+        }
+        assertThat(restored.get(restored.size() - 1).compactBefore())
+                .containsExactlyInAnyOrderElementsOf(originalBlobs);
+        // The old BLOB boundaries are safe individually, but the planned BLOB merge removes them.
+        // Any normal rewrite must therefore retain the planned BLOB output's complete range.
+        for (DataEvolutionCompactTask task : restored) {
+            assertThat(task.compactAfter()).hasSize(1);
+            assertThat(task.compactAfter().get(0).nonNullRowIdRange())
+                    .isEqualTo(new Range(0, 3749));
+        }
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+        if (!mergeNormalVersions) {
+            assertThat(
+                            table.store().newScan().plan().files().stream()
+                                    .map(ManifestEntry::file)
+                                    .filter(
+                                            file ->
+                                                    !isBlobFile(file.fileName())
+                                                            && !isVectorStoreFile(file.fileName())))
+                    .containsExactly(originalNormal);
+        }
+        List<DataFileMeta> compactedBlobs = dedicatedFiles(table);
+        assertThat(compactedBlobs).hasSize(1).doesNotContainAnyElementsOf(originalBlobs);
+        assertDedicatedFilesContained(table, compactedBlobs);
+        assertBlobValues(table);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testOverlappingDedicatedRangesPreventSplit(boolean sameColumn) throws Exception {
+        catalog.createTable(
+                identifier(),
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column("b1", DataTypes.BLOB())
                         .column("b2", DataTypes.BLOB())
-                        .column("v", DataTypes.VECTOR(2, DataTypes.FLOAT()))
                         .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                         .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 kb")
-                        .option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "128 kb")
-                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json")
-                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
-                        .build();
-        catalog.createTable(identifier(), schema, false);
-        FileStoreTable table = getTableDefault();
-        BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = builder.newWrite();
-                BatchTableCommit commit = builder.newCommit()) {
-            for (int i = 0; i < 2500; i++) {
-                write.write(
-                        GenericRow.of(
-                                i,
-                                new BlobData(new byte[] {(byte) i}),
-                                new BlobData(new byte[] {(byte) (i + 1)}),
-                                BinaryVector.fromPrimitiveArray(new float[] {i, i + 1})));
-            }
-            commit.commit(write.prepareCommit());
-        }
-        catalog.alterTable(
-                identifier(),
-                Collections.singletonList(SchemaChange.renameColumn("v", "renamed_v")),
+                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 mb")
+                        .build(),
                 false);
-        table = getTableDefault();
-        List<DataFileMeta> dedicatedFiles =
-                table.store().newScan().plan().files().stream()
-                        .map(ManifestEntry::file)
-                        .filter(
-                                file ->
-                                        isBlobFile(file.fileName())
-                                                || isVectorStoreFile(file.fileName()))
-                        .collect(Collectors.toList());
-        assertThat(dedicatedFiles).hasSize(3);
+        FileStoreTable table = getTableDefault();
+        writeProjectedRange(table, "id", 0, 3750, 0, false);
+        writeProjectedRange(table, "b1", 0, 1250, 0, true);
+        writeProjectedRange(table, "b1", 1250, 2500, 0, true);
+        String overlappingColumn = sameColumn ? "b1" : "b2";
+        writeProjectedRange(table, overlappingColumn, 0, 2500, 1, true);
+        writeProjectedRange(table, overlappingColumn, 2500, 1250, 1, true);
+        List<DataFileMeta> dedicated = dedicatedFiles(table);
+        assertThat(dedicated).hasSize(4);
+        assertThat(dedicated).allSatisfy(file -> assertThat(file.rowCount()).isLessThan(3750));
         Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "10");
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
-        table = table.copy(options);
-        List<DataEvolutionCompactTask> tasks =
-                new DataEvolutionCompactCoordinator(
-                                table, false, false, table.snapshotManager().latestSnapshot())
-                        .plan();
-        assertThat(tasks).hasSize(1);
-        DataEvolutionCompactTask task = tasks.get(0);
-        assertThat(task.compactBefore()).hasSize(1);
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.commit(Collections.singletonList(task.doCompact(table, "split-dedicated")));
-        }
-        List<Range> normalRanges =
-                task.compactAfter().stream()
-                        .filter(
-                                file ->
-                                        !isBlobFile(file.fileName())
-                                                && !isVectorStoreFile(file.fileName()))
-                        .map(DataFileMeta::nonNullRowIdRange)
-                        .collect(Collectors.toList());
-        assertThat(normalRanges.size()).isGreaterThan(1);
-        assertThat(task.compactAfter())
-                .allSatisfy(
-                        file ->
-                                assertThat(
-                                                isBlobFile(file.fileName())
-                                                        || isVectorStoreFile(file.fileName()))
-                                        .isFalse());
+        FileStoreTable splitTable = table.copy(options);
         assertThat(
-                        table.store().newScan().plan().files().stream()
-                                .map(ManifestEntry::file)
-                                .filter(
-                                        file ->
-                                                isBlobFile(file.fileName())
-                                                        || isVectorStoreFile(file.fileName()))
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrderElementsOf(dedicatedFiles);
+                        new DataEvolutionCompactCoordinator(
+                                        splitTable,
+                                        false,
+                                        false,
+                                        table.snapshotManager().latestSnapshot())
+                                .plan())
+                .isEmpty();
 
-        // Reading the new layout does not depend on the compaction option remaining enabled.
-        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "false");
-        table = table.copy(options);
-        assertDedicatedValues(table);
-
-        // Merging split normal files must also leave spanning dedicated files untouched.
-        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "128 mb");
+        // Ordinary version merging remains useful even though no dedicated-safe split is possible.
+        writeProjectedRange(table, "id", 0, 3750, 0, true);
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        table = table.copy(options);
-        tasks =
-                new DataEvolutionCompactCoordinator(
-                                table, false, false, table.snapshotManager().latestSnapshot())
-                        .plan();
-        assertThat(tasks).hasSize(1);
-        task = tasks.get(0);
-        assertThat(task.compactBefore()).hasSize(normalRanges.size());
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.commit(Collections.singletonList(task.doCompact(table, "merge-split-normal")));
-        }
-        assertThat(task.compactAfter()).hasSize(1);
-        assertThat(
-                        table.store().newScan().plan().files().stream()
-                                .map(ManifestEntry::file)
-                                .filter(
-                                        file ->
-                                                isBlobFile(file.fileName())
-                                                        || isVectorStoreFile(file.fileName()))
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrderElementsOf(dedicatedFiles);
-        assertDedicatedValues(table);
-    }
-
-    private void assertDedicatedValues(FileStoreTable table) throws Exception {
+        DataEvolutionCompactTask merged = compactSingleTask(table.copy(options));
+        assertThat(merged.compactBefore()).hasSize(2);
+        assertThat(merged.compactAfter()).hasSize(1);
+        assertThat(merged.compactAfter().get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 3749));
+        assertDedicatedFilesContained(table, dedicated);
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Integer> ids = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -370,9 +408,80 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                     row -> {
                         int id = row.getInt(0);
                         ids.add(id);
-                        assertThat(row.getBlob(1).toData()).containsExactly((byte) id);
-                        assertThat(row.getBlob(2).toData()).containsExactly((byte) (id + 1));
-                        assertThat(row.getVector(3).toFloatArray()).containsExactly(id, id + 1);
+                        assertThat(row.getBlob(1).toData())
+                                .containsExactly((byte) (id + (sameColumn ? 1 : 0)));
+                        if (sameColumn) {
+                            assertThat(row.isNullAt(2)).isTrue();
+                        } else {
+                            assertThat(row.getBlob(2).toData()).containsExactly((byte) (id + 1));
+                        }
+                    });
+        }
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.range(0, 3750)
+                                .boxed()
+                                .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testFullRangeVectorPreventsSplit() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("vector", DataTypes.VECTOR(2, DataTypes.FLOAT()))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "128 mb")
+                        .option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json")
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "none")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = 0; i < 2500; i++) {
+                write.write(
+                        GenericRow.of(i, BinaryVector.fromPrimitiveArray(new float[] {i, i + 1})));
+            }
+            commit.commit(write.prepareCommit());
+        }
+        catalog.alterTable(
+                identifier(),
+                Collections.singletonList(SchemaChange.renameColumn("vector", "renamed_vector")),
+                false);
+        table = getTableDefault();
+        List<DataFileMeta> dedicated = dedicatedFiles(table);
+        assertThat(dedicated).hasSize(1);
+        assertThat(dedicated.get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 2499));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        assertThat(
+                        new DataEvolutionCompactCoordinator(
+                                        table.copy(options),
+                                        false,
+                                        false,
+                                        table.snapshotManager().latestSnapshot())
+                                .plan())
+                .isEmpty();
+
+        writeProjectedRange(table, "id", 0, 2500, 0, true);
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        DataEvolutionCompactTask merged = compactSingleTask(table.copy(options));
+        assertThat(merged.compactAfter()).hasSize(1);
+        assertDedicatedFilesContained(table, dedicated);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        ids.add(id);
+                        assertThat(row.getVector(1).toFloatArray()).containsExactly(id, id + 1);
                     });
         }
         assertThat(ids)
@@ -380,6 +489,211 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                         java.util.stream.IntStream.range(0, 2500)
                                 .boxed()
                                 .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testCompletedParquetOutputsDoNotRepeatSmallFileCompaction() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payload", DataTypes.STRING())
+                        .column("blob", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.FILE_COMPRESSION.key(), "snappy")
+                        .option(CoreOptions.TARGET_FILE_SIZE.key(), "8 mb")
+                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 mb")
+                        .option(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "4 mb")
+                        .option(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2")
+                        .option(
+                                CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(),
+                                "true")
+                        .option("parquet.enable.dictionary", "false")
+                        .option("parquet.page.size", String.valueOf(16 * 1024 * 1024))
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        char[] payloadChars = new char[10 * 1024];
+        Arrays.fill(payloadChars, 'a');
+        BinaryString payload = BinaryString.fromString(new String(payloadChars));
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int i = batch * 1000; i < (batch + 1) * 1000; i++) {
+                    write.write(GenericRow.of(i, payload, new BlobData(new byte[] {(byte) i})));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        List<DataFileMeta> dedicated = dedicatedFiles(table);
+        assertThat(dedicated).hasSize(3);
+
+        DataEvolutionCompactTask compacted = compactSingleTask(table);
+        assertThat(compacted.compactBefore()).hasSize(3);
+        List<DataFileMeta> outputs = compacted.compactAfter();
+        // Parquet reaches the byte target using an uncompressed page buffer at each BLOB end.
+        // Closing compresses the page, so all three outputs remain small enough to merge again.
+        assertThat(outputs).extracting(DataFileMeta::rowCount).containsExactly(1000L, 1000L, 1000L);
+        assertThat(outputs)
+                .allSatisfy(
+                        file ->
+                                assertThat(file.fileSize())
+                                        .isLessThan(table.coreOptions().splitOpenFileCost()));
+        assertDedicatedFilesContained(table, dedicated);
+
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<DataEvolutionCompactTask> repeated =
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();
+        assertThat(repeated).hasSize(1);
+        assertThat(repeated.get(0).compactBefore()).containsExactlyInAnyOrderElementsOf(outputs);
+        assertThat(
+                        new DataEvolutionCompactCoordinator(table, false, false, snapshot)
+                                .withCompletedNormalFiles(
+                                        outputs.stream()
+                                                .map(DataFileMeta::fileName)
+                                                .collect(Collectors.toSet()))
+                                .plan())
+                .isEmpty();
+
+        List<Integer> ids = new ArrayList<>();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        ids.add(id);
+                        assertThat(row.getString(1)).isEqualTo(payload);
+                        assertThat(row.getBlob(2).toData()).containsExactly((byte) id);
+                    });
+        }
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.range(0, 3000)
+                                .boxed()
+                                .collect(Collectors.toList()));
+    }
+
+    private FileStoreTable createBlobSegmentsTable() throws Exception {
+        catalog.createTable(
+                identifier(),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("blob", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 mb")
+                        .build(),
+                false);
+        FileStoreTable table = getTableDefault();
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int i = batch * 1250; i < (batch + 1) * 1250; i++) {
+                    write.write(GenericRow.of(i, new BlobData(new byte[] {(byte) i})));
+                }
+                commit.commit(write.prepareCommit());
+            }
+        }
+        return table;
+    }
+
+    private void assertBlobValues(FileStoreTable table) throws Exception {
+        List<Integer> ids = new ArrayList<>();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        ids.add(id);
+                        assertThat(row.getBlob(1).toData()).containsExactly((byte) id);
+                    });
+        }
+        assertThat(ids)
+                .containsExactlyElementsOf(
+                        java.util.stream.IntStream.range(0, 3750)
+                                .boxed()
+                                .collect(Collectors.toList()));
+    }
+
+    private void writeProjectedRange(
+            FileStoreTable table,
+            String column,
+            int from,
+            int count,
+            int valueOffset,
+            boolean existingRows)
+            throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write =
+                        builder.newWrite().withWriteType(table.rowType().project(column));
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = from; i < from + count; i++) {
+                write.write(
+                        GenericRow.of(
+                                "id".equals(column)
+                                        ? i
+                                        : new BlobData(new byte[] {(byte) (i + valueOffset)})));
+            }
+            List<CommitMessage> messages = write.prepareCommit();
+            if (existingRows) {
+                assignFirstRowId(messages, from);
+            }
+            commit.commit(messages);
+        }
+    }
+
+    private DataEvolutionCompactTask compactSingleTask(FileStoreTable table) throws Exception {
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();
+        assertThat(tasks).hasSize(1);
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        DataEvolutionCompactTask task =
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(tasks.get(0)));
+        List<CommitMessage> messages = new ArrayList<>();
+        messages.add(task.doCompact(table, "compact-dedicated-boundaries"));
+        messages.addAll(
+                new DataEvolutionCompactionCommitPreparation(table, snapshot).prepare(messages));
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(messages);
+        }
+        return task;
+    }
+
+    private List<DataFileMeta> dedicatedFiles(FileStoreTable table) {
+        return table.store().newScan().plan().files().stream()
+                .map(ManifestEntry::file)
+                .filter(file -> isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName()))
+                .collect(Collectors.toList());
+    }
+
+    private void assertDedicatedFilesContained(FileStoreTable table, List<DataFileMeta> expected) {
+        assertThat(dedicatedFiles(table)).containsExactlyInAnyOrderElementsOf(expected);
+        List<Range> normalRanges =
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .filter(
+                                file ->
+                                        !isBlobFile(file.fileName())
+                                                && !isVectorStoreFile(file.fileName()))
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        for (DataFileMeta file : expected) {
+            Range dedicated = file.nonNullRowIdRange();
+            assertThat(
+                            normalRanges.stream()
+                                    .anyMatch(
+                                            normal ->
+                                                    normal.from <= dedicated.from
+                                                            && normal.to >= dedicated.to))
+                    .isTrue();
+        }
     }
 
     private void write() throws Exception {

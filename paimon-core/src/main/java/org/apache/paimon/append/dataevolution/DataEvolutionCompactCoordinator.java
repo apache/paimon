@@ -58,7 +58,9 @@ import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Compact coordinator to compact data evolution table. */
 public class DataEvolutionCompactCoordinator {
@@ -171,6 +173,12 @@ public class DataEvolutionCompactCoordinator {
                 CoreOptions.DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS.key());
     }
 
+    /** Prevents this run from repeatedly compacting bins containing only its own normal outputs. */
+    public DataEvolutionCompactCoordinator withCompletedNormalFiles(Set<String> fileNames) {
+        planner.completedNormalFiles = checkNotNull(fileNames);
+        return this;
+    }
+
     public List<DataEvolutionCompactTask> plan() {
         // scan files in snapshot
         List<ManifestEntry> entries = scanner.scan();
@@ -258,6 +266,7 @@ public class DataEvolutionCompactCoordinator {
         private final long compactMinFileNum;
         private final LongFunction<RowType> schemaFetcher;
         @Nullable private final Set<Integer> currentBlobFieldIds;
+        private Set<String> completedNormalFiles = Collections.emptySet();
 
         @VisibleForTesting
         CompactPlanner(
@@ -334,12 +343,10 @@ public class DataEvolutionCompactCoordinator {
                     }
                 }
 
-                if (compactBlob) {
-                    associateDedicatedFiles(blobFiles, treeMap, dataFileToBlobFiles);
-                }
-                if (compactVector) {
-                    associateDedicatedFiles(vectorStoreFiles, treeMap, dataFileToVectorStoreFiles);
-                }
+                // Retained dedicated files constrain normal output boundaries even when their
+                // own compaction is disabled.
+                associateDedicatedFiles(blobFiles, treeMap, dataFileToBlobFiles);
+                associateDedicatedFiles(vectorStoreFiles, treeMap, dataFileToVectorStoreFiles);
 
                 RangeHelper<DataFileMeta> continuousDataRangeHelper =
                         new RangeHelper<>(
@@ -429,12 +436,32 @@ public class DataEvolutionCompactCoordinator {
 
             List<DataFileMeta> dataFiles = compactBin.files();
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            boolean triggerNormalFile =
-                    dataFiles.size() >= compactMinFileNum
-                            || dataFiles.stream().anyMatch(f -> f.fileSize() > largeFileThreshold);
-            if (triggerNormalFile) {
-                tasks.add(new DataEvolutionNormalCompactTask(partition, dataFiles));
+            List<Range> protectedRanges = new ArrayList<>();
+            for (DataFileMeta dataFile : dataFiles) {
+                dataFileToBlobFiles
+                        .getOrDefault(dataFile, Collections.emptyList())
+                        .forEach(file -> protectedRanges.add(file.nonNullRowIdRange()));
+                dataFileToVectorStoreFiles
+                        .getOrDefault(dataFile, Collections.emptyList())
+                        .forEach(file -> protectedRanges.add(file.nonNullRowIdRange()));
             }
+            Range normalRange = checkContiguousRowRange(dataFiles);
+            boolean hasUncompactedFiles =
+                    dataFiles.stream()
+                            .anyMatch(file -> !completedNormalFiles.contains(file.fileName()));
+            boolean triggerNormalFile =
+                    hasUncompactedFiles
+                            && (dataFiles.size() >= compactMinFileNum
+                                    || (canSplit(normalRange, protectedRanges)
+                                            && dataFiles.stream()
+                                                    .anyMatch(
+                                                            f ->
+                                                                    f.fileSize()
+                                                                                    > largeFileThreshold
+                                                                            && !completedNormalFiles
+                                                                                    .contains(
+                                                                                            f
+                                                                                                    .fileName()))));
 
             if (compactBlob) {
                 if (triggerNormalFile) {
@@ -486,7 +513,30 @@ public class DataEvolutionCompactCoordinator {
                     }
                 }
             }
+            if (triggerNormalFile) {
+                // Dedicated compaction in the same batch may combine existing file ranges.
+                // Its outputs must also fit inside a single normal output file.
+                for (DataEvolutionCompactTask task : tasks) {
+                    protectedRanges.add(checkContiguousRowRange(task.compactBefore()));
+                }
+                if (dataFiles.size() >= compactMinFileNum
+                        || canSplit(normalRange, protectedRanges)) {
+                    tasks.add(
+                            0,
+                            new DataEvolutionNormalCompactTask(
+                                    partition, dataFiles, protectedRanges));
+                }
+            }
             return tasks;
+        }
+
+        private boolean canSplit(Range normalRange, List<Range> protectedRanges) {
+            return normalRange.from < normalRange.to
+                    && Range.sortAndMergeOverlap(protectedRanges).stream()
+                            .noneMatch(
+                                    range ->
+                                            range.from <= normalRange.from
+                                                    && range.to >= normalRange.to);
         }
 
         private CompactBin compactBin(List<DataFileMeta> files, long groupWeight) {

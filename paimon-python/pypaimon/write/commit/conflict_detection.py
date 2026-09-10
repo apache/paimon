@@ -270,8 +270,7 @@ class ConflictDetection:
             if conflict is not None:
                 return conflict
 
-        conflict = self.check_row_id_range_conflicts(
-            commit_kind, merged_entries, base_entries, delta_entries)
+        conflict = self.check_row_id_range_conflicts(commit_kind, merged_entries)
         if conflict is not None:
             return conflict
 
@@ -568,8 +567,7 @@ class ConflictDetection:
 
         return None
 
-    def check_row_id_range_conflicts(self, commit_kind, commit_entries,
-                                     base_entries, delta_entries):
+    def check_row_id_range_conflicts(self, commit_kind, commit_entries):
         if not self.data_evolution_enabled:
             return None
         if self._row_id_check_from_snapshot is None and commit_kind != "COMPACT":
@@ -599,7 +597,7 @@ class ConflictDetection:
             if self._is_dedicated_file(entry.file.file_name)
         ]
         conflict = self._check_dedicated_file_row_id_range_conflicts(
-            commit_kind, data_files, dedicated_files, base_entries, delta_entries)
+            data_files, dedicated_files)
         if conflict is not None:
             return conflict
 
@@ -618,33 +616,15 @@ class ConflictDetection:
         return None
 
     def _check_dedicated_file_row_id_range_conflicts(
-            self, commit_kind, data_files, dedicated_files, base_entries, delta_entries):
+            self, data_files, dedicated_files):
         if not dedicated_files:
             return None
 
         data_ranges = self._data_file_row_ranges(data_files)
-        base_ranges = self._data_file_row_ranges([
-            entry for entry in base_entries
-            if entry.file.first_row_id is not None
-            and not self._is_dedicated_file(entry.file.file_name)
-        ])
-        added_files = {entry.identifier() for entry in delta_entries if entry.kind == 0}
 
         for dedicated_file in dedicated_files:
             dedicated_range = dedicated_file.file.row_id_range()
             if any(self._contains(row_range, dedicated_range) for row_range in data_ranges):
-                continue
-
-            if dedicated_file.identifier() not in added_files:
-                # A normal-only compaction retains dedicated files even when their ranges span
-                # multiple output files. Partial scans only expose part of the base coverage.
-                previously_covered = Range.and_([dedicated_range], base_ranges)
-                if previously_covered and all(
-                        not row_range.exclude(data_ranges) for row_range in previously_covered):
-                    continue
-            elif commit_kind == "COMPACT" and not dedicated_range.exclude(data_ranges):
-                # Dedicated compaction may merge across normal-file boundaries, but newly
-                # written DML files still need to fit one range to reject stale writers.
                 continue
 
             intersecting_ranges = [

@@ -30,8 +30,9 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit, Split
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
-from pypaimon.utils.data_evolution_utils import retrieve_anchor_file, split_normal_file_groups
+from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 
 
 def _null_safe_partition_key(partition_values) -> tuple:
@@ -576,9 +577,6 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
                 row_ranges.append(seg.row_range)
             row_ranges.sort(key=lambda r: r.from_)
 
-        # A retained dedicated file can belong to several normal ranges in one chunk.
-        all_files = list({file.file_name: file for file in all_files}.values())
-
         data_deletion_files = self._get_deletion_files_for_split(
             all_files,
             chunk.partition,
@@ -604,20 +602,23 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
     def _split_by_row_id_with_range(
         files: List[DataFileMeta],
     ) -> List[Tuple[Range, List[DataFileMeta]]]:
-        """Group by normal ranges so each chunk uses the correct deletion-vector anchor."""
+        """Group files by overlapping row_id range, returning (range, files)
+        pairs sorted by ``range.from_``.
+
+        Mirrors :meth:`DataEvolutionSplitGenerator._split_by_row_id` but
+        also returns the merged row_id range per group, which the chunk
+        slicer needs to drive row-count accumulation.
+        """
         for f in files:
             if f.row_id_range() is None:
                 raise ValueError(
                     "chunk_shuffle for data evolution tables requires row tracking; "
                     f"file {f.file_name} is missing first_row_id"
                 )
-        groups = split_normal_file_groups(files)
+        groups = RangeHelper(lambda f: f.row_id_range()).merge_overlapping_ranges(files)
         result = []
         for group in groups:
-            normal_files = [f for f in group
-                            if not DataFileMeta.is_blob_file(f.file_name)
-                            and not DataFileMeta.is_vector_file(f.file_name)]
-            ranges = [f.row_id_range() for f in normal_files or group]
+            ranges = [f.row_id_range() for f in group]
             merged = Range(min(r.from_ for r in ranges), max(r.to for r in ranges))
             result.append((merged, group))
         return sorted(result, key=lambda kv: kv[0].from_)

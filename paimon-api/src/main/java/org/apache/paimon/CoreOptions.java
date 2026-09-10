@@ -2641,10 +2641,11 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether data-evolution compaction selects normal data files larger than "
                                     + "data-evolution.compaction.large-file-ratio times target-file-size, "
-                                    + "even below compaction.min.file-num. "
-                                    + "When enabled, normal compaction output rolls at target-file-size "
-                                    + "while preserving row IDs and logical deletions. This option does not "
-                                    + "rewrite associated BLOB or VECTOR files.");
+                                    + "even below compaction.min.file-num when dedicated-file ranges allow splitting. "
+                                    + "Normal output rolls toward target-file-size without cutting through "
+                                    + "any BLOB or VECTOR file range, so output may exceed the target. "
+                                    + "Row IDs and logical deletions are preserved, and associated "
+                                    + "BLOB and VECTOR files are not rewritten by this option.");
 
     public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
             key("data-evolution.compaction.large-file-ratio")

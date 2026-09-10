@@ -172,6 +172,27 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testFileRollingPredicate() throws Exception {
+        AppendOnlyWriter writer =
+                createEmptyWriter(64)
+                        .withFileRollingPredicate(count -> count == 1250 || count == 2300);
+        for (int i = 0; i < 2500; i++) {
+            writer.write(row(i, "value", PART));
+        }
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        List<DataFileMeta> files = increment.newFilesIncrement().newFiles();
+        assertThat(files).extracting(DataFileMeta::rowCount).containsExactly(1250L, 1050L, 200L);
+        assertThat(files)
+                .extracting(DataFileMeta::minSequenceNumber)
+                .containsExactly(0L, 1250L, 2300L);
+        assertThat(files)
+                .extracting(DataFileMeta::maxSequenceNumber)
+                .containsExactly(1249L, 2299L, 2499L);
+    }
+
+    @Test
     public void testBinaryColumnStatsRoundTrip() throws Exception {
         RowType binarySchema =
                 RowType.builder()

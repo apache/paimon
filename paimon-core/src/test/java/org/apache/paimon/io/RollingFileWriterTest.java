@@ -171,6 +171,104 @@ public class RollingFileWriterTest {
         assertThat(files.get(2).rowCount()).isEqualTo(30);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRollingAtSafeBoundaries(boolean bundled) throws IOException {
+        RowDataRollingFileWriter writer =
+                createRowDataWriter(Long.MAX_VALUE, 3)
+                        .withFileRollingPredicate(count -> count == 5 || count == 6 || count == 9);
+        writeRows(writer, 12, bundled);
+        writer.close();
+
+        // Boundary 6 must not roll a fresh file below target; boundary 9 uses the cumulative
+        // count, and close retains the final short file.
+        assertThat(writer.result()).extracting(DataFileMeta::rowCount).containsExactly(5L, 4L, 3L);
+        assertWrittenRows(writer.result(), 12);
+    }
+
+    @Test
+    public void testSizeRollingAtSafeBoundariesBetweenChecks() throws IOException {
+        RowDataRollingFileWriter writer =
+                createRowDataWriter(TARGET_FILE_SIZE, Long.MAX_VALUE)
+                        .withFileRollingPredicate(count -> count == 1250 || count == 2300);
+        writeRows(writer, 2500, false);
+        writer.close();
+
+        // Avro checks size at rows 1000 and 2000. A pending roll must honor the next safe
+        // boundary without waiting for another size check.
+        assertThat(writer.result())
+                .extracting(DataFileMeta::rowCount)
+                .containsExactly(1250L, 1050L, 200L);
+        assertWrittenRows(writer.result(), 2500);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRowDataRollingWithoutPredicate(boolean bundled) throws IOException {
+        RowDataRollingFileWriter writer = createRowDataWriter(Long.MAX_VALUE, 3);
+        writeRows(writer, 12, bundled);
+        writer.close();
+
+        assertThat(writer.result())
+                .extracting(DataFileMeta::rowCount)
+                .containsExactly(bundled ? new Long[] {12L} : new Long[] {3L, 3L, 3L, 3L});
+        assertWrittenRows(writer.result(), 12);
+    }
+
+    private RowDataRollingFileWriter createRowDataWriter(
+            long targetFileSize, long targetFileRowNum) {
+        return new RowDataRollingFileWriter(
+                LocalFileIO.create(),
+                0L,
+                FileFormat.fromIdentifier("avro", new Options()),
+                targetFileSize,
+                SCHEMA,
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-0"),
+                        "avro",
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null),
+                () -> new LongCounter(0),
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                SimpleColStatsCollector.createFullStatsFactories(SCHEMA.getFieldCount()),
+                new FileIndexOptions(),
+                FileSource.APPEND,
+                true,
+                false,
+                null,
+                null,
+                targetFileRowNum);
+    }
+
+    private static void writeRows(RowDataRollingFileWriter writer, int count, boolean bundled)
+            throws IOException {
+        if (bundled) {
+            writer.writeBundle(bundle(count));
+        } else {
+            for (int i = 0; i < count; i++) {
+                writer.write(GenericRow.of(i));
+            }
+        }
+    }
+
+    private void assertWrittenRows(List<DataFileMeta> files, int count) throws IOException {
+        List<Integer> actual = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            actual.addAll(
+                    readIntsFromRowFile(
+                            FileFormat.fromIdentifier("avro", new Options()),
+                            new Path(tempDir + "/bucket-0/" + file.fileName())));
+        }
+        List<Integer> expected = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            expected.add(i);
+        }
+        assertThat(actual).containsExactlyElementsOf(expected);
+    }
+
     private static SingleUseBundleRecords bundle(int rowCount) {
         List<InternalRow> rows = new ArrayList<>();
         for (int i = 0; i < rowCount; i++) {

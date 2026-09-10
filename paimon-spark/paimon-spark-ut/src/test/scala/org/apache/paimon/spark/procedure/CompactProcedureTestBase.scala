@@ -35,6 +35,7 @@ import org.apache.paimon.spark.commands.{DataEvolutionCompactMergeConflictRewrit
 import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
 import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.CommitMessageImpl
 import org.apache.paimon.table.source.{DataSplit, EndOfScanException, IncrementalSplit}
 import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.utils.Range
@@ -1764,6 +1765,56 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: split oversized files once per compact invocation across batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '10')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (1, 'a', 'p0'), (2, 'b', 'p0') AS S(id, value, pt)")
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ * FROM VALUES (3, 'c', 'p1'), (4, 'd', 'p1') AS S(id, value, pt)")
+
+      val table = loadTable("T").copy(
+        Map(
+          "target-file-size" -> "1 b",
+          "data-evolution.compaction.split-large-files" -> "true").asJava)
+      assert(normalDataFiles(table).size == 2)
+      for (_ <- 0 until 2) {
+        val beforeFiles = normalDataFiles(table).map(_.fileName()).toSet
+        val beforeSnapshot = lastSnapshotId(table)
+        val attempts = new AtomicInteger()
+        CompactProcedure.executeDataEvolutionCompaction(
+          table,
+          null,
+          null,
+          null,
+          new JavaSparkContext(spark.sparkContext),
+          spark,
+          Int.box(1),
+          _ => assert(attempts.incrementAndGet() <= 2, "Recompacted this invocation's output")
+        )
+
+        val afterFiles = normalDataFiles(table)
+        assert(attempts.get() == 2)
+        assert(lastSnapshotId(table) == beforeSnapshot + 2)
+        assert(afterFiles.size == 2)
+        assert(afterFiles.forall(file => file.rowCount() == 2 && file.fileSize() > 2))
+        assert(afterFiles.forall(file => !beforeFiles.contains(file.fileName())))
+      }
+      checkAnswer(
+        sql("SELECT id, value, pt FROM T ORDER BY id"),
+        Seq(Row(1, "a", "p0"), Row(2, "b", "p0"), Row(3, "c", "p1"), Row(4, "d", "p1")))
+    }
+  }
+
   test("Paimon Procedure: materialize deletion vectors across planner batches") {
     withTable("T") {
       sql("""
@@ -1969,6 +2020,8 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
       val javaSparkContext = new JavaSparkContext(spark.sparkContext)
       val attempts = new AtomicInteger()
+      val observedCommits = new AtomicInteger()
+      val observedFiles = new util.HashSet[String]()
       val rewriteSnapshotId = new AtomicLong(-1L)
       val mergeFileAfterRewrite = new AtomicReference[DataFileMeta]()
       partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
@@ -2023,7 +2076,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
         javaSparkContext,
         spark,
         configurer,
-        messageRewriter
+        messageRewriter,
+        messages => {
+          observedCommits.incrementAndGet()
+          messages.asScala.foreach {
+            message =>
+              message
+                .asInstanceOf[CommitMessageImpl]
+                .compactIncrement()
+                .compactAfter()
+                .asScala
+                .foreach(file => observedFiles.add(file.fileName()))
+          }
+        }
       )
 
       Assertions.assertThat(attempts.get()).isEqualTo(2)
@@ -2036,6 +2101,10 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             file.fileName() != mergeFile.fileName())
       assert(bridgeFiles.size == 1, bridgeFiles)
       val bridgeFile = bridgeFiles.head
+      assert(observedCommits.get() == 1)
+      assert(observedFiles.size() == 2)
+      assert(observedFiles.contains(bridgeFile.fileName()))
+      assert(!observedFiles.contains(mergeFile.fileName()))
       assert(bridgeFile.maxSequenceNumber() == rewriteSnapshotId.get())
       assert(bridgeFile.maxSequenceNumber() < mergeFile.maxSequenceNumber())
       assert(mergeFile.maxSequenceNumber() < table.latestSnapshot().get().id())

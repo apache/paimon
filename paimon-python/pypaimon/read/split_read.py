@@ -17,7 +17,6 @@
 
 import os
 from abc import ABC, abstractmethod
-from copy import copy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -81,7 +80,7 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.utils.data_evolution_utils import retrieve_anchor_file, split_normal_file_groups
+from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -1158,20 +1157,16 @@ class DataEvolutionSplitRead(SplitRead):
         split_by_row_id = self._split_by_row_id(files)
 
         for need_merge_files in split_by_row_id:
-            group_read = self._read_for_normal_range(need_merge_files)
-            if group_read.row_ranges == []:
-                continue
             deletion_vector = self._read_deletion_vector(need_merge_files)
             if len(need_merge_files) == 1 or not self.read_fields:
                 # No need to merge fields, just create a single file reader
                 suppliers.append(
-                    lambda f=need_merge_files[0], dv=deletion_vector, read=group_read: read._create_file_reader(
-                        f, read._get_final_read_data_fields(), dv)
+                    lambda f=need_merge_files[0], dv=deletion_vector: self._create_file_reader(
+                        f, self._get_final_read_data_fields(), dv)
                 )
             else:
                 suppliers.append(
-                    lambda files=need_merge_files, dv=deletion_vector, read=group_read:
-                    read._create_union_reader(files, dv)
+                    lambda files=need_merge_files, dv=deletion_vector: self._create_union_reader(files, dv)
                 )
 
         merge_reader = ConcatBatchReader(
@@ -1229,10 +1224,7 @@ class DataEvolutionSplitRead(SplitRead):
         if dv.is_empty():
             return reader
 
-        selected_ranges = ([reader_range] if self.row_ranges is None
-                           else Range.and_([reader_range], self.row_ranges))
-        if any(dv_range.from_ > selected.from_ or dv_range.to < selected.to
-               for selected in selected_ranges):
+        if dv_range.from_ > reader_range.from_ or dv_range.to < reader_range.to:
             raise ValueError(
                 f"Deletion vector range {dv_range} should contain reader range {reader_range}."
             )
@@ -1282,7 +1274,7 @@ class DataEvolutionSplitRead(SplitRead):
         return prescan_read._create_raw_reader()
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """Split by normal row ranges, retaining spanning dedicated files in each group."""
+        """Split files by firstRowId for data evolution."""
 
         # Sort files by firstRowId and then by maxSequenceNumber
         def sort_key(file: DataFileMeta) -> tuple:
@@ -1290,39 +1282,41 @@ class DataEvolutionSplitRead(SplitRead):
             is_special = 1 if (DataFileMeta.is_blob_file(file.file_name)
                                or DataFileMeta.is_vector_file(file.file_name)) else 0
             max_seq = file.max_sequence_number
-            return (is_special, first_row_id, -max_seq)
+            return (first_row_id, is_special, -max_seq)
 
-        tracked_files = [file for file in files if file.first_row_id is not None]
-        groups = split_normal_file_groups(tracked_files)
-        for group in groups:
-            normal_ranges = {
-                (file.first_row_id, file.row_count) for file in group
-                if not DataFileMeta.is_blob_file(file.file_name)
-                and not DataFileMeta.is_vector_file(file.file_name)
-            }
-            if len(normal_ranges) > 1:
-                raise ValueError(f"There are overlapping files in the split: {group}")
-            group.sort(key=sort_key)
-        return [[file] for file in files if file.first_row_id is None] + groups
+        sorted_files = sorted(files, key=sort_key)
 
-    def _read_for_normal_range(self, files: List[DataFileMeta]):
-        normal_files = [file for file in files
-                        if not DataFileMeta.is_blob_file(file.file_name)
-                        and not DataFileMeta.is_vector_file(file.file_name)]
-        if not normal_files or normal_files[0].first_row_id is None:
-            return self
-        normal_range = normal_files[0].row_id_range()
-        if all(file.row_id_range().from_ >= normal_range.from_
-               and file.row_id_range().to <= normal_range.to for file in files):
-            return self
+        # Split files by firstRowId
+        split_by_row_id = []
+        last_row_id = -1
+        check_row_id_start = 0
+        current_split = []
 
-        # Suppliers are lazy: keep the clipping range on a separate read instance.
-        group_read = copy(self)
-        group_read.row_ranges = (
-            [normal_range] if self.row_ranges is None
-            else Range.and_([normal_range], self.row_ranges)
-        )
-        return group_read
+        for file in sorted_files:
+            first_row_id = file.first_row_id
+            if first_row_id is None:
+                split_by_row_id.append([file])
+                continue
+
+            if (not DataFileMeta.is_blob_file(file.file_name)
+                    and not DataFileMeta.is_vector_file(file.file_name)
+                    and first_row_id != last_row_id):
+                if current_split:
+                    split_by_row_id.append(current_split)
+                if first_row_id < check_row_id_start:
+                    raise ValueError(
+                        f"There are overlapping files in the split: {files}, "
+                        f"the wrong file is: {file}"
+                    )
+                current_split = []
+                last_row_id = first_row_id
+                check_row_id_start = first_row_id + file.row_count
+            current_split.append(file)
+
+        if current_split:
+            split_by_row_id.append(current_split)
+
+        return split_by_row_id
 
     def _create_union_reader(self, need_merge_files: List[DataFileMeta], deletion_vector=None) -> RecordReader:
         """Create a DataEvolutionFileReader for merging multiple files."""
@@ -1361,10 +1355,9 @@ class DataEvolutionSplitRead(SplitRead):
             if DataFileMeta.is_blob_file(first_file.file_name):
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif DataFileMeta.is_vector_file(first_file.file_name):
-                field_ids = [bunch.field_id, SpecialFields.ROW_ID.id,
-                             SpecialFields.SEQUENCE_NUMBER.id]
+                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
             elif first_file.write_cols:
-                field_ids = self._get_field_ids_from_write_cols(first_file)
+                field_ids = self._get_field_ids_from_write_cols(first_file.write_cols)
             else:
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
@@ -1431,14 +1424,6 @@ class DataEvolutionSplitRead(SplitRead):
                         blob_parallelism=self._blob_parallelism,
                         logical_ranges=[bunch.logical_range()],
                     )
-                elif isinstance(bunch, VectorBunch):
-                    vector_read = copy(self)
-                    suppliers = [
-                        partial(vector_read._create_vector_segment_reader,
-                                file, read_field_names, row_range, deletion_vector)
-                        for row_range, file in bunch.segments()
-                    ]
-                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 elif len(bunch.files()) == 1:
                     suppliers = [lambda r=self._create_file_reader(
                         bunch.files()[0], read_field_names, deletion_vector
@@ -1501,16 +1486,6 @@ class DataEvolutionSplitRead(SplitRead):
             file_size=file.file_size,
         )
 
-    def _create_vector_segment_reader(self, file, read_fields, row_range, deletion_vector):
-        segment_read = copy(self)
-        segment_read.row_ranges = (
-            [row_range] if self.row_ranges is None
-            else Range.and_([row_range], self.row_ranges)
-        )
-        if not segment_read.row_ranges:
-            return EmptyRecordBatchReader()
-        return segment_read._create_file_reader(file, read_fields, deletion_vector)
-
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""
 
@@ -1529,13 +1504,10 @@ class DataEvolutionSplitRead(SplitRead):
                         row_count, row_id_push_down, row_range)
                 blob_bunch_map[field_id].add(file)
             elif DataFileMeta.is_vector_file(file.file_name):
-                for field_id in self._get_field_ids_from_write_cols(file):
-                    if field_id in (SpecialFields.ROW_ID.id, SpecialFields.SEQUENCE_NUMBER.id):
-                        continue
-                    if field_id not in vector_bunch_map:
-                        vector_bunch_map[field_id] = VectorBunch(
-                            row_count, row_id_push_down, row_range, field_id)
-                    vector_bunch_map[field_id].add(file)
+                field_id = self._get_field_id_from_write_cols(file)
+                if field_id not in vector_bunch_map:
+                    vector_bunch_map[field_id] = VectorBunch(row_count, row_id_push_down)
+                vector_bunch_map[field_id].add(file)
             else:
                 fields_files.append(DataBunch(file))
                 row_count = file.row_count
@@ -1551,8 +1523,6 @@ class DataEvolutionSplitRead(SplitRead):
     def _bunch_first_row_id(bunch: FieldBunch) -> int:
         if isinstance(bunch, BlobBunch):
             return bunch.logical_range().from_
-        if isinstance(bunch, VectorBunch):
-            return bunch.segments()[0][0].from_
         return bunch.files()[0].first_row_id
 
     def _get_field_id_from_write_cols(self, file: DataFileMeta) -> int:
@@ -1560,17 +1530,17 @@ class DataEvolutionSplitRead(SplitRead):
         if not file.write_cols or len(file.write_cols) == 0:
             raise ValueError("Blob/vector file must have write columns")
 
-        # write_cols names belong to the file's historical schema.
+        # Find the field by name in the table schema
         field_name = file.write_cols[0]
-        for field in self._resolve_schema(file.schema_id).fields:
+        for field in self.table.fields:
             if field.name == field_name:
                 return field.id
         raise ValueError(f"Field {field_name} not found in table schema")
 
-    def _get_field_ids_from_write_cols(self, file: DataFileMeta) -> List[int]:
+    def _get_field_ids_from_write_cols(self, write_cols: List[str]) -> List[int]:
         field_ids = []
-        for field_name in file.write_cols:
-            for field in self._resolve_schema(file.schema_id).fields:
+        for field_name in write_cols:
+            for field in self.table.fields:
                 if field.name == field_name:
                     field_ids.append(field.id)
         field_ids.append(SpecialFields.ROW_ID.id)

@@ -229,15 +229,13 @@ class TestCheckRowIdRangeConflicts(unittest.TestCase):
 
     def test_reports_dedicated_file_spanning_data_files(self):
         detection = self._make_detection()
-        detection._row_id_check_from_snapshot = 1
         entries = [
             _make_entry("f1", kind=0, first_row_id=0, row_count=2),
             _make_entry("f2", kind=0, first_row_id=2, row_count=2),
             _make_entry("p1.blob", kind=0, first_row_id=0, row_count=4),
         ]
 
-        result = detection.check_row_id_range_conflicts(
-            "APPEND", entries, entries[:2], entries[2:])
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
 
         self.assertIsNotNone(result)
         self.assertIn("dedicated file", str(result))
@@ -253,7 +251,7 @@ class TestCheckRowIdRangeConflicts(unittest.TestCase):
             _make_entry("f2", kind=0, first_row_id=2, row_count=2),
         ]
 
-        result = detection.check_row_id_range_conflicts("COMPACT", entries, entries, [])
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
 
         self.assertIsNone(result)
 
@@ -264,79 +262,9 @@ class TestCheckRowIdRangeConflicts(unittest.TestCase):
             _make_entry("p1.blob", kind=0, first_row_id=1, row_count=2),
         ]
 
-        result = detection.check_row_id_range_conflicts(
-            "COMPACT", entries, entries[:1], entries[1:])
+        result = detection.check_row_id_range_conflicts("COMPACT", entries)
 
         self.assertIsNone(result)
-
-    def test_normal_split_retains_dedicated_file(self):
-        for dedicated_file in ("retained.blob", "retained.vector.json"):
-            with self.subTest(dedicated_file=dedicated_file):
-                base = [
-                    _make_entry("normal", first_row_id=0, row_count=4),
-                    _make_entry(dedicated_file, first_row_id=0, row_count=4),
-                ]
-                delta = [
-                    _make_entry("normal", kind=1, first_row_id=0, row_count=4),
-                    _make_entry("split-1", first_row_id=0, row_count=2),
-                    _make_entry("split-2", first_row_id=2, row_count=2),
-                ]
-                self.assertIsNone(self._make_detection().check_conflicts(
-                    None, base, delta, "COMPACT"))
-
-    def test_normal_compaction_retains_dedicated_file_outside_scanned_range(self):
-        for dedicated_file in ("retained.blob", "retained.vector.json"):
-            with self.subTest(dedicated_file=dedicated_file):
-                base = [
-                    _make_entry("normal", first_row_id=2, row_count=2),
-                    _make_entry(dedicated_file, first_row_id=0, row_count=6),
-                ]
-                delta = [
-                    _make_entry("normal", kind=1, first_row_id=2, row_count=2),
-                    _make_entry("split-1", first_row_id=2, row_count=1),
-                    _make_entry("split-2", first_row_id=3, row_count=1),
-                ]
-                self.assertIsNone(self._make_detection().check_conflicts(
-                    None, base, delta, "COMPACT"))
-
-    def test_normal_compaction_rejects_gap_or_orphan_under_retained_dedicated_file(self):
-        for dedicated_file in ("retained.blob", "retained.vector.json"):
-            for remaining in (
-                    [],
-                    [_make_entry("split-1", first_row_id=0, row_count=1),
-                     _make_entry("split-2", first_row_id=2, row_count=2)]):
-                with self.subTest(dedicated_file=dedicated_file, remaining=remaining):
-                    base = [
-                        _make_entry("normal", first_row_id=0, row_count=4),
-                        _make_entry(dedicated_file, first_row_id=0, row_count=4),
-                    ]
-                    delta = [_make_entry("normal", kind=1, first_row_id=0, row_count=4)] + remaining
-                    result = self._make_detection().check_conflicts(None, base, delta, "COMPACT")
-                    self.assertIsNotNone(result)
-                    self.assertIn("dedicated file", str(result))
-
-    def test_dedicated_compaction_may_span_split_normal_files(self):
-        for dedicated_file in ("compacted.blob", "compacted.vector.json"):
-            with self.subTest(dedicated_file=dedicated_file):
-                base = [
-                    _make_entry("split-1", first_row_id=0, row_count=2),
-                    _make_entry("split-2", first_row_id=2, row_count=2),
-                ]
-                delta = [_make_entry(dedicated_file, first_row_id=0, row_count=4)]
-                self.assertIsNone(self._make_detection().check_conflicts(
-                    None, base, delta, "COMPACT"))
-
-    def test_merge_rejects_stale_file_across_split_normal_ranges(self):
-        for merge_file in ("merge-normal", "merge.blob", "merge.vector.json"):
-            with self.subTest(merge_file=merge_file):
-                detection = self._make_detection()
-                detection._row_id_check_from_snapshot = 1
-                base = [
-                    _make_entry("split-1", first_row_id=0, row_count=2),
-                    _make_entry("split-2", first_row_id=2, row_count=2),
-                ]
-                delta = [_make_entry(merge_file, first_row_id=0, row_count=4)]
-                self.assertIsNotNone(detection.check_conflicts(None, base, delta, "APPEND"))
 
 
 class TestOverwriteConflictDetection(unittest.TestCase):

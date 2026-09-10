@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -35,7 +36,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SetUtils;
 
 import org.slf4j.Logger;
@@ -43,11 +44,15 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.LongPredicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
@@ -62,9 +67,33 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionNormalCompactTask.class);
 
+    private final List<Range> protectedRanges;
+
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
+        this(partition, files, Collections.emptyList());
+    }
+
+    public DataEvolutionNormalCompactTask(
+            BinaryRow partition, List<DataFileMeta> files, List<Range> protectedRanges) {
         super(partition, files);
         checkContiguousRowRange(files);
+        this.protectedRanges =
+                Collections.unmodifiableList(Range.sortAndMergeOverlap(protectedRanges));
+    }
+
+    public List<Range> protectedRanges() {
+        return protectedRanges;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return super.equals(other)
+                && protectedRanges.equals(((DataEvolutionNormalCompactTask) other).protectedRanges);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), protectedRanges);
     }
 
     @Override
@@ -88,6 +117,8 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
         Map<String, String> writeOptions = new HashMap<>(DYNAMIC_WRITE_OPTIONS);
         if (options.dataEvolutionCompactionSplitLargeFiles()) {
+            // Buffer flushes may close files before reaching a safe dedicated-file boundary.
+            writeOptions.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
             writeOptions.put(
                     CoreOptions.TARGET_FILE_SIZE.key(), options.targetFileSize(false) + " b");
         }
@@ -115,7 +146,10 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
         storeWrite.withFileSource(FileSource.COMPACT);
-        RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
+        AppendOnlyWriter writer = (AppendOnlyWriter) storeWrite.createWriter(partition, 0);
+        if (options.dataEvolutionCompactionSplitLargeFiles() && !protectedRanges.isEmpty()) {
+            writer.withFileRollingPredicate(fileRollingPredicate(firstRowId));
+        }
 
         reader.forEachRemaining(
                 row -> {
@@ -162,6 +196,22 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         checkSameRowRange("Normal file", compactBefore, compactAfter);
 
         return commitMessage(compactBefore, compactAfter);
+    }
+
+    private LongPredicate fileRollingPredicate(long firstRowId) {
+        Iterator<Range> ranges = protectedRanges.iterator();
+        return new LongPredicate() {
+            private Range current = ranges.hasNext() ? ranges.next() : null;
+
+            @Override
+            public boolean test(long writtenRows) {
+                long lastRowId = firstRowId + (writtenRows - 1);
+                while (current != null && current.to <= lastRowId) {
+                    current = ranges.hasNext() ? ranges.next() : null;
+                }
+                return current == null || lastRowId < current.from;
+            }
+        };
     }
 
     @Nullable

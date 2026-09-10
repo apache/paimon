@@ -249,7 +249,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return exception;
         }
 
-        exception = checkRowIdRangeConflicts(commitKind, baseEntries, deltaEntries, mergedEntries);
+        exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -264,10 +264,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     private Optional<RuntimeException> checkRowIdRangeConflicts(
-            CommitKind commitKind,
-            List<SimpleFileEntry> baseEntries,
-            List<SimpleFileEntry> deltaEntries,
-            Collection<SimpleFileEntry> mergedEntries) {
+            CommitKind commitKind, Collection<SimpleFileEntry> mergedEntries) {
         if (rowIdCheckFromSnapshot == null && commitKind != CommitKind.COMPACT) {
             return Optional.empty();
         }
@@ -294,8 +291,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 entries.stream()
                         .filter(file -> dedicatedStorageFile(file.fileName()))
                         .collect(Collectors.toList());
-        return checkDedicatedFileRowIdRangeConflicts(
-                commitKind, baseEntries, deltaEntries, dataFiles, dedicatedFiles);
+        return checkDedicatedFileRowIdRangeConflicts(dataFiles, dedicatedFiles);
     }
 
     private Optional<RuntimeException> checkDataFileRowIdRangeConflicts(
@@ -314,51 +310,15 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     private Optional<RuntimeException> checkDedicatedFileRowIdRangeConflicts(
-            CommitKind commitKind,
-            List<SimpleFileEntry> baseEntries,
-            List<SimpleFileEntry> deltaEntries,
-            List<SimpleFileEntry> dataFiles,
-            List<SimpleFileEntry> dedicatedFiles) {
+            List<SimpleFileEntry> dataFiles, List<SimpleFileEntry> dedicatedFiles) {
         if (dedicatedFiles.isEmpty()) {
             return Optional.empty();
         }
 
         RowRangeIndex dataFileRowRangeIndex = rowRangeIndex(dataFiles, false);
-        RowRangeIndex contiguousDataFileRowRangeIndex = rowRangeIndex(dataFiles, true);
-        RowRangeIndex baseDataFileRowRangeIndex =
-                rowRangeIndex(
-                        baseEntries.stream()
-                                .filter(file -> file.firstRowId() != null)
-                                .filter(file -> !dedicatedStorageFile(file.fileName()))
-                                .collect(Collectors.toList()),
-                        false);
-        Set<FileEntry.Identifier> addedFiles =
-                deltaEntries.stream()
-                        .filter(file -> file.kind() == FileKind.ADD)
-                        .map(FileEntry::identifier)
-                        .collect(Collectors.toSet());
         for (SimpleFileEntry dedicatedFile : dedicatedFiles) {
             Range dedicatedRange = dedicatedFile.nonNullRowIdRange();
             if (dataFileRowRangeIndex.contains(dedicatedRange)) {
-                continue;
-            }
-
-            if (!addedFiles.contains(dedicatedFile.identifier())) {
-                // Normal-file compaction can change boundaries without rewriting dedicated files.
-                // A row-range scan may contain only part of an existing dedicated file, so check
-                // that all of its previously visible normal-file coverage remains present.
-                List<Range> previouslyCoveredRanges =
-                        baseDataFileRowRangeIndex.intersectedRanges(
-                                dedicatedRange.from, dedicatedRange.to);
-                if (!previouslyCoveredRanges.isEmpty()
-                        && previouslyCoveredRanges.stream()
-                                .allMatch(contiguousDataFileRowRangeIndex::contains)) {
-                    continue;
-                }
-            } else if (commitKind == CommitKind.COMPACT
-                    && contiguousDataFileRowRangeIndex.contains(dedicatedRange)) {
-                // Dedicated compaction may merge files across the new normal-file boundaries.
-                // New DML files must still fit one range to reject stale MERGE INTO writers.
                 continue;
             }
 

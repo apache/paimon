@@ -40,7 +40,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SerializationUtils;
 
@@ -57,9 +56,7 @@ import java.util.OptionalLong;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
-import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Input splits. Needed by most batch computation engines. */
@@ -191,19 +188,13 @@ public class DataSplit implements Split {
     private long dataEvolutionMergedRowCount() {
         long sum = 0L;
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(dataFiles)) {
-            List<Range> ranges =
-                    group.stream()
-                            .filter(
-                                    f ->
-                                            !isBlobFile(f.fileName())
-                                                    && !isVectorStoreFile(f.fileName()))
-                            .map(DataFileMeta::nonNullRowIdRange)
-                            .collect(Collectors.toList());
-            if (ranges.isEmpty()) {
-                group.stream().map(DataFileMeta::nonNullRowIdRange).forEach(ranges::add);
+        List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(dataFiles);
+        for (List<DataFileMeta> group : ranges) {
+            long maxCount = 0;
+            for (DataFileMeta file : group) {
+                maxCount = Math.max(maxCount, file.rowCount());
             }
-            sum += Range.sortAndMergeOverlap(ranges, false).stream().mapToLong(Range::count).sum();
+            sum += maxCount;
         }
         if (dataDeletionFiles != null) {
             for (DeletionFile deletionFile : dataDeletionFiles) {

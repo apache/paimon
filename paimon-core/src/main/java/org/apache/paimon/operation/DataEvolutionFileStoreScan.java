@@ -223,14 +223,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * a row-disjoint pre-ALTER group), one file is kept as a row-count representative so the reader
      * can emit the right number of NULL-filled rows.
      *
-     * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each normal
-     * row-id range as the anchor file to lookup corresponding Deletion Files. A retained dedicated
-     * file can span several normal ranges after normal-file compaction.
+     * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
+     * anchor file to lookup corresponding Deletion Files.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
             return group;
         }
+        ManifestEntry anchor =
+                deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
@@ -245,27 +246,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 }
             }
         }
-        List<ManifestEntry> normalFiles =
-                group.stream()
-                        .filter(entry -> !isBlobFile(entry.file().fileName()))
-                        .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
-                        .collect(Collectors.toList());
-        RangeHelper<ManifestEntry> rangeHelper =
-                new RangeHelper<>(entry -> entry.file().nonNullRowIdRange());
-        List<List<ManifestEntry>> normalGroups = rangeHelper.mergeOverlappingRanges(normalFiles);
-        Set<ManifestEntry> keptFiles = new HashSet<>(kept);
-        for (List<ManifestEntry> normalGroup : normalGroups) {
-            if (deletionVectorsEnabled) {
-                ManifestEntry anchor = retrieveAnchorFile(normalGroup, ManifestEntry::file);
-                if (anchor != null && keptFiles.add(anchor)) {
-                    kept.add(anchor);
-                }
-            } else if (normalGroups.size() > 1
-                    && normalGroup.stream().noneMatch(keptFiles::contains)) {
-                // Preserve each normal range even when only a spanning dedicated column or a
-                // newly added column is projected. A single representative would lose rows.
-                kept.add(normalGroup.get(0));
-            }
+        if (anchor != null && !kept.contains(anchor)) {
+            kept.add(anchor);
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows.

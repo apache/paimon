@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.append.dataevolution.DataEvolutionDeletionVectorMaterializeCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionRowIdReassigner;
@@ -593,48 +594,76 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         options.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), String.valueOf(bitmap64));
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 mb");
         FileStoreTable table = getTableDefault().copy(options);
-        BatchWriteBuilder builder = table.newBatchWriteBuilder();
-        try (BatchTableWrite write = builder.newWrite();
-                BatchTableCommit commit = builder.newCommit()) {
-            for (int rowId = 0; rowId < 2500; rowId++) {
-                write.write(
-                        GenericRow.of(
-                                rowId,
-                                BinaryString.fromString("name-" + rowId),
-                                BinaryString.fromString("base-" + rowId),
-                                new BlobData(new byte[] {(byte) rowId})));
+        for (int batch = 0; batch < 3; batch++) {
+            BatchWriteBuilder builder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = builder.newWrite();
+                    BatchTableCommit commit = builder.newCommit()) {
+                for (int rowId = batch * 1250; rowId < (batch + 1) * 1250; rowId++) {
+                    write.write(
+                            GenericRow.of(
+                                    rowId,
+                                    BinaryString.fromString("name-" + rowId),
+                                    BinaryString.fromString("base-" + rowId),
+                                    new BlobData(new byte[] {(byte) rowId})));
+                }
+                commit.commit(write.prepareCommit());
             }
-            commit.commit(write.prepareCommit());
         }
-        Range range = new Range(0, 2499);
-        commitDeletionVectors(
-                table, Collections.singletonList(new DvSpec(range, 0, 999, 2000, 2499)));
-        List<String> expected = readRows(table.newReadBuilder());
-        String oldAnchor = anchorFilesByRange(table).get(range);
         List<DataFileMeta> blobs =
                 currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
                         .filter(file -> isBlobFile(file.fileName()))
                         .collect(Collectors.toList());
-        assertThat(blobs).hasSize(1);
+        assertThat(blobs).hasSize(3);
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        compactDataEvolutionTable(table.copy(options), false);
+        Range range = new Range(0, 3749);
+        assertRegularFileRowRanges(
+                currentDataFiles(table, BinaryRow.EMPTY_ROW), Collections.singletonList(range));
+        long[] deletedRowIds = {0, 1249, 1250, 2499, 2500, 3749};
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(range, deletedRowIds)));
+        List<String> expected = readRows(table.newReadBuilder());
+        String oldAnchor = anchorFilesByRange(table).get(range);
+
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "10");
         options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
         table = table.copy(options);
-        compactDataEvolutionTable(table, false);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        List<DataEvolutionCompactTask> tasks =
+                new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();
+        assertThat(tasks).hasSize(1);
+        DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
+        DataEvolutionCompactTask task =
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(tasks.get(0)));
+        commit(table, prepareCompactionMessages(table, snapshot, Collections.singletonList(task)));
 
         List<DataFileMeta> files = currentDataFiles(table, BinaryRow.EMPTY_ROW);
         List<DataFileMeta> normalFiles =
                 files.stream()
                         .filter(file -> !isBlobFile(file.fileName()))
                         .collect(Collectors.toList());
-        assertThat(normalFiles.size()).isGreaterThan(1);
-        assertThat(normalFiles.stream().mapToLong(DataFileMeta::rowCount).sum()).isEqualTo(2500);
+        assertRegularFileRowRanges(
+                files,
+                Arrays.asList(new Range(0, 1249), new Range(1250, 2499), new Range(2500, 3749)));
+        assertThat(normalFiles.stream().mapToLong(DataFileMeta::rowCount).sum()).isEqualTo(3750);
         assertThat(files.stream().filter(file -> isBlobFile(file.fileName())))
                 .containsExactlyInAnyOrderElementsOf(blobs);
+        for (DataFileMeta blob : blobs) {
+            Range blobRange = blob.nonNullRowIdRange();
+            assertThat(
+                            normalFiles.stream()
+                                    .map(DataFileMeta::nonNullRowIdRange)
+                                    .anyMatch(
+                                            normal ->
+                                                    normal.from <= blobRange.from
+                                                            && normal.to >= blobRange.to))
+                    .isTrue();
+        }
         assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expected);
         List<String> expectedAnchors = new ArrayList<>();
         for (DataFileMeta file : normalFiles) {
             Range fileRange = file.nonNullRowIdRange();
-            if (Arrays.stream(new long[] {0, 999, 2000, 2499})
+            if (Arrays.stream(deletedRowIds)
                     .anyMatch(id -> id >= fileRange.from && id <= fileRange.to)) {
                 expectedAnchors.add(file.fileName());
             }
@@ -656,45 +685,13 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
             reader.forEachRemaining(row -> actualBlobs.add(row.getBlob(0).toData()[0]));
         }
         List<Byte> expectedBlobs = new ArrayList<>();
-        for (int rowId = 0; rowId < 2500; rowId++) {
-            if (rowId != 0 && rowId != 999 && rowId != 2000 && rowId != 2499) {
+        for (int rowId = 0; rowId < 3750; rowId++) {
+            final int id = rowId;
+            if (Arrays.stream(deletedRowIds).noneMatch(deleted -> deleted == id)) {
                 expectedBlobs.add((byte) rowId);
             }
         }
         assertThat(actualBlobs).containsExactlyElementsOf(expectedBlobs);
-    }
-
-    @Test
-    public void testNormalCompactRetainsSpanningBlobFile() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        writeBaseRows(table);
-        writeBlobRange(table, 5L, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114);
-        List<DataFileMeta> blobs =
-                currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
-                        .filter(file -> isBlobFile(file.fileName()))
-                        .collect(Collectors.toList());
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
-        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
-        compactDataEvolutionTable(table.copy(options), false);
-
-        assertThat(
-                        currentDataFiles(table, BinaryRow.EMPTY_ROW).stream()
-                                .filter(file -> isBlobFile(file.fileName())))
-                .containsExactlyInAnyOrderElementsOf(blobs);
-        List<String> expectedRows = new ArrayList<>();
-        for (int rowId = 0; rowId < 15; rowId++) {
-            expectedRows.add(
-                    rowId
-                            + "|name-"
-                            + rowId
-                            + "|base-"
-                            + rowId
-                            + "|"
-                            + (rowId < 5 ? rowId : rowId + 100));
-        }
-        assertThat(readRows(table.newReadBuilder())).containsExactlyElementsOf(expectedRows);
     }
 
     @Test

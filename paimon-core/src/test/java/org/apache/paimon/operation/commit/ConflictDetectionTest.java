@@ -38,8 +38,6 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -1363,7 +1361,6 @@ class ConflictDetectionTest {
     @Test
     void testCheckRowIdRangeConflictsReportsDedicatedFileSpanningDataFiles() {
         DataEvolutionConflictDetection detection = createConflictDetection();
-        detection.setRowIdCheckFromSnapshot(1L);
 
         Optional<RuntimeException> exception =
                 detection.checkConflicts(
@@ -1374,7 +1371,7 @@ class ConflictDetectionTest {
                         Collections.singletonList(createFileEntryWithRowId("p1.blob", ADD, 0L, 4L)),
                         Collections.emptyList(),
                         null,
-                        Snapshot.CommitKind.APPEND);
+                        Snapshot.CommitKind.COMPACT);
 
         assertThat(exception).isPresent();
         assertThat(exception.get())
@@ -1384,130 +1381,6 @@ class ConflictDetectionTest {
                 .hasMessageContaining("spans multiple data file ranges")
                 .hasMessageContaining("f1")
                 .hasMessageContaining("f2");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"retained.blob", "retained.vector.json"})
-    void testNormalSplitRetainsDedicatedFileAcrossAdjacentRanges(String dedicatedFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        assertThat(
-                        detection.checkConflicts(
-                                snapshot(1),
-                                Arrays.asList(
-                                        createFileEntryWithRowId("normal", ADD, 0L, 4L),
-                                        createFileEntryWithRowId(dedicatedFile, ADD, 0L, 4L)),
-                                Arrays.asList(
-                                        createFileEntryWithRowId("normal", DELETE, 0L, 4L),
-                                        createFileEntryWithRowId("split-1", ADD, 0L, 2L),
-                                        createFileEntryWithRowId("split-2", ADD, 2L, 2L)),
-                                Collections.emptyList(),
-                                null,
-                                Snapshot.CommitKind.COMPACT))
-                .isEmpty();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"retained.blob", "retained.vector.json"})
-    void testNormalCompactionRetainsDedicatedFileOutsideScannedRange(String dedicatedFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        // A later compaction scans only one of the normal ranges inside the retained file.
-        assertThat(
-                        detection.checkConflicts(
-                                snapshot(1),
-                                Arrays.asList(
-                                        createFileEntryWithRowId("normal", ADD, 2L, 2L),
-                                        createFileEntryWithRowId(dedicatedFile, ADD, 0L, 6L)),
-                                Arrays.asList(
-                                        createFileEntryWithRowId("normal", DELETE, 2L, 2L),
-                                        createFileEntryWithRowId("split-1", ADD, 2L, 1L),
-                                        createFileEntryWithRowId("split-2", ADD, 3L, 1L)),
-                                Collections.emptyList(),
-                                null,
-                                Snapshot.CommitKind.COMPACT))
-                .isEmpty();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"retained.blob", "retained.vector.json"})
-    void testNormalSplitRejectsGapUnderRetainedDedicatedFile(String dedicatedFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        Optional<RuntimeException> exception =
-                detection.checkConflicts(
-                        snapshot(1),
-                        Arrays.asList(
-                                createFileEntryWithRowId("normal", ADD, 0L, 4L),
-                                createFileEntryWithRowId(dedicatedFile, ADD, 0L, 4L)),
-                        Arrays.asList(
-                                createFileEntryWithRowId("normal", DELETE, 0L, 4L),
-                                createFileEntryWithRowId("split-1", ADD, 0L, 1L),
-                                createFileEntryWithRowId("split-2", ADD, 2L, 2L)),
-                        Collections.emptyList(),
-                        null,
-                        Snapshot.CommitKind.COMPACT);
-
-        assertThat(exception).isPresent();
-        assertThat(exception.get()).hasMessageContaining("dedicated file");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"retained.blob", "retained.vector.json"})
-    void testNormalCompactionRejectsOrphanedDedicatedFile(String dedicatedFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        Optional<RuntimeException> exception =
-                detection.checkConflicts(
-                        snapshot(1),
-                        Arrays.asList(
-                                createFileEntryWithRowId("normal", ADD, 0L, 4L),
-                                createFileEntryWithRowId(dedicatedFile, ADD, 0L, 4L)),
-                        Collections.singletonList(
-                                createFileEntryWithRowId("normal", DELETE, 0L, 4L)),
-                        Collections.emptyList(),
-                        null,
-                        Snapshot.CommitKind.COMPACT);
-
-        assertThat(exception).isPresent();
-        assertThat(exception.get()).hasMessageContaining("dedicated file");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"compacted.blob", "compacted.vector.json"})
-    void testDedicatedCompactionMaySpanSplitNormalFiles(String dedicatedFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        assertThat(
-                        detection.checkConflicts(
-                                snapshot(1),
-                                Arrays.asList(
-                                        createFileEntryWithRowId("split-1", ADD, 0L, 2L),
-                                        createFileEntryWithRowId("split-2", ADD, 2L, 2L)),
-                                Collections.singletonList(
-                                        createFileEntryWithRowId(dedicatedFile, ADD, 0L, 4L)),
-                                Collections.emptyList(),
-                                null,
-                                Snapshot.CommitKind.COMPACT))
-                .isEmpty();
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"merge-normal", "merge.blob", "merge.vector.json"})
-    void testMergeRejectsStaleFileAcrossSplitNormalRanges(String mergeFile) {
-        DataEvolutionConflictDetection detection = createConflictDetection();
-
-        Optional<RuntimeException> exception =
-                detection.checkRowIdExistence(
-                        Arrays.asList(
-                                createFileEntryWithRowId("split-1", ADD, 0L, 2L),
-                                createFileEntryWithRowId("split-2", ADD, 2L, 2L)),
-                        Collections.singletonList(createFileEntryWithRowId(mergeFile, ADD, 0L, 4L)),
-                        4L,
-                        Snapshot.CommitKind.APPEND);
-
-        assertThat(exception).isPresent();
-        assertThat(exception.get()).isInstanceOf(RowIdExistenceConflictException.class);
     }
 
     @Test

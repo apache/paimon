@@ -20,9 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.BinaryVector;
-import org.apache.paimon.data.BlobData;
-import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -38,15 +35,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.SimpleStats;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -54,17 +45,12 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.IntFunction;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -175,271 +161,6 @@ class DataEvolutionSplitReadTest {
         assertEquals(2, result.size());
         assertEquals(Arrays.asList(file7, file1, file2, file3), result.get(0));
         assertEquals(Arrays.asList(file4, file5, file6), result.get(1));
-    }
-
-    @Test
-    public void testSplitWithDedicatedFilesSpanningNormalGroups() {
-        DataFileMeta first = createFile("first.parquet", 0, 4, 3);
-        DataFileMeta middle = createFile("middle.parquet", 4, 4, 3);
-        DataFileMeta last = createFile("last.parquet", 8, 4, 3);
-        DataFileMeta blob = createFile("blob.blob", 0, 12, 1);
-        DataFileMeta vector = createFile("vector.vector.json", 0, 12, 1);
-        DataFileMeta vectorUpdate = createFile("update.vector.json", 4, 4, 2);
-
-        List<List<DataFileMeta>> groups =
-                DataEvolutionSplitRead.mergeRangesAndSort(
-                        Arrays.asList(blob, vector, middle, last, first, vectorUpdate));
-
-        assertEquals(
-                Arrays.asList(
-                        Arrays.asList(first, blob, vector),
-                        Arrays.asList(middle, blob, vectorUpdate, vector),
-                        Arrays.asList(last, blob, vector)),
-                groups);
-        // Associations must retain physical file offsets for readers of the second and third group.
-        assertEquals(new Range(0, 11), groups.get(2).get(1).nonNullRowIdRange());
-    }
-
-    @ParameterizedTest
-    @CsvSource({
-        "false,4,false",
-        "true,4,false",
-        "false,12,false",
-        "true,12,false",
-        "false,4,true",
-        "true,4,true",
-        "false,12,true",
-        "true,12,true"
-    })
-    public void testReadSpanningDedicatedFiles(
-            boolean indexed, int normalRowCount, boolean renameBeforeUpdate) throws Exception {
-        LocalFileIO fileIO = new LocalFileIO();
-        Path tablePath = new Path(tempDir.resolve("spanning").toUri());
-        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
-        TableSchema schema =
-                schemaManager.createTable(
-                        Schema.newBuilder()
-                                .column("id", DataTypes.INT())
-                                .column("blob", DataTypes.BLOB())
-                                .column("vector", DataTypes.VECTOR(2, DataTypes.FLOAT()))
-                                .column("vector2", DataTypes.VECTOR(2, DataTypes.FLOAT()))
-                                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                                .build());
-        FileStoreTable table = FileStoreTableFactory.create(fileIO, tablePath, schema);
-        FileStorePathFactory pathFactory = table.store().pathFactory();
-        Path bucketPath = pathFactory.bucketPath(EMPTY_ROW, 0);
-        fileIO.mkdirs(bucketPath);
-        RowType rowType = schema.logicalRowType();
-        List<DataFileMeta> files = new ArrayList<>();
-        for (int from = 0; from < 12; from += normalRowCount) {
-            files.add(
-                    writeProjectedFile(
-                            fileIO,
-                            bucketPath,
-                            "normal-" + from + ".parquet",
-                            "parquet",
-                            rowType.project("id"),
-                            from,
-                            normalRowCount,
-                            3,
-                            GenericRow::of));
-        }
-        files.add(
-                writeProjectedFile(
-                        fileIO,
-                        bucketPath,
-                        "base.blob",
-                        "blob",
-                        rowType.project("blob"),
-                        0,
-                        12,
-                        1,
-                        i -> GenericRow.of(new BlobData(new byte[] {(byte) i}))));
-        files.add(
-                writeProjectedFile(
-                        fileIO,
-                        bucketPath,
-                        "update.blob",
-                        "blob",
-                        rowType.project("blob"),
-                        2,
-                        8,
-                        2,
-                        i ->
-                                GenericRow.of(
-                                        i % 2 == 0
-                                                ? BlobPlaceholder.INSTANCE
-                                                : new BlobData(new byte[] {(byte) (i + 20)}))));
-        files.add(
-                writeProjectedFile(
-                        fileIO,
-                        bucketPath,
-                        "base.vector.json",
-                        "json",
-                        rowType.project("vector", "vector2"),
-                        0,
-                        12,
-                        1,
-                        i ->
-                                GenericRow.of(
-                                        BinaryVector.fromPrimitiveArray(new float[] {i, i + 1}),
-                                        BinaryVector.fromPrimitiveArray(
-                                                new float[] {i + 100, i + 101}))));
-        if (renameBeforeUpdate) {
-            schema =
-                    schemaManager.commitChanges(
-                            SchemaChange.renameColumn("vector", "renamed_vector"));
-        }
-        files.add(
-                writeProjectedFile(
-                        fileIO,
-                        bucketPath,
-                        "update.vector.json",
-                        "json",
-                        schema.logicalRowType()
-                                .project(renameBeforeUpdate ? "renamed_vector" : "vector"),
-                        4,
-                        4,
-                        2,
-                        i ->
-                                GenericRow.of(
-                                        BinaryVector.fromPrimitiveArray(
-                                                new float[] {i + 20, i + 21})),
-                        schema.id()));
-        if (!renameBeforeUpdate) {
-            schema =
-                    schemaManager.commitChanges(
-                            SchemaChange.renameColumn("vector", "renamed_vector"));
-        }
-        RowType allReadType = SpecialFields.rowTypeWithRowId(schema.logicalRowType());
-        DataSplit dataSplit =
-                DataSplit.builder()
-                        .withPartition(EMPTY_ROW)
-                        .withBucket(0)
-                        .withBucketPath(bucketPath.toString())
-                        .withDataFiles(files)
-                        .rawConvertible(false)
-                        .build();
-        for (boolean vectorOnly : new boolean[] {false, true}) {
-            RowType readType =
-                    vectorOnly
-                            ? allReadType.project(
-                                    "renamed_vector", "vector2", SpecialFields.ROW_ID.name())
-                            : allReadType;
-            DataSplit projectedSplit =
-                    vectorOnly
-                            ? dataSplit
-                                    .filterDataFile(
-                                            file ->
-                                                    org.apache.paimon.types.VectorType
-                                                            .isVectorStoreFile(file.fileName()))
-                                    .get()
-                            : dataSplit;
-            Split split =
-                    indexed
-                            ? new IndexedSplit(
-                                    projectedSplit,
-                                    Arrays.asList(
-                                            new Range(1, 2), new Range(5, 5), new Range(8, 9)),
-                                    null)
-                            : projectedSplit;
-            DataEvolutionSplitRead splitRead =
-                    new DataEvolutionSplitRead(
-                            fileIO,
-                            schemaManager,
-                            schema,
-                            readType,
-                            table.coreOptions(),
-                            pathFactory);
-            List<Integer> ids = new ArrayList<>();
-            try (RecordReader<InternalRow> reader = splitRead.createReader(split)) {
-                reader.forEachRemaining(
-                        row -> {
-                            int id = (int) row.getLong(vectorOnly ? 2 : 4);
-                            ids.add(id);
-                            if (!vectorOnly) {
-                                assertEquals(id, row.getInt(0));
-                                int expectedBlob = id >= 2 && id < 10 && id % 2 != 0 ? id + 20 : id;
-                                assertEquals((byte) expectedBlob, row.getBlob(1).toData()[0]);
-                            }
-                            int expectedVector = id >= 4 && id < 8 ? id + 20 : id;
-                            org.assertj.core.api.Assertions.assertThat(
-                                            row.getVector(vectorOnly ? 0 : 2).toFloatArray())
-                                    .containsExactly(expectedVector, expectedVector + 1);
-                            org.assertj.core.api.Assertions.assertThat(
-                                            row.getVector(vectorOnly ? 1 : 3).toFloatArray())
-                                    .containsExactly(id + 100, id + 101);
-                        });
-            }
-            assertEquals(
-                    indexed
-                            ? Arrays.asList(1, 2, 5, 8, 9)
-                            : IntStream.range(0, 12).boxed().collect(Collectors.toList()),
-                    ids);
-        }
-    }
-
-    private static DataFileMeta writeProjectedFile(
-            LocalFileIO fileIO,
-            Path bucketPath,
-            String name,
-            String formatIdentifier,
-            RowType writeType,
-            int firstRowId,
-            int rowCount,
-            int sequence,
-            IntFunction<GenericRow> rowFactory)
-            throws IOException {
-        return writeProjectedFile(
-                fileIO,
-                bucketPath,
-                name,
-                formatIdentifier,
-                writeType,
-                firstRowId,
-                rowCount,
-                sequence,
-                rowFactory,
-                0);
-    }
-
-    private static DataFileMeta writeProjectedFile(
-            LocalFileIO fileIO,
-            Path bucketPath,
-            String name,
-            String formatIdentifier,
-            RowType writeType,
-            int firstRowId,
-            int rowCount,
-            int sequence,
-            IntFunction<GenericRow> rowFactory,
-            long schemaId)
-            throws IOException {
-        Path filePath = new Path(bucketPath, name);
-        FileFormat format = FileFormat.fromIdentifier(formatIdentifier, new Options());
-        try (PositionOutputStream output = fileIO.newOutputStream(filePath, false)) {
-            FormatWriter writer = format.createWriterFactory(writeType).create(output, "none");
-            for (int i = firstRowId; i < firstRowId + rowCount; i++) {
-                writer.addElement(rowFactory.apply(i));
-            }
-            writer.close();
-        }
-        return DataFileMeta.forAppend(
-                name,
-                fileIO.getFileStatus(filePath).getLen(),
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                sequence,
-                sequence,
-                schemaId,
-                Collections.emptyList(),
-                null,
-                FileSource.APPEND,
-                null,
-                null,
-                (long) firstRowId,
-                writeType.getFieldNames());
     }
 
     @Test

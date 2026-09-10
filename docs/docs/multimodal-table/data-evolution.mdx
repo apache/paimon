@@ -626,7 +626,8 @@ The example uses Spark SQL and selects normal files strictly larger than 384 MB.
 `data-evolution.compaction.large-file-ratio` controls the multiplier relative to
 `target-file-size`; it defaults to `2.0` and accepts finite values of at least `1.0`,
 including fractional values such as `1.5`. Files strictly exceeding the threshold
-qualify for compaction even if the file count is below `compaction.min.file-num`.
+qualify for compaction below `compaction.min.file-num` when their dedicated-file
+ranges allow splitting.
 Changing the ratio does not change the output target size. Compaction includes all
 column updates for the same row-ID range and rolls normal output files near
 `target-file-size`. Actual sizes depend on compression and the writer's size-check
@@ -639,9 +640,12 @@ and their sizes do not trigger splitting. Separate dedicated-file compaction opt
 their existing behavior. Files referenced by older snapshots or tags remain until those
 references expire and snapshot expiration removes them.
 
-After splitting, one dedicated file can cover multiple normal-file row-ID ranges.
-All Java and PyPaimon readers must support this layout before enabling the option.
-Disabling the option later does not undo this layout change.
+Every BLOB or VECTOR file must remain fully contained in a single normal file's
+row-ID range. After reaching the target size, compaction waits for a boundary that
+does not cut through any dedicated file, including overlapping ranges from different
+columns or versions. Output files may therefore exceed `target-file-size`. If these
+ranges prevent any split, file size alone does not trigger a compaction task. Normal
+merging based on `compaction.min.file-num` remains available.
 
 ### Materialize Deletion Vectors
 

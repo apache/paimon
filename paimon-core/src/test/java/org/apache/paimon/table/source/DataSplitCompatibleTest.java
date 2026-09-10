@@ -94,59 +94,6 @@ public class DataSplitCompatibleTest {
     }
 
     @Test
-    public void testMergedRowCountWithSpanningDedicatedFiles() {
-        List<DataFileMeta> files =
-                Arrays.asList(
-                        newRowTrackedDataFile("first.parquet", 0, 5),
-                        newRowTrackedDataFile("update.parquet", 0, 5),
-                        newRowTrackedDataFile("second.parquet", 5, 5),
-                        newRowTrackedDataFile("first.blob", 0, 7),
-                        newRowTrackedDataFile("second.blob", 7, 3));
-        DataSplit split = newDataSplit(false, files, null);
-        assertThat(split.mergedRowCount()).hasValue(10L);
-
-        split =
-                newDataSplit(
-                        false,
-                        files,
-                        Arrays.asList(
-                                new DeletionFile("dv", 0, 1, 1L),
-                                null,
-                                new DeletionFile("dv", 1, 1, 2L),
-                                null,
-                                null));
-        assertThat(split.mergedRowCount()).hasValue(7L);
-
-        // A row-range scan may retain a dedicated file extending outside its normal file.
-        split = newDataSplit(false, Arrays.asList(files.get(2), files.get(3), files.get(4)), null);
-        assertThat(split.mergedRowCount()).hasValue(5L);
-
-        // Projection can prune the normal file from another component packed in this split.
-        List<DataFileMeta> projectedFiles = new ArrayList<>(files);
-        projectedFiles.add(newRowTrackedDataFile("projected.blob", 10, 10));
-        assertThat(newDataSplit(false, projectedFiles, null).mergedRowCount()).hasValue(20L);
-    }
-
-    private DataFileMeta newRowTrackedDataFile(String name, long firstRowId, long rowCount) {
-        return DataFileMeta.forAppend(
-                        name,
-                        1024,
-                        rowCount,
-                        SimpleStats.EMPTY_STATS,
-                        0L,
-                        rowCount - 1,
-                        1,
-                        Collections.emptyList(),
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null)
-                .assignFirstRowId(firstRowId);
-    }
-
-    @Test
     public void testDeletionFilesSerialize() throws Exception {
         List<DataFileMeta> dataFiles =
                 Collections.singletonList(

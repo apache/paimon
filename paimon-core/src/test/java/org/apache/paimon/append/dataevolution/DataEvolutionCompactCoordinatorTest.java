@@ -45,6 +45,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -215,6 +216,22 @@ public class DataEvolutionCompactCoordinatorTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDoNotSplitInsideDedicatedFile(boolean vector) {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("large.parquet", 0L, 10L, 0, 1000L),
+                        vector
+                                ? makeVectorStoreEntry("whole.vector.lance", 0L, 10L, 10L)
+                                : makeBlobEntry("whole.blob", 0L, 10L, 10L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
+
+        assertThat(planner.compactPlan(entries)).isEmpty();
+    }
+
     @Test
     public void testSplitLargeFilesAndMergeSmallFilesKeepDedicatedFiles() {
         List<ManifestEntry> entries =
@@ -222,8 +239,8 @@ public class DataEvolutionCompactCoordinatorTest {
                         makeEntryWithSize("large.parquet", 0L, 10L, 0, 201L),
                         makeEntryWithSize("small1.parquet", 10L, 10L, 0, 20L),
                         makeEntryWithSize("small2.parquet", 20L, 10L, 0, 20L),
-                        makeBlobEntry("original.blob", 0L, 30L, 1000L),
-                        makeVectorStoreEntry("original.vector.lance", 0L, 30L, 1000L));
+                        makeBlobEntry("original.blob", 0L, 5L, 1000L),
+                        makeVectorStoreEntry("original.vector.lance", 5L, 5L, 1000L));
         DataEvolutionCompactCoordinator.CompactPlanner planner =
                 new DataEvolutionCompactCoordinator.CompactPlanner(
                         false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
@@ -1045,7 +1062,11 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        files,
+                        Arrays.asList(
+                                new Range(0L, 49L), new Range(50L, 149L), new Range(150L, 199L)));
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
