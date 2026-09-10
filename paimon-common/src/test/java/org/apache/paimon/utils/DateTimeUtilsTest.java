@@ -49,6 +49,14 @@ public class DateTimeUtilsTest {
         // Sanity: valid values still parse.
         assertThat(DateTimeUtils.parseDate("2024-01-15")).isNotNull();
         assertThat(DateTimeUtils.parseTime("12:30:00")).isNotNull();
+
+        // Zero-padded components whose value still fits an int must keep parsing: the range
+        // guard has to judge the value, not the digit count, or previously accepted padded
+        // dates/times would silently turn into NULL.
+        assertThat(DateTimeUtils.parseDate("00000002024-01-15"))
+                .isEqualTo(DateTimeUtils.parseDate("2024-01-15"));
+        assertThat(DateTimeUtils.parseTime("00000000012:30:00"))
+                .isEqualTo(DateTimeUtils.parseTime("12:30:00"));
     }
 
     @Test
