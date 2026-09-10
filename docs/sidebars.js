@@ -65,8 +65,11 @@ const sidebars = {
       "id": "append-table/index"
     },
     "items": [
-      "append-table/incremental-clustering",
+      "append-table/streaming",
+      "append-table/query-performance",
       "append-table/bucketed",
+      "append-table/incremental-clustering",
+      "append-table/row-level-operations",
       "append-table/row-tracking"
     ]
   },

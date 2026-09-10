@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="461" viewBox="0 0 900 461" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Row ID stays stable while row version changes on update</title>
+<desc id="desc">A row inserted in snapshot 1 has data a, row ID 0, and sequence number 1. Updating it in snapshot 2 changes data to a2 and sequence number to 2, retaining row ID 0. Ordinary compaction in snapshot 3 retains both row ID 0 and sequence number 2. Deleting the row removes it from the current result.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="459" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Row identity and row version</text>
+<text x="28" y="74" font-size="18" fill="#526277" font-weight="400" text-anchor="start">One row in a regular row-tracking table · illustrative snapshot IDs</text>
+<rect x="28" y="111" width="236" height="213" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="46" y="145" font-size="20" fill="#2463b4" font-weight="700" text-anchor="start">INSERT</text>
+<text x="46" y="174" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Snapshot 1</text>
+<text x="46" y="210" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">data = a</text>
+<text x="46" y="247" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">_ROW_ID = 0</text>
+<text x="46" y="287" font-size="16" fill="#172b4d" font-weight="400" text-anchor="start">_SEQUENCE_NUMBER = 1</text>
+<rect x="332" y="111" width="236" height="213" rx="8" fill="#fff8ea" stroke="#93600b" stroke-width="1.5"/>
+<text x="350" y="145" font-size="20" fill="#93600b" font-weight="700" text-anchor="start">UPDATE</text>
+<text x="350" y="174" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Snapshot 2</text>
+<text x="350" y="210" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">data = a2</text>
+<text x="350" y="247" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">_ROW_ID = 0</text>
+<text x="350" y="287" font-size="16" fill="#172b4d" font-weight="400" text-anchor="start">_SEQUENCE_NUMBER = 2</text>
+<rect x="636" y="111" width="236" height="213" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="654" y="145" font-size="20" fill="#087f6e" font-weight="700" text-anchor="start">COMPACT</text>
+<text x="654" y="174" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Snapshot 3</text>
+<text x="654" y="210" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">data = a2</text>
+<text x="654" y="247" font-size="19" fill="#172b4d" font-weight="400" text-anchor="start">_ROW_ID = 0</text>
+<text x="654" y="287" font-size="16" fill="#172b4d" font-weight="400" text-anchor="start">_SEQUENCE_NUMBER = 2</text>
+<path d="M 264 219 H 324" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 568 219 H 628" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="367" font-size="20" fill="#2463b4" font-weight="700" text-anchor="start">Same ID across all three snapshots.</text>
+<text x="28" y="401" font-size="18" fill="#526277" font-weight="400" text-anchor="start">The update changes the row version; ordinary compaction preserves it.</text>
+<text x="28" y="434" font-size="18" fill="#526277" font-weight="400" text-anchor="start">A later DELETE removes the row from the current result.</text>
+</g>
+</svg>
