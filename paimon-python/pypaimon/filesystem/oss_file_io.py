@@ -35,6 +35,7 @@ class OssFileIO(PyArrowFileIO):
             key = re.sub(r'/+', '/', uri.path).lstrip('/')
             if '@' in uri.netloc:
                 key = key.partition('/')[2]
+            path = 'oss://{}/{}'.format(self._oss_bucket, key)
         else:
             key = path
             if not self._use_jindo and not self._oss_bucket_in_endpoint:

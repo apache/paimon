@@ -18,8 +18,10 @@
 import os
 import pickle
 import tempfile
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch, MagicMock
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -147,6 +149,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
+            original_file_io.token = RESTToken({}, 1)
+            original_backend = original_file_io.file_io()
 
             pickled = pickle.dumps(original_file_io)
 
@@ -157,6 +161,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertIsNone(deserialized_file_io.api_instance)
+            self.assertIsNot(deserialized_file_io.file_io(), original_backend)
 
             test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
             test_content = b"pickle test content"
@@ -168,6 +173,24 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertTrue(os.path.exists(expected_path))
             with open(expected_path, 'rb') as f:
                 self.assertEqual(f.read(), test_content)
+
+    def test_concurrent_file_io_reuse_and_token_refresh(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(self.identifier, self.warehouse_path, self.catalog_options)
+            file_io.token = RESTToken({}, 1)
+            barrier = threading.Barrier(8)
+
+            def get_backend(_):
+                barrier.wait(timeout=10)
+                return file_io.file_io()
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                backends = list(pool.map(get_backend, range(8)))
+            self.assertTrue(all(backend is backends[0] for backend in backends))
+            file_io.token = RESTToken({}, 2)
+            refreshed = file_io.file_io()
+            self.assertIsNot(refreshed, backends[0])
+            self.assertIs(file_io.file_io(), refreshed)
 
     def test_dlf_oss_endpoint_overrides_token_endpoint(self):
         """Test that DLF OSS endpoint overrides the standard OSS endpoint in token."""

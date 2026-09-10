@@ -151,7 +151,6 @@ def test_rest_token_refresh_keeps_oss_atomic_creation(oss_server):
     options[CatalogOptions.RESOLVING_FILE_IO_ENABLED.key()] = 'true'
     path = 'oss://test-bucket/table/snapshot-1'
     with mock.patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
-            mock.patch.object(RESTTokenFileIO, '_FILE_IO_CACHE', {}), \
             mock.patch.object(OssFileIO, '_initialize_oss_fs'):
         io = RESTTokenFileIO(Identifier.from_string('default.table'), path, Options(options))
         io.token = RESTToken({'fs.oss.securityToken': 'first-token'}, 1)
@@ -164,8 +163,29 @@ def test_rest_token_refresh_keeps_oss_atomic_creation(oss_server):
     assert sorted(oss_server.objects.values()) == [b'first', b'second']
 
 
+@pytest.mark.parametrize('second_path,method', [
+    ('oss://other-bucket/table', 'AES256'),
+    ('oss://test-bucket/table', 'KMS'),
+])
+def test_rest_file_io_isolates_bucket_and_encryption(oss_server, second_path, method):
+    with mock.patch.object(RESTTokenFileIO, 'try_to_refresh_token'), \
+            mock.patch.object(OssFileIO, '_initialize_oss_fs'):
+        for index, (path, encryption) in enumerate([
+                ('oss://test-bucket/table', 'AES256'), (second_path, method)]):
+            options = dict(options_for(oss_server).to_map())
+            options['fs.oss.server-side-encryption'] = encryption
+            io = RESTTokenFileIO(Identifier.from_string('default.table'), path, Options(options))
+            io.token = RESTToken({'fs.oss.securityToken': 'shared-token'}, oss_server.server_port)
+            target = path + '/snapshot-' + str(index)
+            assert io.try_to_write_atomic(target, str(index))
+            assert oss_server.sse_headers == {'server-side-encryption': encryption}
+            assert oss_server.objects['/' + target[len('oss://'):]] == str(index).encode()
+            assert io.try_to_write_atomic(target, 'overwrite') is False
+
+
 @pytest.mark.parametrize('versioning', ['Enabled', 'Suspended', 'Unexpected', None])
-def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, tmp_path, caplog):
+@pytest.mark.parametrize('credential_uri', [False, True])
+def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, credential_uri, tmp_path, caplog):
     oss_server.versioning = versioning
     if versioning is None:
         oss_server.fail_method = 'GET'
@@ -174,6 +194,11 @@ def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, tmp
     # Run the inherited stream/rename operations against an actual Arrow filesystem.
     io.filesystem = pafs.LocalFileSystem()
     path = 'oss://test-bucket{}/snapshot-1'.format(tmp_path)
+    if credential_uri:
+        # Jindo uses key-only paths; keep all fallback writes inside the temporary directory.
+        io._use_jindo = True
+        io.filesystem = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+        path = 'oss://AK:SK@endpoint/test-bucket/snapshot-1'
     assert io.try_to_write_atomic(path, '兼容写入') is True
     assert io.try_to_write_atomic(path, 'overwrite') is False
     assert (tmp_path / 'snapshot-1').read_text() == '兼容写入'

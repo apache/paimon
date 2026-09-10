@@ -39,26 +39,11 @@ class RESTTokenFileIO(FileIO):
     A FileIO to support getting token from REST Server.
     """
 
-    _FILE_IO_CACHE_MAXSIZE = 1000
     _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
-
-    _FILE_IO_CACHE: TTLCache = None
-    _FILE_IO_CACHE_LOCK = threading.Lock()
 
     _TOKEN_CACHE: dict = {}
     _TOKEN_LOCKS: dict = {}
     _TOKEN_LOCKS_LOCK = threading.Lock()
-
-    @classmethod
-    def _get_file_io_cache(cls) -> TTLCache:
-        if cls._FILE_IO_CACHE is None:
-            with cls._FILE_IO_CACHE_LOCK:
-                if cls._FILE_IO_CACHE is None:
-                    cls._FILE_IO_CACHE = TTLCache(
-                        maxsize=cls._FILE_IO_CACHE_MAXSIZE,
-                        ttl=cls._FILE_IO_CACHE_TTL
-                    )
-        return cls._FILE_IO_CACHE
 
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Union[dict, Options]] = None):
@@ -76,12 +61,20 @@ class RESTTokenFileIO(FileIO):
         self.api_instance: Optional[RESTApi] = None
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
+        self._init_file_io_cache()
+
+    def _init_file_io_cache(self):
+        # FileIO is bound to this instance's path and catalog options.
+        self._file_io_cache = TTLCache(maxsize=1, ttl=self._FILE_IO_CACHE_TTL)
+        self._file_io_cache_lock = threading.Lock()
 
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
         state.pop('api_instance', None)
         state.pop('_uri_reader_factory_cache', None)
+        state.pop('_file_io_cache', None)
+        state.pop('_file_io_cache_lock', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
@@ -90,28 +83,17 @@ class RESTTokenFileIO(FileIO):
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
+        self._init_file_io_cache()
 
     def file_io(self) -> FileIO:
-        self.try_to_refresh_token()
-
-        if self.token is None:
-            return FileIO.get(self.path, self.catalog_options or Options({}))
-
-        cache_key = self.token
-        cache = self._get_file_io_cache()
-
-        file_io = cache.get(cache_key)
-        if file_io is not None:
-            return file_io
-
-        with self._FILE_IO_CACHE_LOCK:
+        with self._file_io_cache_lock:
             self.try_to_refresh_token()
 
             if self.token is None:
                 return FileIO.get(self.path, self.catalog_options or Options({}))
 
             cache_key = self.token
-            cache = self._get_file_io_cache()
+            cache = self._file_io_cache
             file_io = cache.get(cache_key)
             if file_io is not None:
                 return file_io
