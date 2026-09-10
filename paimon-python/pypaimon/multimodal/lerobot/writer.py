@@ -34,8 +34,6 @@ from pypaimon.multimodal.hdf5 import _SnapshotRecorder
 from pypaimon.multimodal.lerobot.metadata import (
     _COMPANION_OPTION_KEYS,
     _EMPTY_EPISODES_SCHEMA,
-    _EMPTY_SUBTASKS_SCHEMA,
-    _EMPTY_TASKS_SCHEMA,
     _append_arrow,
     _companion_table_identifiers,
     _managed_table_options,
@@ -230,11 +228,21 @@ def _aggregate_stats(stats_list, features):
     return result
 
 
+def _indexed_metadata_table(component, entries):
+    import pandas as pd
+
+    entries = list(entries)
+    indices, labels = zip(*entries) if entries else ((), ())
+    return pa.Table.from_pandas(pd.DataFrame(
+        {component + "_index": np.asarray(indices, dtype=np.int64)},
+        index=pd.Index(
+            labels, dtype="string", name=component,
+        ),
+    ))
+
+
 def _subtasks_table(subtasks):
-    return pa.Table.from_pylist([
-        {"subtask_index": index, "subtask": subtask}
-        for index, subtask in enumerate(subtasks)
-    ], schema=_EMPTY_SUBTASKS_SCHEMA)
+    return _indexed_metadata_table("subtask", enumerate(subtasks))
 
 
 def _validate_subtasks(subtasks, has_feature):
@@ -378,8 +386,7 @@ class PaimonLeRobotWriter:
         return {
             "info_table": _metadata_table(info),
             "episodes_schema": _episode_schema(features),
-            "tasks_table": pa.Table.from_pylist(
-                [], schema=_EMPTY_TASKS_SCHEMA),
+            "tasks_table": _indexed_metadata_table("task", ()),
             "stats_table": _metadata_table({}),
             "subtasks_table": (
                 _subtasks_table(subtasks or ())
@@ -701,14 +708,14 @@ class PaimonLeRobotWriter:
                     _subtasks_table(self.subtasks),
                 )
             task_rows = [
-                {"task_index": index, "task": task}
+                (index, task)
                 for task, index in sorted(
                     self._task_indices.items(), key=lambda item: item[1])
                 if index >= self._committed_task_count
             ]
             _append_arrow(
                 self._metadata_tables["tasks"],
-                pa.Table.from_pylist(task_rows, schema=_EMPTY_TASKS_SCHEMA),
+                _indexed_metadata_table("task", task_rows),
             )
             _append_arrow(
                 self._metadata_tables["episodes"],

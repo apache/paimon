@@ -30,8 +30,8 @@ import pyarrow as pa
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal.lerobot import PaimonLeRobotWriter
 from pypaimon.multimodal.lerobot.metadata import (
-    _EMPTY_TASKS_SCHEMA,
     _append_arrow,
+    _restore_pandas_metadata,
 )
 from pypaimon.multimodal.lerobot.writer import _read_arrow
 
@@ -175,6 +175,15 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
             {"subtask_index": 0, "subtask": "approach"},
             {"subtask_index": 1, "subtask": "grasp"},
         ], _catalog_rows(self.connection, "with_subtasks__subtasks"))
+        for component, expected in (
+                ("tasks", ["pick"]),
+                ("subtasks", ["approach", "grasp"])):
+            table = self.connection.catalog.get_table(
+                self.connection._identifier(
+                    "with_subtasks__%s" % component))
+            data = _restore_pandas_metadata(
+                table, _read_arrow(table)).to_pandas()
+            self.assertEqual(expected, data.index.tolist())
         self.assertEqual(
             "default.with_subtasks__subtasks",
             frames.raw_table.table_schema.options[
@@ -379,7 +388,7 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
         _append_arrow(tasks, pa.Table.from_pylist([{
             "task_index": 0,
             "task": "pick",
-        }], schema=_EMPTY_TASKS_SCHEMA))
+        }], schema=_read_arrow(tasks).schema))
 
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             PaimonLeRobotWriter(
