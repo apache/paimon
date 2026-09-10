@@ -153,7 +153,7 @@ const config = {
             title: 'Documentation',
             items: [
               {label: 'Getting Started', to: '/flink/quick-start'},
-              {label: 'Concepts', to: '/concepts/overview'},
+              {label: 'Concepts', to: '/concepts/'},
             ],
           },
           {

@@ -72,35 +72,63 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "PrimaryKey Table",
+    "label": "Primary-Key Table",
     "collapsed": true,
     "link": {
       type: "doc",
       "id": "primary-key-table/index"
     },
     "items": [
-      "primary-key-table/data-distribution",
-      "primary-key-table/table-mode",
-      "primary-key-table/changelog-producer",
-      "primary-key-table/sequence-rowkind",
-      "primary-key-table/compaction",
-      "primary-key-table/query-performance",
-      "primary-key-table/global-index",
-      "primary-key-table/chain-table",
-      "primary-key-table/pk-clustering-override",
-      "primary-key-table/blob-storage",
       {
         type: "category",
-        "label": "Merge Engine",
+        "label": "Data Layout",
         "collapsed": true,
-        "link": {
-          type: "doc",
-          "id": "primary-key-table/merge-engine/index"
-        },
         "items": [
-          "primary-key-table/merge-engine/partial-update",
-          "primary-key-table/merge-engine/aggregation",
-          "primary-key-table/merge-engine/first-row"
+          "primary-key-table/data-distribution",
+          "primary-key-table/table-mode"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Updates & Changelogs",
+        "collapsed": true,
+        "items": [
+          {
+            type: "category",
+            "label": "Merge Engines",
+            "collapsed": true,
+            "link": {
+              type: "doc",
+              "id": "primary-key-table/merge-engine/index"
+            },
+            "items": [
+              "primary-key-table/merge-engine/partial-update",
+              "primary-key-table/merge-engine/aggregation",
+              "primary-key-table/merge-engine/first-row"
+            ]
+          },
+          "primary-key-table/sequence-rowkind",
+          "primary-key-table/changelog-producer"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Compaction & Querying",
+        "collapsed": true,
+        "items": [
+          "primary-key-table/compaction",
+          "primary-key-table/query-performance"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Advanced Features",
+        "collapsed": true,
+        "items": [
+          "primary-key-table/global-index",
+          "primary-key-table/pk-clustering-override",
+          "primary-key-table/chain-table",
+          "primary-key-table/blob-storage"
         ]
       }
     ]

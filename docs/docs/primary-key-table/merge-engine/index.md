@@ -22,23 +22,62 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+<a id="overview"></a>
 
-When Paimon sink receives two or more records with the same primary keys, it will merge them into one record to keep
-primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
+# Merge Engines
 
-:::info
+A merge engine defines how records with the same primary key form one logical row. Set the
+`merge-engine` table option when creating a table. The choice affects the meaning of updates,
+null values, and retractions; it is separate from the [storage mode](../table-mode).
 
-Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig, sink upsert-materialize may
-result in strange behavior. When the input is out of order, we recommend that you use
-[Sequence Field](../sequence-rowkind#sequence-field) to correct disorder.
+## Choose a Merge Engine
+
+| Engine | Result for the same key | Typical input | Details |
+| --- | --- | --- | --- |
+| `deduplicate` (default) | Keep the latest row; a latest retract removes it | Complete replacement rows, such as CDC updates | [Deduplicate](#deduplicate) |
+| `partial-update` | Update non-null fields; sequence groups can also explicitly set nulls | Updates to different columns of an entity | [Partial Update](./partial-update) |
+| `aggregation` | Aggregate each value field using its configured function | Contributions such as sums or maxima | [Aggregation](./aggregation) |
+| `first-row` | Keep the first row and ignore later rows for the key | Deduplicating events or logs | [First Row](./first-row) |
+
+"Latest" follows Paimon's record ordering. Configure a
+[sequence field](../sequence-rowkind#sequence-field) if arrival order does not represent the
+business order. Partial updates from independent streams can use per-column
+[sequence groups](./partial-update#sequence-group).
+
+:::info Flink SQL input ordering
+
+Set `table.exec.sink.upsert-materialize` to `NONE` in the Flink SQL TableConfig for these merge
+pipelines. The sink materializer can reorder records before Paimon receives them. Use sequence
+fields to express the required update order explicitly.
 
 :::
 
 ## Deduplicate
 
-The `deduplicate` merge engine is the default merge engine. Paimon will only keep the latest record and throw away
-other records with the same primary keys.
+`deduplicate` keeps the latest complete row. A null value in that row replaces an earlier non-null
+value; use `partial-update` if null should mean "leave this field unchanged".
 
-Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.
-You can config `ignore-delete` to ignore it.
+For example, two inputs `(1, 'open', 12.00)` and `(1, 'closed', 15.00)`, where the first column is
+the key, produce `(1, 'closed', 15.00)`.
+
+```sql
+CREATE TABLE orders (
+    order_id BIGINT,
+    status STRING,
+    amount DECIMAL(12, 2),
+    PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'deduplicate'
+);
+```
+
+If the latest record is `DELETE` or `UPDATE_BEFORE`, the logical row is removed. Set
+`ignore-delete = true` only when the pipeline should discard these retract records.
+
+## Streaming Results
+
+The merge engine defines stored table state; the
+[changelog producer](../changelog-producer) defines what streaming readers receive. For example,
+`input` forwards the original input records, which may be partial updates rather than complete
+merged rows. Check the streaming requirements on each engine's page before building a downstream
+aggregation or sink.
