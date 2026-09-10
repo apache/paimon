@@ -27,7 +27,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableSerializer;
 import org.apache.paimon.flink.sink.Committer;
-import org.apache.paimon.flink.sink.CommitterOperatorTestBase;
+import org.apache.paimon.flink.sink.CommitterTestBase;
+import org.apache.paimon.flink.sink.SavepointTagUtils;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.sink.state.CoordinatorState;
 import org.apache.paimon.flink.sink.state.CoordinatorStateSerializer;
@@ -75,7 +76,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link CommittingWriteOperatorCoordinator}. */
-public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTestBase {
+public class CommittingWriteOperatorCoordinatorTest extends CommitterTestBase {
 
     private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
             new SimpleVersionedSerializerTypeSerializerProxy<>(
@@ -378,6 +379,114 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Test
+    public void testAutoTagForSavepointOnComplete() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinatorWithAutoTag(table, context);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // savepoint at cp1 (not notified), then a normal cp2 completes and materializes both.
+        coordinator.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 2, 2)));
+        coordinator.notifyCheckpointComplete(2L);
+        coordinator.waitProcessAllActions();
+
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
+        Snapshot tagged = table.snapshotManager().snapshot(1);
+        assertThat(table.tagManager().tags().get(tagged)).containsOnly(savepointTag(1L));
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testAbortSavepointRemovesTag() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinatorWithAutoTag(table, context);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        // savepoint at cp1, then cp2 completes and creates the savepoint-1 tag.
+        coordinator.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        coordinator.handleEventFromOperator(0, 0, event(committable(table, 2, 2)));
+        coordinator.notifyCheckpointComplete(2L);
+        coordinator.waitProcessAllActions();
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+
+        // aborting the savepoint removes the tag that a later checkpoint had created.
+        coordinator.notifyCheckpointAborted(1L);
+        coordinator.waitProcessAllActions();
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testAutoTagForSavepointOnRestore() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+
+        // capture coordinator state holding an uncommitted savepoint at cp1.
+        CommittingWriteOperatorCoordinator first = createCoordinatorWithAutoTag(table, context);
+        first.start();
+        first.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+        first.checkpointCoordinator(1, checkpoint);
+        first.waitProcessAllActions();
+        byte[] state = checkpoint.get();
+        first.close();
+        assertThat(table.latestSnapshot()).isNotPresent();
+
+        // restore: the replayed savepoint bit drives the re-commit and tag creation while the
+        // coordinator keeps running — no intentional failover.
+        CommittingWriteOperatorCoordinator second = createCoordinatorWithAutoTag(table, context);
+        second.resetToCheckpoint(1, state);
+        second.start();
+        second.waitProcessAllActions();
+        second.handleEventFromOperator(
+                0,
+                0,
+                savepointRestoreEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        second.waitProcessAllActions();
+
+        assertThat(failureCause).isNull();
+        assertThat(second.getCurrentState())
+                .isEqualTo(CommittingWriteOperatorCoordinator.State.RUNNING);
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
+        second.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testNoTagWhenAutoTagDisabled() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        CommittingWriteOperatorCoordinator coordinator = createCoordinator(table, context);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        coordinator.handleEventFromOperator(
+                0, 0, savepointEvent(1L, Collections.singletonList(committable(table, 1, 1))));
+        coordinator.notifyCheckpointComplete(1L);
+        coordinator.waitProcessAllActions();
+
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+        coordinator.close();
+    }
+
+    private static String savepointTag(long checkpointId) {
+        return SavepointTagUtils.tagNameOf(checkpointId);
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
     public void testCheckpointFutureCompletedExceptionallyOnSnapshotFailure() throws Exception {
         FileStoreTable table = createUnawareBucketTable();
         TestingContext context = new TestingContext(new OperatorID(), 1);
@@ -395,7 +504,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                                 commitContext),
                                         expected),
                         true,
-                        commitUser);
+                        commitUser,
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -1087,7 +1197,31 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                                         .newCommit(),
                                 commitContext),
                 true,
-                commitUser);
+                commitUser,
+                null);
+    }
+
+    private CommittingWriteOperatorCoordinator createCoordinatorWithAutoTag(
+            FileStoreTable table, TestingContext context) {
+        return new CommittingWriteOperatorCoordinator(
+                context,
+                commitContext ->
+                        new StoreCommitter(
+                                table,
+                                table.newStreamWriteBuilder()
+                                        .withCommitUser(commitContext.commitUser())
+                                        .newCommit(),
+                                commitContext),
+                true,
+                commitUser,
+                user ->
+                        new SavepointTagger(
+                                table.snapshotManager(),
+                                table.tagManager(),
+                                table.store().newTagDeletion(),
+                                table.store().createTagCallbacks(table),
+                                table.coreOptions().tagDefaultTimeRetained(),
+                                user));
     }
 
     private CommittingWriteOperatorCoordinator createCoordinatorCapturingContext(
@@ -1106,7 +1240,8 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                             commitContext);
                 },
                 true,
-                commitUser);
+                commitUser,
+                null);
     }
 
     private Committable committable(FileStoreTable table, long checkpointId, int value)
@@ -1180,6 +1315,34 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
 
     private CommittableEvent emptyEvent(long checkpointId) throws Exception {
         return eventOf(checkpointId, Collections.emptyList(), Long.MIN_VALUE);
+    }
+
+    private CommittableEvent savepointEvent(long checkpointId, List<Committable> committables)
+            throws Exception {
+        return CommittableEvent.create(
+                checkpointId,
+                new CheckpointCommittables(
+                        checkpointId,
+                        committables,
+                        Long.MIN_VALUE,
+                        /* idle */ false,
+                        /* shouldCreateSavepointTag */ true),
+                SERIALIZER);
+    }
+
+    private RestoredCommittableEvent savepointRestoreEvent(
+            long restoredCheckpointId, List<Committable> committables) throws Exception {
+        CheckpointCommittables checkpointCommittables =
+                new CheckpointCommittables(
+                        restoredCheckpointId,
+                        committables,
+                        Long.MIN_VALUE,
+                        /* idle */ false,
+                        /* shouldCreateSavepointTag */ true);
+        return RestoredCommittableEvent.create(
+                restoredCheckpointId,
+                Collections.singletonList(checkpointCommittables),
+                SERIALIZER);
     }
 
     private RestoredCommittableEvent restoreEvent(

@@ -474,6 +474,30 @@ public abstract class VirtualFileSystemTest {
     }
 
     @Test
+    public void testWorkingDirectoryIsCatalogRoot() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "object_table";
+        createObjectTable(databaseName, tableName);
+
+        // Hadoop hands initialize() the full user URI, path component included
+        Path filePath = new Path(vfsRoot, databaseName + "/" + tableName + "/a.csv");
+        try (FileSystem fs = new PaimonVirtualFileSystem()) {
+            fs.initialize(filePath.toUri(), vfs.getConf());
+            assertThat(fs.getWorkingDirectory()).isEqualTo(vfsRoot);
+
+            // A relative path resolves against the catalog root, so it lands in the table it
+            // names rather than in the table that happened to open this file system
+            String relative = databaseName + "/" + tableName + "2/b.csv";
+            FSDataOutputStream out = fs.create(new Path(relative));
+            out.write("hello".getBytes());
+            out.close();
+
+            assertThat(fs.exists(new Path(vfsRoot, relative))).isTrue();
+            assertThat(fs.exists(filePath)).isFalse();
+        }
+    }
+
+    @Test
     public void testTrash() throws Exception {
         String databaseName = "test_db";
         String tableName = "object_table";

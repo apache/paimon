@@ -85,6 +85,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
+    private final boolean nestedFieldEnabled;
     private final boolean ignoreCorruptFiles;
     private final boolean ignoreLostFiles;
 
@@ -112,6 +113,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
         this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
         this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
+        this.nestedFieldEnabled = coreOptions.dataEvolutionNestedFieldEnabled();
         this.readRowType = rowType;
     }
 
@@ -271,7 +273,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                 },
                 filters,
                 pushDownTopN,
-                pushDownLimit);
+                pushDownLimit,
+                nestedFieldEnabled);
     }
 
     private ReaderSupplier<InternalRow> createFileReader(

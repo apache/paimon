@@ -496,7 +496,6 @@ class RaySinkTest(unittest.TestCase):
         datasink._writer_builder.new_commit = mock_new_commit
         with self.assertRaises(Exception):
             datasink.on_write_complete(write_result)
-        self.assertEqual(len(datasink._pending_commit_messages), 1)
 
     def test_on_write_complete_without_on_write_start(self):
         from ray.data.datasource.datasink import WriteResult
@@ -580,34 +579,15 @@ class RaySinkTest(unittest.TestCase):
             )
 
     def test_on_write_failed(self):
-        # Test without pending messages (on_write_complete() never called)
         datasink = PaimonDatasink(self.table, overwrite=False)
         datasink.on_write_start()
-        self.assertEqual(datasink._pending_commit_messages, [])
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)  # Should not raise exception
-
-        # Test with pending messages (on_write_complete() was called but failed)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        commit_msg2 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1, commit_msg2]
-
-        mock_commit = Mock()
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
+        datasink._writer_builder.new_commit = Mock()
         error = Exception("Write job failed")
         datasink.on_write_failed(error)
 
-        mock_commit.abort.assert_called_once()
-        abort_args = mock_commit.abort.call_args[0][0]
-        self.assertEqual(len(abort_args), 2)
-        self.assertEqual(abort_args[0], commit_msg1)
-        self.assertEqual(abort_args[1], commit_msg2)
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        datasink._writer_builder.new_commit.assert_not_called()
 
-    def test_consume_write_results_stages_messages_before_late_failure(self):
+    def test_consume_write_results_reports_late_failure(self):
         import pickle
 
         message_col = '__messages__'
@@ -629,9 +609,6 @@ class RaySinkTest(unittest.TestCase):
                 FailingResults(), coordinator, message_col
             )
 
-        coordinator.add_pending_commit_messages.assert_called_once_with(
-            ['first']
-        )
         coordinator.on_write_complete.assert_not_called()
         coordinator.on_write_failed.assert_called_once()
 
@@ -660,29 +637,47 @@ class RaySinkTest(unittest.TestCase):
                 results, coordinator, message_col, error_col
             )
 
-        self.assertEqual(
-            [call.args[0] for call in
-             coordinator.add_pending_commit_messages.call_args_list],
-            [['first'], [], ['last']],
-        )
         coordinator.on_write_complete.assert_not_called()
         coordinator.on_write_failed.assert_called_once()
 
-        # Test abort failure handling (should not raise exception)
-        datasink = PaimonDatasink(self.table, overwrite=False)
-        datasink.on_write_start()
-        commit_msg1 = Mock(spec=CommitMessage)
-        datasink._pending_commit_messages = [commit_msg1]
+    def test_consume_write_results_failure_preserves_completed_files(self):
+        import pickle
 
-        mock_commit = Mock()
-        mock_commit.abort.side_effect = Exception("Abort failed")
-        datasink._writer_builder.new_commit = Mock(return_value=mock_commit)
-        error = Exception("Write job failed")
-        datasink.on_write_failed(error)
+        writer = self.table.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'value': [1.1],
+        }, schema=self.pk_pa_schema))
+        messages = writer.prepare_commit()
+        writer.close()
+        paths = [
+            file.external_path or file.file_path
+            for message in messages
+            for file in message.new_files
+        ]
 
-        mock_commit.abort.assert_called_once()
-        mock_commit.close.assert_called_once()
-        self.assertEqual(datasink._pending_commit_messages, [])
+        message_col = '__messages__'
+        error_col = '__errors__'
+        results = Mock()
+        results.iter_batches.return_value = iter([
+            pa.table({
+                message_col: pa.array([
+                    pickle.dumps(messages),
+                    pickle.dumps([]),
+                ], type=pa.binary()),
+                error_col: pa.array([None, 'worker failure'], type=pa.string()),
+            }),
+        ])
+        coordinator = PaimonDatasink(self.table, overwrite=False)
+        coordinator.on_write_start()
+
+        with self.assertRaisesRegex(RuntimeError, 'worker failure'):
+            _consume_write_results(
+                results, coordinator, message_col, error_col
+            )
+
+        self.assertTrue(all(self.table.file_io.exists(path) for path in paths))
 
 
 if __name__ == '__main__':

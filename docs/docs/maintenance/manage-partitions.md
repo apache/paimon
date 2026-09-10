@@ -26,6 +26,9 @@ under the License.
 Paimon provides multiple ways to manage partitions, including expire historical partitions by different strategies or 
 mark a partition done to notify the downstream application that the partition has finished writing.
 
+For how partition expiration relates to snapshot retention and file cleanup, see
+[Clean Up Stored Data](./#clean-up-stored-data).
+
 ## Expiring Partitions
 
 You can set `partition.expiration-time` when creating a partitioned table. Paimon streaming sink will periodically check

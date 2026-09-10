@@ -272,6 +272,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         MergeEngine mergeEngine = options.mergeEngine();
         ChangelogProducer changelogProducer = options.changelogProducer();
         LookupStrategy lookupStrategy = options.lookupStrategy();
+        boolean changelogIgnoreUpdateBefore = options.changelogProducerIgnoreUpdateBefore();
+        boolean changelogIgnoreDelete = options.changelogProducerIgnoreDelete();
         if (changelogProducer.equals(FULL_COMPACTION)) {
             return new FullChangelogMergeTreeCompactRewriter(
                     maxLevel,
@@ -282,7 +284,9 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     userDefinedSeqComparator,
                     mfFactory,
                     mergeSorter,
-                    logDedupEqualSupplier.get());
+                    logDedupEqualSupplier.get(),
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete);
         } else if (lookupStrategy.needLookup) {
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
@@ -307,6 +311,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         processorFactory = PersistValueAndPosProcessor.factory(valueType);
                     } else {
                         processorFactory = PersistPositionProcessor.factory();
+                        // Record-level expiration still inspects value fields.
+                        if (recordLevelExpire == null) {
+                            lookupReaderFactory =
+                                    readerFactoryBuilder
+                                            .copyWithoutProjection()
+                                            .withReadValueType(RowType.of())
+                                            .build(partition, bucket, dvFactory);
+                        }
                     }
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
@@ -342,6 +354,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     mergeSorter,
                     wrapperFactory,
                     lookupStrategy.produceChangelog && !ignorePreviousFiles,
+                    changelogIgnoreUpdateBefore,
+                    changelogIgnoreDelete,
                     dvMaintainer,
                     options,
                     remoteLookupFileManager);

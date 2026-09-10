@@ -40,6 +40,8 @@ public class IcebergOptions {
 
     public static final String REST_CONFIG_PREFIX = "metadata.iceberg.rest.";
 
+    public static final String TABLE_PROPERTIES_PREFIX = "metadata.iceberg.table-properties.";
+
     public static final ConfigOption<StorageType> METADATA_ICEBERG_STORAGE =
             key("metadata.iceberg.storage")
                     .enumType(StorageType.class)
@@ -186,6 +188,24 @@ public class IcebergOptions {
                             }
                         });
         return restConfig;
+    }
+
+    public Map<String, String> icebergTableProperties() {
+        Map<String, String> tableProperties = new HashMap<>();
+        options.keySet()
+                .forEach(
+                        key -> {
+                            if (key.startsWith(TABLE_PROPERTIES_PREFIX)) {
+                                String propertyKey =
+                                        key.substring(TABLE_PROPERTIES_PREFIX.length());
+                                Preconditions.checkArgument(
+                                        !propertyKey.isEmpty(),
+                                        "config key '%s' for iceberg table property is empty!",
+                                        key);
+                                tableProperties.put(propertyKey, options.get(key));
+                            }
+                        });
+        return tableProperties;
     }
 
     public boolean deleteAfterCommitEnabled() {

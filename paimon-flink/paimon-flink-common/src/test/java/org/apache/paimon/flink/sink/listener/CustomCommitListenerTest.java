@@ -26,6 +26,7 @@ import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -60,7 +61,7 @@ public class CustomCommitListenerTest {
     @Test
     public void testCustomCommitListener() throws Exception {
         Path tablePath = new Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         String testId = UUID.randomUUID().toString();
         Schema schema =
                 Schema.newBuilder()

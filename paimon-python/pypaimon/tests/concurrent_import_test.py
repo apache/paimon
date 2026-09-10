@@ -155,6 +155,66 @@ if errors:
                 "attempt {}: {}".format(attempt, result.stdout),
             )
 
+    @unittest.skipIf(
+        sys.version_info[:2] < (3, 7),
+        "module-level lazy attributes require Python 3.7+",
+    )
+    def test_concurrent_leaf_imports_and_top_level_export(self):
+        # Racing leaf imports against top-level exports deadlocks whenever a
+        # package init eagerly imports siblings that import the package back.
+        script = r"""
+import sys
+import threading
+
+sys.setswitchinterval(1e-6)
+statements = [
+    "import pypaimon.manifest.schema.data_file_meta",
+    "import pypaimon.manifest.schema.simple_stats",
+    "from pypaimon import Schema",
+    "from pypaimon import CatalogFactory",
+    "import pypaimon.multimodal.connection",
+    "import pypaimon.read.query_auth_split",
+    "import pypaimon.write.table_delete",
+    "import pypaimon.index.index_file_meta",
+]
+barrier = threading.Barrier(len(statements))
+errors = []
+
+
+def resolve(statement):
+    try:
+        barrier.wait()
+        exec(statement)
+    except BaseException as error:
+        errors.append(repr(error))
+
+
+threads = [
+    threading.Thread(target=resolve, args=(statement,))
+    for statement in statements
+]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join(15)
+if errors:
+    print("\n".join(sorted(set(errors))))
+    raise SystemExit(1)
+"""
+        for attempt in range(8):
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                env=os.environ.copy(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                timeout=30,
+            )
+            self.assertEqual(
+                0, result.returncode,
+                "attempt {}: {}".format(attempt, result.stdout),
+            )
+
     def test_fresh_import_of_cycle_prone_leaf_modules(self):
         # Each module must import cleanly as a process's first pypaimon
         # import, without a package init pulling a circular chain.

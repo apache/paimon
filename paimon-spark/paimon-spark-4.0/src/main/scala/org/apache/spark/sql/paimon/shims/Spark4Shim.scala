@@ -271,10 +271,9 @@ class Spark4Shim extends SparkShim {
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
@@ -414,6 +413,9 @@ class Spark4Shim extends SparkShim {
     val v = array.getVariant(pos)
     new GenericVariant(v.getValue, v.getMetadata)
   }
+
+  override def toSparkVariant(variant: Variant): Object =
+    new VariantVal(variant.value(), variant.metadata())
 
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean =
     dataType.isInstanceOf[VariantType]

@@ -68,6 +68,8 @@ public class FileIndexPredicate implements Closeable {
     }
 
     public FileIndexPredicate(SeekableInputStream inputStream, RowType fileRowType) {
+        // createReader itself closes the stream when the header fails validation, so
+        // there is no stream to release here anymore.
         this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
     }
 

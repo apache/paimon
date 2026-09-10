@@ -205,7 +205,6 @@ trait SparkShim {
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite
 
@@ -319,6 +318,8 @@ trait SparkShim {
   def toPaimonVariant(row: InternalRow, pos: Int): Variant
 
   def toPaimonVariant(array: ArrayData, pos: Int): Variant
+
+  def toSparkVariant(variant: Variant): Object
 
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 

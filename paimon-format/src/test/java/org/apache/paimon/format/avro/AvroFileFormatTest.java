@@ -37,6 +37,10 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.DecoderFactory;
@@ -52,6 +56,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -269,6 +274,107 @@ public class AvroFileFormatTest {
         assertThat(result.getInt(0)).isEqualTo(20);
         assertThat(result.isNullAt(1)).isTrue();
         assertThat(decoder.isEnd()).isTrue();
+    }
+
+    @Test
+    void testReadNumericTypeWidening() throws IOException {
+        Schema writerSchema =
+                SchemaBuilder.record("record")
+                        .fields()
+                        .requiredInt("int_to_bigint")
+                        .requiredInt("int_to_double")
+                        .requiredFloat("float_to_double")
+                        .endRecord();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                DataFileWriter<GenericRecord> writer =
+                        new DataFileWriter<>(new GenericDatumWriter<>(writerSchema))) {
+            writer.create(writerSchema, out);
+            GenericRecord record = new GenericData.Record(writerSchema);
+            record.put("int_to_bigint", 42);
+            record.put("int_to_double", 21);
+            record.put("float_to_double", 10.5f);
+            writer.append(record);
+        }
+
+        RowType tableType =
+                RowType.builder()
+                        .field("int_to_bigint", DataTypes.BIGINT().notNull())
+                        .field("int_to_double", DataTypes.DOUBLE().notNull())
+                        .field("float_to_double", DataTypes.DOUBLE().notNull())
+                        .build();
+        List<Object> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(tableType, tableType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(
+                    row -> {
+                        values.add(row.getLong(0));
+                        values.add(row.getDouble(1));
+                        values.add(row.getDouble(2));
+                    });
+        }
+
+        assertThat(values).containsExactly(42L, 21.0d, 10.5d);
+    }
+
+    @Test
+    void testReadNullableUnionWithNullSecond() throws IOException {
+        Schema nullableInt =
+                Schema.createUnion(
+                        Arrays.asList(
+                                Schema.create(Schema.Type.INT), Schema.create(Schema.Type.NULL)));
+        Schema recordSchema =
+                SchemaBuilder.record("record")
+                        .fields()
+                        .name("skipped")
+                        .type(nullableInt)
+                        .noDefault()
+                        .name("value")
+                        .type(nullableInt)
+                        .noDefault()
+                        .endRecord();
+        Schema writerSchema =
+                Schema.createUnion(Arrays.asList(recordSchema, Schema.create(Schema.Type.NULL)));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                DataFileWriter<GenericRecord> writer =
+                        new DataFileWriter<>(new GenericDatumWriter<>(writerSchema))) {
+            writer.create(writerSchema, out);
+            GenericRecord value = new GenericData.Record(recordSchema);
+            value.put("skipped", 100);
+            value.put("value", 42);
+            writer.append(value);
+            GenericRecord nullValue = new GenericData.Record(recordSchema);
+            nullValue.put("skipped", null);
+            nullValue.put("value", null);
+            writer.append(nullValue);
+        }
+
+        RowType tableType =
+                RowType.builder()
+                        .field("skipped", DataTypes.INT())
+                        .field("value", DataTypes.INT())
+                        .build();
+        RowType projectedType = RowType.builder().field("value", DataTypes.INT()).build();
+        List<Integer> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(tableType, projectedType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> values.add(row.isNullAt(0) ? null : row.getInt(0)));
+        }
+
+        assertThat(values).containsExactly(42, null);
     }
 
     @Test

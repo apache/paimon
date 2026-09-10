@@ -113,6 +113,9 @@ object AggregatePushDownUtils {
     }
 
     val columnName = extractColumn.get
+    if (rowType.notContainsField(columnName)) {
+      return None
+    }
     val dataType = rowType.getField(columnName).`type`()
     if (minmaxAvailable(dataType)) {
       Option(columnName)

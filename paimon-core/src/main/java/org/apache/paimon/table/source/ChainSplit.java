@@ -21,10 +21,12 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -49,7 +51,7 @@ public class ChainSplit implements Split {
     private static final long serialVersionUID = 1L;
 
     private static final int VERSION_1 = 1;
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
 
     private BinaryRow logicalPartition;
     private List<DataFileMeta> dataFiles;
@@ -217,7 +219,10 @@ public class ChainSplit implements Split {
 
         int n = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(n);
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
+        ObjectSerializer<DataFileMeta> dataFileSer =
+                version <= 2
+                        ? new DataFileMetaWriteColsLegacySerializer()
+                        : new DataFileMetaSerializer();
         for (int i = 0; i < n; i++) {
             dataFiles.add(dataFileSer.deserialize(in));
         }

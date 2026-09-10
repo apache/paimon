@@ -401,6 +401,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         null,
                         null,
                         null,
+                        null,
                         0L,
                         Snapshot.CommitKind.APPEND,
                         1000,
@@ -423,6 +424,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                 new Snapshot(
                         5,
                         0L,
+                        null,
                         null,
                         null,
                         null,

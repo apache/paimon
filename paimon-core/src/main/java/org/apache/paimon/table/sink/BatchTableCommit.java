@@ -57,13 +57,15 @@ public interface BatchTableCommit extends TableCommit {
 
     /**
      * Truncate table, like normal {@link #commit}, files are not immediately deleted, they are only
-     * logically deleted and will be deleted after the snapshot expires.
+     * logically deleted and will be deleted after the snapshot expires. A table that keeps no
+     * snapshots, such as a Format Table, deletes them right away.
      */
     void truncateTable();
 
     /**
      * Truncate partitions, like normal {@link #commit}, files are not immediately deleted, they are
-     * only logically deleted and will be deleted after the snapshot expires.
+     * only logically deleted and will be deleted after the snapshot expires. A table that keeps no
+     * snapshots, such as a Format Table, deletes them right away.
      */
     void truncatePartitions(List<Map<String, String>> partitionSpecs);
 

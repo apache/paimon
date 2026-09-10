@@ -27,6 +27,18 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>format-table.repair.collect-statistics</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether MSCK REPAIR TABLE on a Format Table also measures the partitions it finds. Off by default: measuring lists the files inside every partition, not only the partition directories.</td>
+        </tr>
+        <tr>
+            <td><h5>format-table.statistics.parallelism</h5></td>
+            <td style="word-wrap: break-word;">8</td>
+            <td>Integer</td>
+            <td>How many requests MSCK REPAIR TABLE and ANALYZE TABLE use at once to measure Format Table partitions, so that a large table does not burst them at storage.</td>
+        </tr>
+        <tr>
             <td><h5>legacy-timestamp-mapping.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

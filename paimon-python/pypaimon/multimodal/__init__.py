@@ -25,6 +25,16 @@ from pypaimon.multimodal.blob_store import (
     PutObjectResult,
 )
 from pypaimon.multimodal.connection import MultimodalConnection, connect
+from pypaimon.multimodal.hdf5 import (
+    Hdf5File,
+    Hdf5LoadResult,
+)
+from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
+from pypaimon.multimodal.rosbag import (
+    RosbagLoadResult,
+    RosbagSource,
+    RosbagStagingConfig,
+)
 from pypaimon.multimodal.table import (
     MultimodalTable,
     TextRoute,
@@ -32,6 +42,8 @@ from pypaimon.multimodal.table import (
     text_route,
     vector_route,
 )
+from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
 from pypaimon.table.data_evolution_merge_into import (
     lit,
     source_col,
@@ -39,15 +51,25 @@ from pypaimon.table.data_evolution_merge_into import (
 )
 
 __all__ = [
+    "Blob",
+    "BlobDescriptor",
     "BlobObject",
     "BlobStore",
+    "Hdf5File",
+    "Hdf5LoadResult",
     "MultimodalConnection",
     "MultimodalTable",
     "NoSuchKey",
     "ObjectInfo",
+    "PaimonLeRobotDataset",
     "PutObjectResult",
+    "RosbagLoadResult",
+    "RosbagSource",
+    "RosbagStagingConfig",
     "TextRoute",
     "VectorRoute",
+    "VideoFrameCollator",
+    "VideoFrameDescriptor",
     "connect",
     "lit",
     "source_col",

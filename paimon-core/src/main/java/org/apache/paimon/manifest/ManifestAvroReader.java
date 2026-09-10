@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -162,6 +163,15 @@ public final class ManifestAvroReader implements AutoCloseable {
             ManifestEntry.FILE
         };
 
+        private static final FieldType[] TOP_LEVEL_FIELD_TYPES = {
+            FieldType.INT,
+            FieldType.INT,
+            FieldType.BYTES,
+            FieldType.INT,
+            FieldType.INT,
+            FieldType.RECORD
+        };
+
         private final int projectedFieldCount;
         private final int versionPosition;
         private final int kindPosition;
@@ -169,6 +179,8 @@ public final class ManifestAvroReader implements AutoCloseable {
         private final int bucketPosition;
         private final int totalBucketsPosition;
         private final int filePosition;
+        private final int[] fieldOrder;
+        private final boolean standardFieldOrder;
         private final FieldDecoder fileReader;
 
         private ManifestRecordDecoder(AvroRecordDecoder decoder, RowType projectedType) {
@@ -181,13 +193,22 @@ public final class ManifestAvroReader implements AutoCloseable {
             this.totalBucketsPosition = projectedType.getFieldIndex(ManifestEntry.TOTAL_BUCKETS);
             this.filePosition = projectedType.getFieldIndex(ManifestEntry.FILE);
 
-            validateTopLevelFields(decoder);
-            // Manifest v2 has a fixed top-level layout, but DataFileMeta has gained nullable
-            // fields. Build this reader from the writer schema so legacy files with fewer nested
-            // fields still decode and expose the missing projected fields as null.
+            this.fieldOrder = validateTopLevelFields(decoder);
+            boolean standardFieldOrder = true;
+            int writerFilePosition = -1;
+            for (int i = 0; i < fieldOrder.length; i++) {
+                standardFieldOrder &= fieldOrder[i] == i;
+                if (fieldOrder[i] == 5) {
+                    writerFilePosition = i;
+                }
+            }
+            this.standardFieldOrder = standardFieldOrder;
+            // Resolve the file field from the writer schema, including its nested field order.
+            // Legacy files with fewer nested fields expose missing projected fields as null.
             fileReader =
                     decoder.createFieldDecoder(
-                            5, filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
+                            writerFilePosition,
+                            filePosition >= 0 ? projectedType.getTypeAt(filePosition) : null);
         }
 
         private boolean read(
@@ -198,6 +219,9 @@ public final class ManifestAvroReader implements AutoCloseable {
                 throws IOException {
             if (!decoder.readRecordStart()) {
                 throw new IOException("Unexpected null or non-record Manifest Avro value.");
+            }
+            if (!standardFieldOrder) {
+                return readReordered(decoder, row, partitionFilter, bucketFilter);
             }
 
             int version = decoder.readInt();
@@ -258,6 +282,64 @@ public final class ManifestAvroReader implements AutoCloseable {
             return true;
         }
 
+        private boolean readReordered(
+                AvroRecordDecoder decoder,
+                GenericRow row,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException {
+            boolean partitionNeededForFilter = partitionFilter != null || bucketFilter != null;
+            byte[] partitionBytes = null;
+            int bucket = 0;
+            int totalBuckets = 0;
+            // Avro values follow writer field order. Filter fields may occur after the file,
+            // so this compatibility path applies filters after consuming the complete record.
+            for (int field : fieldOrder) {
+                switch (field) {
+                    case 0:
+                        int version = decoder.readInt();
+                        ManifestEntrySerializer.checkFormatIdentifier(version);
+                        setProjected(row, versionPosition, version);
+                        break;
+                    case 1:
+                        setProjected(row, kindPosition, (byte) decoder.readInt());
+                        break;
+                    case 2:
+                        if (partitionPosition >= 0 || partitionNeededForFilter) {
+                            partitionBytes = decoder.readBytes();
+                        } else {
+                            decoder.skipBytes();
+                        }
+                        setProjected(row, partitionPosition, partitionBytes);
+                        break;
+                    case 3:
+                        bucket = decoder.readInt();
+                        setProjected(row, bucketPosition, bucket);
+                        break;
+                    case 4:
+                        totalBuckets = decoder.readInt();
+                        setProjected(row, totalBucketsPosition, totalBuckets);
+                        break;
+                    case 5:
+                        if (filePosition >= 0) {
+                            row.setField(
+                                    filePosition,
+                                    fileReader.read(decoder, row.getField(filePosition)));
+                        } else {
+                            fileReader.skip(decoder);
+                        }
+                        break;
+                    default:
+                        throw new IllegalStateException("Unexpected Manifest field: " + field);
+                }
+            }
+
+            BinaryRow partition =
+                    partitionNeededForFilter ? deserializeBinaryRow(partitionBytes) : null;
+            return (partitionFilter == null || partitionFilter.test(partition))
+                    && (bucketFilter == null || bucketFilter.test(partition, bucket, totalBuckets));
+        }
+
         private void skipBucketAndFile(AvroRecordDecoder decoder) throws IOException {
             decoder.readInt();
             decoder.readInt();
@@ -275,30 +357,27 @@ public final class ManifestAvroReader implements AutoCloseable {
             }
         }
 
-        private static void validateTopLevelFields(AvroRecordDecoder decoder) {
+        private static int[] validateTopLevelFields(AvroRecordDecoder decoder) {
             if (decoder.fieldCount() != TOP_LEVEL_FIELDS.length) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "Manifest Avro schema has %s top-level fields, expected %s.",
                                 decoder.fieldCount(), TOP_LEVEL_FIELDS.length));
             }
-            for (int i = 0; i < TOP_LEVEL_FIELDS.length; i++) {
+            int[] fieldOrder = new int[TOP_LEVEL_FIELDS.length];
+            for (int i = 0; i < fieldOrder.length; i++) {
                 String actual = decoder.fieldName(i);
-                String expected = TOP_LEVEL_FIELDS[i];
-                if (!expected.equals(actual)) {
+                int field = Arrays.asList(TOP_LEVEL_FIELDS).indexOf(actual);
+                if (field < 0) {
                     throw new IllegalArgumentException(
                             String.format(
-                                    "Unexpected Manifest Avro field at position %s: expected %s but found %s.",
-                                    i, expected, actual));
+                                    "Unexpected Manifest Avro field at position %s: %s.",
+                                    i, actual));
                 }
+                validateFieldType(decoder, i, TOP_LEVEL_FIELD_TYPES[field]);
+                fieldOrder[i] = field;
             }
-
-            validateFieldType(decoder, 0, FieldType.INT);
-            validateFieldType(decoder, 1, FieldType.INT);
-            validateFieldType(decoder, 2, FieldType.BYTES);
-            validateFieldType(decoder, 3, FieldType.INT);
-            validateFieldType(decoder, 4, FieldType.INT);
-            validateFieldType(decoder, 5, FieldType.RECORD);
+            return fieldOrder;
         }
 
         private static void validateFieldType(
@@ -381,7 +460,10 @@ public final class ManifestAvroReader implements AutoCloseable {
         /** Returns an independently owned block which remains valid after this reader advances. */
         public RawBlock stableCopy() {
             return new RawBlock(
-                    decoderContext, rawBlockCopySupported, block.stableCopy(), blockOrdinal);
+                    new DecoderContext(decoderContext.decoder.copy()),
+                    rawBlockCopySupported,
+                    block.stableCopy(),
+                    blockOrdinal);
         }
     }
 

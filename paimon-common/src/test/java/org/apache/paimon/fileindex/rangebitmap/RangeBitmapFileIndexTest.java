@@ -512,6 +512,59 @@ public class RangeBitmapFileIndexTest {
     }
 
     @Test
+    public void testTopNWithMultipleColumnsKeepsNullTies() {
+        IntType intType = new IntType();
+        FieldRef fieldRef1 = new FieldRef(0, "col1", intType);
+        FieldRef fieldRef2 = new FieldRef(1, "col2", intType);
+
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        writer.writeRecord(null);
+        writer.writeRecord(null);
+        writer.writeRecord(null);
+        writer.writeRecord(7);
+        writer.writeRecord(8);
+
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+        RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
+
+        // col2 decides among the tied nulls, so all of them must survive the index selection
+        List<SortValue> multiple =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_FIRST),
+                        new SortValue(fieldRef2, DESCENDING, NULLS_FIRST));
+        FileIndexResult result =
+                reader.visitTopN(new TopN(multiple, 2), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2));
+
+        // a single order is exact, so the null group is still trimmed to the limit
+        List<SortValue> single = Arrays.asList(new SortValue(fieldRef1, ASCENDING, NULLS_FIRST));
+        result = reader.visitTopN(new TopN(single, 2), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+
+        // nulls sort last, so they tie while filling up the remaining limit
+        List<SortValue> multipleNullsLast =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+                        new SortValue(fieldRef2, DESCENDING, NULLS_LAST));
+        result =
+                reader.visitTopN(
+                        new TopN(multipleNullsLast, 3), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+
+        List<SortValue> singleNullsLast =
+                Arrays.asList(new SortValue(fieldRef1, ASCENDING, NULLS_LAST));
+        result =
+                reader.visitTopN(
+                        new TopN(singleNullsLast, 3), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 4));
+    }
+
+    @Test
     public void testAllowDuplicatesAscBoundary() {
         IntType intType = new IntType();
         FieldRef fieldRef1 = new FieldRef(0, "col1", intType);

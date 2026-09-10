@@ -48,6 +48,20 @@ import static org.mockito.Mockito.when;
 class RESTTokenFileIOTest {
 
     @Test
+    void testSetFileIOCacheMaximumSize() {
+        long originalMaximumSize = RESTTokenFileIO.fileIOCacheMaximumSize();
+        try {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(2000);
+            assertThat(RESTTokenFileIO.fileIOCacheMaximumSize()).isEqualTo(2000);
+            assertThatThrownBy(() -> RESTTokenFileIO.setFileIOCacheMaximumSize(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Maximum cache size must be positive.");
+        } finally {
+            RESTTokenFileIO.setFileIOCacheMaximumSize(originalMaximumSize);
+        }
+    }
+
+    @Test
     void testCreateBlobPresignedUrlRequiresBoundRootAndDelegates() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         BlobDescriptor descriptor =
@@ -81,6 +95,36 @@ class RESTTokenFileIOTest {
                                         new Path("oss://bucket/other"), descriptor, validity))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("bound table root");
+    }
+
+    @Test
+    void testFileIOCreationFailureSurfacesAsCheckedIOException() throws IOException {
+        Path tableRoot = new Path("resttoken-broken://bucket/table");
+        // the loader's access check fails, so FileIO.get cannot produce an inner FileIO
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenThrow(new IOException("token fs unavailable"));
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("resttoken-broken");
+        when(loader.load(any())).thenReturn(delegate);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        // a unique token, so the static token-keyed FileIO cache cannot serve another test's
+        // delegate and the creation path actually runs
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        identifier,
+                        tableRoot);
+
+        // FileIO operations declare IOException; failing to create the inner FileIO must
+        // surface the same way instead of bypassing callers as UncheckedIOException
+        assertThatThrownBy(() -> fileIO.exists(tableRoot)).isInstanceOf(IOException.class);
     }
 
     @Test

@@ -29,6 +29,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -601,7 +602,7 @@ public class WriterOperatorTest {
             RowType rowType, List<String> primaryKeys, List<String> partitionKeys, Options conf)
             throws Exception {
         conf.set(CoreOptions.PATH, tablePath.toString());
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), conf);

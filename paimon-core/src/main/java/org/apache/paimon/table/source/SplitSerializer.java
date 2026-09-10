@@ -18,31 +18,15 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.catalog.TableQueryAuthResult;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
-import org.apache.paimon.utils.FunctionWithIOException;
-
-import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
-
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /**
  * Versioned binary serializer for non-system table {@link Split}s.
@@ -78,13 +62,13 @@ public class SplitSerializer {
 
         if (split instanceof QueryAuthSplit) {
             out.writeInt(QUERY_AUTH_SPLIT);
-            writeQueryAuthSplit((QueryAuthSplit) split, out);
+            ((QueryAuthSplit) split).serialize(out);
         } else if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
             out.writeInt(FALLBACK_DATA_SPLIT);
             ((FallbackReadFileStoreTable.FallbackDataSplit) split).serialize(out);
         } else if (split instanceof FallbackReadFileStoreTable.FallbackSplitImpl) {
             out.writeInt(FALLBACK_SPLIT);
-            writeFallbackSplit((FallbackReadFileStoreTable.FallbackSplitImpl) split, out);
+            ((FallbackReadFileStoreTable.FallbackSplitImpl) split).serialize(out);
         } else if (split instanceof IndexedSplit) {
             out.writeInt(INDEXED_SPLIT);
             ((IndexedSplit) split).serialize(out);
@@ -93,7 +77,7 @@ public class SplitSerializer {
             ((ChainSplit) split).serialize(out);
         } else if (split instanceof IncrementalSplit) {
             out.writeInt(INCREMENTAL_SPLIT);
-            writeIncrementalSplit((IncrementalSplit) split, out);
+            ((IncrementalSplit) split).serialize(out);
         } else if (split instanceof DataSplit) {
             out.writeInt(DATA_SPLIT);
             ((DataSplit) split).serialize(out);
@@ -122,204 +106,19 @@ public class SplitSerializer {
             case DATA_SPLIT:
                 return DataSplit.deserialize(in);
             case INCREMENTAL_SPLIT:
-                return readIncrementalSplit(in);
+                return IncrementalSplit.deserialize(in);
             case INDEXED_SPLIT:
                 return IndexedSplit.deserialize(in);
             case CHAIN_SPLIT:
                 return ChainSplit.deserialize(in);
             case QUERY_AUTH_SPLIT:
-                return readQueryAuthSplit(in);
+                return QueryAuthSplit.deserialize(in);
             case FALLBACK_DATA_SPLIT:
                 return FallbackReadFileStoreTable.FallbackDataSplit.deserialize(in);
             case FALLBACK_SPLIT:
-                return readFallbackSplit(in);
+                return FallbackReadFileStoreTable.FallbackSplitImpl.deserialize(in);
             default:
                 throw new IOException("Unsupported split type: " + type);
         }
-    }
-
-    private static void writeIncrementalSplit(IncrementalSplit split, DataOutputView out)
-            throws IOException {
-        out.writeLong(split.snapshotId());
-        serializeBinaryRow(split.partition(), out);
-        out.writeInt(split.bucket());
-        out.writeInt(split.totalBuckets());
-        writeDataFiles(split.beforeFiles(), out);
-        DeletionFile.serializeList(out, split.beforeDeletionFiles());
-        writeDataFiles(split.afterFiles(), out);
-        DeletionFile.serializeList(out, split.afterDeletionFiles());
-        out.writeBoolean(split.isStreaming());
-    }
-
-    private static IncrementalSplit readIncrementalSplit(DataInputView in) throws IOException {
-        long snapshotId = in.readLong();
-        BinaryRow partition = deserializeBinaryRow(in);
-        int bucket = in.readInt();
-        int totalBuckets = in.readInt();
-        List<DataFileMeta> beforeFiles = readDataFiles(in);
-        FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerializer =
-                DeletionFile::deserialize;
-        List<DeletionFile> beforeDeletionFiles =
-                DeletionFile.deserializeList(in, deletionFileSerializer);
-        List<DataFileMeta> afterFiles = readDataFiles(in);
-        List<DeletionFile> afterDeletionFiles =
-                DeletionFile.deserializeList(in, deletionFileSerializer);
-        boolean isStreaming = in.readBoolean();
-        return new IncrementalSplit(
-                snapshotId,
-                partition,
-                bucket,
-                totalBuckets,
-                beforeFiles,
-                beforeDeletionFiles,
-                afterFiles,
-                afterDeletionFiles,
-                isStreaming);
-    }
-
-    private static void writeQueryAuthSplit(QueryAuthSplit split, DataOutputView out)
-            throws IOException {
-        serialize(split.split(), out);
-        writeAuthResult(out, split.authResult());
-    }
-
-    private static QueryAuthSplit readQueryAuthSplit(DataInputView in) throws IOException {
-        Split split = deserialize(in);
-        TableQueryAuthResult authResult = readAuthResult(in);
-        return new QueryAuthSplit(split, authResult);
-    }
-
-    private static void writeFallbackSplit(
-            FallbackReadFileStoreTable.FallbackSplitImpl split, DataOutputView out)
-            throws IOException {
-        out.writeBoolean(split.isFallback());
-        serialize(split.wrapped(), out);
-    }
-
-    private static FallbackReadFileStoreTable.FallbackSplitImpl readFallbackSplit(DataInputView in)
-            throws IOException {
-        boolean isFallback = in.readBoolean();
-        Split split = deserialize(in);
-        return new FallbackReadFileStoreTable.FallbackSplitImpl(split, isFallback);
-    }
-
-    private static void writeAuthResult(
-            DataOutputView out, @Nullable TableQueryAuthResult authResult) throws IOException {
-        if (authResult == null) {
-            out.writeBoolean(false);
-            return;
-        }
-
-        out.writeBoolean(true);
-        writeStringList(out, authResult.filter());
-        writeStringMap(out, authResult.columnMasking());
-    }
-
-    @Nullable
-    private static TableQueryAuthResult readAuthResult(DataInputView in) throws IOException {
-        if (!in.readBoolean()) {
-            return null;
-        }
-        return new TableQueryAuthResult(readStringList(in), readNullableStringMap(in));
-    }
-
-    private static void writeDataFiles(List<DataFileMeta> files, DataOutputView out)
-            throws IOException {
-        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
-        out.writeInt(files.size());
-        for (DataFileMeta file : files) {
-            serializer.serialize(file, out);
-        }
-    }
-
-    private static List<DataFileMeta> readDataFiles(DataInputView in) throws IOException {
-        int size = in.readInt();
-        List<DataFileMeta> files = new ArrayList<>(size);
-        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
-        for (int i = 0; i < size; i++) {
-            files.add(serializer.deserialize(in));
-        }
-        return files;
-    }
-
-    private static void writeStringList(DataOutputView out, @Nullable List<String> strings)
-            throws IOException {
-        if (strings == null) {
-            out.writeBoolean(false);
-            return;
-        }
-
-        out.writeBoolean(true);
-        out.writeInt(strings.size());
-        for (String string : strings) {
-            writeString(out, string);
-        }
-    }
-
-    @Nullable
-    private static List<String> readStringList(DataInputView in) throws IOException {
-        if (!in.readBoolean()) {
-            return null;
-        }
-
-        int size = in.readInt();
-        List<String> strings = new ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            strings.add(readString(in));
-        }
-        return strings;
-    }
-
-    private static void writeStringMap(DataOutputView out, @Nullable Map<String, String> map)
-            throws IOException {
-        if (map == null) {
-            out.writeBoolean(false);
-            return;
-        }
-
-        out.writeBoolean(true);
-        out.writeInt(map.size());
-        for (Map.Entry<String, String> entry : new TreeMap<>(map).entrySet()) {
-            writeString(out, entry.getKey());
-            writeString(out, entry.getValue());
-        }
-    }
-
-    @Nullable
-    private static Map<String, String> readNullableStringMap(DataInputView in) throws IOException {
-        if (!in.readBoolean()) {
-            return null;
-        }
-
-        int size = in.readInt();
-        Map<String, String> map = new HashMap<>(size);
-        for (int i = 0; i < size; i++) {
-            map.put(readString(in), readString(in));
-        }
-        return map;
-    }
-
-    private static void writeString(DataOutputView out, @Nullable String string)
-            throws IOException {
-        if (string == null) {
-            out.writeInt(-1);
-            return;
-        }
-
-        byte[] bytes = string.getBytes(StandardCharsets.UTF_8);
-        out.writeInt(bytes.length);
-        out.write(bytes);
-    }
-
-    @Nullable
-    private static String readString(DataInputView in) throws IOException {
-        int length = in.readInt();
-        if (length < 0) {
-            return null;
-        }
-
-        byte[] bytes = new byte[length];
-        in.readFully(bytes);
-        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

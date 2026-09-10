@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.read
 
 import org.apache.paimon.data.variant.VariantMetadataUtils
-import org.apache.paimon.types.{DataField, RowType}
+import org.apache.paimon.types.{DataField, RowType, VarCharType}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -40,8 +40,9 @@ object VariantPushDownUtils {
 
     var i = 0
     while (i < extractions.length) {
-      val (path, _, isVariantTarget) = extractions(i)
-      if (path.isEmpty || isVariantTarget) {
+      val (path, info, isVariantTarget) = extractions(i)
+      val canThrow = info.failOnError && !info.paimonType.isInstanceOf[VarCharType]
+      if (path.isEmpty || isVariantTarget || canThrow || !canEncodePath(info.path)) {
         if (path.nonEmpty) {
           rejected += path
         }
@@ -66,6 +67,14 @@ object VariantPushDownUtils {
     }
     (out.toMap, accepted)
   }
+
+  /**
+   * The extraction path is encoded into the projected field's description, delimited by
+   * [[VariantMetadataUtils.DELIMITER]] and split back on read with no escaping. A path carrying the
+   * delimiter would decode into a different path, so it cannot be pushed down.
+   */
+  private def canEncodePath(path: String): Boolean =
+    !path.contains(VariantMetadataUtils.DELIMITER)
 
   /**
    * Replace each variant field at a path in `accepted` with a Paimon variant `RowType`; recurse

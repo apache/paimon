@@ -867,6 +867,7 @@ public class ChainTableUtilsTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 

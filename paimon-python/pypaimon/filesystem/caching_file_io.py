@@ -341,6 +341,11 @@ class CachingFileIO(FileIO):
         else:
             self._whitelist = whitelist
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['_cache'] = None
+        return state
+
     # Fallback caps when local-cache.max-size is unset (memory shares the heap).
     _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
     _DEFAULT_DISK_CACHE_MAX_SIZE = 10 * 1024 * 1024 * 1024
@@ -456,7 +461,10 @@ class CachingFileIO(FileIO):
         return self._delegate.write_row(*args, **kwargs)
 
     def __getattr__(self, name):
-        return getattr(self._delegate, name)
+        delegate = self.__dict__.get('_delegate')
+        if delegate is None:
+            raise AttributeError(name)
+        return getattr(delegate, name)
 
     def close(self):
         self._delegate.close()

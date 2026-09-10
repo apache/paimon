@@ -31,6 +31,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
+
 /** Parquet Column tree. */
 public class ParquetColumnVector {
     private final ParquetField column;
@@ -48,6 +50,8 @@ public class ParquetColumnVector {
     /** Whether this column is primitive (i.e., leaf column). */
     private final boolean isPrimitive;
 
+    private final boolean isMissing;
+
     /** Reader for this column - only set if 'isPrimitive' is true. */
     private VectorizedColumnReader columnReader;
 
@@ -61,8 +65,9 @@ public class ParquetColumnVector {
         this.vector = vector;
         this.children = new ArrayList<>();
         this.isPrimitive = column.isPrimitive();
+        this.isMissing = missingColumns.contains(column);
 
-        if (missingColumns.contains(column)) {
+        if (isMissing) {
             vector.setAllNull();
             return;
         }
@@ -78,17 +83,19 @@ public class ParquetColumnVector {
         } else {
             ParquetGroupField groupField = (ParquetGroupField) column;
             Preconditions.checkArgument(
-                    groupField.getChildren().size() == vector.getChildren().length);
+                    groupField.getChildren().size() == vector.getChildren().length
+                            || groupField.getChildren().size() == vector.getChildren().length + 1);
             boolean allChildrenAreMissing = true;
 
             for (int i = 0; i < groupField.getChildren().size(); i++) {
+                ParquetField child = groupField.getChildren().get(i);
+                WritableColumnVector childVector =
+                        i < vector.getChildren().length
+                                ? (WritableColumnVector) vector.getChildren()[i]
+                                : createParquetWritableColumnVector(capacity, child.getType());
                 ParquetColumnVector childCv =
                         new ParquetColumnVector(
-                                groupField.getChildren().get(i),
-                                (WritableColumnVector) vector.getChildren()[i],
-                                capacity,
-                                missingColumns,
-                                false);
+                                child, childVector, capacity, missingColumns, false);
                 children.add(childCv);
 
                 // Only use levels from non-missing child, this can happen if only some but not all
@@ -165,8 +172,8 @@ public class ParquetColumnVector {
      * children.
      */
     void reset() {
-        // nothing to do if the column itself is missing
-        if (vector.isAllNull()) {
+        if (isMissing) {
+            vector.setAllNull();
             return;
         }
 

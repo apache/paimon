@@ -40,6 +40,14 @@ public class CommitMessageSerializerTest {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
 
         DataIncrement dataIncrement = randomNewFilesIncrement();
+        dataIncrement
+                .newFiles()
+                .set(
+                        0,
+                        dataIncrement
+                                .newFiles()
+                                .get(0)
+                                .withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
         dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
         dataIncrement
                 .deletedIndexFiles()

@@ -128,6 +128,7 @@ public class RenamingSnapshotCommitTest {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                null,
                 commitIdentifier,
                 commitKind,
                 timeMillis,

@@ -27,6 +27,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Filter;
 
 import org.slf4j.Logger;
@@ -218,7 +219,6 @@ final class ManifestFileLegacyMerger {
                         singletonList(
                                 readForFullCompaction(
                                         file, manifestFile, mustChange, deleteEntries));
-        Exception exception = null;
         try {
             for (FullCompactionReadResult readResult :
                     sequentialBatchedExecute(reader, toBeMerged, manifestReadParallelism)) {
@@ -228,20 +228,16 @@ final class ManifestFileLegacyMerger {
                     result.add(readResult.file);
                 }
             }
-        } catch (Exception e) {
-            exception = e;
-        } finally {
-            if (exception != null) {
-                writer.abort();
-                throw exception;
-            }
             writer.close();
+            List<ManifestFileMeta> merged = writer.result();
+            result.addAll(merged);
+            newFilesForAbort.addAll(merged);
+            return Optional.of(result);
+        } catch (Throwable primaryFailure) {
+            writer.abort(primaryFailure);
+            ExceptionUtils.rethrowException(primaryFailure);
+            return Optional.empty();
         }
-
-        List<ManifestFileMeta> merged = writer.result();
-        result.addAll(merged);
-        newFilesForAbort.addAll(merged);
-        return Optional.of(result);
     }
 
     private static FullCompactionReadResult readForFullCompaction(

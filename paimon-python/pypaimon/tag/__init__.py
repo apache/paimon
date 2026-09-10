@@ -17,7 +17,6 @@
 
 import importlib
 import sys
-import threading
 
 if sys.version_info[:2] < (3, 7):
     # Module-level __getattr__ is unavailable before Python 3.7.
@@ -31,18 +30,15 @@ _MODULE_BY_EXPORT = {
     "TagManager": "pypaimon.tag.tag_manager",
 }
 
-# Eager sibling imports let threads lock tag and tag_manager in opposite
-# orders and fail with _DeadlockError. The lock serializes racing imports.
-_LAZY_IMPORT_LOCK = threading.RLock()
 
-
+# Lazy resolution avoids the eager sibling imports that let threads lock
+# tag and tag_manager in opposite orders. Python's own module locks make
+# this thread-safe; an extra lock here would deadlock against them.
 def __getattr__(name):
     module_name = _MODULE_BY_EXPORT.get(name)
     if module_name is None:
         raise AttributeError(
             "module 'pypaimon.tag' has no attribute {}".format(name))
-    with _LAZY_IMPORT_LOCK:
-        if name not in globals():
-            module = importlib.import_module(module_name)
-            globals()[name] = getattr(module, name)
-        return globals()[name]
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value

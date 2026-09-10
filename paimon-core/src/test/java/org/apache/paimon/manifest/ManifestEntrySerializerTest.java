@@ -23,6 +23,8 @@ import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestEntrySerializer}. */
@@ -33,6 +35,26 @@ public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<Manife
     @Test
     void testFormatIdentifier() {
         assertThat(new ManifestEntrySerializer().toRow(gen.next()).getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    void testWriteColsLegacySerializer() throws IOException {
+        ManifestEntry expected = gen.next();
+        ManifestEntry withColumnSequences =
+                ManifestEntry.create(
+                        expected.kind(),
+                        expected.partition(),
+                        expected.bucket(),
+                        expected.totalBuckets(),
+                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+        ManifestEntryWriteColsLegacySerializer serializer =
+                new ManifestEntryWriteColsLegacySerializer();
+
+        ManifestEntry actual =
+                serializer.deserializeFromBytes(serializer.serializeToBytes(withColumnSequences));
+
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
     }
 
     @Override

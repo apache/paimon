@@ -167,6 +167,7 @@ overwriteClause
 expression
     : constant
     | stringMap
+    | stringArray
     ;
 
 constant
@@ -178,6 +179,10 @@ constant
 
 stringMap
     : MAP '(' constant (',' constant)* ')'
+    ;
+
+stringArray
+    : ARRAY '(' (constant (',' constant)*)? ')'
     ;
 
 booleanValue
@@ -214,7 +219,7 @@ nonReserved
     : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | LIKE
     | NOT | OF | OR | TABLE | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
-    | MAP
+    | ARRAY | MAP
     | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | CONTINUE | SKIP_FILE | OVERWRITE
     | CSV
     | JSON
@@ -249,6 +254,7 @@ TRUE: 'TRUE';
 FALSE: 'FALSE';
 
 MAP: 'MAP';
+ARRAY: 'ARRAY';
 
 COPY: 'COPY';
 INTO: 'INTO';

@@ -375,7 +375,13 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
             return new FormatReaderMapping.Builder(
-                    formatDiscover, readTableFields, fieldsExtractor, filters, null, null);
+                    formatDiscover,
+                    readTableFields,
+                    fieldsExtractor,
+                    filters,
+                    null,
+                    null,
+                    options.dataEvolutionNestedFieldEnabled());
         }
 
         public FileIO fileIO() {

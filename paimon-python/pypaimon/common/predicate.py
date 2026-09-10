@@ -18,7 +18,6 @@
 import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
-from functools import reduce
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
 
@@ -28,6 +27,20 @@ from pyarrow import dataset as pyarrow_dataset
 
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.internal_row import InternalRow
+
+
+def _combine_arrow_expressions(expressions, combine):
+    while len(expressions) > 1:
+        next_level = []
+        for index in range(0, len(expressions), 2):
+            if index + 1 == len(expressions):
+                next_level.append(expressions[index])
+            else:
+                next_level.append(combine(
+                    expressions[index], expressions[index + 1],
+                ))
+        expressions = next_level
+    return expressions[0]
 
 
 @dataclass
@@ -113,11 +126,15 @@ class Predicate:
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
-            return reduce(lambda x, y: x & y,
-                          [p.to_arrow() for p in self.literals])
+            return _combine_arrow_expressions(
+                [p.to_arrow() for p in self.literals],
+                lambda left, right: left & right,
+            )
         if self.method == 'or':
-            return reduce(lambda x, y: x | y,
-                          [p.to_arrow() for p in self.literals])
+            return _combine_arrow_expressions(
+                [p.to_arrow() for p in self.literals],
+                lambda left, right: left | right,
+            )
 
         if self.method == 'startsWith':
             pattern = self.literals[0]

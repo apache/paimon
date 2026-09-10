@@ -116,7 +116,7 @@ public class Like extends LeafBinaryFunction {
                 javaPattern.append(nextChar);
                 ++i;
             } else if (c == '_') {
-                javaPattern.append('.');
+                javaPattern.append("(?s:.)");
             } else if (c == '%') {
                 javaPattern.append("(?s:.*)");
             } else {

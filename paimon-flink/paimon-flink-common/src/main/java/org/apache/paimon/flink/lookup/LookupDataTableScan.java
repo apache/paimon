@@ -64,6 +64,7 @@ public class LookupDataTableScan extends DataTableStreamScan {
             LookupStreamScanMode lookupScanMode) {
         super(
                 table.schema(),
+                table.schemaManager(),
                 table.coreOptions(),
                 snapshotReader,
                 table.snapshotManager(),

@@ -91,6 +91,11 @@ _EPOCH_DT_UTC = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 _EPOCH_DT_NTZ = datetime.datetime(1970, 1, 1)
 
 
+def _check_variant_sizes(value_size, metadata_size):
+    if value_size > _SIZE_LIMIT or metadata_size > _SIZE_LIMIT:
+        raise ValueError('VARIANT_CONSTRUCTOR_SIZE_LIMIT')
+
+
 class _Type(enum.Enum):
     """Internal high-level variant value types (many-to-one from wire types)."""
     OBJECT = 'OBJECT'
@@ -264,8 +269,9 @@ class _GenericVariantBuilder:
 
     def _ensure(self, n):
         needed = self._pos + n
+        _check_variant_sizes(needed, 0)
         if needed > len(self._buf):
-            new_cap = max(needed, len(self._buf) * 2)
+            new_cap = min(_SIZE_LIMIT, max(needed, len(self._buf) * 2))
             new_buf = bytearray(new_cap)
             new_buf[:self._pos] = self._buf[:self._pos]
             self._buf = new_buf
@@ -388,7 +394,7 @@ class _GenericVariantBuilder:
         self._write_le(micros_since_epoch & 0xFFFFFFFFFFFFFFFF, 8)
 
     def _finish_writing_object(self, start, fields):
-        fields.sort(key=lambda f: f[0])
+        fields.sort(key=lambda f: f[0].encode('utf-8'))
         for i in range(1, len(fields)):
             if fields[i][0] == fields[i - 1][0]:
                 raise ValueError('Duplicate key in variant object')
@@ -516,6 +522,7 @@ class _GenericVariantBuilder:
         offset_start = 1 + offset_size
         string_start = offset_start + (n_keys + 1) * offset_size
         metadata_size = string_start + total_str_size
+        _check_variant_sizes(self._pos, metadata_size)
 
         metadata = bytearray(metadata_size)
         metadata[0] = _VERSION | ((offset_size - 1) << 6)
@@ -570,6 +577,7 @@ class GenericVariant:
     __slots__ = ('_value', '_metadata', '_pos')
 
     def __init__(self, value: bytes, metadata: bytes, _pos: int = 0):
+        _check_variant_sizes(len(value), len(metadata))
         self._value = bytes(value)
         self._metadata = bytes(metadata)
         self._pos = _pos

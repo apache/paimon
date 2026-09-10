@@ -31,7 +31,7 @@ from decimal import Decimal as BigDecimal
 from functools import reduce
 from typing import List
 
-from _datasketches import update_theta_sketch
+from _datasketches import hll_sketch, update_theta_sketch
 
 from pypaimon.common.options import CoreOptions, Options
 from pypaimon.data import Timestamp, Decimal
@@ -55,6 +55,7 @@ from pypaimon.read.reader.aggregate.aggregators import (
     FieldMergeMapWithKeyTimeAgg,
     FieldMergeMapAgg,
     FieldThetaSketchAgg,
+    FieldHllSketchAgg,
     FieldRoaringBitmap32Agg,
 )
 from pypaimon.schema.data_types import AtomicType, DataField, RowType, ArrayType, MapType
@@ -2542,6 +2543,69 @@ class FieldThetaSketchAggTest(unittest.TestCase):
         self.assertEqual(agg.agg(acc2, input_val), acc2)
 
 
+class FieldHllSketchAggTest(unittest.TestCase):
+    """HLL sketches are approximate and their sparse ("list mode")
+    payload keeps coupons in insertion order, so merged bytes are not
+    stable across insertion orders. Assert on estimates instead, and pin
+    cross-language compatibility with fixtures produced by Java's
+    ``HllSketchUtil`` (datasketches-java 4.2.0, default lgK=12).
+    """
+
+    JAVA_SKETCH_OF_1_2_3 = bytes.fromhex(
+        "0201070c030803002bf2fb06862ff90d75816607")
+    JAVA_SKETCH_OF_3_4_5 = bytes.fromhex(
+        "0201070c030803007581660781bc5d067b65e608")
+    JAVA_UNION_OF_BOTH = bytes.fromhex(
+        "0201070c030805007581660781bc5d067b65e6082bf2fb06862ff90d")
+
+    @staticmethod
+    def sketch_of(*values: int) -> bytes:
+        sketch = hll_sketch(12)
+
+        for value in values:
+            sketch.update(value)
+
+        return bytes(sketch.serialize_compact())
+
+    @staticmethod
+    def estimate(data: bytes) -> float:
+        return hll_sketch.deserialize(data).get_estimate()
+
+    def test_field_hll_sketch_agg(self):
+        agg = _make("hll_sketch", "VARBINARY(20)")
+        self.assertIsInstance(agg, FieldHllSketchAgg)
+
+        input_val = self.sketch_of(1)
+        acc = self.sketch_of(2, 3)
+
+        self.assertIsNone(agg.agg(None, None))
+        self.assertEqual(agg.agg(None, input_val), input_val)
+        self.assertEqual(agg.agg(acc, None), acc)
+
+        merged = agg.agg(acc, input_val)
+        self.assertAlmostEqual(self.estimate(merged), 3.0, places=6)
+
+        # Folding in a sketch already covered by the accumulator keeps
+        # the distinct count stable.
+        self.assertAlmostEqual(
+            self.estimate(agg.agg(merged, input_val)), 3.0, places=6)
+
+    def test_merges_java_produced_sketches(self):
+        agg = _make("hll_sketch", "VARBINARY(20)")
+
+        merged = agg.agg(self.JAVA_SKETCH_OF_1_2_3, self.JAVA_SKETCH_OF_3_4_5)
+
+        # {1,2,3} ∪ {3,4,5} == 5 distinct, and Java's own union of the
+        # same pair agrees.
+        self.assertAlmostEqual(self.estimate(merged), 5.0, places=6)
+        self.assertAlmostEqual(
+            self.estimate(self.JAVA_UNION_OF_BOTH), 5.0, places=6)
+
+    def test_rejects_non_binary_column(self):
+        with self.assertRaises(ValueError):
+            _make("hll_sketch", "INT")
+
+
 class FieldRoaringBitmap32AggTest(unittest.TestCase):
 
     def test_field_roaring_bitmap32_agg(self):
@@ -2582,8 +2646,8 @@ class FieldRoaringBitmap32AggTest(unittest.TestCase):
 
 
 class RegistrationTest(unittest.TestCase):
-    """Sanity check that all 10 expected aggregators (the primary-key
-    placeholder plus 9 value aggregators) are registered when the
+    """Sanity check that all 20 expected aggregators (the primary-key
+    placeholder plus 19 value aggregators) are registered when the
     package is imported. Guards against future refactors silently
     dropping a registration.
     """
@@ -2594,6 +2658,13 @@ class RegistrationTest(unittest.TestCase):
         "first_value", "first_non_null_value",
         "sum", "max", "min",
         "bool_or", "bool_and",
+        "product",
+        "listagg",
+        "collect",
+        "nested_update", "nested_partial_update",
+        "merge_map", "merge_map_with_keytime",
+        "theta_sketch", "hll_sketch",
+        "rbm32",
     ])
 
     def test_all_expected_aggregators_registered(self):
@@ -2602,6 +2673,17 @@ class RegistrationTest(unittest.TestCase):
         missing = self.EXPECTED - registered
         self.assertEqual(missing, set(),
                          "Missing built-in aggregators: {}".format(missing))
+
+    def test_merge_engine_guard_lists_the_same_aggregators(self):
+        # ``merge_engine_support`` duplicates the identifier list on
+        # purpose (it must stay import-free of the read pipeline), so
+        # the two can drift. Adding an aggregator without updating the
+        # guard would leave it rejected at read time even though it is
+        # registered; pin them together here.
+        from pypaimon.read.merge_engine_support import (
+            _AGGREGATION_SUPPORTED_AGG_FUNCS)
+        self.assertEqual(set(_AGGREGATION_SUPPORTED_AGG_FUNCS),
+                         set(self.EXPECTED))
 
 
 if __name__ == '__main__':

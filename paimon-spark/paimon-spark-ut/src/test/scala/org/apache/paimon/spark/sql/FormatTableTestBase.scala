@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.Split
 import org.apache.paimon.utils.{CompressUtils, PartitionPathUtils}
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
 import org.apache.spark.sql.connector.read.InputPartition
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -144,19 +145,105 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test("Format table: truncate table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '1'), (3, 2, '2')")
+
+      sql("TRUNCATE TABLE t")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+      // Emptying a table does not redefine which partitions it has (SPARK-34418). Here they are
+      // the directories, and those stay.
+      checkAnswer(
+        sql("SHOW PARTITIONS t"),
+        Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+    }
+  }
+
+  test("Format table: truncate partition") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '1'), (3, 2, '2')")
+
+      sql("TRUNCATE TABLE t PARTITION (p1 = 2, p2 = '2')")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1"), Row(2, 2, "1")))
+
+      // A partial spec truncates the partitions it covers.
+      sql("TRUNCATE TABLE t PARTITION (p1 = 2)")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1")))
+
+      checkAnswer(
+        sql("SHOW PARTITIONS t"),
+        Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+    }
+  }
+
+  test("Format table: truncate a partition the table does not have") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1')")
+
+      // A complete spec matching nothing is an error, as for any other Spark table; a partial one
+      // matching nothing does nothing.
+      intercept[NoSuchPartitionException] {
+        sql("TRUNCATE TABLE t PARTITION (p1 = 9, p2 = '9')")
+      }
+      sql("TRUNCATE TABLE t PARTITION (p1 = 9)")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1")))
+    }
+  }
+
   test("Format table: CTAS with partitioned table") {
     withTable("t1", "t2") {
-      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv PARTITIONED BY (p1, p2)")
-      sql("INSERT INTO t1 VALUES (1, 2, 3)")
+      sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+      sql("INSERT INTO t1 VALUES (1, 2, 3), (2, 2, 4), (3, 5, 6)")
 
-      assertThrows[UnsupportedOperationException] {
-        sql("""
-              |CREATE TABLE t2
-              |USING csv
-              |PARTITIONED BY (p1, p2)
-              |AS SELECT * FROM t1
-              |""".stripMargin)
+      sql("""
+            |CREATE TABLE t2
+            |USING parquet
+            |PARTITIONED BY (p1, p2)
+            |AS SELECT * FROM t1
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t2 ORDER BY id"),
+        Seq(Row(1, 2, 3), Row(2, 2, 4), Row(3, 5, 6)))
+      checkAnswer(
+        sql("SHOW PARTITIONS t2"),
+        Seq(Row("p1=2/p2=3"), Row("p1=2/p2=4"), Row("p1=5/p2=6")))
+
+      val filtered = sql("SELECT * FROM t2 WHERE p1 = 2 AND p2 = 4")
+      checkAnswer(filtered, Seq(Row(2, 2, 4)))
+      assert(collectFilteredInputSplits(filtered.queryExecution.executedPlan, "t2").size == 1)
+    }
+  }
+
+  test("Format table: CTAS with partitioned engine table") {
+    def checkRejected(tableProperties: String): Unit = {
+      withTable("t1", "t2") {
+        sql("CREATE TABLE t1 (id INT, p1 INT, p2 INT) USING csv")
+        sql("INSERT INTO t1 VALUES (1, 2, 3)")
+
+        val exception = intercept[UnsupportedOperationException] {
+          sql(s"""
+                 |CREATE TABLE t2
+                 |USING parquet
+                 |PARTITIONED BY (p1, p2)
+                 |$tableProperties
+                 |AS SELECT * FROM t1
+                 |""".stripMargin)
+        }
+        assert(exception.getMessage.contains("partitioned engine format table"))
+        assert(!spark.catalog.tableExists("t2"))
       }
+    }
+
+    checkRejected("TBLPROPERTIES ('format-table.implementation'='engine')")
+    withSparkSQLConf("spark.paimon.format-table.implementation" -> "engine") {
+      checkRejected("")
+      checkRejected("TBLPROPERTIES ('format-table.implementation'='paimon')")
     }
   }
 
@@ -521,6 +608,54 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
         // partitions produce splits. (Pruning effectiveness is covered by FormatTableScanTest.)
         val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "dwd_fact")
         assert(filteredSplits.size == 2)
+      }
+    }
+  }
+
+  test(
+    "Format table: INSERT OVERWRITE empties an unpartitioned table when the query returns nothing") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, payload STRING) USING CSV")
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+
+      // An unpartitioned overwrite replaces the table, and it replaces it with nothing here. Left
+      // to the files this commit wrote, an empty query would leave the old rows readable.
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+    }
+  }
+
+  test("Format table: static INSERT OVERWRITE replaces every partition of the table") {
+    withTable("t") {
+      withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "STATIC") {
+        sql("CREATE TABLE t (id INT, dt STRING) USING CSV PARTITIONED BY (dt)")
+        sql("INSERT INTO t VALUES (1, '20260101'), (2, '20260102')")
+
+        sql("INSERT OVERWRITE t VALUES (9, '20260101')")
+
+        // The statement names no partition and the mode is STATIC, so it is about the whole
+        // table: the partition it does not write is replaced too, not left as it was.
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(9, "20260101")))
+
+        sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+        checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+      }
+    }
+  }
+
+  test("Format table: dynamic INSERT OVERWRITE replaces only the partitions it writes") {
+    withTable("t") {
+      withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "DYNAMIC") {
+        sql("CREATE TABLE t (id INT, dt STRING) USING CSV PARTITIONED BY (dt)")
+        sql("INSERT INTO t VALUES (1, '20260101'), (2, '20260102')")
+
+        sql("INSERT OVERWRITE t VALUES (9, '20260101')")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, "20260102"), Row(9, "20260101")))
+
+        // Nothing written means no partition selected, which is not the same as selecting all.
+        sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, "20260102"), Row(9, "20260101")))
       }
     }
   }

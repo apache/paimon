@@ -49,9 +49,9 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
     public void testSingleColumnWriterRotationPreservesResultGroups() throws Exception {
         GlobalIndexSingleColumnWriter first = mock(GlobalIndexSingleColumnWriter.class);
         GlobalIndexSingleColumnWriter second = mock(GlobalIndexSingleColumnWriter.class);
-        when(first.finish())
+        when(first.finish(2))
                 .thenReturn(Collections.singletonList(new ResultEntry("index-1", 2, null)));
-        when(second.finish())
+        when(second.finish(1))
                 .thenReturn(Collections.singletonList(new ResultEntry("index-2", 1, null)));
         Queue<GlobalIndexSingleColumnWriter> writers =
                 new ArrayDeque<>(Arrays.asList(first, second));
@@ -69,6 +69,38 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
         assertThat(results).hasSize(2);
         assertThat(results.get(0)).extracting(ResultEntry::fileName).containsExactly("index-1");
         assertThat(results.get(1)).extracting(ResultEntry::fileName).containsExactly("index-2");
+    }
+
+    @Test
+    public void testSingleColumnWriterPreservesSourceRowCount() throws Exception {
+        GlobalIndexSingleColumnWriter writer = mock(GlobalIndexSingleColumnWriter.class);
+        when(writer.finish(5))
+                .thenReturn(Collections.singletonList(new ResultEntry("index", 5, null)));
+        SortedSingleColumnIndexWriter taskWriter =
+                SortedSingleColumnIndexWriter.forSourceRowCount(5, writer);
+
+        taskWriter.write(10, 0);
+        taskWriter.write(20, 0);
+        List<List<ResultEntry>> results = taskWriter.finish();
+
+        verify(writer).finish(5);
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0)).extracting(ResultEntry::rowCount).containsExactly(5L);
+    }
+
+    @Test
+    public void testSingleColumnWriterPreservesSourceRangeWithoutEntries() {
+        GlobalIndexSingleColumnWriter writer = mock(GlobalIndexSingleColumnWriter.class);
+        when(writer.finish(3))
+                .thenReturn(Collections.singletonList(new ResultEntry("index", 3, null)));
+        SortedSingleColumnIndexWriter taskWriter =
+                SortedSingleColumnIndexWriter.forSourceRowCount(3, writer);
+
+        List<List<ResultEntry>> results = taskWriter.finish();
+
+        verify(writer).finish(3);
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0)).extracting(ResultEntry::rowCount).containsExactly(3L);
     }
 
     @Test

@@ -15,13 +15,43 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.data.timestamp import Timestamp
-from pypaimon.data.decimal import Decimal
-from pypaimon.data.variant_path import variant_get, variant_replace
+import importlib
+import sys
+
+if sys.version_info[:2] < (3, 7):
+    # Module-level __getattr__ is unavailable before Python 3.7.
+    from pypaimon.data.timestamp import Timestamp
+    from pypaimon.data.decimal import Decimal
+    from pypaimon.data.variant_path import (
+        variant_get,
+        variant_replace,
+        variant_set,
+    )
 
 __all__ = [
     'Timestamp',
     'Decimal',
     'variant_get',
     'variant_replace',
+    'variant_set',
 ]
+
+_MODULE_BY_EXPORT = {
+    'Timestamp': 'pypaimon.data.timestamp',
+    'Decimal': 'pypaimon.data.decimal',
+    'variant_get': 'pypaimon.data.variant_path',
+    'variant_replace': 'pypaimon.data.variant_path',
+    'variant_set': 'pypaimon.data.variant_path',
+}
+
+
+# Eager sibling imports here let one thread hold this package's module lock
+# while waiting on a sibling that another thread is already importing.
+def __getattr__(name):
+    module_name = _MODULE_BY_EXPORT.get(name)
+    if module_name is None:
+        raise AttributeError(
+            "module 'pypaimon.data' has no attribute {}".format(name))
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value

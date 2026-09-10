@@ -28,10 +28,16 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.util.Arrays;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -251,6 +257,468 @@ public class HttpClientUtilsTest {
     }
 
     @Test
+    public void testGetAsInputStreamPreservesContentDecoding() throws Exception {
+        byte[] payload = payload(4096);
+        byte[] compressed = gzip(payload);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/encoded",
+                exchange -> {
+                    if (requestCount.incrementAndGet() > 1) {
+                        respond(exchange, 410, new byte[0]);
+                        return;
+                    }
+                    exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+                    respond(exchange, 200, compressed);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/encoded"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(1);
+    }
+
+    @Test
+    public void testGetAsInputStreamFallsBackWhenIdentityEncodingIsRejected() throws Exception {
+        byte[] payload = payload(4096);
+        byte[] compressed = gzip(payload);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> firstAcceptEncoding = new AtomicReference<>();
+        AtomicReference<String> secondAcceptEncoding = new AtomicReference<>();
+        registerHandler(
+                "/encoded-only",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    String acceptEncoding =
+                            exchange.getRequestHeaders().getFirst("Accept-Encoding");
+                    if (currentRequest == 1) {
+                        firstAcceptEncoding.set(acceptEncoding);
+                        respond(exchange, 406, new byte[0]);
+                        return;
+                    }
+
+                    secondAcceptEncoding.set(acceptEncoding);
+                    exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+                    respond(exchange, 200, compressed);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/encoded-only"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(firstAcceptEncoding).hasValue("identity");
+        assertThat(secondAcceptEncoding.get()).contains("gzip");
+    }
+
+    @Test
+    public void testGetAsInputStreamDoesNotResumeTruncatedEncodedResponse() throws Exception {
+        byte[] compressed = gzip(payload(4096));
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/truncated-encoded",
+                exchange -> {
+                    requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+                    respondTruncated(
+                            exchange, 200, compressed.length, compressed, compressed.length / 2);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated-encoded"))) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("encoded response bodies cannot be resumed safely");
+        }
+        assertThat(requestCount).hasValue(1);
+    }
+
+    @Test
+    public void testGetAsInputStreamResumesTruncatedResponseBody() throws Exception {
+        byte[] payload = payload(128 * 1024);
+        int truncatedLength = 89_075;
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> ifRange = new AtomicReference<>();
+        AtomicReference<String> acceptEncoding = new AtomicReference<>();
+        registerHandler(
+                "/truncated",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (currentRequest == 1) {
+                        respondTruncated(exchange, payload, truncatedLength);
+                        return;
+                    }
+
+                    range.set(exchange.getRequestHeaders().getFirst("Range"));
+                    ifRange.set(exchange.getRequestHeaders().getFirst("If-Range"));
+                    acceptEncoding.set(exchange.getRequestHeaders().getFirst("Accept-Encoding"));
+                    byte[] remaining = Arrays.copyOfRange(payload, truncatedLength, payload.length);
+                    exchange.getResponseHeaders()
+                            .add(
+                                    "Content-Range",
+                                    String.format(
+                                            "bytes %d-%d/%d",
+                                            truncatedLength, payload.length - 1, payload.length));
+                    respond(exchange, 206, remaining);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range).hasValue("bytes=" + truncatedLength + "-");
+        assertThat(ifRange).hasValue("\"image-v1\"");
+        assertThat(acceptEncoding).hasValue("identity");
+    }
+
+    @Test
+    public void testGetAsInputStreamReplaysAndVerifiesWithoutResourceValidator() throws Exception {
+        byte[] payload = payload(4096);
+        int truncatedLength = 1024;
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> acceptEncoding = new AtomicReference<>();
+        registerHandler(
+                "/truncated-no-validator",
+                exchange -> {
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, truncatedLength);
+                        return;
+                    }
+
+                    range.set(exchange.getRequestHeaders().getFirst("Range"));
+                    acceptEncoding.set(exchange.getRequestHeaders().getFirst("Accept-Encoding"));
+                    respond(exchange, 200, payload);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated-no-validator"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range.get()).isNull();
+        assertThat(acceptEncoding).hasValue("identity");
+    }
+
+    @Test
+    public void testGetAsInputStreamReadsChunkedReplayPastInitialContentLength() throws Exception {
+        byte[] replayedPayload = payload(120);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/longer-chunked-replay",
+                exchange -> {
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, 200, 100, replayedPayload, 40);
+                    } else {
+                        respondChunked(exchange, 200, replayedPayload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/longer-chunked-replay"))) {
+            assertThat(readAll(in)).isEqualTo(replayedPayload);
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    public void testGetAsInputStreamReplaysWhenOnlyLastModifiedIsAvailable() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> ifRange = new AtomicReference<>();
+        registerHandler(
+                "/last-modified-only",
+                exchange -> {
+                    exchange.getResponseHeaders()
+                            .add("Last-Modified", "Mon, 17 Aug 2026 00:00:00 GMT");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        range.set(exchange.getRequestHeaders().getFirst("Range"));
+                        ifRange.set(exchange.getRequestHeaders().getFirst("If-Range"));
+                        respond(exchange, 200, payload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/last-modified-only"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range.get()).isNull();
+        assertThat(ifRange.get()).isNull();
+    }
+
+    @Test
+    public void testGetAsInputStreamReplaysWhenOnlyWeakEtagIsAvailable() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> ifRange = new AtomicReference<>();
+        registerHandler(
+                "/weak-etag",
+                exchange -> {
+                    exchange.getResponseHeaders().add("ETag", "W/\"image-v1\"");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        range.set(exchange.getRequestHeaders().getFirst("Range"));
+                        ifRange.set(exchange.getRequestHeaders().getFirst("If-Range"));
+                        respond(exchange, 200, payload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/weak-etag"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range.get()).isNull();
+        assertThat(ifRange.get()).isNull();
+    }
+
+    @Test
+    public void testGetAsInputStreamRejectsChangedReplayWithoutResourceValidator()
+            throws Exception {
+        byte[] payload = payload(4096);
+        byte[] changedPayload = payload.clone();
+        changedPayload[17] ^= 1;
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/changed-replay",
+                exchange -> {
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        respond(exchange, 200, changedPayload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/changed-replay"))) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("resource content changed");
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    public void testGetAsInputStreamResumesMultipleTruncatedBodies() throws Exception {
+        byte[] payload = payload(16 * 1024);
+        int firstEnd = 2048;
+        int secondEnd = 3072;
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> firstRange = new AtomicReference<>();
+        AtomicReference<String> secondRange = new AtomicReference<>();
+        registerHandler(
+                "/multiple-truncations",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (currentRequest == 1) {
+                        respondTruncated(exchange, payload, firstEnd);
+                        return;
+                    }
+
+                    int start = currentRequest == 2 ? firstEnd : secondEnd;
+                    if (currentRequest == 2) {
+                        firstRange.set(exchange.getRequestHeaders().getFirst("Range"));
+                    } else {
+                        secondRange.set(exchange.getRequestHeaders().getFirst("Range"));
+                    }
+                    exchange.getResponseHeaders()
+                            .add(
+                                    "Content-Range",
+                                    String.format(
+                                            "bytes %d-%d/%d",
+                                            start, payload.length - 1, payload.length));
+                    byte[] remaining = Arrays.copyOfRange(payload, start, payload.length);
+                    if (currentRequest == 2) {
+                        respondTruncated(exchange, 206, remaining.length, remaining, 1024);
+                    } else {
+                        respond(exchange, 206, remaining);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/multiple-truncations"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(3);
+        assertThat(firstRange).hasValue("bytes=" + firstEnd + "-");
+        assertThat(secondRange).hasValue("bytes=" + secondEnd + "-");
+    }
+
+    @Test
+    public void testGetAsInputStreamContinuesAfterBoundedRangeResponse() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> lastRange = new AtomicReference<>();
+        registerHandler(
+                "/bounded-range",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (currentRequest == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else if (currentRequest == 2) {
+                        exchange.getResponseHeaders().add("Content-Range", "bytes 1024-2047/4096");
+                        respond(exchange, 206, Arrays.copyOfRange(payload, 1024, 2048));
+                    } else {
+                        lastRange.set(exchange.getRequestHeaders().getFirst("Range"));
+                        exchange.getResponseHeaders().add("Content-Range", "bytes 2048-4095/4096");
+                        respond(exchange, 206, Arrays.copyOfRange(payload, 2048, 4096));
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/bounded-range"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(3);
+        assertThat(lastRange).hasValue("bytes=2048-");
+    }
+
+    @Test
+    public void testGetAsInputStreamFailsWhenServerIgnoresRange() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/ignore-range",
+                exchange -> {
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        respond(exchange, 200, payload);
+                    }
+                });
+
+        String uri = url("/ignore-range") + "?sig=BODY_RESUME_SECRET";
+        try (InputStream in = HttpClientUtils.getAsInputStream(uri)) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("did not honor the range request")
+                    .satisfies(
+                            e -> {
+                                assertThat(String.valueOf(e)).doesNotContain("BODY_RESUME_SECRET");
+                                assertThat(e.getMessage()).doesNotContain("sig=");
+                            });
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    public void testGetAsInputStreamFailsForMismatchedContentRange() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/wrong-content-range",
+                exchange -> {
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                        return;
+                    }
+
+                    exchange.getResponseHeaders().add("Content-Range", "bytes 1023-4095/4096");
+                    respond(exchange, 206, Arrays.copyOfRange(payload, 1023, payload.length));
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/wrong-content-range"))) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("resumed at byte 1023 instead of 1024");
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    public void testGetAsInputStreamFailsAfterBoundedResumeAttempts() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/resume-exhausted",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("ETag", "\"image-v1\"");
+                    if (currentRequest == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                        return;
+                    }
+
+                    int start = 1024 + currentRequest - 2;
+                    exchange.getResponseHeaders()
+                            .add(
+                                    "Content-Range",
+                                    String.format(
+                                            "bytes %d-%d/%d",
+                                            start, payload.length - 1, payload.length));
+                    byte[] remaining = Arrays.copyOfRange(payload, start, payload.length);
+                    respondTruncated(exchange, 206, remaining.length, remaining, 1);
+                });
+
+        String uri = url("/resume-exhausted") + "?sig=BODY_RESUME_SECRET";
+        try (InputStream in = HttpClientUtils.getAsInputStream(uri)) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("after 5 resume attempts")
+                    .hasMessageContaining(url("/resume-exhausted"))
+                    .hasMessageContaining("position=1029")
+                    .hasMessageContaining("contentLength=4096")
+                    .hasMessageContaining("recoveryAttempts=5")
+                    .satisfies(
+                            e -> {
+                                assertThat(String.valueOf(e)).doesNotContain("BODY_RESUME_SECRET");
+                                assertThat(e.getMessage()).doesNotContain("sig=");
+                            });
+            assertThatThrownBy(in::read)
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("after 5 resume attempts");
+        }
+        assertThat(requestCount).hasValue(6);
+    }
+
+    @Test
+    public void testGetAsInputStreamDoesNotResumeAfterClose() throws Exception {
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/closed-stream",
+                exchange -> {
+                    requestCount.incrementAndGet();
+                    respond(exchange, 200, payload(4096));
+                });
+
+        InputStream in = HttpClientUtils.getAsInputStream(url("/closed-stream"));
+        assertThat(in.read()).isNotNegative();
+        in.close();
+        assertThatThrownBy(in::read)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("stream is closed");
+        assertThat(requestCount).hasValue(1);
+    }
+
+    @Test
+    public void testGetAsInputStreamKeepsRestartStatusFailureTerminal() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/restart-status",
+                exchange -> {
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 0);
+                    } else {
+                        respond(exchange, 404, new byte[0]);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/restart-status"))) {
+            assertThatThrownBy(in::read)
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("server returned HTTP 404");
+            assertThatThrownBy(in::read)
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("server returned HTTP 404");
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
     public void testIsNotFoundError() {
         RuntimeException exception =
                 new RuntimeException("wrapper", new RuntimeException("HTTP error code: 404"));
@@ -329,5 +797,56 @@ public class HttpClientUtilsTest {
         } else {
             exchange.close();
         }
+    }
+
+    private static void respondTruncated(HttpExchange exchange, byte[] body, int truncatedLength)
+            throws IOException {
+        respondTruncated(exchange, 200, body.length, body, truncatedLength);
+    }
+
+    private static void respondTruncated(
+            HttpExchange exchange,
+            int statusCode,
+            long declaredLength,
+            byte[] body,
+            int truncatedLength)
+            throws IOException {
+        exchange.sendResponseHeaders(statusCode, declaredLength);
+        OutputStream outputStream = exchange.getResponseBody();
+        outputStream.write(body, 0, truncatedLength);
+        outputStream.flush();
+        exchange.close();
+    }
+
+    private static void respondChunked(HttpExchange exchange, int statusCode, byte[] body)
+            throws IOException {
+        exchange.sendResponseHeaders(statusCode, 0);
+        try (OutputStream outputStream = exchange.getResponseBody()) {
+            outputStream.write(body);
+        }
+    }
+
+    private static byte[] payload(int length) {
+        byte[] payload = new byte[length];
+        new Random(20260817L).nextBytes(payload);
+        return payload;
+    }
+
+    private static byte[] gzip(byte[] payload) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(outputStream)) {
+            gzipOutputStream.write(payload);
+        }
+        return outputStream.toByteArray();
+    }
+
+    private static byte[] readAll(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) >= 0) {
+            outputStream.write(buffer, 0, bytesRead);
+        }
+        return outputStream.toByteArray();
     }
 }

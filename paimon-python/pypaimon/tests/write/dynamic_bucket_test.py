@@ -37,7 +37,6 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
 
@@ -455,7 +454,7 @@ class DynamicBucketTest(unittest.TestCase):
                 commit2.commit(messages2)
 
             self.assertTrue(all(
-                not table.file_io.exists(path)
+                table.file_io.exists(path)
                 for path in stale_data_paths + stale_index_paths
             ))
 
@@ -554,7 +553,7 @@ class DynamicBucketTest(unittest.TestCase):
                 commit2.commit(messages2)
 
             self.assertTrue(all(
-                not table.file_io.exists(path) for path in stale_paths
+                table.file_io.exists(path) for path in stale_paths
             ))
             writer1.close()
             writer2.close()
@@ -603,7 +602,7 @@ class DynamicBucketTest(unittest.TestCase):
             stale_writer.close()
             stale_commit.close()
 
-    def test_retry_then_hash_index_conflict_aborts_prepared_files(self):
+    def test_retry_then_hash_index_conflict_preserves_prepared_files(self):
         with tempfile.TemporaryDirectory() as root:
             table = self._create_table(root, 'retry_hash_conflict')
             writer, commit, messages = self._prepare_indexed_write(table, [1])
@@ -643,13 +642,13 @@ class DynamicBucketTest(unittest.TestCase):
                 '_commit_retry_wait',
             ):
                 with self.assertRaisesRegex(
-                    CommitConflictError, 'HASH index assignment conflict'
+                    RuntimeError, 'HASH index assignment conflict'
                 ):
                     commit.commit(messages)
 
             self.assertEqual(1, calls)
             self.assertTrue(all(
-                not table.file_io.exists(path) for path in prepared_paths
+                table.file_io.exists(path) for path in prepared_paths
             ))
             writer.close()
             commit.close()

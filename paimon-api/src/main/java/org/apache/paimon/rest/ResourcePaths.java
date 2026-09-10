@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
@@ -35,6 +37,7 @@ public class ResourcePaths {
     protected static final String TAGS = "tags";
     protected static final String SNAPSHOTS = "snapshots";
     protected static final String CONSUMERS = "consumers";
+    protected static final String SCHEMAS = "schemas";
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
@@ -42,6 +45,8 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String PERMISSIONS = "permissions";
+    protected static final String POLICIES = "policies";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -58,6 +63,34 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = encodeString(prefix);
+    }
+
+    @Experimental
+    public String permissions() {
+        return SLASH.join(V1, prefix, PERMISSIONS);
+    }
+
+    @Experimental
+    public String grantPermission() {
+        return SLASH.join(permissions(), "grant");
+    }
+
+    @Experimental
+    public String revokePermission() {
+        return SLASH.join(permissions(), "revoke");
+    }
+
+    /** Policy collection nested below its attachment resource. */
+    @Experimental
+    public String policies(PermissionResource resource) {
+        resource.validatePolicyAttachment();
+        return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
+    }
+
+    /** Action endpoint for dropping one policy from its attachment resource. */
+    @Experimental
+    public String dropPolicy(PermissionResource resource) {
+        return SLASH.join(policies(resource), "drop");
     }
 
     public String databases() {
@@ -189,6 +222,21 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 SNAPSHOTS);
+    }
+
+    public String schemas(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                SCHEMAS);
+    }
+
+    public String schemas(String databaseName, String objectName, String version) {
+        return SLASH.join(schemas(databaseName, objectName), encodeString(version));
     }
 
     public String authTable(String databaseName, String objectName) {

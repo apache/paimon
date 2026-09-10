@@ -49,6 +49,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +72,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final String tableName;
     private final String commitUser;
     private final SnapshotManager snapshotManager;
+    private final boolean nestedFieldEnabled;
 
     private @Nullable Long rowIdCheckFromSnapshot;
     private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
@@ -82,6 +84,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             FileStorePathFactory pathFactory,
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
+            boolean nestedFieldEnabled,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -97,6 +100,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         this.tableName = tableName;
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
+        this.nestedFieldEnabled = nestedFieldEnabled;
     }
 
     @Override
@@ -131,7 +135,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         if (!shouldCheckRowIdFromSnapshot(commitKind)) {
             return null;
         }
-        return rowIdConflictCheckStrategy().createChecker(schemaManager, deltaFiles);
+        return rowIdConflictCheckStrategy()
+                .createChecker(schemaManager, deltaFiles, nestedFieldEnabled);
     }
 
     private RowIdConflictCheckStrategy rowIdConflictCheckStrategy() {
@@ -149,66 +154,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (commitKind == CommitKind.COMPACT) {
-            return scanCompactBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        if (commitKind == CommitKind.OVERWRITE) {
-            return scanOverwriteBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        return super.scanBaseDataFiles(
-                latestSnapshot,
-                changedPartitions,
-                deltaFiles,
-                indexFiles,
-                commitKind,
-                previousAttempt,
-                hasOverwriteSincePreviousAttempt);
-    }
-
-    private List<SimpleFileEntry> scanCompactBaseDataFiles(
-            Snapshot latestSnapshot,
-            List<BinaryRow> changedPartitions,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt) {
-        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
-        if (changedRowRanges.isEmpty()) {
-            return super.scanBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    CommitKind.COMPACT,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        return scanChangedRowRanges(
-                latestSnapshot,
-                changedPartitions,
-                changedRowRanges,
-                referencedDataFiles(deltaFiles, indexFiles));
-    }
-
-    private List<SimpleFileEntry> scanOverwriteBaseDataFiles(
-            Snapshot latestSnapshot,
-            List<BinaryRow> changedPartitions,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt) {
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
         Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (!changedRowRanges.isEmpty()) {
@@ -220,14 +165,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                     .readAllEntriesFromDataFiles(
                             latestSnapshot, changedPartitions, referencedDataFiles);
         }
-        return super.scanBaseDataFiles(
-                latestSnapshot,
-                changedPartitions,
-                deltaFiles,
-                indexFiles,
-                CommitKind.OVERWRITE,
-                previousAttempt,
-                hasOverwriteSincePreviousAttempt);
+        return Collections.emptyList();
     }
 
     private List<SimpleFileEntry> scanChangedRowRanges(
@@ -263,9 +201,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
     private Set<String> referencedDataFiles(
             List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
+        // Include ADD files to detect replay even if their row IDs have changed or are unassigned.
         Set<String> referencedDataFiles =
                 deltaFiles.stream()
-                        .filter(entry -> entry.kind() == FileKind.DELETE)
                         .map(entry -> entry.file().fileName())
                         .collect(Collectors.toSet());
         for (IndexManifestEntry indexFile : indexFiles) {
@@ -468,7 +406,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
         boolean appliesTo(CommitKind commitKind);
 
         RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles);
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled);
 
         boolean shouldCheckHistoricalEntry(FileKind kind);
     }
@@ -485,10 +425,13 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             return RowIdColumnConflictChecker.fromDataFiles(
                     schemaManager,
-                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()));
+                    deltaFiles.stream().map(ManifestEntry::file).collect(Collectors.toList()),
+                    nestedFieldEnabled);
         }
 
         @Override
@@ -509,7 +452,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
 
         @Override
         public RowIdConflictChecker createChecker(
-                SchemaManager schemaManager, List<ManifestEntry> deltaFiles) {
+                SchemaManager schemaManager,
+                List<ManifestEntry> deltaFiles,
+                boolean nestedFieldEnabled) {
             // Materializing deletion vectors rewrites complete row ranges. A concurrent ADD in a
             // deleted normal-file range can otherwise restore logically deleted rows.
             List<DataFileMeta> deletedNormalFiles =

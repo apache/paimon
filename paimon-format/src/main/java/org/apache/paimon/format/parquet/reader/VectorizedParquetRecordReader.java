@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
+import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -161,6 +162,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                 ColumnDescriptor fd = fileSchema.getColumnDescription(desc.getPath());
                 if (!fd.equals(desc)) {
                     throw new IOException("Schema evolution not supported.");
+                }
+            } else {
+                for (ParquetField child : ((ParquetGroupField) field).getChildren()) {
+                    checkColumn(child);
                 }
             }
         } else {

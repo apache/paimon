@@ -51,7 +51,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests source-backed sorted index payload creation. */
+/** Tests source-backed scalar-index payload creation. */
 class PkSortedIndexFileTest {
 
     @TempDir java.nio.file.Path tempPath;
@@ -126,6 +126,33 @@ class PkSortedIndexFileTest {
     }
 
     @Test
+    void testBuildsMultiValuePayloadFromArrayRows() throws Exception {
+        PkSortedIndexFile indexFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath));
+        PrimaryKeyIndexSourceFile source = new PrimaryKeyIndexSourceFile("data-file", 4);
+        DataField tags = new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT()));
+
+        IndexFileMeta payload =
+                indexFile.build(
+                        1,
+                        Collections.singletonList(source),
+                        tags,
+                        "multivalue",
+                        options(),
+                        Arrays.asList(
+                                        new PkSortedIndexFile.Entry(1, 0),
+                                        new PkSortedIndexFile.Entry(2, 0),
+                                        new PkSortedIndexFile.Entry(2, 3))
+                                .iterator());
+
+        assertThat(payload.indexType()).isEqualTo("multivalue");
+        assertThat(payload.rowCount()).isEqualTo(4L);
+        assertThat(payload.globalIndexMeta().indexFieldId()).isEqualTo(8);
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile()).isEqualTo(source);
+        assertThat(indexFile.exists(payload)).isTrue();
+    }
+
+    @Test
     void testBuildsMultiSourcePayloadsInOneOrdinalDomain() throws Exception {
         PkSortedIndexFile indexFile =
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath));
@@ -157,7 +184,7 @@ class PkSortedIndexFileTest {
     }
 
     @Test
-    void testRejectsMultiplePayloadsAndDeletesWholeGroup() throws Exception {
+    void testBuildRejectsMultiplePayloadsAndDeletesThem() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkSortedIndexFile indexFile =
                 new PkSortedIndexFile(fileIO, pathFactory(tempPath)) {
@@ -187,7 +214,8 @@ class PkSortedIndexFileTest {
                                         throw new RuntimeException(e);
                                     }
                                     results.add(
-                                            new ResultEntry(fileName, rowCount, new byte[] {2}));
+                                            new ResultEntry(
+                                                    fileName, rowCount / 2, new byte[] {2}));
                                 }
                                 return results;
                             }
@@ -258,7 +286,7 @@ class PkSortedIndexFileTest {
                                         Collections.singletonList(
                                                         new PkSortedIndexFile.Entry(10, 1))
                                                 .iterator()))
-                .hasMessageContaining("outside sorted index group row range");
+                .hasMessageContaining("outside source-backed index group row range");
         assertThat(closed).isTrue();
     }
 

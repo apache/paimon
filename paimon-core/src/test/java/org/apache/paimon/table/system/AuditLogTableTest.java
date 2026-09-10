@@ -33,6 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -106,7 +107,7 @@ public class AuditLogTableTest extends TableTestBase {
         FileIO fileIO = LocalFileIO.create();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         Schema.newBuilder()
                                 .column("pk", DataTypes.INT())
                                 .column("score", DataTypes.INT())
@@ -149,7 +150,7 @@ public class AuditLogTableTest extends TableTestBase {
     public void testChainTableAuditLogPreservesChainScan() throws Exception {
         Path tablePath = new Path(String.format("%s/%s.db/chain_audit_table", warehouse, database));
         FileIO fileIO = LocalFileIO.create();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         schemaManager.createTable(
                 Schema.newBuilder()
                         .column("dt", DataTypes.STRING())
@@ -179,8 +180,8 @@ public class AuditLogTableTest extends TableTestBase {
                         SchemaChange.setOption("partition.timestamp-pattern", "$dt"),
                         SchemaChange.setOption("partition.timestamp-formatter", "yyyyMMdd"));
         schemaManager.commitChanges(chainOptions);
-        new SchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainOptions);
-        new SchemaManager(fileIO, tablePath, "delta").commitChanges(chainOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "snapshot").commitChanges(chainOptions);
+        new FileSystemSchemaManager(fileIO, tablePath, "delta").commitChanges(chainOptions);
 
         FileStoreTable snapshotTable = branchTable(fileIO, tablePath, "snapshot");
         FileStoreTable deltaTable = branchTable(fileIO, tablePath, "delta");
@@ -243,7 +244,7 @@ public class AuditLogTableTest extends TableTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath),
+                        new FileSystemSchemaManager(fileIO, tablePath),
                         Schema.newBuilder()
                                 .column("pk", DataTypes.INT())
                                 .column("pt", DataTypes.INT())
@@ -320,7 +321,7 @@ public class AuditLogTableTest extends TableTestBase {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(fileIO, tablePath), schemaBuilder.build());
+                        new FileSystemSchemaManager(fileIO, tablePath), schemaBuilder.build());
         FileStoreTable table =
                 FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
@@ -333,7 +334,7 @@ public class AuditLogTableTest extends TableTestBase {
 
     private FileStoreTable branchTable(FileIO fileIO, Path tablePath, String branch) {
         TableSchema branchSchema =
-                new SchemaManager(fileIO, tablePath, branch)
+                new FileSystemSchemaManager(fileIO, tablePath, branch)
                         .latest()
                         .orElseThrow(AssertionError::new);
         Options dynamicOptions = new Options();

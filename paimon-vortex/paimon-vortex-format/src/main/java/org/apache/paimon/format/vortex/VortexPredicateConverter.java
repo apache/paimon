@@ -147,8 +147,9 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             case SMALLINT:
                 return Expression.literal((Short) value);
             case INTEGER:
-            case DATE:
                 return Expression.literal((Integer) value);
+            case DATE:
+                return Expression.literalDate((Integer) value, Expression.TimeUnit.DAYS);
             case BIGINT:
                 return Expression.literal((Long) value);
             case FLOAT:
@@ -179,7 +180,10 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
 
     private static Expression toTimestampLiteral(
             Timestamp ts, int precision, @Nullable String timeZone) {
-        if (precision <= 3) {
+        if (precision == 0) {
+            return Expression.literalTimestamp(
+                    ts.getMillisecond() / 1000, Expression.TimeUnit.SECONDS, timeZone);
+        } else if (precision <= 3) {
             return Expression.literalTimestamp(
                     ts.getMillisecond(), Expression.TimeUnit.MILLISECONDS, timeZone);
         } else if (precision <= 6) {

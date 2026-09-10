@@ -64,6 +64,21 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
+    public FileIndexResult visitArrayContains(FieldRef fieldRef, Object literal) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visitArraysOverlap(FieldRef fieldRef, List<Object> literals) {
+        return REMAIN;
+    }
+
+    @Override
+    public FileIndexResult visitArrayContainsAll(FieldRef fieldRef, List<Object> literals) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitLike(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }
@@ -117,7 +132,7 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
             fileIndexResult =
                     fileIndexResult == null
                             ? visitNotEqual(fieldRef, key)
-                            : fileIndexResult.or(visitNotEqual(fieldRef, key));
+                            : fileIndexResult.and(visitNotEqual(fieldRef, key));
         }
         return fileIndexResult;
     }

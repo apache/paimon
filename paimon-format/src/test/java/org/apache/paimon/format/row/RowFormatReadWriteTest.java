@@ -25,7 +25,9 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -481,7 +483,8 @@ public class RowFormatReadWriteTest {
         Path path = new Path(tempDir.toUri().toString(), "variant.row");
         FileFormat format = FileFormat.fromIdentifier("row", new Options());
 
-        GenericVariant v1 = GenericVariant.fromJson("{\"key\": 123}");
+        GenericVariant expected1 = GenericVariant.fromJson("{\"key\": 123}");
+        Variant v1 = new BufferOnlyVariant(expected1);
         GenericVariant v2 = GenericVariant.fromJson("[1, 2, 3]");
 
         List<InternalRow> expected = new ArrayList<>();
@@ -494,8 +497,8 @@ public class RowFormatReadWriteTest {
 
         assertThat(result.size()).isEqualTo(3);
         assertThat(result.get(0).getInt(0)).isEqualTo(1);
-        assertThat(result.get(0).getVariant(1).value()).isEqualTo(v1.value());
-        assertThat(result.get(0).getVariant(1).metadata()).isEqualTo(v1.metadata());
+        assertThat(result.get(0).getVariant(1).value()).isEqualTo(expected1.value());
+        assertThat(result.get(0).getVariant(1).metadata()).isEqualTo(expected1.metadata());
         assertThat(result.get(1).getVariant(1).value()).isEqualTo(v2.value());
         assertThat(result.get(1).getVariant(1).metadata()).isEqualTo(v2.metadata());
         assertThat(result.get(2).isNullAt(1)).isTrue();
@@ -600,6 +603,58 @@ public class RowFormatReadWriteTest {
         assertThat(result.get(0).getInt(0)).isEqualTo(100);
         assertThat(result.get(1).getInt(0)).isEqualTo(200);
         assertThat(result.get(2).getInt(0)).isEqualTo(300);
+    }
+
+    @Test
+    public void testInterleavedReadersDoNotShareProjectedRow() throws IOException {
+        RowType fullType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new VarCharType(100))));
+        // The projection has to drop a column: for an identical schema
+        // NestedProjectedRow.create returns null and no wrapper is involved.
+        RowType projectedType = new RowType(Arrays.asList(new DataField(0, "a", new IntType())));
+
+        Path pathA = new Path(tempDir.toUri().toString(), "interleaved_a.row");
+        Path pathB = new Path(tempDir.toUri().toString(), "interleaved_b.row");
+        FileFormat format = FileFormat.fromIdentifier("row", new Options());
+        writeRows(
+                format,
+                fullType,
+                pathA,
+                Arrays.asList(GenericRow.of(1, BinaryString.fromString("A"))));
+        writeRows(
+                format,
+                fullType,
+                pathB,
+                Arrays.asList(GenericRow.of(2, BinaryString.fromString("B"))));
+
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatReaderFactory readerFactory =
+                format.createReaderFactory(fullType, projectedType, new ArrayList<>());
+        try (FileRecordReader<InternalRow> readerA =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, pathA, fileIO.getFileSize(pathA), null, null));
+                FileRecordReader<InternalRow> readerB =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, pathB, fileIO.getFileSize(pathB), null, null))) {
+            FileRecordIterator<InternalRow> batchA = readerA.readBatch();
+            assertThat(batchA).isNotNull();
+            InternalRow rowA = batchA.next();
+            assertThat(rowA.getInt(0)).isEqualTo(1);
+
+            FileRecordIterator<InternalRow> batchB = readerB.readBatch();
+            assertThat(batchB).isNotNull();
+            InternalRow rowB = batchB.next();
+            assertThat(rowB.getInt(0)).isEqualTo(2);
+
+            // Reading from B must leave the row A handed out alone.
+            assertThat(rowA).isNotSameAs(rowB);
+            assertThat(rowA.getInt(0)).isEqualTo(1);
+        }
     }
 
     @Test

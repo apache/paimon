@@ -26,6 +26,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
 import org.apache.paimon.utils.Range
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.streaming.StreamTest
@@ -34,6 +35,7 @@ import java.io.File
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
+import scala.collection.mutable
 
 class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
 
@@ -244,6 +246,50 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     }
   }
 
+  test("create multivalue global index") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, tags ARRAY<STRING>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.enabled' = 'true',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      spark.sql(
+        "INSERT INTO T VALUES " +
+          "(1, array('red', 'blue')), " +
+          "(2, array('blue')), " +
+          "(3, array('green')), " +
+          "(4, array('red', 'red')), " +
+          "(5, CAST(NULL AS ARRAY<STRING>)), " +
+          "(6, CAST(array() AS ARRAY<STRING>)), " +
+          "(7, array(CAST(NULL AS STRING))), " +
+          "(8, array('red', CAST(NULL AS STRING)))"
+      )
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'tags', " +
+            "index_type => 'multivalue', options => 'sorted-index.records-per-range=2')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+      val entries = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .map(_.indexFile())
+        .filter(_.indexType() == "multivalue")
+      assert(entries.size > 1)
+      assert(entries.map(_.rowCount()).sum == 8L)
+      entries.foreach(entry => assert(entry.globalIndexMeta() != null))
+    }
+  }
+
   test("create btree global index with multiple partitions") {
     withTable("T") {
       spark.sql("""
@@ -278,15 +324,34 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       values = (0 until 33333).map(i => s"($i, 'name_$i', 'p2')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
+      val submittedStageTasks = mutable.ListBuffer.empty[Int]
+      val listener = new SparkListener {
+        override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = {
+          submittedStageTasks += stageSubmitted.stageInfo.numTasks
+        }
+      }
       val output =
-        spark
-          .sql(
-            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
-              " options => 'btree-index.records-per-range=1000')")
-          .collect()
-          .head
+        try {
+          spark.sparkContext.addSparkListener(listener)
+          spark
+            .sql(
+              "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+                " options => 'btree-index.records-per-range=1000')")
+            .collect()
+            .head
+        } finally {
+          Utils.waitUntilEventEmpty(spark)
+          spark.sparkContext.removeSparkListener(listener)
+        }
 
       assert(output.getBoolean(0))
+
+      val expectedBuildParallelism = (189088L / 1000).toInt
+      assert(
+        submittedStageTasks.count(_ == expectedBuildParallelism) == 1,
+        s"Expected one global build stage with $expectedBuildParallelism tasks, " +
+          s"but observed stages with ${submittedStageTasks.mkString(", ")} tasks"
+      )
 
       assertMultiplePartitionsResult("T", 189088L, 3)
     }

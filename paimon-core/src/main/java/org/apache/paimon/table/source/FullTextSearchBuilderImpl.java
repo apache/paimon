@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -72,6 +73,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextScan newFullTextScan() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
         return definition.isPresent()
@@ -86,6 +88,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextRead newFullTextRead() {
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);

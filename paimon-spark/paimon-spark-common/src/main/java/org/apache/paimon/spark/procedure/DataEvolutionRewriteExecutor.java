@@ -46,6 +46,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
@@ -84,6 +85,26 @@ final class DataEvolutionRewriteExecutor {
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
             @Nullable CommitMessageRewriter commitMessageRewriter) {
+        execute(
+                table,
+                initialSnapshot,
+                taskPlanner,
+                javaSparkContext,
+                sparkSession,
+                commitConfigurer,
+                commitMessageRewriter,
+                null);
+    }
+
+    static void execute(
+            FileStoreTable table,
+            Snapshot initialSnapshot,
+            Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            CommitConfigurer commitConfigurer,
+            @Nullable CommitMessageRewriter commitMessageRewriter,
+            @Nullable Consumer<List<CommitMessage>> commitObserver) {
         CommitMessageSerializer messageSerializer = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         Snapshot preparationSnapshot = initialSnapshot;
@@ -167,7 +188,8 @@ final class DataEvolutionRewriteExecutor {
                                     commitUser,
                                     sparkSession,
                                     commitConfigurer,
-                                    commitMessageRewriter);
+                                    commitMessageRewriter,
+                                    commitObserver);
                     checkArgument(
                             committedSnapshot.id() > preparationSnapshot.id(),
                             "Committed data evolution rewrite snapshot %s must be newer than preparation snapshot %s.",
@@ -194,7 +216,8 @@ final class DataEvolutionRewriteExecutor {
             String commitUser,
             SparkSession sparkSession,
             CommitConfigurer commitConfigurer,
-            @Nullable CommitMessageRewriter commitMessageRewriter) {
+            @Nullable CommitMessageRewriter commitMessageRewriter,
+            @Nullable Consumer<List<CommitMessage>> commitObserver) {
         int retryCount = 0;
         long startMillis = System.currentTimeMillis();
         RetryWaiter retryWaiter =
@@ -271,12 +294,18 @@ final class DataEvolutionRewriteExecutor {
                     }
                     throw conflict;
                 }
-                return table.snapshotManager()
-                        .latestSnapshotOfUser(commitUser)
-                        .orElseThrow(
-                                () ->
-                                        new IllegalStateException(
-                                                "Cannot find the committed data evolution rewrite snapshot."));
+                Snapshot committedSnapshot =
+                        table.snapshotManager()
+                                .latestSnapshotOfUser(commitUser)
+                                .orElseThrow(
+                                        () ->
+                                                new IllegalStateException(
+                                                        "Cannot find the committed data evolution rewrite snapshot."));
+                if (commitObserver != null) {
+                    // Include successful retry artifacts, not just the original staged outputs.
+                    commitObserver.accept(preparedMessages);
+                }
+                return committedSnapshot;
             } catch (RuntimeException conflict) {
                 if (commitMessageRewriter == null
                         || !isMergeConflict(conflict)

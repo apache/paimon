@@ -160,7 +160,7 @@ public class HilbertIndexer implements Serializable {
                 if (row.isNullAt(fieldIndex)) {
                     return PRIMITIVE_EMPTY;
                 }
-                return row.getBoolean(fieldIndex) ? PRIMITIVE_EMPTY : 0;
+                return row.getBoolean(fieldIndex) ? 1L : 0L;
             };
         }
 

@@ -930,4 +930,63 @@ Limitations:
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 
+### Video
+
+Video is an independent, versioned format with the `.video` extension. It packs one or more
+complete encoded-video payloads and logical frame runs. The payloads are raw byte ranges without
+the ordinary BLOB entry header, length trailer, or per-entry CRC:
+
+```
++----------------------------+
+| Encoded Video Payload 1    |  Raw complete video bytes
++----------------------------+
+| Encoded Video Payload 2    |
++----------------------------+
+| ...                        |
++----------------------------+
+| Physical Length Index      |  Delta-Varint video lengths
++----------------------------+
+| Run Length Index           |  Delta-Varint logical row counts
++----------------------------+
+| Run Reference Index        |  Delta-Varint physical video ordinals
++----------------------------+
+| Run First-Frame Index      |  Delta-Varint frame ordinals
++----------------------------+
+| Physical Index Length      |  4 bytes (Little Endian)
+| Run-Length Index Length    |  4 bytes (Little Endian)
+| Run-Reference Index Length |  4 bytes (Little Endian)
+| First-Frame Index Length   |  4 bytes (Little Endian)
+| Magic Number               |  4 bytes (0x4F454449, Little Endian)
+| Version                    |  1 byte
++----------------------------+
+```
+
+The run arrays have equal element counts. A non-negative run reference is an ordinal in the
+physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
+`VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
+`run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
+Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
+
+The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
+wire layout. All numeric values are little endian:
+
+| Field | Size | Description |
+| --- | ---: | --- |
+| Version | 1 byte | Descriptor version, currently `1` |
+| Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
+| URI length | 4 bytes | UTF-8 URI byte length |
+| URI | variable | URI of the containing `.video` file |
+| Offset | 8 bytes | Start of the complete encoded-video payload |
+| Length | 8 bytes | Encoded-video payload length |
+| Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+
+Descriptor bytes are independently versioned from the `.video` container. Java and Python share
+canonical descriptor and container fixtures to keep both implementations byte-compatible.
+
+Readers validate footer and index bounds, positive physical lengths, full coverage of the payload
+region, equal run-index counts, positive run lengths, physical ordinals, and non-negative first
+frames. The format currently supports one scalar BLOB field per file. Physical video reuse uses
+exact input payload `BlobDescriptor` identity and is file-local; there are no cross-file payload
+references. Ordinary `.blob` files keep their existing version, wrappers, checksums, and layout.
+
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).

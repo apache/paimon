@@ -28,6 +28,7 @@ import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExe
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -139,7 +140,7 @@ public class FileStoreLookupFunctionTest {
             boolean refreshAsync,
             Integer fullLoadThreshold)
             throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
         conf.set(CoreOptions.BUCKET, 2);
@@ -404,7 +405,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testDebugLogRowsWithAppendedPrimaryKey() throws Exception {
+    public void testLookupProjectionWithAppendedPrimaryKey() throws Exception {
         table = createStringFileStoreTable();
         lookupFunction =
                 new FileStoreLookupFunction(table, new int[] {2, 1}, new int[] {1}, null, null);
@@ -419,8 +420,15 @@ public class FileStoreLookupFunctionTest {
 
         Appender appender = addLookupFunctionAppender(Level.INFO);
         try {
-            lookupFunction.lookup(
-                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            List<RowData> rows =
+                    new ArrayList<>(
+                            lookupFunction.lookup(
+                                    new FlinkRowData(
+                                            GenericRow.of(BinaryString.fromString("key-1")))));
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).getArity()).isEqualTo(2);
+            assertThat(rows.get(0).getString(0).toString()).isEqualTo("value-1");
+            assertThat(rows.get(0).getString(1).toString()).isEqualTo("key-1");
             assertThat(((CollectingAppender) appender).messages)
                     .noneMatch(message -> message.contains("matched rows in lookup table"));
         } finally {
@@ -462,7 +470,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     private FileStoreTable createStringFileStoreTable() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));

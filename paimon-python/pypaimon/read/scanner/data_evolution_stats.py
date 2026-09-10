@@ -178,10 +178,16 @@ class DataEvolutionGroupStatsFilter:
         if layout is not None:
             return layout
 
-        schema_fields = self.schema_fields(file.schema_id)
+        schema = self.schema_fields(file.schema_id)
+        schema_fields = schema.fields if hasattr(schema, 'fields') else schema
         fields_by_name = {field.name: field for field in schema_fields}
-        data_fields = self._project_fields(
-            schema_fields, fields_by_name, file.write_cols)
+        data_fields = (
+            schema.data_file_fields(None)
+            if file.write_cols is None
+            and hasattr(schema, 'data_file_fields')
+            else self._project_fields(
+                schema_fields, fields_by_name, file.write_cols)
+        )
         stats_fields = self._project_fields(
             data_fields,
             {field.name: field for field in data_fields},

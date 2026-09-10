@@ -57,17 +57,31 @@ public class ManifestReadThreadPool {
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
         threadNum = normalizeThreadNum(threadNum);
         ExecutorService executor = getExecutorService(threadNum);
-        if (threadNum == null) {
-            threadNum =
-                    executor instanceof ThreadPoolExecutor
-                            ? ((ThreadPoolExecutor) executor).getMaximumPoolSize()
-                            : ((SemaphoredDelegatingExecutor) executor).getPermitCount();
-        }
-        return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
+        return ThreadPoolUtils.sequentialBatchedExecute(
+                executor, processor, input, effectiveThreadNum(threadNum, executor));
+    }
+
+    /** This method parallel processes one bounded batch and waits for it when closed. */
+    public static <T, U>
+            ThreadPoolUtils.CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
+                    Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
+        threadNum = normalizeThreadNum(threadNum);
+        ExecutorService executor = getExecutorService(threadNum);
+        return ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                executor, processor, input, effectiveThreadNum(threadNum, executor));
     }
 
     private static @Nullable Integer normalizeThreadNum(@Nullable Integer threadNum) {
         return threadNum == null || threadNum <= 0 ? null : threadNum;
+    }
+
+    private static int effectiveThreadNum(@Nullable Integer threadNum, ExecutorService executor) {
+        if (threadNum != null) {
+            return threadNum;
+        }
+        return executor instanceof ThreadPoolExecutor
+                ? ((ThreadPoolExecutor) executor).getMaximumPoolSize()
+                : ((SemaphoredDelegatingExecutor) executor).getPermitCount();
     }
 
     /** This method aims to parallel process tasks with randomly but return values sequentially. */

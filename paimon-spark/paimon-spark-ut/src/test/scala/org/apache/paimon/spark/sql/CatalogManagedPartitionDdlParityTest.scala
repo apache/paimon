@@ -18,11 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, Row}
 
 import scala.collection.JavaConverters._
 
@@ -34,6 +36,42 @@ import scala.collection.JavaConverters._
  * the session's case sensitivity.
  */
 class CatalogManagedPartitionDdlParityTest extends PaimonSparkTestWithRestCatalogBase {
+
+  test("ADD PARTITION LOCATION reads external data without creating the default directory") {
+    val tableName = "ddl_add_location"
+    withTable(tableName) {
+      createTable(tableName)
+      withTempDir {
+        externalDir =>
+          val table = formatTable(tableName)
+          val externalLocation = new Path(externalDir.toURI.toString).toString
+          table
+            .fileIO()
+            .writeFile(new Path(externalLocation, "part-00001.csv"), "1,a\n", false)
+
+          sql(
+            s"ALTER TABLE ${qualified(tableName)} ADD " +
+              s"PARTITION (dt = '20260101', hour = '00') " +
+              s"LOCATION '$externalLocation'")
+
+          val partitions =
+            paimonCatalog
+              .listPartitions(Identifier.create(dbName0, tableName))
+              .asScala
+          assert(partitions.size == 1)
+          assert(partitions.head.options().get(CoreOptions.PATH.key()) == externalLocation)
+          assert(
+            !table
+              .fileIO()
+              .exists(new Path(table.location(), "dt=20260101/hour=00")))
+          checkAnswer(
+            sql(
+              s"SELECT id, payload, dt, hour FROM ${qualified(tableName)} " +
+                s"WHERE dt = '20260101' AND hour = '00'"),
+            Seq(Row(1, "a", "20260101", "00")))
+      }
+    }
+  }
 
   test("ADD PARTITION IF NOT EXISTS is a repeatable no-op, a strict repeat is an error") {
     val tableName = "ddl_add_if_not_exists"
@@ -151,6 +189,58 @@ class CatalogManagedPartitionDdlParityTest extends PaimonSparkTestWithRestCatalo
       // and drift reads as empty instead of taking the query down.
       checkAnswer(sql(s"SELECT id FROM ${qualified(tableName)} ORDER BY id"), Seq(Row(2)))
       assert(registered(tableName) == Set("20260101/00", "20260102/00"))
+    }
+  }
+
+  test("SET LOCATION is rejected without changing a catalog-managed Format Table") {
+    val tableName = "ddl_set_location"
+    withTable(tableName) {
+      createTable(tableName)
+      val table = formatTable(tableName)
+      val originalLocation = table.location().toString
+      sql(s"ALTER TABLE ${qualified(tableName)} ADD PARTITION (dt = '20260101', hour = '00')")
+      table
+        .fileIO()
+        .writeFile(new Path(table.location(), "dt=20260101/hour=00/part-00001.csv"), "1,a\n", false)
+
+      val error = intercept[UnsupportedOperationException] {
+        sql(s"ALTER TABLE ${qualified(tableName)} SET LOCATION '${originalLocation}_relocated'")
+      }
+
+      assert(error.getMessage == "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+      assert(formatTable(tableName).location().toString == originalLocation)
+      assert(registered(tableName) == Set("20260101/00"))
+      checkAnswer(
+        sql(s"SELECT id, payload, dt, hour FROM ${qualified(tableName)}"),
+        Seq(Row(1, "a", "20260101", "00")))
+    }
+  }
+
+  test("partition SET LOCATION keeps Spark's structured rejection and table state") {
+    val tableName = "ddl_partition_set_location"
+    withTable(tableName) {
+      createTable(tableName)
+      val table = formatTable(tableName)
+      val originalLocation = table.location().toString
+      sql(s"ALTER TABLE ${qualified(tableName)} ADD PARTITION (dt = '20260101', hour = '00')")
+      table
+        .fileIO()
+        .writeFile(new Path(table.location(), "dt=20260101/hour=00/part-00001.csv"), "1,a\n", false)
+
+      val error = intercept[AnalysisException] {
+        sql(
+          s"ALTER TABLE ${qualified(tableName)} PARTITION " +
+            s"(dt = '20260101', hour = '00') SET LOCATION '${originalLocation}_relocated'")
+      }
+
+      // Spark 4 renamed getErrorClass to getCondition and is still moving these legacy ids to
+      // named conditions, so match the message instead of the id.
+      assert(error.getMessage.contains("does not support partition"))
+      assert(formatTable(tableName).location().toString == originalLocation)
+      assert(registered(tableName) == Set("20260101/00"))
+      checkAnswer(
+        sql(s"SELECT id, payload, dt, hour FROM ${qualified(tableName)}"),
+        Seq(Row(1, "a", "20260101", "00")))
     }
   }
 

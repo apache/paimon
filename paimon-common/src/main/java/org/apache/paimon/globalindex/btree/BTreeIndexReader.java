@@ -39,6 +39,7 @@ import org.apache.paimon.sst.BlockIterator;
 import org.apache.paimon.sst.ReverseBlockIterator;
 import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -154,25 +155,30 @@ public class BTreeIndexReader implements Closeable {
             this.maxKey = null;
         }
         this.input = fileReader.getInputStream(globalIndexIOMeta);
+        try {
+            // prepare file footer
+            long fileSize = globalIndexIOMeta.fileSize();
+            Path filePath = globalIndexIOMeta.filePath();
+            BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
+            BTreeFileFooter footer = readFooter(blockCache, fileSize);
 
-        // prepare file footer
-        long fileSize = globalIndexIOMeta.fileSize();
-        Path filePath = globalIndexIOMeta.filePath();
-        BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
-        BTreeFileFooter footer = readFooter(blockCache, fileSize);
-
-        // prepare nullBitmap and SstFileReader
-        this.nullBitmap =
-                new LazyField<>(() -> readNullBitmap(blockCache, footer.getNullBitmapHandle()));
-        FileBasedBloomFilter bloomFilter =
-                FileBasedBloomFilter.create(
-                        input, filePath, cacheManager, footer.getBloomFilterHandle());
-        this.reader =
-                new SstFileReader(
-                        createSliceComparator(keySerializer),
-                        blockCache,
-                        footer.getIndexBlockHandle(),
-                        bloomFilter);
+            // prepare nullBitmap and SstFileReader
+            this.nullBitmap =
+                    new LazyField<>(() -> readNullBitmap(blockCache, footer.getNullBitmapHandle()));
+            FileBasedBloomFilter bloomFilter =
+                    FileBasedBloomFilter.create(
+                            input, filePath, cacheManager, footer.getBloomFilterHandle());
+            this.reader =
+                    new SstFileReader(
+                            createSliceComparator(keySerializer),
+                            blockCache,
+                            footer.getIndexBlockHandle(),
+                            bloomFilter);
+        } catch (RuntimeException e) {
+            // nothing else holds a reference to input yet, so this is the only chance to release it
+            IOUtils.closeQuietly(input);
+            throw e;
+        }
     }
 
     private BTreeFileFooter readFooter(BlockCache blockCache, long fileSize) {
@@ -231,8 +237,15 @@ public class BTreeIndexReader implements Closeable {
 
     @Override
     public void close() throws IOException {
-        reader.close();
-        input.close();
+        // input is this reader's own handle, so it has to be released even when the reader
+        // itself fails to close. Rethrow the original failure rather than a wrapper.
+        try {
+            IOUtils.closeAll(reader, input);
+        } catch (IOException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
     }
 
     /** Returns a sequential iterator over all non-null key entries in this index file. */

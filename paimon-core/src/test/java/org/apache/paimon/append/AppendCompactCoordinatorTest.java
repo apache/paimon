@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -227,7 +228,7 @@ public class AppendCompactCoordinatorTest {
     public void createCoordinator() throws Exception {
         FileIO fileIO = new LocalFileIO();
         org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(fileIO, path);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, path);
         TableSchema tableSchema = schemaManager.createTable(schema());
 
         appendOnlyFileStoreTable =

@@ -38,6 +38,7 @@ under the License.
         <iceberg.flink.version>1.19</iceberg.flink.version>
         <hive.version>2.3.10</hive.version>
         <iceberg.flink.dropwizard.version>1.19.0</iceberg.flink.dropwizard.version>
+        <jetty.server.version>11.0.24</jetty.server.version>
     </properties>
 
     <dependencies>
@@ -193,6 +194,14 @@ under the License.
                     <groupId>commons-io</groupId>
                     <artifactId>commons-io</artifactId>
                 </exclusion>
+                            <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty.websocket</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -229,6 +238,14 @@ under the License.
                 <exclusion>
                     <groupId>commons-io</groupId>
                     <artifactId>commons-io</artifactId>
+                </exclusion>
+                            <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty.websocket</groupId>
+                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -275,7 +292,7 @@ under the License.
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>11.0.24</version>
+            <version>${jetty.server.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -356,4 +373,79 @@ under the License.
 
     </dependencies>
 
+
+    <profiles>
+        <profile>
+            <!-- GA row-lineage validation: builds and runs this module against Iceberg 1.11,
+                 the reference implementation of Iceberg format-version 3 row lineage. Iceberg
+                 1.10+ ships Java-17 bytecode, so this profile requires JDK 17 and stays
+                 opt-in: the default build keeps Iceberg 1.8.1 so the module compiles and
+                 tests on the JDK 11 CI, where GA-only reader assertions skip themselves.
+
+                 Run as two invocations (as the iceberg-ga CI workflow does):
+                   mvn install -DskipTests -pl paimon-iceberg -am -Ppaimon-iceberg,iceberg-ga
+                   mvn test -pl paimon-iceberg -Ppaimon-iceberg,iceberg-ga
+                 A single `test -am` session substitutes the not-yet-shaded paimon-bundle with
+                 its unshaded constituent modules, whose direct Avro references clash with the
+                 Avro 1.12 line Iceberg 1.11 requires; the installed bundle relocates Avro and
+                 has no such clash. -->
+            <id>iceberg-ga</id>
+            <properties>
+                <iceberg.version>1.11.0</iceberg.version>
+                <iceberg.flink.version>1.20</iceberg.flink.version>
+                <iceberg.flink.dropwizard.version>1.20.0</iceberg.flink.dropwizard.version>
+                <!-- Iceberg 1.11's REST test-fixtures embed a Jetty 12 server built on the
+                     jetty-compression module; the Jetty 11 jetty-server no longer provides
+                     the classes it needs. -->
+                <jetty.server.version>12.1.8</jetty.server.version>
+                <!-- Iceberg 1.11's iceberg-parquet pulls parquet-avro/parquet-hadoop 1.17.1,
+                     whose HadoopInputFile always calls the FileSystem#openFile(Path) builder
+                     API (Hadoop 3.3+); the reactor-wide hadoop.version predates it, so this
+                     profile pins the Hadoop 3 line Iceberg 1.11 itself builds against. -->
+                <hadoop.version>3.4.3</hadoop.version>
+            </properties>
+            <dependencies>
+                <!-- iceberg-core 1.11 requires jackson-core/jackson-databind 2.21.x, but
+                     Hadoop's older jackson-annotations otherwise wins dependency mediation,
+                     leaving a mismatched pair that fails at runtime. -->
+                <dependency>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                    <version>2.21</version>
+                    <scope>provided</scope>
+                </dependency>
+
+                <dependency>
+                    <groupId>org.eclipse.jetty.ee10</groupId>
+                    <artifactId>jetty-ee10-servlet</artifactId>
+                    <version>12.1.8</version>
+                    <scope>test</scope>
+                </dependency>
+
+                <!-- direct declaration so the Jetty 12 security classes win dependency
+                     mediation over the Jetty 11 line pulled by the default fixture's
+                     jetty-servlet -->
+                <dependency>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>jetty-security</artifactId>
+                    <version>12.1.10</version>
+                    <scope>test</scope>
+                </dependency>
+
+                <dependency>
+                    <groupId>org.eclipse.jetty.compression</groupId>
+                    <artifactId>jetty-compression-server</artifactId>
+                    <version>12.1.8</version>
+                    <scope>test</scope>
+                </dependency>
+
+                <dependency>
+                    <groupId>org.eclipse.jetty.compression</groupId>
+                    <artifactId>jetty-compression-gzip</artifactId>
+                    <version>12.1.8</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>

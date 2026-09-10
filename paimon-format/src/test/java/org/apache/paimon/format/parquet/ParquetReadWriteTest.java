@@ -207,6 +207,68 @@ public class ParquetReadWriteTest {
     }
 
     @Test
+    void testMissingNestedFieldPreservesStructNullability() throws IOException {
+        RowType writeType =
+                RowType.builder()
+                        .field("id", new BigIntType())
+                        .field("s", RowType.builder().field("a", new BigIntType()).build())
+                        .field(
+                                "map_s",
+                                RowType.builder()
+                                        .field("m", new MapType(new BooleanType(), new IntType()))
+                                        .build())
+                        .field("partial_s", RowType.builder().field("a", new BigIntType()).build())
+                        .build();
+        List<InternalRow> records =
+                Arrays.asList(
+                        GenericRow.of(
+                                1L,
+                                GenericRow.of(10L),
+                                GenericRow.of(new GenericMap(Collections.singletonMap(true, 10))),
+                                GenericRow.of(20L)),
+                        GenericRow.of(2L, null, null, null));
+        Path path = createTempParquetFileByPaimon(folder, records, 10_000, writeType);
+
+        RowType readType =
+                RowType.builder()
+                        .field("id", new BigIntType())
+                        .field("s", RowType.builder().field("b", new BigIntType()).build())
+                        .field("map_s", RowType.builder().field("b", new BigIntType()).build())
+                        .field(
+                                "partial_s",
+                                RowType.builder()
+                                        .field("a", new BigIntType())
+                                        .field("b", new BigIntType())
+                                        .build())
+                        .build();
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(new Options(), readType, 1024, null);
+        LocalFileIO fileIO = new LocalFileIO();
+        InternalRowSerializer serializer = new InternalRowSerializer(readType);
+        List<InternalRow> results = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
+            reader.forEachRemaining(row -> results.add(serializer.copy(row)));
+        }
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).getLong(0)).isEqualTo(1L);
+        assertThat(results.get(0).isNullAt(1)).isFalse();
+        assertThat(results.get(0).getRow(1, 1).isNullAt(0)).isTrue();
+        assertThat(results.get(0).isNullAt(2)).isFalse();
+        assertThat(results.get(0).getRow(2, 1).isNullAt(0)).isTrue();
+        assertThat(results.get(0).isNullAt(3)).isFalse();
+        assertThat(results.get(0).getRow(3, 2).getLong(0)).isEqualTo(20L);
+        assertThat(results.get(0).getRow(3, 2).isNullAt(1)).isTrue();
+        assertThat(results.get(1).getLong(0)).isEqualTo(2L);
+        assertThat(results.get(1).isNullAt(1)).isTrue();
+        assertThat(results.get(1).isNullAt(2)).isTrue();
+        assertThat(results.get(1).isNullAt(3)).isTrue();
+    }
+
+    @Test
     void testDynamicReadBatchSize() throws IOException {
         List<InternalRow> records = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
@@ -836,6 +898,78 @@ public class ParquetReadWriteTest {
                     Assertions.assertArrayEquals(row.getBinary(0), row.getBinary(0));
                     Assertions.assertArrayEquals(row.getBinary(1), row.getBinary(1));
                 });
+    }
+
+    @Test
+    public void testReadByteStreamSplitWrittenByParquet() throws Exception {
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        MessageType schema =
+                new MessageType(
+                        "origin-parquet",
+                        Types.required(PrimitiveType.PrimitiveTypeName.FLOAT).named("f0").withId(0),
+                        Types.required(PrimitiveType.PrimitiveTypeName.DOUBLE)
+                                .named("f1")
+                                .withId(1),
+                        Types.optional(PrimitiveType.PrimitiveTypeName.FLOAT).named("f2").withId(2),
+                        Types.optional(PrimitiveType.PrimitiveTypeName.DOUBLE)
+                                .named("f3")
+                                .withId(3));
+
+        int size = 8193;
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(conf)
+                        .withType(schema)
+                        .withDictionaryEncoding(false)
+                        .withByteStreamSplitEncoding(true)
+                        .build()) {
+            SimpleGroupFactory groups = new SimpleGroupFactory(schema);
+            for (int i = 1; i <= size; i++) {
+                Group row = groups.newGroup().append("f0", i * 0.1f).append("f1", i * 0.01d);
+                if (i % 3 != 0) {
+                    row.append("f2", i * 0.5f);
+                }
+                if (i % 5 != 0) {
+                    row.append("f3", i * 0.25d);
+                }
+                writer.write(row);
+            }
+        }
+
+        RowType rowType =
+                RowType.of(new FloatType(), new DoubleType(), new FloatType(), new DoubleType());
+        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), rowType, 500, null);
+        AtomicInteger count = new AtomicInteger();
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null))) {
+            reader.forEachRemaining(
+                    row -> {
+                        int i = count.incrementAndGet();
+                        assertThat(row.getFloat(0)).isEqualTo(i * 0.1f);
+                        assertThat(row.getDouble(1)).isEqualTo(i * 0.01d);
+                        if (i % 3 == 0) {
+                            assertThat(row.isNullAt(2)).isTrue();
+                        } else {
+                            assertThat(row.getFloat(2)).isEqualTo(i * 0.5f);
+                        }
+                        if (i % 5 == 0) {
+                            assertThat(row.isNullAt(3)).isTrue();
+                        } else {
+                            assertThat(row.getDouble(3)).isEqualTo(i * 0.25d);
+                        }
+                    });
+        }
+        assertThat(count.get()).isEqualTo(size);
     }
 
     @Test

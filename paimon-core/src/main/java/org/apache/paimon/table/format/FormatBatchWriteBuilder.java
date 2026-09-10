@@ -78,6 +78,14 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
         CoreOptions options = new CoreOptions(table.options());
         boolean formatTablePartitionOnlyValueInPath = options.formatTablePartitionOnlyValueInPath();
         String syncHiveUri = options.formatTableCommitSyncPartitionHiveUri();
+        int cleanupThreadNum =
+                table.partitionManager() != null && !table.partitionKeys().isEmpty()
+                        ? options.formatTableCommitCleanupThreadNum()
+                        : 1;
+        int publishThreadNum =
+                table.partitionManager() != null && !table.partitionKeys().isEmpty()
+                        ? options.formatTableCommitPublishThreadNum()
+                        : 1;
         return new FormatTableCommit(
                 table.location(),
                 table.partitionKeys(),
@@ -89,7 +97,10 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 staticPartition,
                 syncHiveUri,
                 table.catalogContext(),
-                table.partitionManager());
+                table.partitionManager(),
+                options.dynamicPartitionOverwrite(),
+                cleanupThreadNum,
+                publishThreadNum);
     }
 
     @Override

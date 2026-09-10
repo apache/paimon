@@ -64,7 +64,7 @@ class PaimonScanBuilder(val table: InnerTable)
           }
 
           val field = rowType.getField(fieldName)
-          val ref = new FieldRef(field.id(), field.name(), field.`type`())
+          val ref = new FieldRef(rowType.getFieldIndex(fieldName), field.name(), field.`type`())
 
           val nullOrdering = order.nullOrdering() match {
             case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST

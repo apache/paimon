@@ -197,15 +197,16 @@ class RayDatasource(Datasource):
                 continue
 
             # Calculate metadata for this chunk
-            total_rows = 0
+            total_rows: Optional[int] = 0
             total_size = 0
 
             for split in chunk_splits:
-                if predicate is None:
-                    # Only estimate rows if no predicate (predicate filtering changes row count)
-                    merged = split.merged_row_count()
-                    row_count = merged if merged is not None else split.row_count
-                    if row_count > 0:
+                if predicate is None and total_rows is not None:
+                    row_count = split.merged_row_count()
+                    if row_count is None:
+                        # Physical rows cannot replace unknown counts after filtering or merging.
+                        total_rows = None
+                    else:
                         total_rows += row_count
                 if hasattr(split, 'file_size') and split.file_size > 0:
                     total_size += split.file_size
@@ -222,7 +223,7 @@ class RayDatasource(Datasource):
             elif predicate is not None:
                 num_rows = None  # Can't estimate with predicate filtering
             else:
-                num_rows = total_rows if total_rows > 0 else None
+                num_rows = total_rows
             size_bytes = total_size if total_size > 0 else None
 
             metadata_kwargs = {

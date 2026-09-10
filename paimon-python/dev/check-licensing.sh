@@ -79,6 +79,7 @@ else
         -e '.*entry_points[.]txt$'
         -e '.*requires[.]txt$'
         -e '.*top_level[.]txt$'
+        -e '.*_full_version$'
         -e '.*[.]jsonl$'
         -d "${PACKAGE_DIR}"
     )

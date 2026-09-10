@@ -33,7 +33,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -2334,7 +2334,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         ManifestFile multiPartManifestFile =
                 new ManifestFile.Factory(
                                 fileIO,
-                                new SchemaManager(fileIO, path),
+                                new FileSystemSchemaManager(fileIO, path),
                                 multiPartitionType,
                                 avro,
                                 "zstd",
@@ -2737,6 +2737,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null));
     }
 
@@ -2745,7 +2746,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(
                         fileIO,
-                        new SchemaManager(fileIO, path),
+                        new FileSystemSchemaManager(fileIO, path),
                         partitionType,
                         avro,
                         "zstd",
@@ -2804,7 +2805,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 
     private List<String> readFileNames(
@@ -2887,7 +2889,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         externalPath,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 
     private List<ManifestEntry> readEntries(List<ManifestFileMeta> manifestMetas) {

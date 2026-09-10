@@ -29,7 +29,6 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
-import java.util.TimeZone;
 
 /** A procedure to expire tags by time. */
 public class ExpireTagsProcedure extends ProcedureBase {
@@ -51,9 +50,7 @@ public class ExpireTagsProcedure extends ProcedureBase {
         TagTimeExpire tagTimeExpire =
                 fileStoreTable.store().newTagAutoManager(fileStoreTable).getTagTimeExpire();
         if (olderThanStr != null) {
-            LocalDateTime olderThanTime =
-                    DateTimeUtils.parseTimestampData(olderThanStr, 3, TimeZone.getDefault())
-                            .toLocalDateTime();
+            LocalDateTime olderThanTime = DateTimeUtils.toLocalDateTime(olderThanStr, 3);
             tagTimeExpire.withOlderThanTime(olderThanTime);
         }
         List<String> expired = tagTimeExpire.expire();

@@ -60,6 +60,13 @@ under the License.
             <artifactId>httpclient5</artifactId>
             <version>${apache.hc.client.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${paimon.shade.jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

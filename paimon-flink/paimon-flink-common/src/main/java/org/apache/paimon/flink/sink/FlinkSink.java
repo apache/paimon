@@ -214,11 +214,12 @@ public abstract class FlinkSink<T> implements Serializable {
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean streamingCheckpointEnabled =
                 isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
+        boolean coordinatorCommitEnabled = coordinatorCommitEnabled();
         if (streamingCheckpointEnabled) {
-            assertStreamingConfiguration(env);
+            assertStreamingConfiguration(env, coordinatorCommitEnabled);
         }
 
-        if (coordinatorCommitEnabled()) {
+        if (coordinatorCommitEnabled) {
             return doCoordinatorCommit(written, checkpointConfig, streamingCheckpointEnabled);
         }
         return doOperatorCommit(written, commitUser, streamingCheckpointEnabled);
@@ -309,8 +310,14 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
+        assertStreamingConfiguration(env, false);
+    }
+
+    private static void assertStreamingConfiguration(
+            StreamExecutionEnvironment env, boolean supportsUnalignedCheckpoints) {
         checkArgument(
-                !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
+                supportsUnalignedCheckpoints
+                        || !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "Paimon sink currently does not support unaligned checkpoints. Please set "
                         + "execution.checkpointing.unaligned.enabled to false.");
         checkArgument(
@@ -409,14 +416,6 @@ public abstract class FlinkSink<T> implements Serializable {
                 "Could not enable coordinator commit because it requires "
                         + PRECOMMIT_COMPACT.key()
                         + " = false.");
-
-        // The OperatorCoordinator cannot tell a savepoint from a normal checkpoint.
-        // TODO support savepoint auto-tag.
-        checkArgument(
-                !options.get(SINK_AUTO_TAG_FOR_SAVEPOINT),
-                "Could not enable coordinator commit because "
-                        + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
-                        + " is enabled, which is not supported yet.");
 
         // TODO concurrent checkpoints are not supported yet.
         checkArgument(

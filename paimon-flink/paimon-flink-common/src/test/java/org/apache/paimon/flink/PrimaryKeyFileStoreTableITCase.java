@@ -1187,7 +1187,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         List<String> compactedChangelogs2 = listAllFilesWithPrefix("compacted-changelog-");
         assertThat(compactedChangelogs2).hasSize(2);
-        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
+        // A single changelog file in a partition is intentionally passed through, so original
+        // changelog files may remain when input crosses checkpoint boundaries.
 
         // write update data
         values.clear();
@@ -1207,7 +1208,6 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
         assertStreamingResult(it, expected.subList(200, 600));
         assertThat(listAllFilesWithPrefix("compacted-changelog-")).hasSize(4);
-        assertThat(listAllFilesWithPrefix("changelog-")).isEmpty();
     }
 
     private List<String> listAllFilesWithPrefix(String prefix) throws Exception {

@@ -20,7 +20,9 @@ package org.apache.paimon.index.pk;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 
@@ -46,12 +48,22 @@ public class PrimaryKeyIndexDefinitions {
         List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
         List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
         List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
+        List<String> fmColumns = options.primaryKeyFMIndexColumns();
         validateNoDuplicates(vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
         validateNoDuplicates(btreeColumns, CoreOptions.PK_BTREE_INDEX_COLUMNS.key());
         validateNoDuplicates(bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+        validateNoDuplicates(multiValueColumns, CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
         validateNoDuplicates(fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
-        validateOneIndexPerColumn(vectorColumns, btreeColumns, bitmapColumns, fullTextColumns);
+        validateNoDuplicates(fmColumns, CoreOptions.PK_FM_INDEX_COLUMNS.key());
+        validateOneIndexPerColumn(
+                vectorColumns,
+                btreeColumns,
+                bitmapColumns,
+                multiValueColumns,
+                fullTextColumns,
+                fmColumns);
         List<PrimaryKeyIndexDefinition> definitions = new ArrayList<>();
 
         for (DataField field : schema.fields()) {
@@ -72,6 +84,14 @@ public class PrimaryKeyIndexDefinitions {
                                 BitmapGlobalIndexerFactory.IDENTIFIER,
                                 options.primaryKeyBitmapIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.BITMAP));
+            } else if (multiValueColumns.contains(column)) {
+                definitions.add(
+                        new PrimaryKeyIndexDefinition(
+                                column,
+                                field.id(),
+                                MultiValueGlobalIndexerFactory.IDENTIFIER,
+                                options.primaryKeyMultiValueIndexOptions(column),
+                                PrimaryKeyIndexDefinition.Family.MULTI_VALUE));
             } else if (vectorColumns.contains(column)) {
                 definitions.add(
                         new PrimaryKeyIndexDefinition(
@@ -88,6 +108,14 @@ public class PrimaryKeyIndexDefinitions {
                                 "full-text",
                                 options.primaryKeyFullTextIndexOptions(column),
                                 PrimaryKeyIndexDefinition.Family.FULL_TEXT));
+            } else if (fmColumns.contains(column)) {
+                definitions.add(
+                        new PrimaryKeyIndexDefinition(
+                                column,
+                                field.id(),
+                                FMGlobalIndexerFactory.IDENTIFIER,
+                                options.primaryKeyFMIndexOptions(column),
+                                PrimaryKeyIndexDefinition.Family.FM));
             }
         }
 
@@ -109,12 +137,16 @@ public class PrimaryKeyIndexDefinitions {
             List<String> vectorColumns,
             List<String> btreeColumns,
             List<String> bitmapColumns,
-            List<String> fullTextColumns) {
+            List<String> multiValueColumns,
+            List<String> fullTextColumns,
+            List<String> fmColumns) {
         Set<String> indexedColumns = new HashSet<>();
         validateUniqueColumns(indexedColumns, vectorColumns);
         validateUniqueColumns(indexedColumns, btreeColumns);
         validateUniqueColumns(indexedColumns, bitmapColumns);
+        validateUniqueColumns(indexedColumns, multiValueColumns);
         validateUniqueColumns(indexedColumns, fullTextColumns);
+        validateUniqueColumns(indexedColumns, fmColumns);
     }
 
     private static void validateUniqueColumns(Set<String> indexedColumns, List<String> columns) {

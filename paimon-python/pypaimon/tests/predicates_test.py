@@ -49,6 +49,26 @@ def _random_format():
 
 class PredicateTest(unittest.TestCase):
 
+    def test_large_boolean_arrow_expression_is_balanced(self):
+        class Expression:
+            def __init__(self, depth=1):
+                self.depth = depth
+
+            def __or__(self, other):
+                return Expression(max(self.depth, other.depth) + 1)
+
+        predicates = []
+        for _ in range(2000):
+            predicate = Predicate('equal', 0, 'id', [1])
+            predicate.to_arrow = lambda: Expression()
+            predicates.append(predicate)
+
+        expression = Predicate(
+            'or', None, None, predicates,
+        ).to_arrow()
+
+        self.assertLessEqual(expression.depth, 12)
+
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()

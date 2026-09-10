@@ -171,6 +171,31 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"CONTAINS\",\"literals\":[\"foo\"]}"),
 
+                // LeafPredicate - ArrayContains uses the element type for literal serde
+                TestSpec.forPredicate(builder.arrayContains(4, BinaryString.fromString("vip")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAY_CONTAINS\",\"literals\":[\"vip\"]}"),
+
+                // LeafPredicate - ArraysOverlap uses the element type for literal serde
+                TestSpec.forPredicate(
+                                builder.arraysOverlap(
+                                        4,
+                                        Arrays.asList(
+                                                BinaryString.fromString("vip"),
+                                                BinaryString.fromString("trial"))))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAYS_OVERLAP\",\"literals\":[\"vip\",\"trial\"]}"),
+
+                // LeafPredicate - ArrayContainsAll uses the element type for literal serde
+                TestSpec.forPredicate(
+                                builder.arrayContainsAll(
+                                        4,
+                                        Arrays.asList(
+                                                BinaryString.fromString("vip"),
+                                                BinaryString.fromString("trial"))))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAY_CONTAINS_ALL\",\"literals\":[\"vip\",\"trial\"]}"),
+
                 // LeafPredicate - Between
                 TestSpec.forPredicate(builder.between(0, 3, 7))
                         .expectJson(
@@ -249,7 +274,12 @@ class PredicateJsonSerdeTest {
 
     private static PredicateBuilder newBuilder() {
         return new PredicateBuilder(
-                RowType.of(new IntType(), DataTypes.STRING(), DataTypes.STRING(), new IntType()));
+                RowType.of(
+                        new IntType(),
+                        DataTypes.STRING(),
+                        DataTypes.STRING(),
+                        new IntType(),
+                        DataTypes.ARRAY(DataTypes.STRING())));
     }
 
     private static List<Object> manyInts() {

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.data.BinaryString
 import org.apache.paimon.globalindex.IndexedSplit
+import org.apache.paimon.predicate.{ArrayContains, ArrayContainsAll, ArraysOverlap, LeafPredicate, PredicateBuilder}
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.table.source.DataSplit
 
@@ -26,8 +28,131 @@ import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 
-/** End-to-end Spark SQL tests for source-backed primary-key BTree and Bitmap indexes. */
+/** End-to-end Spark SQL tests for source-backed primary-key sorted indexes. */
 class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
+
+  test("primary-key FM index supports exact contains with partitioned container") {
+    withTable("t") {
+      // Force this tiny fixture through FM locate; production defaults may prefer a source scan.
+      spark.sql("""
+                  |CREATE TABLE t (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id',
+                  |  'bucket' = '1',
+                  |  'deletion-vectors.enabled' = 'true',
+                  |  'pk-fm.index.columns' = 'content',
+                  |  'fields.content.pk-fm.index.options' =
+                  |    '{"partition-row-count":"2","sa-sample-rate":"1","locate-cost-ratio":"1"}'
+                  |)
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (1, 'alpha needle omega'),
+                  |  (2, 'noise'),
+                  |  (3, 'needle at start')
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (4, 'unicode 你好 needle'),
+                  |  (5, CAST(NULL AS STRING)),
+                  |  (6, 'short e')
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 't')")
+
+      val sourceIndexes = loadTable("t").store.newIndexFileHandler.scanEntries.asScala
+        .map(_.indexFile)
+        .filter(meta => meta.globalIndexMeta != null && meta.globalIndexMeta.sourceMeta != null)
+      assert(sourceIndexes.map(_.indexType).toSet == Set("fm"))
+      assert(sourceIndexes.size == 1)
+
+      val predicateBuilder = new PredicateBuilder(loadTable("t").rowType())
+      val indexedQuery = "SELECT id FROM t WHERE content LIKE '%needle%'"
+      val indexedScan = getPaimonScan(indexedQuery)
+      assert(
+        indexedScan.pushedDataFilters.contains(
+          predicateBuilder.contains(1, BinaryString.fromString("needle"))))
+      assert(indexedScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(spark.sql(indexedQuery), Seq(Row(1), Row(3), Row(4)))
+
+      spark.sql("UPDATE t SET content = 'updated needle' WHERE id = 2")
+      spark.sql("DELETE FROM t WHERE id = 3")
+      spark.sql("INSERT INTO t VALUES (7, 'new needle row')")
+
+      val mixedScan = getPaimonScan(indexedQuery)
+      assert(mixedScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      assert(mixedScan.inputSplits.exists(_.isInstanceOf[DataSplit]))
+      checkAnswer(spark.sql(indexedQuery), Seq(Row(1), Row(2), Row(4), Row(7)))
+      checkAnswer(
+        spark.sql("SELECT id FROM t WHERE content LIKE '%e%'"),
+        Seq(Row(1), Row(2), Row(4), Row(6), Row(7)))
+    }
+  }
+
+  test("Spark array predicates use multivalue index") {
+    assume(gteqSpark3_3)
+
+    withTable("t") {
+      spark.sql("""
+                  |CREATE TABLE t (id INT, tags ARRAY<STRING>, probe STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id',
+                  |  'bucket' = '1',
+                  |  'deletion-vectors.enabled' = 'true',
+                  |  'pk-multivalue.index.columns' = 'tags'
+                  |)
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (1, array('red', 'blue'), 'red'),
+                  |  (2, array('green'), 'red'),
+                  |  (3, array('red'), 'blue')
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (4, array('yellow'), 'yellow'),
+                  |  (5, array(CAST(NULL AS STRING)), 'red'),
+                  |  (6, CAST(NULL AS ARRAY<STRING>), 'red')
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 't')")
+
+      val sourceIndexes = loadTable("t").store.newIndexFileHandler.scanEntries.asScala
+        .map(_.indexFile)
+        .filter(meta => meta.globalIndexMeta != null && meta.globalIndexMeta.sourceMeta != null)
+      assert(sourceIndexes.map(_.indexType).toSet == Set("multivalue"))
+
+      val predicateBuilder = new PredicateBuilder(loadTable("t").rowType())
+      val red = BinaryString.fromString("red")
+      val blue = BinaryString.fromString("blue")
+      val green = BinaryString.fromString("green")
+
+      val containsQuery = "SELECT id FROM t WHERE array_contains(tags, 'red')"
+      val containsScan = getPaimonScan(containsQuery)
+      assert(containsScan.pushedDataFilters.contains(predicateBuilder.arrayContains(1, red)))
+      assert(containsScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(spark.sql(containsQuery), Seq(Row(1), Row(3)))
+
+      val overlapsQuery =
+        "SELECT id FROM t WHERE arrays_overlap(tags, array('blue', 'green'))"
+      val overlapsScan = getPaimonScan(overlapsQuery)
+      assert(
+        overlapsScan.pushedDataFilters.contains(
+          predicateBuilder.arraysOverlap(1, Seq(blue, green).asJava)))
+      assert(overlapsScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(spark.sql(overlapsQuery), Seq(Row(1), Row(2)))
+
+      val dynamicQuery = "SELECT id FROM t WHERE array_contains(tags, probe)"
+      val dynamicScan = getPaimonScan(dynamicQuery)
+      assert(!dynamicScan.pushedDataFilters.exists {
+        case leaf: LeafPredicate =>
+          leaf.function() == ArrayContains.INSTANCE ||
+          leaf.function() == ArraysOverlap.INSTANCE ||
+          leaf.function() == ArrayContainsAll.INSTANCE
+        case _ => false
+      })
+      assert(!dynamicScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(spark.sql(dynamicQuery), Seq(Row(1), Row(4)))
+    }
+  }
 
   test("postpone bucket builds and applies sorted indexes during compact") {
     withTable("t") {

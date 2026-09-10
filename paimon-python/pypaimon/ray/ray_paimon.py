@@ -33,6 +33,7 @@ from pypaimon.common.predicate import Predicate
 
 if TYPE_CHECKING:
     import ray.data
+    from pypaimon.write.ray_datasink import PaimonWriteResult
 
 
 def _require_ray_data():
@@ -60,6 +61,7 @@ def read_paimon(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
+    _preserve_current_schema: bool = False,
     **read_args,
 ) -> "ray.data.Dataset":
     """Read a Paimon table into a Ray Dataset.
@@ -109,6 +111,7 @@ def read_paimon(
         snapshot_id=snapshot_id,
         tag_name=tag_name,
         dynamic_options=dynamic_options,
+        preserve_current_schema=_preserve_current_schema,
     )
 
     if not split_provider.splits():
@@ -267,7 +270,7 @@ def _unknown_blob_descriptor_columns(batch, scalar_cols):
 
 def _looks_like_blob_descriptor(column):
     import pyarrow as pa
-    from pypaimon.table.row.blob import BlobDescriptor
+    from pypaimon.table.row.blob import BlobDescriptorSerde
 
     if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
         return False
@@ -275,7 +278,7 @@ def _looks_like_blob_descriptor(column):
     for chunk in chunks:
         for value in chunk:
             if value.is_valid:
-                return BlobDescriptor.is_blob_descriptor(value.as_py())
+                return BlobDescriptorSerde.is_descriptor(value.as_py())
     return False
 
 
@@ -288,7 +291,7 @@ def write_paimon(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
-) -> None:
+) -> "Optional[PaimonWriteResult]":
     """Write a Ray Dataset to a Paimon table.
 
     HASH_FIXED rows are assigned to the correct bucket by the Paimon
@@ -310,6 +313,10 @@ def write_paimon(
         hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
             table options, ``"off"`` disables it, and ``"map_groups"``
             explicitly enables HASH_FIXED grouping.
+
+    Returns:
+        Metadata for the exact committed snapshot, or ``None`` when no
+        snapshot was committed.
     """
     _require_ray_data()
 
@@ -319,7 +326,7 @@ def write_paimon(
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    write_paimon_dataset(
+    return write_paimon_dataset(
         dataset,
         table,
         overwrite=overwrite,

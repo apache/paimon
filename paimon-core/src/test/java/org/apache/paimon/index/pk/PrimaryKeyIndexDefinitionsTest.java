@@ -44,25 +44,27 @@ class PrimaryKeyIndexDefinitionsTest {
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
 
         List<PrimaryKeyIndexDefinition> definitions =
                 PrimaryKeyIndexDefinitions.create(schema(options)).definitions();
 
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::column)
-                .containsExactly("name", "status", "embedding");
+                .containsExactly("name", "status", "embedding", "tags");
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::family)
                 .containsExactly(
                         PrimaryKeyIndexDefinition.Family.BTREE,
                         PrimaryKeyIndexDefinition.Family.BITMAP,
-                        PrimaryKeyIndexDefinition.Family.VECTOR);
+                        PrimaryKeyIndexDefinition.Family.VECTOR,
+                        PrimaryKeyIndexDefinition.Family.MULTI_VALUE);
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::fieldId)
-                .containsExactly(1, 2, 3);
+                .containsExactly(1, 2, 3, 4);
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::indexType)
-                .containsExactly("btree", "bitmap", "ivf-pq");
+                .containsExactly("btree", "bitmap", "ivf-pq", "multivalue");
     }
 
     @Test
@@ -98,6 +100,23 @@ class PrimaryKeyIndexDefinitionsTest {
     }
 
     @Test
+    void testCreatesFMDefinitionAndResolvesOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_FM_INDEX_COLUMNS.key(), "name");
+        options.put("fm-index.sa-sample-rate", "16");
+        options.put("fields.name.pk-fm.index.options", "{\"partition-row-count\":\"2\"}");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.column()).isEqualTo("name");
+        assertThat(definition.indexType()).isEqualTo("fm");
+        assertThat(definition.family()).isEqualTo(PrimaryKeyIndexDefinition.Family.FM);
+        assertThat(definition.options().get("fm-index.sa-sample-rate")).isEqualTo("16");
+        assertThat(definition.options().get("fm-index.partition-row-count")).isEqualTo("2");
+    }
+
+    @Test
     void testRejectsDuplicateColumnWithinFamily() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name,name");
@@ -126,7 +145,8 @@ class PrimaryKeyIndexDefinitionsTest {
                         new DataField(0, "id", DataTypes.INT().notNull()),
                         new DataField(1, "name", DataTypes.STRING()),
                         new DataField(2, "status", DataTypes.INT()),
-                        new DataField(3, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()))),
+                        new DataField(3, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                        new DataField(4, "tags", DataTypes.ARRAY(DataTypes.STRING()))),
                 3,
                 Collections.emptyList(),
                 Collections.singletonList("id"),

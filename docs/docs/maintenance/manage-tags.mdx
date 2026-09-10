@@ -34,6 +34,9 @@ data files, and the historical data of expired snapshots cannot be queried anymo
 To solve this problem, you can create a tag based on a snapshot. The tag will maintain the manifests and data files of the
 snapshot. A typical usage is creating tags daily, then you can maintain the historical data of each day for batch reading.
 
+For the relationship between tag retention and other cleanup operations, see [Clean Up Stored Data](./#clean-up-stored-data).
+To compare snapshot and tag recovery modes, see [Recover Table Data](./#recover-table-data).
+
 ## Automatic Creation
 
 Paimon supports automatic creation of tags in writing job.
@@ -234,6 +237,9 @@ CALL sys.delete_tag(table => 'test.t', tag => 'test_tag');
 
 Rollback table to a specific tag. All snapshots and tags whose snapshot id is larger than the tag will be deleted (and 
 the data will be deleted too).
+
+To preserve later snapshots and tags, see [Rollback to Tag as Latest](#rollback-to-tag-as-latest).
+To restore a snapshot by ID, see [Rollback to Snapshot](./manage-snapshots#rollback-to-snapshot).
 
 <Tabs groupId="rollback-to">
 

@@ -20,6 +20,8 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.format.{FormatTablePartitionRepair, PaimonFormatTable}
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.table.format.FormatTablePartitionStatsCollector
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionsException, ResolvedPartitionSpec}
@@ -111,9 +113,9 @@ case class PaimonAddFormatTablePartitionsExec(
  * partitions (tables using filesystem partition discovery always fail with a clear error). Complete
  * specs are resolved against the catalog registration first: missing specs fail with
  * [[NoSuchPartitionsException]] unless IF EXISTS was given, and only registered specs are
- * unregistered and have their directories deleted, so data that is merely awaiting registration
- * (e.g. by MSCK REPAIR TABLE) is never removed. Partial specs resolve to the registered leaf
- * partitions they cover.
+ * unregistered. Default-location directories are deleted; custom-location data and data merely
+ * awaiting registration (e.g. by MSCK REPAIR TABLE) are not. Partial specs resolve to the
+ * registered leaf partitions they cover.
  */
 case class PaimonDropFormatTablePartitionsExec(
     table: PaimonFormatTable,
@@ -130,11 +132,8 @@ case class PaimonDropFormatTablePartitionsExec(
         table)
     }
     if (purge) {
-      // Match Spark's v2 default for purgePartitions. DROP PARTITION on a Format Table with
-      // catalog-managed partitions already removes the partition data, so PURGE adds nothing.
       throw new UnsupportedOperationException(
-        s"DROP PARTITION ... PURGE is not supported for Format Table ${table.name()}. " +
-          "DROP PARTITION already removes the partition data.")
+        s"DROP PARTITION ... PURGE is not supported for Format Table ${table.name()}.")
     }
     if (partSpecs.isEmpty) {
       return Seq.empty
@@ -143,11 +142,10 @@ case class PaimonDropFormatTablePartitionsExec(
     val partitionKeyCount = table.table.partitionKeys().size()
     val (completeSpecs, partialSpecs) =
       partSpecs.partition(_.ident.numFields == partitionKeyCount)
-    val registration = table
-      .formatTablePartitionsRegistered(
-        completeSpecs.map(_.names.toArray).toArray,
-        completeSpecs.map(_.ident).toArray)
-      .toSeq
+    val requestedSpecs = completeSpecs ++ partialSpecs
+    val (registration, partitions) = table.resolveFormatTablePartitionsForDrop(
+      requestedSpecs.map(_.names.toArray).toArray,
+      requestedSpecs.map(_.ident).toArray)
     val missingSpecs = completeSpecs.zip(registration).collect { case (spec, false) => spec }
     if (missingSpecs.nonEmpty && !ifExists) {
       throw new NoSuchPartitionsException(
@@ -156,17 +154,11 @@ case class PaimonDropFormatTablePartitionsExec(
         table.partitionSchema)
     }
 
-    val specsToDrop =
-      completeSpecs.zip(registration).collect { case (spec, true) => spec } ++ partialSpecs
-    if (specsToDrop.nonEmpty) {
-      // Catalog-managed semantics (PaimonPartitionManagement#dropFormatTablePartitions): resolve
-      // partial specs, unregister the exact catalog partitions, then delete their directories
-      // with the table FileIO client-side. A directory-deletion failure stays unregistered so
-      // partially deleted data is not exposed again.
+    if (partitions.nonEmpty) {
+      // Resolve partial specs, unregister the exact partitions, and delete only default-location
+      // directories. A deletion failure stays unregistered so partial data is not exposed again.
       PaimonFormatTablePartitionDdlExec.refreshingCache(refreshCache) {
-        table.dropFormatTablePartitions(
-          specsToDrop.map(_.names.toArray).toArray,
-          specsToDrop.map(_.ident).toArray)
+        table.dropCatalogRegisteredPartitions(partitions)
       }
     }
     Seq.empty
@@ -189,8 +181,18 @@ case class PaimonRepairFormatTablePartitionsExec(
   extends LeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
+    // A repair stops at the numbers a directory listing already gives; a record count needs the
+    // file footers, which no listing opens.
+    val statsCollector =
+      if (OptionUtils.formatTableRepairCollectStatistics()) {
+        new FormatTablePartitionStatsCollector(
+          table.table,
+          OptionUtils.formatTableStatisticsParallelism())
+      } else {
+        null
+      }
     PaimonFormatTablePartitionDdlExec.refreshingCache(refreshCache) {
-      FormatTablePartitionRepair.repair(table, addPartitions, dropPartitions)
+      FormatTablePartitionRepair.repair(table, addPartitions, dropPartitions, statsCollector)
     }
     Seq.empty
   }

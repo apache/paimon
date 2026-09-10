@@ -168,6 +168,15 @@ public class TextFileReaderTest {
     }
 
     @Test
+    public void testReadLineWithOverlappingDelimiterPrefix() throws IOException {
+        writeFile("aaabtail");
+
+        List<String> lines = readAllLines("aab");
+
+        assertThat(lines).containsExactly("a", "tail");
+    }
+
+    @Test
     public void testReadLineWithMultiByteUTF8Delimiter() throws IOException {
         // Emoji delimiter
         writeFile("line1😀line2😀line3");

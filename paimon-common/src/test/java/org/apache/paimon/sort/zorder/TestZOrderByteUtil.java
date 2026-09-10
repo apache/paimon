@@ -18,15 +18,22 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -85,6 +92,82 @@ public class TestZOrderByteUtil {
             substringIndex++;
         }
         return result.toString();
+    }
+
+    /**
+     * Ordered-bytes transforms must preserve value order across negatives for floats and doubles.
+     */
+    @Test
+    public void testFloatDoubleNegativeOrdering() {
+        float[] floats = {
+            -Float.MAX_VALUE,
+            -2.5f,
+            -1f,
+            -Float.MIN_VALUE,
+            0f,
+            Float.MIN_VALUE,
+            1f,
+            2.5f,
+            Float.MAX_VALUE
+        };
+        long prevF =
+                ZOrderByteUtils.floatToOrderedBytes(floats[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < floats.length; i++) {
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(floats[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevF, cur)).isLessThan(0);
+            prevF = cur;
+        }
+
+        double[] doubles = {
+            -Double.MAX_VALUE,
+            -2.5d,
+            -1d,
+            -Double.MIN_VALUE,
+            0d,
+            Double.MIN_VALUE,
+            1d,
+            2.5d,
+            Double.MAX_VALUE
+        };
+        long prevD =
+                ZOrderByteUtils.doubleToOrderedBytes(doubles[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < doubles.length; i++) {
+            long cur =
+                    ZOrderByteUtils.doubleToOrderedBytes(doubles[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevD, cur)).isLessThan(0);
+            prevD = cur;
+        }
+
+        // Dense walk of adjacent negative bit patterns: value strictly decreases, so
+        // the transformed unsigned value must strictly decrease too. The old shift-31
+        // flip inverts order for a fraction of adjacent negative pairs.
+        for (int i = 1; i < 1000; i++) {
+            int bits = 0xC0400000 + i; // starting at -3.0f, descending values
+            long prev =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits - 1), ByteBuffer.allocate(8))
+                            .getLong(0);
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits), ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+        }
+        for (int i = 0; i < 1000; i++) {
+            long bits = 0xC004000000000000L + i; // just below -2.5d, descending values
+            double v = Double.longBitsToDouble(bits);
+            long cur = ZOrderByteUtils.doubleToOrderedBytes(v, ByteBuffer.allocate(8)).getLong(0);
+            if (i > 0) {
+                long prev =
+                        ZOrderByteUtils.doubleToOrderedBytes(
+                                        Double.longBitsToDouble(bits - 1), ByteBuffer.allocate(8))
+                                .getLong(0);
+                assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+            }
+        }
     }
 
     /**
@@ -408,5 +491,36 @@ public class TestZOrderByteUtil {
                             Arrays.toString(bBytes),
                             byteCompare));
         }
+    }
+
+    @Test
+    public void testBooleanDistinctFromNullSentinel() {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BOOLEAN(), DataTypes.BOOLEAN()},
+                        new String[] {"a", "b"});
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        byte[] nullBytes = zvalue(indexer, null);
+        byte[] falseBytes = zvalue(indexer, false);
+        byte[] trueBytes = zvalue(indexer, true);
+
+        // The three states have to be pairwise distinct, and NULL is the all-zero sentinel, so
+        // the unsigned order it puts them in is NULL, then FALSE, then TRUE.
+        Comparator<byte[]> unsigned = UnsignedBytes.lexicographicalComparator();
+        assertThat(unsigned.compare(nullBytes, falseBytes)).isNegative();
+        assertThat(unsigned.compare(falseBytes, trueBytes)).isNegative();
+        assertThat(nullBytes).isNotEqualTo(falseBytes);
+        assertThat(falseBytes).isNotEqualTo(trueBytes);
+        assertThat(nullBytes).isNotEqualTo(trueBytes);
+    }
+
+    /** {@code index()} hands back its internal buffer, so each result is copied out of it. */
+    private static byte[] zvalue(ZIndexer indexer, Boolean value) {
+        GenericRow row = new GenericRow(2);
+        row.setField(0, value);
+        row.setField(1, value);
+        return indexer.index(row).clone();
     }
 }

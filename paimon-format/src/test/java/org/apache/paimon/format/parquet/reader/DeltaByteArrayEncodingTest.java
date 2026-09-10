@@ -102,6 +102,51 @@ public class DeltaByteArrayEncodingTest {
                         Integer.MAX_VALUE - 1));
     }
 
+    /**
+     * skipBinary alternates two vectors and leaves {@code previous} pointing into the buffer of
+     * whichever one it wrote last, so after an odd number of skipped values the next skip call
+     * starts by resetting that very vector. The prefix of the following value is copied out of it.
+     */
+    @Test
+    public void skippingAnOddNumberOfValuesKeepsThePrefix() throws Exception {
+        String[] vals = new String[] {"aaaa", "aaab", "aaac", "aaad"};
+        Utils.writeData(writer, vals);
+        reader.initFromPage(vals.length, writer.getBytes().toInputStream());
+
+        reader.skipBinary(1);
+        reader.skipBinary(1);
+
+        assertArrayEquals(vals[2].getBytes(), reader.readBinary(0).getBytes());
+    }
+
+    /**
+     * The record reader resets the vector between batches, so a page that spans two batches has to
+     * survive that reset. Every other case here reads a whole page into one vector without a reset,
+     * which is why none of them exercises this.
+     */
+    @Test
+    public void readingOnePageInTwoBatchesKeepsThePrefix() throws Exception {
+        String[] vals = new String[8];
+        for (int i = 0; i < vals.length; i++) {
+            vals[i] = String.format("shared-prefix-%04d", i);
+        }
+        Utils.writeData(writer, vals);
+        HeapBytesVector vector = new HeapBytesVector(vals.length);
+        reader.initFromPage(vals.length, writer.getBytes().toInputStream());
+
+        int half = vals.length / 2;
+        reader.readBinary(half, vector, 0);
+        for (int i = 0; i < half; i++) {
+            assertArrayEquals(vals[i].getBytes(), vector.getBytes(i).getBytes());
+        }
+
+        vector.reset();
+        reader.readBinary(vals.length - half, vector, 0);
+        for (int i = 0; i < vals.length - half; i++) {
+            assertArrayEquals(vals[half + i].getBytes(), vector.getBytes(i).getBytes());
+        }
+    }
+
     private void assertReadWrite(
             DeltaByteArrayWriter writer, VectorizedDeltaByteArrayReader reader, String[] vals)
             throws Exception {

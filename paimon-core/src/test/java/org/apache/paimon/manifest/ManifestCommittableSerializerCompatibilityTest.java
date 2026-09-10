@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.CompatibilityUtils;
 import org.apache.paimon.utils.IOUtils;
 
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,64 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Compatibility Test for {@link ManifestCommittableSerializer}. */
 public class ManifestCommittableSerializerCompatibilityTest {
+
+    private static final String GENERATE_GOLDEN_FILES_PROPERTY =
+            "generateManifestCommittableGoldenFiles";
+
+    @Test
+    public void testCompatibilityToV5CommitV13() throws IOException {
+        DataFileMeta dataFile =
+                DataFileMeta.create(
+                                "column-sequence-file",
+                                1024L,
+                                10L,
+                                singleColumn("min_key"),
+                                singleColumn("max_key"),
+                                SimpleStats.EMPTY_STATS,
+                                SimpleStats.EMPTY_STATS,
+                                1L,
+                                5L,
+                                1L,
+                                0,
+                                Collections.emptyList(),
+                                Timestamp.fromLocalDateTime(
+                                        LocalDateTime.parse("2026-08-07T00:00:00")),
+                                0L,
+                                null,
+                                FileSource.COMPACT,
+                                null,
+                                null,
+                                1L,
+                                Arrays.asList("a", "b"),
+                                null)
+                        .withColumnMaxSequenceNumbers(new long[] {3L, 5L});
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "index-type", "index-file", 100L, 10L, (GlobalIndexMeta) null, null);
+        ManifestCommittable committable =
+                createManifestCommittable(
+                        Collections.singletonList(dataFile), indexFile, indexFile);
+
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        byte[] current = serializer.serialize(committable);
+        byte[] serialized;
+        if (Boolean.parseBoolean(
+                System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
+            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v13-v5", current);
+            serialized = current;
+        } else {
+            serialized =
+                    IOUtils.readFully(
+                            ManifestCommittableSerializerCompatibilityTest.class
+                                    .getClassLoader()
+                                    .getResourceAsStream(
+                                            "compatibility/manifest-committable-v13-v5"),
+                            true);
+        }
+
+        assertThat(current).isEqualTo(serialized);
+        assertThat(serializer.deserialize(5, serialized)).isEqualTo(committable);
+    }
 
     @Test
     public void testCompatibilityToV5CommitV11() throws IOException {
@@ -80,7 +139,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
-                        Arrays.asList("asdf", "qwer", "zxcv"));
+                        Arrays.asList("asdf", "qwer", "zxcv"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         GlobalIndexMeta globalIndexMeta =
                 new GlobalIndexMeta(
@@ -212,7 +272,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
-                        Arrays.asList("asdf", "qwer", "zxcv"));
+                        Arrays.asList("asdf", "qwer", "zxcv"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         GlobalIndexMeta globalIndexMeta =
                 new GlobalIndexMeta(1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45});
@@ -311,7 +372,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
-                        Arrays.asList("asdf", "qwer", "zxcv"));
+                        Arrays.asList("asdf", "qwer", "zxcv"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         IndexFileMeta hashIndexFile =
                 new IndexFileMeta(
@@ -400,7 +462,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
-                        Arrays.asList("asdf", "qwer", "zxcv"));
+                        Arrays.asList("asdf", "qwer", "zxcv"),
+                        null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
@@ -484,6 +547,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         1L,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -563,6 +627,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -641,6 +706,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -715,6 +781,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         FileSource.COMPACT,
                         Arrays.asList("field1", "field2", "field3"),
                         "hdfs://localhost:9000/path/to/file",
+                        null,
                         null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
@@ -791,6 +858,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         null,
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -865,6 +933,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("field1", "field2", "field3"),
                         null,
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -937,6 +1006,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         11L,
                         new byte[] {1, 2, 4},
                         FileSource.COMPACT,
+                        null,
                         null,
                         null,
                         null,
@@ -1015,6 +1085,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null,
                         null,
                         null,
+                        null,
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
@@ -1084,6 +1155,7 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         3,
                         Arrays.asList("extra1", "extra2"),
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2022-03-02T20:20:12")),
+                        null,
                         null,
                         null,
                         null,

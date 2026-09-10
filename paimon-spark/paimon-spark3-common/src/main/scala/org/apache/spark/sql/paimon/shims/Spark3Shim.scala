@@ -257,10 +257,9 @@ class Spark3Shim extends SparkShim {
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
@@ -388,6 +387,9 @@ class Spark3Shim extends SparkShim {
   }
 
   override def toPaimonVariant(o: Object): Variant = throw new UnsupportedOperationException()
+
+  override def toSparkVariant(variant: Variant): Object =
+    throw new UnsupportedOperationException("Variant requires Spark 4.0 or later")
 
   override def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean = false
 
