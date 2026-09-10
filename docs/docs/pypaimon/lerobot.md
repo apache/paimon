@@ -107,6 +107,12 @@ together, and keep writers paused until the call returns.
 Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 `ARRAY`, and images to `BLOB`. Images keep their compressed bytes.
 
+Video features map to `BLOB`. Frame rows reference MP4 payloads copied once per
+aligned file group. Video imports use the video grouping policy and check
+rolling before each Episode. They require a bucket-unaware table. Read them
+with a Paimon scan and `VideoFrameCollator`; `PaimonLeRobotDataset` currently
+supports image features only.
+
 ## Capture LeRobot frames directly into Paimon
 
 `PaimonLeRobotWriter` implements the write-side surface used by LeRobot's

@@ -437,6 +437,22 @@ class PaimonLeRobotWriterTest(unittest.TestCase):
                 },
             )
 
+    def test_video_features_are_rejected(self):
+        with self.assertRaisesRegex(
+                ValueError, "does not support video features: camera"):
+            PaimonLeRobotWriter(
+                self.connection,
+                "video",
+                fps=10,
+                features={
+                    "camera": {
+                        "dtype": "video",
+                        "shape": (3, 4, 5),
+                        "names": ["channels", "height", "width"],
+                    },
+                },
+            )
+
     def test_missing_lerobot_stats_dependency_fails_before_table_creation(self):
         self.connection.catalog.create_database(
             "default", ignore_if_exists=True)
