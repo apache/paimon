@@ -44,6 +44,9 @@ public class DataFileRecordReaderTest {
     @Test
     public void testRowTrackingIsolatedFromReusedIdentityBatch() throws Exception {
         ReusingColumnarReader delegate = new ReusingColumnarReader();
+        assertThat(delegate.batch.columns).isSameAs(delegate.readerOwnedColumns);
+        assertThat(delegate.readerOwnedColumns.getClass()).isEqualTo(HeapLongVector[].class);
+
         Map<String, Integer> systemFields = new HashMap<>();
         systemFields.put(SpecialFields.ROW_ID.name(), 0);
         systemFields.put(SpecialFields.SEQUENCE_NUMBER.name(), 1);
@@ -69,16 +72,17 @@ public class DataFileRecordReaderTest {
 
             assertThat(iterator).isNotSameAs(delegate.iterator);
             assertThat(iterator).isInstanceOf(VectorizedRowIterator.class);
-            assertThat(delegate.batch.columns)
+            assertThat(delegate.readerOwnedColumns)
                     .containsExactly(delegate.rowIdVector, delegate.sequenceNumberVector);
 
             InternalRow row = iterator.next();
             assertThat(row.getLong(0)).isEqualTo(100L + batchIndex);
             assertThat(row.getLong(1)).isEqualTo(7L);
+            assertThat(delegate.recycleCount).isEqualTo(batchIndex);
 
             iterator.releaseBatch();
             assertThat(delegate.recycleCount).isEqualTo(batchIndex + 1);
-            assertThat(delegate.batch.columns)
+            assertThat(delegate.readerOwnedColumns)
                     .containsExactly(delegate.rowIdVector, delegate.sequenceNumberVector);
         }
         reader.close();
@@ -88,8 +92,9 @@ public class DataFileRecordReaderTest {
 
         private final HeapLongVector rowIdVector = new HeapLongVector(1);
         private final HeapLongVector sequenceNumberVector = new HeapLongVector(1);
-        private final VectorizedColumnBatch batch =
-                new VectorizedColumnBatch(new ColumnVector[] {rowIdVector, sequenceNumberVector});
+        private final ColumnVector[] readerOwnedColumns =
+                new HeapLongVector[] {rowIdVector, sequenceNumberVector};
+        private final VectorizedColumnBatch batch = new VectorizedColumnBatch(readerOwnedColumns);
         private final VectorizedRowIterator iterator;
         private int nextPosition;
         private int recycleCount;
