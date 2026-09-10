@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Unit tests for the OSS bucket-in-endpoint mode (PyArrow < 16) of PyArrowFileIO.
+"""Unit tests for the OSS bucket-in-endpoint mode (PyArrow < 16) of OssFileIO.
 
-See ``PyArrowFileIO._legacy_oss_mode`` for why bucket-level operations
+See ``OssFileIO._legacy_oss_mode`` for why bucket-level operations
 must be guarded in this mode. No real OSS access is required.
 """
 
@@ -28,11 +28,8 @@ import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.pyarrow_file_io import (
-    LegacyOssDirectoryListingError,
-    PyArrowFileIO,
-)
-
+from pypaimon.filesystem.oss_file_io import OssFileIO
+from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 
 TABLE_PATH = "oss://test-bucket/db-uuid.db/tbl-uuid"
 
@@ -48,7 +45,7 @@ def _probe_response(status_code, body):
 
 
 class OssLegacyModeTest(unittest.TestCase):
-    """Behavior of PyArrowFileIO when OSS runs on PyArrow < 16."""
+    """Behavior of OssFileIO when OSS runs on PyArrow < 16."""
 
     def _new_file_io(self, legacy):
         options = Options({
@@ -59,8 +56,8 @@ class OssLegacyModeTest(unittest.TestCase):
             OssOptions.OSS_IMPL.key(): "legacy",
         })
         with mock.patch.object(
-                PyArrowFileIO, "_initialize_oss_fs", return_value=mock.Mock()):
-            file_io = PyArrowFileIO("oss://test-bucket/", options)
+                OssFileIO, "_initialize_oss_fs", return_value=mock.Mock()):
+            file_io = OssFileIO("oss://test-bucket/", options)
         # _legacy_oss_mode() keys off the bucket-in-endpoint flag (PyArrow < 16).
         file_io._oss_bucket_in_endpoint = legacy
         file_io.filesystem = mock.Mock()
@@ -214,7 +211,7 @@ class OssLegacyModeTest(unittest.TestCase):
             OssOptions.OSS_REGION.key(): "cn-test",
             OssOptions.OSS_IMPL.key(): "legacy",
         })
-        file_io = PyArrowFileIO("oss://test-bucket/wh", options)
+        file_io = OssFileIO("oss://test-bucket/wh", options)
         file_io._legacy_bucket_checked = True
         file_io._legacy_bucket_error = "OSS bucket 'test-bucket' does not exist"
 

@@ -29,6 +29,7 @@ from pypaimon.common.file_io import create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO, _file_uri_path
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 
@@ -95,7 +96,7 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
-        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+        oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
@@ -348,7 +349,7 @@ class FileIOTest(unittest.TestCase):
             file_io.delete_quietly("file:///some/path")
             file_io.delete_directory_quietly("file:///some/path")
 
-            oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
                 OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
                 OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
@@ -441,7 +442,7 @@ class FileIOTest(unittest.TestCase):
             test_file = os.path.join(temp_dir, "test_file.txt")
             with open(test_file, "w") as f:
                 f.write("test content")
-            
+
             file_info = file_io.get_file_status(f"file://{test_file}")
             self.assertEqual(file_info.type, pafs.FileType.File)
             self.assertIsNotNone(file_info.size)
@@ -464,26 +465,26 @@ class FileIOTest(unittest.TestCase):
 
             source_file = os.path.join(temp_dir, "source.txt")
             target_file = os.path.join(temp_dir, "target.txt")
-            
+
             with open(source_file, "w") as f:
                 f.write("source content")
-            
+
             # Test 1: Raises FileExistsError when target exists and overwrite=False
             with open(target_file, "w") as f:
                 f.write("target content")
-            
+
             with self.assertRaises(FileExistsError) as context:
                 file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=False)
             self.assertIn("already exists", str(context.exception))
-            
+
             with open(target_file, "r") as f:
                 self.assertEqual(f.read(), "target content")
-            
+
             # Test 2: Overwrites when overwrite=True
             file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=True)
             with open(target_file, "r") as f:
                 self.assertEqual(f.read(), "source content")
-            
+
             # Test 3: Creates parent directory if it doesn't exist
             target_file_in_subdir = os.path.join(temp_dir, "subdir", "target.txt")
             file_io.copy_file(f"file://{source_file}", f"file://{target_file_in_subdir}", overwrite=False)
@@ -498,7 +499,7 @@ class FileIOTest(unittest.TestCase):
         try:
             target_dir = os.path.join(temp_dir, "target_dir")
             normal_file = os.path.join(temp_dir, "normal_file.txt")
-            
+
             from pypaimon.filesystem.local_file_io import LocalFileIO
             local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
             os.makedirs(target_dir)
@@ -506,18 +507,18 @@ class FileIOTest(unittest.TestCase):
                 local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
                 "LocalFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
-            
+
             self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
             with open(normal_file, "r") as f:
                 self.assertEqual(f.read(), "test content")
-            
+
             os.remove(normal_file)
             local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
             self.assertFalse(
                 local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
                 "LocalFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
-            
+
             self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
             with open(normal_file, "r") as f:
                 self.assertEqual(f.read(), "test content")
@@ -525,7 +526,7 @@ class FileIOTest(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_path_on_windows(self):
-        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+        oss_io = OssFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',

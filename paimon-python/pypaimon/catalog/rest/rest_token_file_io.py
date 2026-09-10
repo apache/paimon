@@ -22,13 +22,12 @@ from typing import Optional, Union
 
 from cachetools import TTLCache
 
+from pypaimon.api.auth.bearer import BearTokenAuthProvider
+from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-from pypaimon.api.auth.bearer import BearTokenAuthProvider
-from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -127,7 +126,7 @@ class RESTTokenFileIO(FileIO):
                     merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
             merged_options = Options(merged_properties)
 
-            file_io = PyArrowFileIO(self.path, merged_options)
+            file_io = FileIO.get(self.path, merged_options)
             cache[cache_key] = file_io
             return file_io
 
