@@ -1,10 +1,7 @@
 ---
-title: "Sequence & Rowkind"
+title: "Sequence and Row Kind"
 sidebar_position: 6
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -25,96 +22,147 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Sequence and Rowkind
+<a id="sequence-and-rowkind"></a>
 
-When creating a table, you can specify the `'sequence.field'` by specifying fields to determine the order of updates,
-or you can specify the `'rowkind.field'` to determine the changelog kind of record.
+# Sequence and Row Kind
+
+Record ordering and row kind answer different questions: which update takes precedence, and
+whether that update inserts or retracts a row. Configure them alongside the
+[merge engine](./merge-engine/).
+
+| Option | Use |
+| --- | --- |
+| `sequence.field` | Order updates by one or more source fields |
+| `rowkind.field` | Decode an operation such as `+I` or `-D` from a column |
+| `sequence.snapshot-ordering` | Order updates across writers by commit snapshot ID |
+
+Partial updates from independent streams can use
+[sequence groups](./merge-engine/partial-update#sequence-group) instead of one shared sequence field.
 
 ## Sequence Field
 
-By default, the primary key table determines the merge order according to the input order (the last input record will be the last to merge). However, in distributed computing,
-there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
+By default, Paimon assigns internal sequence numbers to order records during merging. This order
+does not necessarily match the order in the source system, especially when updates arrive late
+or come from multiple writers. Set `sequence.field` to a source version or timestamp when the
+source defines which update should take precedence.
 
-<Tabs groupId="sequence-field">
-
-<TabItem value="flink" label="Flink">
+For example, this Flink SQL table uses the source version to keep the latest order status:
 
 ```sql
-CREATE TABLE my_table (
-    pk BIGINT PRIMARY KEY NOT ENFORCED,
-    v1 DOUBLE,
-    v2 BIGINT,
-    update_time TIMESTAMP
+CREATE TABLE order_status (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    status STRING,
+    source_version BIGINT
 ) WITH (
-    'sequence.field' = 'update_time'
+    'sequence.field' = 'source_version'
 );
+
+INSERT INTO order_status VALUES (1, 'shipped', 12), (1, 'paid', 11);
+
+-- After the INSERT job finishes, query in batch mode.
+SELECT * FROM order_status;
+-- 1, shipped, 12
 ```
 
-</TabItem>
+The default `sequence.field.sort-order = ascending` merges the largest value last. With the
+default `deduplicate` engine, version `12` wins even if version `11` arrives later. Setting
+`sequence.field.sort-order = descending` reverses that comparison, so the smallest value wins
+for `deduplicate`.
 
-</Tabs>
+For multiple fields, such as `'sequence.field' = 'update_time,source_offset'`, Paimon compares
+the first field, then uses the next field to break ties. If all configured values are equal,
+Paimon falls back to its internal record order. Use a source tie-breaker when the result must
+be independent of arrival order.
 
-The record with the largest `sequence.field` value will be the last to merge, if the values are the same, the input
-order will be used to determine which one is the last one. `sequence.field` does not support `GEOMETRY`, `GEOGRAPHY`, or managed `BLOB` fields.
+The merge engine still determines how ordered records are combined. Sequence fields do not
+turn an aggregation engine into deduplication, or guarantee a complete historical ordering
+for order-dependent field aggregates such as `first_value`.
 
-You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
+Restrictions:
 
-:::info
-
-User defined sequence fields conflict with features such as `first_row` and `first_value`, which may result in unexpected results.
-
-:::
+- `sequence.field` cannot be combined with `merge-engine = first-row`, cross-partition updates,
+  or `sequence.snapshot-ordering`.
+- Do not assign an `aggregate-function` to a sequence field itself.
+- `GEOMETRY`, `GEOGRAPHY`, and managed `BLOB` fields cannot be sequence fields.
 
 ## Row Kind Field
 
-By default, the primary key table determines the row kind according to the input row. You can also define the
-`'rowkind.field'` to use a field to extract row kind.
+By default, Paimon uses the input row's row kind. Set `rowkind.field` when the source instead
+encodes each operation in a data column. The configured column must have a character-string
+type and contain a non-null operation value on every input row.
 
-The valid row kind string should be `'+I'`, `'-U'`, `'+U'` or `'-D'`.
+| Value | Row kind | Meaning |
+| --- | --- | --- |
+| `+I` | `INSERT` | Add a row or contribution |
+| `-U` | `UPDATE_BEFORE` | Retract the old row or contribution |
+| `+U` | `UPDATE_AFTER` | Add the updated row or contribution |
+| `-D` | `DELETE` | Retract a row or contribution |
+
+The merge engine determines how each kind affects stored state; see its delete and retraction
+requirements before choosing an input encoding.
+
+For example, the following Flink SQL table accepts upserts and deletes encoded in `op`.
+Wait for each bounded `INSERT` job to finish before running the next statement, and run the
+queries in batch mode.
+
+```sql
+CREATE TABLE order_changes (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    status STRING,
+    source_version BIGINT,
+    op STRING NOT NULL
+) WITH (
+    'sequence.field' = 'source_version',
+    'rowkind.field' = 'op'
+);
+
+INSERT INTO order_changes VALUES (1, 'paid', 11, '+I');
+INSERT INTO order_changes VALUES (1, 'shipped', 12, '+U');
+
+SELECT order_id, status FROM order_changes;
+-- 1, shipped
+
+INSERT INTO order_changes VALUES (1, 'shipped', 13, '-D');
+
+SELECT order_id, status FROM order_changes;
+-- No rows
+```
+
+The operation column remains a regular stored column; Paimon does not remove it from the
+schema. Use the short values in the table above, without surrounding whitespace. Long names
+such as `INSERT` and `DELETE` are not accepted.
 
 ## Snapshot Ordering
 
-In multi-writer scenarios where wall-clock sequence numbers cannot be globally ordered across writers,
-you can enable `'sequence.snapshot-ordering'` to use the commit snapshot id as the ordering key when
-merging records with the same primary key. Records from later snapshots are considered newer,
-regardless of their per-record sequence number.
+Use `sequence.snapshot-ordering = true` when updates from multiple writers should be ordered
+by their commit snapshot ID. Records in later snapshots are considered newer, regardless of
+the writers' per-record sequence numbers.
 
-<Tabs>
-<TabItem value="flink" label="Flink">
+For example, with `deduplicate`, a row committed in snapshot `41` takes precedence over a row
+with the same key in snapshot `40`, even if the writer of snapshot `40` assigned a larger
+internal sequence number. This follows **commit order**, which may differ from source event
+time.
+
+Configure the option when creating the table. This Flink SQL example uses fixed buckets for
+multiple writers:
 
 ```sql
-CREATE TABLE my_table (
-    pk BIGINT PRIMARY KEY NOT ENFORCED,
-    v1 DOUBLE,
-    v2 BIGINT
+CREATE TABLE committed_orders (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    status STRING
 ) WITH (
+    'bucket' = '4',
     'sequence.snapshot-ordering' = 'true',
     'write-only' = 'true'
 );
 ```
 
-</TabItem>
-</Tabs>
+| Requirement or boundary | Meaning |
+| --- | --- |
+| Primary-key table; immutable option | Choose this ordering strategy at table creation |
+| `write-only = true` for writers | Run a separate [dedicated compaction job](./compaction#dedicated-compaction-job) to preserve snapshot ordering during compaction |
+| No `sequence.field` | Source-field ordering and snapshot ordering are mutually exclusive |
+| No ordering within one snapshot | Do not rely on this option to choose among multiple versions of the same key in the same snapshot |
 
-:::warning
-This option requires `'write-only' = 'true'`. Compaction must be performed by a separate dedicated
-compact job. This ensures that compaction correctly preserves the snapshot id of each record.
-:::
-
-:::info
-`'sequence.snapshot-ordering'` is mutually exclusive with `'sequence.field'`. You cannot enable both
-on the same table.
-:::
-
-:::info
-The ordering key is the commit snapshot id only; the order of records **within the same snapshot** is
-not guaranteed, and this is by design. Under the default configuration it is harmless: a writer
-buffers a commit's writes (`'write-buffer-spillable' = 'true'`) and runs them through the merge
-function before flushing, so at most one record per primary key is written per snapshot — the common
-case is fully covered. We therefore deliberately do not handle the case where the same key is spread
-across multiple files of one snapshot. That case only arises with `'write-buffer-spillable' = 'false'`,
-or when the spilled data exceeds `'write-buffer-spill-disk-size'`, where the buffer may be flushed
-mid-commit; the same key can then land in multiple files of the same snapshot with equal sequence
-numbers and their relative order becomes undefined. This affects only intra-snapshot order, never the
-cross-snapshot ordering this feature provides.
-:::
+Writer buffers can merge versions before flushing, but they do not establish a guaranteed order
+across files within a snapshot. Size and spill settings do not change this ordering contract.
