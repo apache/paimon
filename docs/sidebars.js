@@ -248,16 +248,44 @@ const sidebars = {
       "id": "maintenance/index"
     },
     "items": [
-      "maintenance/filesystems",
-      "maintenance/write-performance",
-      "maintenance/dedicated-compaction",
-      "maintenance/manage-snapshots",
-      "maintenance/rescale-bucket",
-      "maintenance/manage-tags",
-      "maintenance/metrics",
-      "maintenance/manage-branches",
-      "maintenance/manage-partitions",
-      "maintenance/configurations"
+      {
+        type: "category",
+        "label": "Data Lifecycle & Versioning",
+        "collapsed": true,
+        "items": [
+          "maintenance/manage-snapshots",
+          "maintenance/manage-tags",
+          "maintenance/manage-branches",
+          "maintenance/manage-partitions"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Compaction & Data Layout",
+        "collapsed": true,
+        "items": [
+          "maintenance/dedicated-compaction",
+          "maintenance/rescale-bucket"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Performance & Monitoring",
+        "collapsed": true,
+        "items": [
+          "maintenance/write-performance",
+          "maintenance/metrics"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Storage & Configuration",
+        "collapsed": true,
+        "items": [
+          "maintenance/filesystems",
+          "maintenance/configurations"
+        ]
+      }
     ]
   },
   {
