@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="563" viewBox="0 0 900 563" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Logical frames, complete video payloads</title>
+<desc id="desc">Five logical frame rows map through two run-index entries to video A frames 0 to 2 and video B frames 0 to 1. One self-contained .video pack contains both encoded videos and its run index. Frame descriptors identify a complete encoded video and a frame ordinal.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="561" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">Logical frames, complete video payloads</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Illustrative single-camera pack: frame ordinals are zero-based.</text>
+<text x="28" y="117" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Logical table rows</text>
+<rect x="28" y="132" width="160" height="73" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="159" font-size="18" font-weight="700" fill="#2463b4" text-anchor="start">Row 0</text>
+<text x="44" y="188" font-size="15" font-weight="400" fill="#172b4d" text-anchor="start">Video / frame: A / 0</text>
+<rect x="199" y="132" width="160" height="73" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="215" y="159" font-size="18" font-weight="700" fill="#2463b4" text-anchor="start">Row 1</text>
+<text x="215" y="188" font-size="15" font-weight="400" fill="#172b4d" text-anchor="start">Video / frame: A / 1</text>
+<rect x="370" y="132" width="160" height="73" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="386" y="159" font-size="18" font-weight="700" fill="#2463b4" text-anchor="start">Row 2</text>
+<text x="386" y="188" font-size="15" font-weight="400" fill="#172b4d" text-anchor="start">Video / frame: A / 2</text>
+<rect x="541" y="132" width="160" height="73" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="557" y="159" font-size="18" font-weight="700" fill="#2463b4" text-anchor="start">Row 3</text>
+<text x="557" y="188" font-size="15" font-weight="400" fill="#172b4d" text-anchor="start">Video / frame: B / 0</text>
+<rect x="712" y="132" width="160" height="73" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="728" y="159" font-size="18" font-weight="700" fill="#2463b4" text-anchor="start">Row 4</text>
+<text x="728" y="188" font-size="15" font-weight="400" fill="#172b4d" text-anchor="start">Video / frame: B / 1</text>
+<path d="M450 208 L450 244" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="253" width="844" height="234" rx="8" fill="#f8fbfa" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="285" font-size="22" font-weight="700" fill="#14766b" text-anchor="start">One self-contained .video pack</text>
+<rect x="46" y="306" width="366" height="126" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="64" y="338" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Run index</text>
+<text x="64" y="367" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Rows 0–2 → video A, start frame 0</text>
+<text x="64" y="392" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Rows 3–4 → video B, start frame 0</text>
+<path d="M422 368 L463 368" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="477" y="306" width="176" height="126" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="495" y="338" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Video A</text>
+<text x="495" y="367" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Complete</text>
+<text x="495" y="392" font-size="18" font-weight="400" fill="#526277" text-anchor="start">encoded bytes</text>
+<rect x="671" y="306" width="183" height="126" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="689" y="338" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Video B</text>
+<text x="689" y="367" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Complete</text>
+<text x="689" y="392" font-size="18" font-weight="400" fill="#526277" text-anchor="start">encoded bytes</text>
+<text x="46" y="464" font-size="17" font-weight="400" fill="#526277" text-anchor="start">BLOB compaction copies encoded ranges and rebuilds the index without re-encoding.</text>
+<text x="28" y="520" font-size="17" font-weight="400" fill="#172b4d" text-anchor="start">Frame descriptors select frames. Decode and reuse video sessions in the client.</text>
+</g>
+</svg>

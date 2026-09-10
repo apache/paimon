@@ -62,27 +62,30 @@ is accepted.
 
 :::
 
+For table prerequisites, see [Global Index](../global-index#prerequisites).
+For refresh, coverage modes, and shared build options, see
+[Manage Global Indexes](./manage-indexes).
+
 ## Build Vector Index
+
+Create and populate the [shared example table](../global-index#prerequisites) first.
+The build and search examples below use its three-dimensional `embedding` column.
+For this small dataset, use `ivf-flat` with one cluster; production workloads should
+choose an index type and cluster count for their own data.
+
+For Python, install `pypaimon[vindex]` (or its matching `paimon-vindex==0.4.0`
+dependency) before building or querying native vector indexes.
 
 <Tabs groupId="vector-build">
 
-<TabItem value="sql" label="SQL">
+<TabItem value="sql" label="Spark / Flink SQL">
 
 ```sql
--- Create IVF-PQ vector index on 'embedding' column
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
-    index_type => 'ivf-pq',
-    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.code-ratio=0.0625'
-);
-
--- Create a paimon-vindex DiskANN vector index
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'embedding',
-    index_type => 'diskann',
-    options => 'diskann.dimension=768,diskann.distance.metric=l2,diskann.build-preset=balanced'
+    index_type => 'ivf-flat',
+    options => 'ivf-flat.dimension=3,ivf-flat.distance.metric=cosine,ivf-flat.nlist=1'
 );
 ```
 
@@ -93,22 +96,20 @@ CALL sys.create_global_index(
 ```python
 table = catalog.get_table("db.my_table")
 
-# Create IVF-PQ vector index on 'embedding' column.
 added_files = table.create_global_index(
     "embedding",
-    index_type="ivf-pq",
+    index_type="ivf-flat",
     options={
-        "ivf-pq.dimension": "768",
-        "ivf-pq.distance.metric": "cosine",
-        "ivf-pq.nlist": "256",
-        "ivf-pq.pq.code-ratio": "0.0625",
+        "ivf-flat.dimension": "3",
+        "ivf-flat.distance.metric": "cosine",
+        "ivf-flat.nlist": "1",
     },
 )
 print(added_files)
 ```
 
-You can also build only selected partitions or tune the row-id shard size used
-by non-sorted global indexes:
+To limit a build to selected partitions, pass `partitions` with the same build
+options. The shared example table is partitioned by `dt`:
 
 ```python
 added_files = table.create_global_index(
@@ -116,193 +117,28 @@ added_files = table.create_global_index(
     index_type="ivf-flat",
     partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
     options={
-        "ivf-flat.dimension": "768",
+        "ivf-flat.dimension": "3",
+        "ivf-flat.distance.metric": "cosine",
+        "ivf-flat.nlist": "1",
         "global-index.row-count-per-shard": "100000",
     },
 )
 print(added_files)
 ```
 
-PyPaimon vector index build supports the paimon-vindex 0.4.0 identifiers `ivf-flat`, `ivf-pq`,
-`ivf-sq`, `ivf-rq`, and `diskann`. Install `paimon-vindex==0.4.0` or `pypaimon[vindex]` before
-building or querying paimon-vindex indexes from Python.
-
 </TabItem>
 
 </Tabs>
 
-For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-type>.dimension` for
-paimon-vindex indexes. For `VECTOR<FLOAT>` columns, Paimon uses the dimension from the column type.
-
-## Drop Vector Index
-
-<Tabs groupId="vector-drop">
-
-<TabItem value="sql" label="SQL">
-
-```sql
-CALL sys.drop_global_index(
-    table => 'db.my_table',
-    index_column => 'embedding',
-    index_type => 'ivf-pq'
-);
-```
-
-</TabItem>
-
-<TabItem value="python-sdk" label="Python SDK">
-
-```python
-table = catalog.get_table("db.my_table")
-
-dropped_files = table.drop_global_index("embedding", index_type="ivf-pq")
-print(dropped_files)
-```
-
-You can also restrict the drop to selected partitions, or count matched files
-without committing:
-
-```python
-matched_files = table.drop_global_index(
-    "embedding",
-    index_type="ivf-pq",
-    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
-    dry_run=True,
-)
-print(matched_files)
-```
-
-</TabItem>
-
-</Tabs>
-
-Supported paimon-vindex options:
-
-| Option | Default | Description |
-|---|---|---|
-| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
-| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
-| `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
-| `<index-type>.nlist` | Automatic | Number of clusters for the four IVF types. When omitted, paimon-vindex resolves it from the shard's non-null vector count. |
-| `<index-type>.pq.code-ratio` | `0.0625` | Relative PQ-code budget for `ivf-pq` and `diskann`. |
-| `<index-type>.pq.m` | Automatic | Expert override for the PQ sub-vector count used by `ivf-pq` and `diskann`. |
-| `ivf-pq.pq.use-opq` | Automatic | Explicitly enables or disables OPQ. Without an explicit value, a `target-recall` of at least `0.9` enables it. |
-| `ivf-rq.rq.bits` | `4` | Persisted IVF-RQ residual width. Supported values are `1` through `8`; changing it requires rebuilding the index. |
-| `<index-type>.target-recall` | Not set | Build-policy hint used by `ivf-pq` and `diskann`. Validate the resulting recall on held-out queries. |
-| `<index-type>.max-bytes-per-vector` | Not set | Storage objective and conservative preflight bound for `ivf-pq`, `ivf-rq`, and `diskann`. |
-
-Additional paimon-vindex DiskANN build options:
-
-| Option | Default | Description |
-|---|---|---|
-| `diskann.build-preset` | `balanced` | Coherent `fast_build`, `balanced`, or `high_recall` build policy. |
-| `diskann.deployment-profile` | Not set | Deployment objective used to choose a storage layout. |
-| `diskann.pq.bits` | `8` | Resident PQ-code width. Supported values are `4` and `8`. |
-| `diskann.max-degree` | `64` | Maximum graph out-degree. |
-| `diskann.build-search-list-size` | `max(100, max-degree)` | Candidate width during graph construction. |
-| `diskann.alpha` | `1.2` | Robust-prune threshold. |
-| `diskann.seed` | `42` | Reproducible initialization and build-order seed. |
-| `diskann.memory-budget-bytes` | `8 GiB` | Internal graph-build memory estimate used to select normal or sharded construction. |
-| `diskann.storage-layout` | `auto` | Explicit `compact` or `interleaved` layout override. |
-| `diskann.raw-vector-encoding` | `auto` | Explicit `f32` or `f16` persisted rerank-vector encoding. |
-| `diskann.build-distance` | `auto` | Explicit product-quantized or full-precision build traversal override. |
-
-## Per-Field Options
-
-The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared
-by every vector column of the same index type. When a table has multiple vector columns, you can
-scope an option to a single column with `fields.<field-name>.<option>`. The field-level form takes
-precedence over the column-agnostic option for that column. Use the stored table column name exactly
-as `<field-name>`. Field-level vector options do not include the index-type prefix; for example,
-use `fields.image_embedding.nlist` to override the shared `ivf-pq.nlist` option for
-`image_embedding`:
-
-<Tabs groupId="vector-per-field-options">
-
-<TabItem value="sql" label="SQL">
-
-```sql
-CREATE TABLE my_table (
-    id INT,
-    title_embedding ARRAY<FLOAT>,
-    image_embedding ARRAY<FLOAT>
-) TBLPROPERTIES (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'global-index.enabled' = 'true',
-    -- per-column dimensions
-    'fields.title_embedding.dimension' = '768',
-    'fields.image_embedding.dimension' = '512',
-    -- shared by every ivf-pq column, overridden only for 'image_embedding'
-    'ivf-pq.nlist' = '256',
-    'fields.image_embedding.nlist' = '512',
-    -- per-column training sample ratio
-    'fields.image_embedding.train.sample-ratio' = '0.5'
-);
-```
-
-</TabItem>
-
-<TabItem value="python-sdk" label="Python SDK">
-
-```python
-import pyarrow as pa
-
-from pypaimon import Schema
-
-schema = Schema.from_pyarrow_schema(
-    pa.schema([
-        pa.field("id", pa.int32()),
-        pa.field("title_embedding", pa.list_(pa.float32())),
-        pa.field("image_embedding", pa.list_(pa.float32())),
-    ]),
-    options={
-        "row-tracking.enabled": "true",
-        "data-evolution.enabled": "true",
-        "global-index.enabled": "true",
-        "fields.title_embedding.dimension": "768",
-        "fields.image_embedding.dimension": "512",
-        "ivf-pq.nlist": "256",
-        "fields.image_embedding.nlist": "512",
-    },
-)
-
-catalog.create_table("db.my_table", schema, ignore_if_exists=False)
-```
-
-</TabItem>
-
-</Tabs>
-
-With the properties above, `title_embedding` is indexed with `nlist=256` while `image_embedding`
-uses `nlist=512` and trains with half of the non-null vectors.
+For `ARRAY<FLOAT>` columns, specify the dimension with `<index-type>.dimension`.
+For `VECTOR<FLOAT, n>` columns, Paimon uses the dimension from the column type.
+Every query vector must have that same dimension.
 
 ## Vector Search
 
-Search-time options are passed with each vector search request:
-
-| Option | Default | Description |
-|---|---|---|
-| `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
-| `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
-| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
-| `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
-| `ivf_pq.batch_table_reuse.max_bytes` | 512 MiB | Positive long integer limiting the memory used by IVF-PQ batch distance-table reuse. Search falls back to direct table construction when the reusable tables exceed the budget. |
-| `diskann.l_search` | Automatic | paimon-vindex DiskANN graph candidate width. The automatic value uses calibration when available, otherwise `max(100, 2 * top_k)`. |
-
-Use the same distance metric at build time and query time. Search options can be passed per query,
-so you can use a larger `ivf.nprobe` or `diskann.l_search` for higher recall queries and a smaller
-value for latency-sensitive queries. Do not set both in one query.
-
-`ivf.max_initial_filter_expansion_factor` applies only to automatic IVF search and cannot be combined
-with `ivf.nprobe` or `diskann.l_search`. Lower factors reduce initial filtered-search work but may
-reduce Recall@K compared with uncapped automatic search. Progressive expansion occurs only when
-fewer than `top_k` valid results are returned; if the capped initial search already fills `top_k`,
-probing stops.
-
-`ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
-spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector
-rerank for the indexed candidates; leaving it unset skips the rerank stage.
+The examples search the three-dimensional IVF-flat index built above. A limit of
+`5` returns at most five matches; the three-row sample table returns fewer.
+`ivf.nprobe=1` matches the single cluster in this example.
 
 <Tabs groupId="vector-search">
 
@@ -310,7 +146,9 @@ rerank for the indexed candidates; leaving it unset skips the rerank stage.
 
 ```sql
 -- Search for top-5 nearest neighbors
-SELECT * FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5);
+SELECT id, name, __paimon_search_score
+FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5)
+ORDER BY __paimon_search_score DESC, id;
 ```
 
 </TabItem>
@@ -336,7 +174,7 @@ CALL sys.vector_search(
     query_vector => '1.0,2.0,3.0',
     top_k => 5,
     projection => 'id,name,__paimon_search_score',
-    options => 'ivf.nprobe=32',
+    options => 'ivf.nprobe=1',
     `where` => 'id > 100'
 );
 ```
@@ -354,7 +192,7 @@ GlobalIndexResult result = table.newVectorSearchBuilder()
         .withVector(queryVector)
         .withLimit(5)
         .withVectorColumn("embedding")
-        .withOption("ivf.nprobe", "16")
+        .withOption("ivf.nprobe", "1")
         .executeLocal();
 
 // Step 2: Read matching rows using the search result
@@ -398,7 +236,7 @@ result = (
     .with_vector_column("embedding")
     .with_query_vector([1.0, 2.0, 3.0])
     .with_limit(5)
-    .with_option("ivf.nprobe", "16")
+    .with_option("ivf.nprobe", "1")
     .execute_local()
 )
 
@@ -415,6 +253,8 @@ You can also add a scalar filter to pre-filter rows before vector search:
 
 ```python
 from pypaimon.common.predicate_builder import PredicateBuilder
+
+table.create_global_index("category", index_type="btree")
 
 predicate = (
     PredicateBuilder(table.fields)
@@ -434,6 +274,215 @@ result = (
 The scalar filter is evaluated with matching scalar global indexes before vector search. Build a
 BTree index for frequently used metadata filters, such as `category`, `tenant_id`, or `event_time`,
 so vector search can restrict the candidate row ids before running ANN search.
+
+</TabItem>
+
+</Tabs>
+
+A search selects top-K row IDs; reading those rows through a regular table scan
+does not imply score order. See [Read Scored Results](./manage-indexes#read-scored-results)
+for SQL ordering and Java/Python score access.
+
+## Search Options
+
+Search-time options are passed with each vector search request:
+
+| Option | Default | Description |
+|---|---|---|
+| `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
+| `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
+| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
+| `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
+| `ivf_pq.batch_table_reuse.max_bytes` | 512 MiB | Positive long integer limiting the memory used by IVF-PQ batch distance-table reuse. Search falls back to direct table construction when the reusable tables exceed the budget. |
+| `diskann.l_search` | Automatic | paimon-vindex DiskANN graph candidate width. The automatic value uses calibration when available, otherwise `max(100, 2 * top_k)`. |
+
+Use the same distance metric at build time and query time. Search options can be passed per query,
+so you can use a larger `ivf.nprobe` or `diskann.l_search` for higher recall queries and a smaller
+value for latency-sensitive queries. Do not set both in one query.
+
+`ivf.max_initial_filter_expansion_factor` applies only to automatic IVF search and cannot be combined
+with `ivf.nprobe` or `diskann.l_search`. Lower factors reduce initial filtered-search work but may
+reduce Recall@K compared with uncapped automatic search. Progressive expansion occurs only when
+fewer than `top_k` valid results are returned; if the capped initial search already fills `top_k`,
+probing stops.
+
+`ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
+spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector
+rerank for the indexed candidates; leaving it unset skips the rerank stage.
+
+## Build Options
+
+Supported paimon-vindex options:
+
+| Option | Default | Description |
+|---|---|---|
+| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT, n>` columns. |
+| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
+| `<index-type>.nlist` | Automatic | Number of clusters for the four IVF types. When omitted, paimon-vindex resolves it from the shard's non-null vector count. |
+| `<index-type>.pq.code-ratio` | `0.0625` | Relative PQ-code budget for `ivf-pq` and `diskann`. |
+| `<index-type>.pq.m` | Automatic | Expert override for the PQ sub-vector count used by `ivf-pq` and `diskann`. |
+| `ivf-pq.pq.use-opq` | Automatic | Explicitly enables or disables OPQ. Without an explicit value, a `target-recall` of at least `0.9` enables it. |
+| `ivf-rq.rq.bits` | `4` | Persisted IVF-RQ residual width. Supported values are `1` through `8`; changing it requires rebuilding the index. |
+| `<index-type>.target-recall` | Not set | Build-policy hint used by `ivf-pq` and `diskann`. Validate the resulting recall on held-out queries. |
+| `<index-type>.max-bytes-per-vector` | Not set | Storage objective and conservative preflight bound for `ivf-pq`, `ivf-rq`, and `diskann`. |
+
+Additional paimon-vindex DiskANN build options:
+
+| Option | Default | Description |
+|---|---|---|
+| `diskann.build-preset` | `balanced` | Coherent `fast_build`, `balanced`, or `high_recall` build policy. |
+| `diskann.deployment-profile` | Not set | Deployment objective used to choose a storage layout. |
+| `diskann.pq.bits` | `8` | Resident PQ-code width. Supported values are `4` and `8`. |
+| `diskann.max-degree` | `64` | Maximum graph out-degree. |
+| `diskann.build-search-list-size` | `max(100, max-degree)` | Candidate width during graph construction. |
+| `diskann.alpha` | `1.2` | Robust-prune threshold. |
+| `diskann.seed` | `42` | Reproducible initialization and build-order seed. |
+| `diskann.memory-budget-bytes` | `8 GiB` | Internal graph-build memory estimate used to select normal or sharded construction. |
+| `diskann.storage-layout` | `auto` | Explicit `compact` or `interleaved` layout override. |
+| `diskann.raw-vector-encoding` | `auto` | Explicit `f32` or `f16` persisted rerank-vector encoding. |
+| `diskann.build-distance` | `auto` | Explicit product-quantized or full-precision build traversal override. |
+
+### Quantized and DiskANN Builds
+
+The following are alternative builds for a **separate, populated** table
+`db.model_embeddings` whose `embedding ARRAY<FLOAT>` values have dimension `768`.
+They do not apply to the three-dimensional sample table. Choose one alternative;
+train quantized indexes on a representative dataset large enough for the chosen
+clustering and quantization parameters.
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.dimension=768,ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.code-ratio=0.0625'
+);
+```
+
+Alternatively, build a DiskANN index:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.model_embeddings',
+    index_column => 'embedding',
+    index_type => 'diskann',
+    options => 'diskann.dimension=768,diskann.distance.metric=l2,diskann.build-preset=balanced'
+);
+```
+
+Pass the same option keys to Python's `create_global_index(..., options={...})`.
+Use full 768-dimensional query vectors when searching either of these indexes.
+
+## Per-Field Options
+
+The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared
+by every vector column of the same index type. When a table has multiple vector columns, you can
+scope an option to a single column with `fields.<field-name>.<option>`. The field-level form takes
+precedence over the column-agnostic option for that column. Use the stored table column name exactly
+as `<field-name>`. Field-level vector options do not include the index-type prefix; for example,
+use `fields.image_embedding.nlist` to override the shared `ivf-pq.nlist` option for
+`image_embedding`:
+
+<Tabs groupId="vector-per-field-options">
+
+<TabItem value="sql" label="Spark SQL">
+
+```sql
+CREATE TABLE multi_embedding_table (
+    id INT,
+    title_embedding ARRAY<FLOAT>,
+    image_embedding ARRAY<FLOAT>
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'global-index.enabled' = 'true',
+    -- per-column dimensions
+    'fields.title_embedding.dimension' = '768',
+    'fields.image_embedding.dimension' = '512',
+    -- shared by every ivf-pq column, overridden only for 'image_embedding'
+    'ivf-pq.nlist' = '256',
+    'fields.image_embedding.nlist' = '512',
+    -- per-column training sample ratio
+    'fields.image_embedding.train.sample-ratio' = '0.5'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+import pyarrow as pa
+
+from pypaimon import Schema
+
+schema = Schema.from_pyarrow_schema(
+    pa.schema([
+        pa.field("id", pa.int32()),
+        pa.field("title_embedding", pa.list_(pa.float32())),
+        pa.field("image_embedding", pa.list_(pa.float32())),
+    ]),
+    options={
+        "row-tracking.enabled": "true",
+        "data-evolution.enabled": "true",
+        "global-index.enabled": "true",
+        "fields.title_embedding.dimension": "768",
+        "fields.image_embedding.dimension": "512",
+        "ivf-pq.nlist": "256",
+        "fields.image_embedding.nlist": "512",
+        "fields.image_embedding.train.sample-ratio": "0.5",
+    },
+)
+
+catalog.create_table("db.multi_embedding_table", schema, ignore_if_exists=False)
+```
+
+</TabItem>
+
+</Tabs>
+
+These properties configure subsequent IVF-PQ builds; creating the table does not
+build an index. After loading data, a build on `title_embedding` uses `nlist=256`,
+while one on `image_embedding` uses `nlist=512` and trains with half of its non-null vectors.
+
+## Drop Vector Index
+
+<Tabs groupId="vector-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'embedding',
+    index_type => 'ivf-flat'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("embedding", index_type="ivf-flat")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "embedding",
+    index_type="ivf-flat",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
 
 </TabItem>
 
