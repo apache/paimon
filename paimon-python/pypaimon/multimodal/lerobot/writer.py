@@ -52,6 +52,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _schema_from_info,
     _validate_lerobot_schema,
     _validate_v3_required_features,
+    _video_feature_names,
 )
 from pypaimon.multimodal.table import _target_schema
 
@@ -288,6 +289,11 @@ class PaimonLeRobotWriter:
             raise ValueError("features must be a non-empty mapping.")
         if "task" in features:
             raise ValueError("task is managed by PaimonLeRobotWriter.")
+        video_fields = _video_feature_names({"features": features})
+        if video_fields:
+            raise ValueError(
+                "PaimonLeRobotWriter does not support video features: %s."
+                % ", ".join(video_fields))
         requested_subtasks = _validate_subtasks(
             subtasks, "subtask_index" in features)
         _lerobot_stats_functions()

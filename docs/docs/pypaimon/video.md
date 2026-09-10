@@ -89,11 +89,9 @@ frames.add_video(video, episode_43_rows)
 ```
 
 The writer deduplicates exact payload descriptor identity inside each `.video`
-file. Payload boundaries may be nested across configured video columns, but
-every change must occur at an episode boundary. When a file target is reached
-within an episode, normal, BLOB, and vector rolling waits for the next payload
-boundary and closes the aligned file group together. A single large episode
-may therefore exceed the target. The normal `.blob` format is unchanged.
+file. Its video grouping policy coordinates normal, BLOB, and vector rolling
+at payload boundaries. A file may exceed its target before the next boundary.
+The normal `.blob` format is unchanged.
 
 ### Update frame rows and replace a video
 
