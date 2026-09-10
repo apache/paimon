@@ -269,15 +269,7 @@ function validateCatalogOpenApi() {
       requestOptions.type.includes('null') &&
       requestOptions.items.type === 'object' &&
       requestOptions.items.additionalProperties.type === 'string',
-    'CreatePartitionsRequest.partitionOptions must be a nullable array of option maps',
-  );
-  const pathOption = requestOptions.items.properties && requestOptions.items.properties.path;
-  contract.checkSpec(
-    pathOption &&
-      Array.isArray(pathOption.type) &&
-      pathOption.type.includes('string') &&
-      pathOption.type.includes('null'),
-    'CreatePartitionsRequest.partitionOptions.path must accept string and null',
+    'CreatePartitionsRequest.partitionOptions must be a nullable array of string maps',
   );
   contract.checkSpec(
     requestOptions.description.includes('partitionSpecs') &&
@@ -286,8 +278,8 @@ function validateCatalogOpenApi() {
       requestOptions.description.toLowerCase().includes('empty object') &&
       requestOptions.description.includes('replaceStatistics=true') &&
       requestOptions.description.includes('partitionStatistics') &&
-      requestOptions.description.toLowerCase().includes('null path'),
-    'CreatePartitionsRequest.partitionOptions must document alignment and null path resets',
+      requestOptions.description.toLowerCase().includes('default directory'),
+    'CreatePartitionsRequest.partitionOptions must document alignment and returns to the default directory',
   );
   contract.requireProperties('Partition', ['options']);
   contract.requireProperties('ConfigResponse', ['defaults', 'overrides']);

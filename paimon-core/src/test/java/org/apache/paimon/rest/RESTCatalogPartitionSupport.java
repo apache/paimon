@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.fs.Path;
@@ -75,7 +76,11 @@ final class RESTCatalogPartitionSupport {
             if (partitionOptions == null) {
                 throw new IllegalArgumentException("partitionOptions must not contain null maps.");
             }
-            CreatePartitionsRequest.checkOptionValues(partitionOptions);
+            if (partitionOptions.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
+                throw new IllegalArgumentException(
+                        "partitionOptions must not contain null keys or values.");
+            }
             hasOptions |= !partitionOptions.isEmpty();
         }
         if (!hasOptions) {
@@ -91,9 +96,12 @@ final class RESTCatalogPartitionSupport {
             Map<String, String> copied = new HashMap<>(partitionOptions);
             String location = copied.get(PATH.key());
             if (location != null) {
+                // What a partition may own is judged once the location is known not to be the
+                // partition's own default directory, which validateFormatTablePartitionLocations
+                // does after the returns have been taken out.
                 copied.put(
                         PATH.key(),
-                        FormatTablePartitionPathResolver.canonicalizeCustomLocation(
+                        FormatTablePartitionPathResolver.canonicalizeLocation(
                                         location, catalogContext)
                                 .toString());
             }
@@ -160,7 +168,7 @@ final class RESTCatalogPartitionSupport {
         return copied;
     }
 
-    static void validateNoAdditiveStatisticsForCustomPartitions(
+    private static void validateNoAdditiveStatisticsForCustomPartitions(
             List<Partition> stored,
             @Nullable List<PartitionStatistics> statistics,
             @Nullable Boolean replaceStatistics) {
@@ -182,32 +190,150 @@ final class RESTCatalogPartitionSupport {
         }
     }
 
-    static void applyPathResets(
-            List<Partition> partitions,
-            List<Map<String, String>> requestedSpecs,
-            @Nullable List<Map<String, String>> requestedOptions) {
+    /**
+     * Specs whose requested location names their own default directory. Such a request asks for the
+     * partition to live there again, so the location itself is dropped from the request: a
+     * partition at its default directory carries no location of its own.
+     */
+    static Set<Map<String, String>> takeReturnsToDefault(
+            CreatePartitionsRequest request,
+            @Nullable List<Map<String, String>> requestedOptions,
+            List<Partition> stored,
+            TableMetadata metadata,
+            String tableName,
+            CatalogContext catalogContext) {
+        if (!TableType.FORMAT_TABLE
+                .toString()
+                .equalsIgnoreCase(metadata.schema().options().get(CoreOptions.TYPE.key()))) {
+            canonicalizeRemainingLocations(requestedOptions, catalogContext);
+            return java.util.Collections.emptySet();
+        }
+        validateNoAdditiveStatisticsForCustomPartitions(
+                stored, request.getPartitionStatistics(), request.replaceStatistics());
+        Set<Map<String, String>> returning =
+                defaultDirectoryRequests(
+                        request.getPartitionSpecs(),
+                        requestedOptions,
+                        metadata,
+                        tableName,
+                        catalogContext);
+        validateReturnsToDefault(
+                returning, request.getPartitionStatistics(), request.replaceStatistics());
+        canonicalizeRemainingLocations(requestedOptions, catalogContext);
+        return returning;
+    }
+
+    /**
+     * A location still named after the returns were taken out is one a partition wants to own, so
+     * it is held to the rules for such a place and stored the way they canonicalize it.
+     */
+    private static void canonicalizeRemainingLocations(
+            @Nullable List<Map<String, String>> requestedOptions, CatalogContext catalogContext) {
         if (requestedOptions == null) {
             return;
         }
-        Set<Map<String, String>> resetSpecs = new HashSet<>();
-        for (int i = 0; i < requestedOptions.size(); i++) {
-            if (isPathReset(requestedOptions.get(i))) {
-                resetSpecs.add(requestedSpecs.get(i));
-            }
-        }
-        if (resetSpecs.isEmpty()) {
-            return;
-        }
-        for (int i = 0; i < partitions.size(); i++) {
-            Partition partition = partitions.get(i);
-            if (resetSpecs.contains(partition.spec())) {
-                partitions.set(i, copyPartition(partition, withoutPath(partition.options())));
+        for (Map<String, String> options : requestedOptions) {
+            String location = options.get(PATH.key());
+            if (location != null) {
+                options.put(
+                        PATH.key(),
+                        FormatTablePartitionPathResolver.canonicalizeCustomLocation(
+                                        location, catalogContext)
+                                .toString());
             }
         }
     }
 
-    private static boolean isPathReset(Map<String, String> options) {
-        return options.containsKey(PATH.key()) && options.get(PATH.key()) == null;
+    private static Set<Map<String, String>> defaultDirectoryRequests(
+            List<Map<String, String>> requestedSpecs,
+            @Nullable List<Map<String, String>> requestedOptions,
+            TableMetadata metadata,
+            String tableName,
+            CatalogContext catalogContext) {
+        if (requestedOptions == null
+                || requestedOptions.stream()
+                        .noneMatch(options -> options.get(PATH.key()) != null)) {
+            return java.util.Collections.emptySet();
+        }
+        String tablePath = metadata.schema().options().get(PATH.key());
+        if (StringUtils.isBlank(tablePath)) {
+            throw new IllegalStateException(
+                    String.format("Format Table %s has no authoritative path.", tableName));
+        }
+        List<String> partitionKeys = metadata.schema().partitionKeys();
+        boolean onlyValueInPath =
+                new CoreOptions(metadata.schema().options()).formatTablePartitionOnlyValueInPath();
+        Set<Map<String, String>> returning = new HashSet<>();
+        for (int i = 0; i < requestedOptions.size(); i++) {
+            Map<String, String> options = requestedOptions.get(i);
+            String requested = options.get(PATH.key());
+            Map<String, String> spec = requestedSpecs.get(i);
+            if (requested == null || spec == null || !spec.keySet().containsAll(partitionKeys)) {
+                continue;
+            }
+            LinkedHashMap<String, String> orderedSpec = new LinkedHashMap<>();
+            for (String partitionKey : partitionKeys) {
+                orderedSpec.put(partitionKey, spec.get(partitionKey));
+            }
+            if (FormatTablePartitionPathResolver.isDefaultPartitionPath(
+                    new Path(tablePath), orderedSpec, onlyValueInPath, requested, catalogContext)) {
+                options.remove(PATH.key());
+                returning.add(spec);
+            }
+        }
+        return returning;
+    }
+
+    /** Returning a partition to its default directory replaces whatever it held there. */
+    private static void validateReturnsToDefault(
+            Set<Map<String, String>> returning,
+            @Nullable List<PartitionStatistics> statistics,
+            @Nullable Boolean replaceStatistics) {
+        if (returning.isEmpty()) {
+            return;
+        }
+        Set<Map<String, String>> reportedSpecs = new HashSet<>();
+        if (statistics != null) {
+            for (PartitionStatistics statistic : statistics) {
+                reportedSpecs.add(statistic.spec());
+            }
+        }
+        for (Map<String, String> spec : returning) {
+            if (!Boolean.TRUE.equals(replaceStatistics) || !reportedSpecs.contains(spec)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Returning partition %s to its default directory requires "
+                                        + "replaceStatistics=true and statistics for the same partition.",
+                                PartitionUtils.buildPartitionName(spec)));
+            }
+        }
+    }
+
+    /** Drops the location of every partition back at its default directory, then checks them. */
+    static void settlePartitionLocations(
+            List<Partition> partitions,
+            Set<Map<String, String>> returningToDefault,
+            boolean formatTable,
+            TableMetadata metadata,
+            String tableName,
+            CatalogContext catalogContext) {
+        applyReturnsToDefault(partitions, returningToDefault);
+        if (formatTable) {
+            validateFormatTablePartitionLocations(partitions, metadata, tableName, catalogContext);
+        }
+    }
+
+    private static void applyReturnsToDefault(
+            List<Partition> partitions, Set<Map<String, String>> returning) {
+        if (returning.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < partitions.size(); i++) {
+            Partition partition = partitions.get(i);
+            if (returning.contains(partition.spec())) {
+                partitions.set(i, copyPartition(partition, withoutPath(partition.options())));
+            }
+        }
     }
 
     @Nullable
@@ -216,9 +342,6 @@ final class RESTCatalogPartitionSupport {
         Map<String, String> copied = copyOptions(options);
         if (copied == null) {
             return null;
-        }
-        if (copied.get(PATH.key()) == null) {
-            copied.remove(PATH.key());
         }
         return copied.isEmpty() ? null : copied;
     }
@@ -255,7 +378,7 @@ final class RESTCatalogPartitionSupport {
                 options);
     }
 
-    static void validateFormatTablePartitionLocations(
+    private static void validateFormatTablePartitionLocations(
             List<Partition> partitions,
             TableMetadata metadata,
             String tableName,

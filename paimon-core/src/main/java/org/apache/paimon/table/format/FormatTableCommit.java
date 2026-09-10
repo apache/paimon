@@ -594,10 +594,20 @@ public class FormatTableCommit implements BatchTableCommit {
 
         List<Map<String, String>> partitionOptions = null;
         if (replaceStatistics) {
+            // Replacing a partition means owning where it lives: name the default directory, which
+            // returns a partition registered elsewhere and says nothing new about the rest.
             partitionOptions = new ArrayList<>(specs.size());
             for (Map<String, String> spec : specs) {
                 statisticsByPartition.putIfAbsent(spec, emptyStatistics(spec, commitTime));
-                partitionOptions.add(Collections.singletonMap(CoreOptions.PATH.key(), null));
+                partitionOptions.add(
+                        Collections.singletonMap(
+                                CoreOptions.PATH.key(),
+                                buildPartitionPath(
+                                                location,
+                                                spec,
+                                                formatTablePartitionOnlyValueInPath,
+                                                partitionKeys)
+                                        .toString()));
             }
         }
         partitionManager.createPartitions(

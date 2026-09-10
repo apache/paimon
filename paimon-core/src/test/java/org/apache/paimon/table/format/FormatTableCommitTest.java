@@ -236,7 +236,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(spec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
@@ -282,7 +282,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(targetSpec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
@@ -422,7 +422,7 @@ class FormatTableCommitTest {
         verify(committer).clean(fileIO);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(spec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
@@ -475,7 +475,7 @@ class FormatTableCommitTest {
         verify(committer).clean(fileIO);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(targetSpec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
@@ -531,7 +531,8 @@ class FormatTableCommitTest {
         verify(partitionManager).listPartitions(prefix, null);
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
-        assertReplacementReport(partitionManager, Arrays.asList(defaultSpec, customSpec));
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
@@ -616,7 +617,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(new Path(tablePath, "part=default"))).isTrue();
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(targetSpec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
@@ -664,7 +665,8 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
-        assertReplacementReport(partitionManager, Arrays.asList(defaultSpec, customSpec));
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
@@ -1443,7 +1445,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
-        assertReplacementReport(partitionManager, Collections.singletonList(spec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
@@ -1564,7 +1566,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager).listPartitionsByNames(Collections.singletonList(spec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(spec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
@@ -1592,7 +1594,7 @@ class FormatTableCommitTest {
         verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).createPartitions(anyList(), anyBoolean());
-        assertReplacementReport(partitionManager, Collections.singletonList(targetSpec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
@@ -1627,7 +1629,7 @@ class FormatTableCommitTest {
         assertThat(fileIO.mkdirsCalls()).isZero();
         verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
-        assertReplacementReport(partitionManager, Collections.singletonList(targetSpec));
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
@@ -1672,7 +1674,8 @@ class FormatTableCommitTest {
         verify(partitionManager).listPartitions(prefix, null);
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
-        assertReplacementReport(partitionManager, Arrays.asList(defaultSpec, customSpec));
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
@@ -2772,7 +2775,7 @@ class FormatTableCommitTest {
         commit.commit(Collections.emptyList());
 
         List<PartitionStatistics> statistics =
-                assertReplacementReport(partitionManager, expectedSpecs);
+                assertReplacementReport(partitionManager, tablePath, expectedSpecs);
         assertThat(statistics)
                 .allSatisfy(
                         stat -> {
@@ -2855,7 +2858,7 @@ class FormatTableCommitTest {
         commit.commit(Collections.emptyList());
 
         List<PartitionStatistics> statistics =
-                assertReplacementReport(partitionManager, expectedSpecs);
+                assertReplacementReport(partitionManager, tablePath, expectedSpecs);
         assertThat(statistics)
                 .hasSize(8)
                 .extracting(PartitionStatistics::spec)
@@ -3852,7 +3855,33 @@ class FormatTableCommitTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static List<PartitionStatistics> assertReplacementReport(
-            FormatTablePartitionManager partitionManager, List<Map<String, String>> expectedSpecs) {
+            FormatTablePartitionManager partitionManager,
+            Path tablePath,
+            List<Map<String, String>> expectedSpecs) {
+        return assertReplacementReport(partitionManager, tablePath, false, expectedSpecs);
+    }
+
+    /**
+     * What a replacement sends for a partition: the directory that partition belongs in, named the
+     * way partition directories are named, escapes and all.
+     */
+    static Map<String, String> defaultDirectoryOption(
+            Path tablePath, Map<String, String> spec, boolean onlyValueInPath) {
+        return Collections.singletonMap(
+                CoreOptions.PATH.key(),
+                new Path(
+                                tablePath,
+                                PartitionPathUtils.generatePartitionPathUtil(
+                                        new LinkedHashMap<>(spec), onlyValueInPath))
+                        .toString());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<PartitionStatistics> assertReplacementReport(
+            FormatTablePartitionManager partitionManager,
+            Path tablePath,
+            boolean onlyValueInPath,
+            List<Map<String, String>> expectedSpecs) {
         ArgumentCaptor<List<Map<String, String>>> specs =
                 ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<List<PartitionStatistics>> statistics =
@@ -3871,11 +3900,13 @@ class FormatTableCommitTest {
                 .extracting(PartitionStatistics::spec)
                 .containsExactlyInAnyOrderElementsOf(expectedSpecs);
         assertThat(options.getValue()).hasSameSizeAs(specs.getValue());
-        assertThat(options.getValue())
-                .allSatisfy(
-                        option ->
-                                assertThat(option)
-                                        .containsOnly(entry(CoreOptions.PATH.key(), null)));
+        for (int i = 0; i < specs.getValue().size(); i++) {
+            assertThat(options.getValue().get(i))
+                    .as("a replacement names the partition's own default directory")
+                    .isEqualTo(
+                            defaultDirectoryOption(
+                                    tablePath, specs.getValue().get(i), onlyValueInPath));
+        }
         return statistics.getValue();
     }
 

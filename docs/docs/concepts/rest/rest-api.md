@@ -30,11 +30,12 @@ order of `partitionSpecs`; use `{}` when a partition has no options. Custom loca
 `path` option. Before registering custom locations, ensure that the REST server supports partition
 options and all readers support custom locations.
 
-For an existing Format Table partition, omitting `path` keeps its location, while `path: null` resets
-the partition to its default directory under the table without deleting data and requires
-`replaceStatistics=true` with a `partitionStatistics` entry for the same spec. A server that does not
-support the reset rejects the request, as does any server that receives additive statistics for a
-partition that already has a custom location.
+For an existing Format Table partition, omitting `path` keeps its location. Naming the partition's
+own default directory under the table asks the server to put it back there: the stored location is
+dropped, no data is deleted, and the request needs `replaceStatistics=true` with a
+`partitionStatistics` entry for the same spec. Any other path under the table location stays
+invalid, so a server that does not implement this rejects the request rather than storing it. A
+server also rejects additive statistics for a partition that already has a custom location.
 
 <body>
     <iframe src="/docs/master/rest-catalog-open-api.yaml" width="100%" height="800px" />

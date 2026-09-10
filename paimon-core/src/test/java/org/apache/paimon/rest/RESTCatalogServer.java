@@ -2237,6 +2237,15 @@ public class RESTCatalogServer {
                         return mockResponse(response, 409);
                     }
                 }
+                boolean formatTable = isFormatTable(tableMetadata.schema().toSchema());
+                Set<Map<String, String>> returningToDefault =
+                        RESTCatalogPartitionSupport.takeReturnsToDefault(
+                                request,
+                                requestedOptions,
+                                storedPartitions,
+                                tableMetadata,
+                                tableName,
+                                catalogContext);
                 Optional<Map<String, String>> conflictingLocation =
                         RESTCatalogPartitionSupport.conflictingLocation(
                                 storedPartitions, request.getPartitionSpecs(), requestedOptions);
@@ -2245,13 +2254,6 @@ public class RESTCatalogServer {
                             RESTCatalogPartitionSupport.conflictingLocationError(
                                     conflictingLocation.get()),
                             409);
-                }
-                boolean formatTable = isFormatTable(tableMetadata.schema().toSchema());
-                if (formatTable) {
-                    RESTCatalogPartitionSupport.validateNoAdditiveStatisticsForCustomPartitions(
-                            storedPartitions,
-                            request.getPartitionStatistics(),
-                            request.replaceStatistics());
                 }
                 List<Map<String, String>> created = new ArrayList<>();
                 List<Map<String, String>> existed = new ArrayList<>();
@@ -2268,12 +2270,13 @@ public class RESTCatalogServer {
                         existed.add(spec);
                     }
                 }
-                RESTCatalogPartitionSupport.applyPathResets(
-                        storedPartitions, request.getPartitionSpecs(), requestedOptions);
-                if (formatTable) {
-                    RESTCatalogPartitionSupport.validateFormatTablePartitionLocations(
-                            storedPartitions, tableMetadata, tableName, catalogContext);
-                }
+                RESTCatalogPartitionSupport.settlePartitionLocations(
+                        storedPartitions,
+                        returningToDefault,
+                        formatTable,
+                        tableMetadata,
+                        tableName,
+                        catalogContext);
                 applyPartitionStatistics(
                         storedPartitions,
                         request.getPartitionStatistics(),

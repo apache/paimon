@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
@@ -26,7 +25,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.StringUtils;
 
@@ -165,7 +163,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
             @Nullable List<Map<String, String>> partitionOptions) {
         Map<Map<String, String>, PartitionStatistics> statisticsBySpec =
                 validateAndIndexStatistics(statistics, partitions);
-        validatePartitionOptions(partitionOptions, partitions, replaceStatistics, statisticsBySpec);
+        validatePartitionOptions(partitionOptions, partitions);
         if (partitions.isEmpty()) {
             return;
         }
@@ -207,9 +205,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
 
     private void validatePartitionOptions(
             @Nullable List<Map<String, String>> partitionOptions,
-            List<Map<String, String>> partitions,
-            boolean replaceStatistics,
-            @Nullable Map<Map<String, String>, PartitionStatistics> statisticsBySpec) {
+            List<Map<String, String>> partitions) {
         if (partitionOptions == null) {
             return;
         }
@@ -222,23 +218,13 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
         for (int i = 0; i < partitionOptions.size(); i++) {
             Map<String, String> options = partitionOptions.get(i);
             checkArgument(options != null, "Partition options must not contain null maps.");
-            CreatePartitionsRequest.checkOptionValues(options);
+            checkArgument(
+                    options.entrySet().stream()
+                            .noneMatch(entry -> entry.getKey() == null || entry.getValue() == null),
+                    "Partition options must not contain null keys or values.");
             checkArgument(
                     partitions.get(i) != null && uniqueSpecs.add(partitions.get(i)),
                     "Partition specs must be non-null and unique when partition options are provided.");
-            if (options.containsKey(CoreOptions.PATH.key())
-                    && options.get(CoreOptions.PATH.key()) == null) {
-                checkArgument(
-                        replaceStatistics,
-                        "partitionOptions.path=null for partition %s of table %s requires replaceStatistics=true.",
-                        partitions.get(i),
-                        identifier.getFullName());
-                checkArgument(
-                        statisticsBySpec != null && statisticsBySpec.containsKey(partitions.get(i)),
-                        "partitionOptions.path=null for partition %s of table %s requires a partitionStatistics entry with the same spec.",
-                        partitions.get(i),
-                        identifier.getFullName());
-            }
         }
     }
 

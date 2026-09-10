@@ -209,7 +209,9 @@ class FormatTableCommitRegistryValidationTest {
         verify(partitionManager).listPartitions(prefix, null);
         verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         assertReplacementReport(
-                partitionManager, Arrays.asList(exactOutsidePrefix, exactInsidePrefix, prefixOnly));
+                partitionManager,
+                tablePath,
+                Arrays.asList(exactOutsidePrefix, exactInsidePrefix, prefixOnly));
     }
 
     @Test
@@ -343,7 +345,9 @@ class FormatTableCommitRegistryValidationTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void assertReplacementReport(
-            FormatTablePartitionManager partitionManager, List<Map<String, String>> expectedSpecs) {
+            FormatTablePartitionManager partitionManager,
+            Path tablePath,
+            List<Map<String, String>> expectedSpecs) {
         ArgumentCaptor<List<Map<String, String>>> specs =
                 ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<List<PartitionStatistics>> statistics =
@@ -361,12 +365,23 @@ class FormatTableCommitRegistryValidationTest {
         assertThat(statistics.getValue())
                 .extracting(PartitionStatistics::spec)
                 .containsExactlyInAnyOrderElementsOf(expectedSpecs);
-        assertThat(options.getValue())
-                .hasSameSizeAs(expectedSpecs)
-                .allSatisfy(
-                        option ->
-                                assertThat(option)
-                                        .isEqualTo(Collections.singletonMap(PATH.key(), null)));
+        List<Map<String, String>> reportedSpecs = specs.getValue();
+        assertThat(options.getValue()).hasSameSizeAs(expectedSpecs);
+        for (int i = 0; i < reportedSpecs.size(); i++) {
+            Map<String, String> spec = reportedSpecs.get(i);
+            assertThat(options.getValue().get(i))
+                    .as("a replacement names the partition's own default directory")
+                    .isEqualTo(
+                            Collections.singletonMap(
+                                    PATH.key(),
+                                    new Path(
+                                                    tablePath,
+                                                    "year="
+                                                            + spec.get("year")
+                                                            + "/month="
+                                                            + spec.get("month"))
+                                            .toString()));
+        }
     }
 
     private static class MutationTrackingLocalFileIO extends LocalFileIO {

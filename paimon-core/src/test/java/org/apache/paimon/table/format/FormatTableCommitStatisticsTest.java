@@ -98,7 +98,7 @@ class FormatTableCommitStatisticsTest {
                 .commit(Collections.singletonList(message));
         long after = System.currentTimeMillis();
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isFalse();
         assertThat(reported.partitionOptions).isNull();
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
@@ -126,7 +126,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).commit(messages);
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.statistics)
                 .hasSize(2)
                 .anySatisfy(
@@ -161,7 +161,7 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, false, null).commit(messages);
 
         PartitionStatistics statistics =
-                captureAndValidateReport(partitionManager).statistics.get(0);
+                captureAndValidateReport(partitionManager, tablePath).statistics.get(0);
         // A sum missing a file must not be presented as an exact count.
         assertThat(statistics.recordCount()).isEqualTo(PartitionStatistics.UNKNOWN);
         assertThat(statistics.fileSizeInBytes()).isEqualTo(PartitionStatistics.UNKNOWN);
@@ -182,9 +182,10 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, true, null)
                 .commit(Collections.singletonList(message));
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
-        assertThat(reported.partitionOptions).containsExactly(locationReset());
+        assertThat(reported.partitionOptions)
+                .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
         assertThat(fileIO.exists(oldWrittenPartitionData)).isFalse();
         verify(partitionManager, never()).listPartitions(any(), isNull());
         verify(partitionManager, never()).listPartitionsByNames(anyList());
@@ -205,7 +206,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, true, target).commit(Collections.emptyList());
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs).containsExactly(target);
         assertThat(reported.statistics).hasSize(1);
         assertThat(reported.statistics.get(0).spec()).isEqualTo(target);
@@ -213,7 +214,8 @@ class FormatTableCommitStatisticsTest {
         assertThat(reported.statistics.get(0).fileSizeInBytes()).isZero();
         assertThat(reported.statistics.get(0).fileCount()).isZero();
         assertThat(reported.replaceStatistics).isTrue();
-        assertThat(reported.partitionOptions).containsExactly(locationReset());
+        assertThat(reported.partitionOptions)
+                .containsExactly(returnsToDefault(tablePath, spec("2025", "10")));
         verify(partitionManager, never()).listPartitions(any(), isNull());
         verify(partitionManager, never()).listPartitionsByNames(anyList());
     }
@@ -238,7 +240,7 @@ class FormatTableCommitStatisticsTest {
                 .commit(Collections.singletonList(message));
         long after = System.currentTimeMillis();
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         long commitTime =
                 reported.statistics.stream()
                         .filter(s -> s.spec().equals(spec("2025", "10")))
@@ -291,7 +293,7 @@ class FormatTableCommitStatisticsTest {
         overwritingTheWholeTable(tablePath, fileIO, partitionManager)
                 .commit(Collections.singletonList(message));
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
@@ -335,7 +337,7 @@ class FormatTableCommitStatisticsTest {
                 .isTrue();
         // Nor does the overwrite register it: reporting a zero for it would make a partition the
         // catalog never had, out of a directory that still holds rows.
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
         verify(partitionManager).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
@@ -356,7 +358,7 @@ class FormatTableCommitStatisticsTest {
                 .truncatePartitions(Arrays.asList(spec("2025", "10"), spec("2025", "11")));
         long after = System.currentTimeMillis();
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         // What a truncated partition holds is zero, not zero fewer rows than before.
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
@@ -398,7 +400,7 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, false, null)
                 .truncatePartitions(Collections.singletonList(spec("2025", "10")));
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         // A registered exact target remains a target even when it already holds no files.
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
@@ -424,7 +426,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
@@ -456,7 +458,7 @@ class FormatTableCommitStatisticsTest {
         commit(tablePath, fileIO, partitionManager, false, null)
                 .truncatePartitions(Collections.singletonList(prefix));
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         // The prefix names no partition of its own; the partitions it empties are the registered
         // ones underneath it.
         assertThat(reported.specs)
@@ -483,7 +485,7 @@ class FormatTableCommitStatisticsTest {
 
         commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isTrue();
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
@@ -513,7 +515,7 @@ class FormatTableCommitStatisticsTest {
         // A Format Table has no snapshot to make the whole truncation atomic, so what it emptied
         // before the failure is reported anyway: the catalog must not keep describing files that
         // are gone.
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs).containsExactly(spec("2025", "10"));
         assertThat(reported.statistics.get(0).fileCount()).isZero();
     }
@@ -587,7 +589,7 @@ class FormatTableCommitStatisticsTest {
         // The registry, not a filesystem path parsed after deletion, defines month=11 as a target.
         // A listing may still answer under a different URI scheme, and deletion must handle that
         // without losing the target's replacement statistics.
-        assertThat(captureAndValidateReport(partitionManager).statistics)
+        assertThat(captureAndValidateReport(partitionManager, tablePath).statistics)
                 .anySatisfy(
                         statistics -> {
                             assertThat(statistics.spec()).isEqualTo(spec("2025", "11"));
@@ -616,7 +618,7 @@ class FormatTableCommitStatisticsTest {
         // The commit reports only the registry-defined and written targets. It leaves the foreign
         // prefix file alone and deletes the nested file as part of month=10 without inventing a
         // partition for either path.
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         assertThat(reported.statistics).hasSize(2);
@@ -649,7 +651,7 @@ class FormatTableCommitStatisticsTest {
                 .commit(Collections.singletonList(message));
 
         // The nested path is deleted as data under month=10, but is never reported as a partition.
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath, true);
         assertThat(reported.specs)
                 .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
         assertThat(reported.statistics)
@@ -840,12 +842,25 @@ class FormatTableCommitStatisticsTest {
         return spec;
     }
 
-    private static Map<String, String> locationReset() {
-        return Collections.singletonMap(CoreOptions.PATH.key(), null);
+    /** What a replacement sends for a partition: the directory the partition belongs in. */
+    private static Map<String, String> returnsToDefault(Path tablePath, Map<String, String> spec) {
+        return returnsToDefault(tablePath, spec, false);
+    }
+
+    private static Map<String, String> returnsToDefault(
+            Path tablePath, Map<String, String> spec, boolean onlyValueInPath) {
+        return FormatTableCommitTest.defaultDirectoryOption(tablePath, spec, onlyValueInPath);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Reported captureAndValidateReport(FormatTablePartitionManager partitionManager) {
+    private static Reported captureAndValidateReport(
+            FormatTablePartitionManager partitionManager, Path tablePath) {
+        return captureAndValidateReport(partitionManager, tablePath, false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Reported captureAndValidateReport(
+            FormatTablePartitionManager partitionManager, Path tablePath, boolean onlyValueInPath) {
         ArgumentCaptor<List<Map<String, String>>> specs =
                 ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<List<PartitionStatistics>> statistics =
@@ -865,8 +880,13 @@ class FormatTableCommitStatisticsTest {
         if (replaceStatistics.getValue()) {
             assertThat(capturedOptions)
                     .as("replacement options must align with every target spec")
-                    .hasSameSizeAs(capturedSpecs)
-                    .allSatisfy(option -> assertThat(option).isEqualTo(locationReset()));
+                    .hasSameSizeAs(capturedSpecs);
+            for (int i = 0; i < capturedSpecs.size(); i++) {
+                assertThat(capturedOptions.get(i))
+                        .as("a replacement names the partition's own default directory")
+                        .isEqualTo(
+                                returnsToDefault(tablePath, capturedSpecs.get(i), onlyValueInPath));
+            }
         } else {
             assertThat(capturedOptions).as("append must not change partition options").isNull();
         }
@@ -1070,7 +1090,7 @@ class FormatTableCommitStatisticsTest {
         List<CommitMessage> messages = write.prepareCommit();
         writeBuilder.newCommit().commit(messages);
 
-        Reported reported = captureAndValidateReport(partitionManager);
+        Reported reported = captureAndValidateReport(partitionManager, tablePath);
         assertThat(reported.replaceStatistics).isFalse();
         assertThat(reported.specs).containsExactly(Collections.singletonMap("year", "2025"));
         assertThat(reported.statistics).hasSize(1);

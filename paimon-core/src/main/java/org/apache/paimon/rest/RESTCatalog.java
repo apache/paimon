@@ -52,7 +52,6 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
-import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
@@ -865,16 +864,21 @@ public class RESTCatalog implements Catalog {
             if (options == null) {
                 throw new IllegalArgumentException("Partition options must not contain null maps.");
             }
-            CreatePartitionsRequest.checkOptionValues(options);
+            if (options.entrySet().stream()
+                    .anyMatch(entry -> entry.getKey() == null || entry.getValue() == null)) {
+                throw new IllegalArgumentException(
+                        "Partition options must not contain null keys or values.");
+            }
             Map<String, String> copied = new HashMap<>(options);
-            // A null path is kept: it asks the server to reset the location.
             String location = copied.get(PATH.key());
             if (location != null) {
                 try {
+                    // A partition location may be the table's own directory, which is how a
+                    // request returns a partition there, so what a partition may own is judged
+                    // where the table is known rather than here.
                     copied.put(
                             PATH.key(),
-                            FormatTablePartitionPathResolver.canonicalizeCustomLocation(
-                                            location, context)
+                            FormatTablePartitionPathResolver.canonicalizeLocation(location, context)
                                     .toString());
                 } catch (IllegalArgumentException e) {
                     throw invalidPartitionLocation(identifier, partition, e);

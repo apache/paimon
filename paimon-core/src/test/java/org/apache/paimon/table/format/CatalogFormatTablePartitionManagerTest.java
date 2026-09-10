@@ -430,23 +430,21 @@ class CatalogFormatTablePartitionManagerTest {
     }
 
     @Test
-    void testPathResetsStayWithReplacementStatisticsAcrossBatches() throws Exception {
+    void testPartitionLocationsStayWithReplacementStatisticsAcrossBatches() throws Exception {
         Catalog catalog = mock(Catalog.class);
         List<Map<String, String>> specs = specs(2001);
         List<Map<String, String>> options = new ArrayList<>(specs.size());
         List<PartitionStatistics> statistics = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
             if (i == 999 || i == 1000 || i == 2000) {
-                Map<String, String> reset = new HashMap<>();
-                reset.put("path", null);
-                options.add(reset);
+                options.add(Collections.singletonMap("path", "file:/warehouse/archive/" + i));
             } else {
                 options.add(Collections.emptyMap());
             }
         }
-        // Resets straddle both split points. Reports are deliberately reversed: options align
-        // by original position while statistics align by spec, so sharing either indexing rule
-        // between them would silently authorize the wrong reset.
+        // The partitions carrying a location straddle both split points. Reports are deliberately
+        // reversed: options align by original position while statistics align by spec, so sharing
+        // either indexing rule between them would move a location onto the wrong partition.
         for (int i = specs.size() - 1; i >= 0; i--) {
             statistics.add(statistics(specs.get(i), i));
         }
@@ -491,16 +489,16 @@ class CatalogFormatTablePartitionManagerTest {
     }
 
     @Test
-    void testInvalidPathResetAfterBatchBoundaryTouchesNoCatalog() {
+    void testInvalidPartitionOptionAfterBatchBoundaryTouchesNoCatalog() {
         Catalog catalog = mock(Catalog.class);
         List<Map<String, String>> specs = specs(1001);
         List<Map<String, String>> options = new ArrayList<>(specs.size());
         for (int i = 0; i < 1000; i++) {
             options.add(Collections.emptyMap());
         }
-        Map<String, String> reset = new HashMap<>();
-        reset.put("path", null);
-        options.add(reset);
+        Map<String, String> nullValue = new HashMap<>();
+        nullValue.put("path", null);
+        options.add(nullValue);
 
         assertThatThrownBy(
                         () ->

@@ -1028,7 +1028,7 @@ paths:
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
         "501":
-          description: The catalog provider does not support partition options or resetting a path
+          description: The catalog provider does not support partition options
           content:
             application/json:
               schema:
@@ -2509,14 +2509,10 @@ components:
           description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces. An additive report is rejected for a Format Table partition that already has a custom path; registering a new custom path together with its first statistics is allowed.
           type: [ boolean, "null" ]
         partitionOptions:
-          description: Optional options aligned with partitionSpecs by position. The list must have the same length as partitionSpecs; use an empty object when a partition has no options. A custom location is stored under the path key. Omitting path keeps the stored location; a non-null path registers a custom location for a new partition and must equal the stored path for an existing one; a null path resets the partition to its default location without deleting data. A null path requires replaceStatistics=true and a partitionStatistics entry with the same spec, applied in the same request, and a provider that does not support it must reject the request.
+          description: Optional options aligned with partitionSpecs by position. The list must have the same length as partitionSpecs; use an empty object when a partition has no options. A custom location is stored under the path key. Omitting path keeps the stored location; a path outside the table location registers a custom location for a new partition and must equal the stored path for an existing one; the partition's own default directory under the table location returns the partition there, dropping the stored path without deleting data. Returning a partition to its default directory requires replaceStatistics=true and a partitionStatistics entry with the same spec, applied in the same request. Any other path under the table location is invalid, so a provider that does not implement this rejects the request instead of storing it.
           type: [ array, "null" ]
           items:
             type: object
-            properties:
-              path:
-                description: Custom partition location; null resets the partition to its default location.
-                type: [ string, "null" ]
             additionalProperties:
               type: string
     CreatePartitionsResponse:

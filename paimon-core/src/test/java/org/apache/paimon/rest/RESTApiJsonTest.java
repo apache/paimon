@@ -360,30 +360,31 @@ public class RESTApiJsonTest {
     }
 
     @Test
-    public void createPartitionsRequestPreservesPathResetTest() throws Exception {
-        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260901");
+    public void createPartitionsRequestCarriesPartitionLocationsTest() throws Exception {
+        Map<String, String> returningSpec = Collections.singletonMap("dt", "20260901");
         Map<String, String> untouchedSpec = Collections.singletonMap("dt", "20260902");
-        Map<String, String> pathReset = new HashMap<>();
-        pathReset.put("path", null);
+        Map<String, String> defaultDirectory =
+                Collections.singletonMap("path", "file:/warehouse/db/table/dt=20260901");
         PartitionStatistics replacement =
-                new PartitionStatistics(resetSpec, 0L, 0L, 0L, 1756684800000L, -1);
+                new PartitionStatistics(returningSpec, 0L, 0L, 0L, 1756684800000L, -1);
         CreatePartitionsRequest request =
                 new CreatePartitionsRequest(
-                        Arrays.asList(resetSpec, untouchedSpec),
+                        Arrays.asList(returningSpec, untouchedSpec),
                         true,
                         Collections.singletonList(replacement),
                         true,
-                        Arrays.asList(pathReset, Collections.emptyMap()));
+                        Arrays.asList(defaultDirectory, Collections.emptyMap()));
 
         String json = RESTApi.toJson(request);
         CreatePartitionsRequest parsed = RESTApi.fromJson(json, CreatePartitionsRequest.class);
         Map<?, ?> wireObject = RESTApi.fromJson(json, Map.class);
 
-        // A missing path means "leave options alone". Keeping the explicit JSON null is therefore
-        // what distinguishes an overwrite/truncate reset from an ordinary statistics report.
-        assertTrue(json.contains("\"path\":null"));
+        // Naming the partition's own default directory is how a request asks for it back; an
+        // absent path leaves the stored location alone.
+        assertTrue(json.contains("\"path\":\"file:/warehouse/db/table/dt=20260901\""));
         assertEquals(
-                Arrays.asList(pathReset, Collections.emptyMap()), parsed.getPartitionOptions());
+                Arrays.asList(defaultDirectory, Collections.emptyMap()),
+                parsed.getPartitionOptions());
         assertEquals(5, wireObject.size());
         assertTrue(wireObject.containsKey("partitionSpecs"));
         assertTrue(wireObject.containsKey("ignoreIfExists"));
@@ -393,57 +394,7 @@ public class RESTApiJsonTest {
     }
 
     @Test
-    public void createPartitionsRequestRequiresReplacementStatisticsForEveryPathReset() {
-        Map<String, String> resetSpec = Collections.singletonMap("dt", "20260901");
-        Map<String, String> otherSpec = Collections.singletonMap("dt", "20260902");
-        List<Map<String, String>> specs = Arrays.asList(resetSpec, otherSpec);
-        Map<String, String> pathReset = new HashMap<>();
-        pathReset.put("path", null);
-        List<Map<String, String>> options = Arrays.asList(pathReset, Collections.emptyMap());
-        PartitionStatistics resetStatistics =
-                new PartitionStatistics(resetSpec, 0L, 0L, 0L, 1756684800000L, -1);
-        PartitionStatistics otherStatistics =
-                new PartitionStatistics(otherSpec, 0L, 0L, 0L, 1756771200000L, -1);
-
-        // Reject a missing statistics report, additive mode, a report for another partition, and a
-        // second reset without a matching report.
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new CreatePartitionsRequest(specs, true, null, true, options));
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new CreatePartitionsRequest(
-                                specs,
-                                true,
-                                Collections.singletonList(resetStatistics),
-                                false,
-                                options));
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new CreatePartitionsRequest(
-                                specs,
-                                true,
-                                Collections.singletonList(otherStatistics),
-                                true,
-                                options));
-
-        Map<String, String> secondReset = new HashMap<>();
-        secondReset.put("path", null);
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new CreatePartitionsRequest(
-                                specs,
-                                true,
-                                Collections.singletonList(resetStatistics),
-                                true,
-                                Arrays.asList(pathReset, secondReset)));
-    }
-
-    @Test
-    public void createPartitionsRequestRejectsNullMapsKeysAndNonPathValuesTest() {
+    public void createPartitionsRequestRejectsNullMapsKeysAndValuesTest() {
         List<Map<String, String>> specs =
                 Arrays.asList(
                         Collections.singletonMap("dt", "20260901"),
