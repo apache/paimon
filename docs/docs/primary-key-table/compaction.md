@@ -105,21 +105,33 @@ select a full compaction as data accumulates. To request one regularly:
 ## Lookup Compaction
 
 Paimon uses lookup compaction for the `lookup` changelog producer, the `first-row` merge engine,
-and tables with deletion vectors. It reconciles Level-0 records with existing rows.
+and tables with deletion vectors. It can also be enabled explicitly with `force-lookup = true`.
+Lookup compaction reconciles Level-0 records with existing rows and promotes them to higher
+levels, making processed rows or generated changelogs available to readers.
+
+The following options control forced Level-0 promotion for these lookup scenarios. Ordinary
+MOR tables can merge Level-0 data during reads and do not enable this strategy by default.
+Non-lookup tables can opt into immediate forced promotion separately with
+`compaction.force-up-level-0 = true`.
 
 | Option | Behavior |
 | --- | --- |
-| `lookup-compact = radical` (default) | Force new Level-0 files into higher levels at compaction triggers |
-| `lookup-compact = gentle` | Use the universal strategy with a configurable forced-compaction interval |
-| `lookup-compact.max-interval` | Number of compaction-selection attempts without universal compaction work before forcing Level-0 compaction; only used in `gentle` mode |
+| `lookup-compact = radical` (default) | Immediately select Level-0 files for promotion when the universal strategy selects no compaction work |
+| `lookup-compact = gentle` | Allow the universal strategy to select work, with forced Level-0 promotion after the effective interval |
+| `lookup-compact.max-interval` | Control the forced-promotion interval in `gentle` mode; count only compaction-selection attempts where the universal strategy selects no work |
 
-To defer forced Level-0 compaction, use `gentle` together with an explicit
-`lookup-compact.max-interval`. The interval has no default value; leaving it unset still forces
-Level-0 compaction immediately when the universal strategy selects no work. It counts selection
-attempts, not elapsed time.
+Setting `lookup-compact = gentle` alone already defers forced Level-0 promotion. When
+`lookup-compact.max-interval` is unset, its effective runtime default is
+`2 * num-sorted-run.compaction-trigger`: **10** with the default trigger of **5**. An explicitly
+configured interval is clamped to at least `num-sorted-run.compaction-trigger`; for example,
+configuring `3` with a trigger of `5` gives an effective interval of `5`.
 
-Deferring compaction can reduce resource use, but pending files can reduce freshness. Choose the
-interval together with `lookup-wait` and the visibility requirements of your table mode.
+The interval counts selection attempts, not elapsed time or commits. The universal strategy can
+still select compaction work before this interval is reached.
+
+Gentle mode can reduce compaction frequency, but pending Level-0 files can delay the visibility
+of DV/`first-row` data and lookup changelogs. Choose the interval together with `lookup-wait` and
+the [visibility requirements](#asynchronous-compaction) of your table mode.
 
 ## Compaction Options
 
