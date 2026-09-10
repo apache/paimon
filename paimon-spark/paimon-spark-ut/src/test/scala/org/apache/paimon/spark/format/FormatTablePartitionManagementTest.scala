@@ -577,6 +577,76 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     }
   }
 
+  test("catalog-managed DROP removes one of two partitions whose custom locations overlap") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-overlapping-pair").toUri)
+    val outerDir =
+      new Path(Files.createTempDirectory("catalog-partition-format-drop-overlapping-outer").toUri)
+    val nestedDir = new Path(outerDir, "child")
+    val outerFile = new Path(outerDir, "outer.csv")
+    val nestedFile = new Path(nestedDir, "nested.csv")
+    def customPartition(spec: Map[String, String], location: Path): Partition =
+      new Partition(
+        spec.asJava,
+        0L,
+        0L,
+        0L,
+        0L,
+        0,
+        false,
+        null,
+        null,
+        null,
+        null,
+        Map(CoreOptions.PATH.key() -> location.toString).asJava)
+    val outerPartition = customPartition(partitionSpec(20260715, 10), outerDir)
+    val nestedPartition = customPartition(partitionSpec(20260716, 11), nestedDir)
+    var dropped = Seq.empty[Map[String, String]]
+    val gateway = new FormatTablePartitionManager {
+      override def createPartitions(
+          partitions: JList[JMap[String, String]],
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean,
+          partitionOptions: JList[JMap[String, String]]): Unit = {}
+
+      override def dropPartitions(partitions: JList[JMap[String, String]]): Unit =
+        dropped = partitions.asScala.map(_.asScala.toMap).toSeq
+
+      override def listPartitionsByNames(
+          partitions: JList[JMap[String, String]]): JList[Partition] =
+        Collections.singletonList(nestedPartition)
+
+      override def listPartitions(
+          prefix: JMap[String, String],
+          filter: Predicate): JList[Partition] =
+        Seq(outerPartition, nestedPartition).asJava
+    }
+
+    try {
+      fileIO.mkdirs(nestedDir)
+      fileIO.writeFile(outerFile, "outer", false)
+      fileIO.writeFile(nestedFile, "nested", false)
+      val sparkTable =
+        new PaimonFormatTable(
+          formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway))
+
+      // A registry where one custom location sits inside another cannot be read, and dropping one
+      // of the two is the way out of it.
+      assert(
+        sparkTable
+          .dropFormatTablePartitions(Array(Array("dt", "hh")), Array(partitionRow(20260716, 11))))
+
+      assert(dropped == Seq(Map("dt" -> "20260716", "hh" -> "11")))
+      assert(fileIO.exists(outerFile))
+      assert(fileIO.exists(nestedFile))
+    } finally {
+      fileIO.delete(tablePath, true)
+      fileIO.delete(outerDir, true)
+    }
+  }
+
   test("catalog-managed DROP of a custom-location partition leaves all data in place") {
     val fileIO = LocalFileIO.create()
     val tablePath =
