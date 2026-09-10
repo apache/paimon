@@ -417,19 +417,48 @@ All available procedures are listed below.
       </td>
       <td>
          To remove the orphan data files and metadata files. Arguments:
-            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>table (STRING, required): the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
             <li>olderThan: to avoid deleting newly written files, this procedure only 
                deletes orphan files older than 1 day by default. This argument can modify the interval.
             </li>
             <li>dryRun: when true, view only orphan files, don't actually remove files. Default is false.</li>
             <li>parallelism: The maximum number of concurrent deleting files. By default is the number of processors available to the Java virtual machine.</li>
             <li>mode: The mode of remove orphan clean procedure (local or distributed) . By default is distributed.</li>
+            <li>Note: this procedure does not delete primary-key <code>.managed.blob</code> packs. Use <code>remove_orphan_blobs</code>.</li>
       </td>
       <td>CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
+      </td>
+   </tr>
+   <tr>
+      <td>remove_orphan_blobs</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.remove_orphan_blobs(`table` => 'identifier', older_than => 'olderThan', dry_run => dryRun, parallelism => parallelism, mode => 'mode') <br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.remove_orphan_blobs('identifier')<br/>
+         CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan')<br/>
+         CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', dryRun)<br/>
+         CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', dryRun, parallelism)<br/>
+         CALL [catalog.]sys.remove_orphan_blobs('identifier', 'olderThan', dryRun, parallelism, 'mode')
+      </td>
+      <td>
+         To remove unreferenced primary-key <code>.managed.blob</code> packs. Arguments:
+            <li>table: the target table identifier. Cannot be empty, you can use database_name.* to clean whole database.</li>
+            <li>older_than (STRING, optional): the absolute cutoff timestamp. Only packs whose modification time is earlier than this value are eligible. The default cutoff is 1 day before the procedure starts.
+            </li>
+            <li>dry_run (BOOLEAN, optional): when true, calculate the orphan pack count and total bytes without deleting files. Default is false.</li>
+            <li>parallelism (INT, optional): the parallelism of each table cleanup job. It must be greater than 0. If omitted, distributed mode uses the execution environment default and local mode uses the number of available processors.</li>
+            <li>mode (STRING, optional): the cleanup mode, either local or distributed. Default is distributed.</li>
+      </td>
+      <td>CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL sys.remove_orphan_blobs(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
+          CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
+          CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_blobs(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
       </td>
    </tr>
    <tr>

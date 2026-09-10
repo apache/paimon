@@ -21,9 +21,11 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.orphan.FlinkOrphanFilesClean;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.CleanOrphanFilesResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaChange;
@@ -41,9 +43,14 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.api.common.BatchShuffleMode;
+import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -104,6 +111,35 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     private Path getOrphanFilePath(FileStoreTable table, String orphanFile) {
         return new Path(table.location(), orphanFile);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDistributedCleanupForcesBlockingShuffle() throws Exception {
+        FileStoreTable table = createTableAndWriteData(tableName);
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(2)
+                        .setConf(
+                                ExecutionOptions.BATCH_SHUFFLE_MODE,
+                                BatchShuffleMode.ALL_EXCHANGES_PIPELINED)
+                        .build();
+        FlinkOrphanFilesClean cleaner = new FlinkOrphanFilesClean(table, Long.MAX_VALUE, false, 2);
+
+        DataStream<CleanOrphanFilesResult> clean = cleaner.doOrphanClean(env);
+        assertThat(env.getConfiguration().get(ExecutionOptions.BATCH_SHUFFLE_MODE))
+                .isEqualTo(BatchShuffleMode.ALL_EXCHANGES_BLOCKING);
+
+        long deleted = 0;
+        try (CloseableIterator<CleanOrphanFilesResult> results = clean.executeAndCollect()) {
+            while (results.hasNext()) {
+                deleted += results.next().getDeletedFileCount();
+            }
+        }
+        assertThat(deleted).isEqualTo(2);
+        assertThat(table.fileIO().exists(getOrphanFilePath(table, ORPHAN_FILE_1))).isFalse();
+        assertThat(table.fileIO().exists(getOrphanFilePath(table, ORPHAN_FILE_2))).isFalse();
     }
 
     @ParameterizedTest
