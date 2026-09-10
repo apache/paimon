@@ -179,4 +179,20 @@ class HeapBytesVectorReserveBytesTest {
         assertThat(bytes.len).isEqualTo(2);
         assertThat(vector.buffer[0]).isEqualTo((byte) 10);
     }
+
+    @Test
+    void testResetDoesNotWipeBuffer() {
+        HeapBytesVector vector = new HeapBytesVector(4);
+        byte[] data = new byte[] {1, 2, 3};
+        vector.putByteArray(0, data, 0, data.length);
+
+        vector.reset();
+
+        // reset() deliberately leaves the data buffer untouched: wiping it costs
+        // O(buffer size) per batch in the vectorized reader hot path, and reads are
+        // always bounded by the start/length offsets, which reset() does clear
+        assertThat(vector.buffer[0]).isEqualTo((byte) 1);
+        assertThat(vector.start[0]).isZero();
+        assertThat(vector.length[0]).isZero();
+    }
 }
