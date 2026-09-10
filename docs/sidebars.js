@@ -370,18 +370,111 @@ const sidebars = {
       "id": "pypaimon/index"
     },
     "items": [
-      "pypaimon/python-api",
-      "pypaimon/multimodal-api",
-      "pypaimon/manage-tags",
-      "pypaimon/ray-data",
-      "pypaimon/daft",
-      "pypaimon/pytorch",
-      "pypaimon/data-evolution",
-      "pypaimon/system-tables",
-      "pypaimon/fuse-support",
-      "pypaimon/pyjindosdk-support",
-      "pypaimon/sql",
-      "pypaimon/cli"
+      {
+        "type": "category",
+        "label": "Getting Started",
+        "collapsed": true,
+        "items": [
+          "pypaimon/installation",
+          "pypaimon/quick-start"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Python API",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "pypaimon/python-api"
+        },
+        "items": [
+          "pypaimon/catalogs",
+          "pypaimon/writing",
+          "pypaimon/reading",
+          "pypaimon/streaming",
+          "pypaimon/data-types",
+          "pypaimon/manage-tags",
+          "pypaimon/branches"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Multimodal & AI",
+        "collapsed": true,
+        "link": {
+          "type": "doc",
+          "id": "pypaimon/multimodal-api"
+        },
+        "items": [
+          "pypaimon/multimodal-tables",
+          "pypaimon/multimodal-reading",
+          "pypaimon/multimodal-search",
+          "pypaimon/blob",
+          "pypaimon/blob-store",
+          "pypaimon/data-evolution",
+          "pypaimon/merge-into",
+          "pypaimon/video",
+          "pypaimon/dataset-ingestion",
+          "pypaimon/lerobot",
+          {
+            "type": "category",
+            "label": "Examples & Benchmarks",
+            "collapsed": true,
+            "items": [
+              "pypaimon/robomind-agilex",
+              "pypaimon/robomind-act-benchmark"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Compute & Training",
+        "collapsed": true,
+        "items": [
+          {
+            "type": "category",
+            "label": "Ray Data",
+            "collapsed": true,
+            "link": {
+              "type": "doc",
+              "id": "pypaimon/ray-data"
+            },
+            "items": [
+              "pypaimon/ray-joins",
+              "pypaimon/ray-row-ids"
+            ]
+          },
+          "pypaimon/daft",
+          "pypaimon/pytorch"
+        ]
+      },
+      {
+        "type": "category",
+        "label": "Tools & Storage",
+        "collapsed": true,
+        "items": [
+          "pypaimon/sql",
+          {
+            "type": "category",
+            "label": "Command Line Interface",
+            "collapsed": true,
+            "link": {
+              "type": "doc",
+              "id": "pypaimon/cli"
+            },
+            "items": [
+              "pypaimon/cli-query",
+              "pypaimon/cli-tables",
+              "pypaimon/cli-catalogs",
+              "pypaimon/cli-versions"
+            ]
+          },
+          "pypaimon/system-tables",
+          "pypaimon/fuse-support",
+          "pypaimon/pyjindosdk-support"
+        ]
+      }
     ]
   },
   {

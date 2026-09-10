@@ -29,13 +29,13 @@ PyPaimon supports executing SQL queries on Paimon tables, powered by [pypaimon-r
 
 ## Installation
 
-SQL query support requires additional dependencies. Install them with:
+SQL queries require Python 3.10 or newer and the SQL extra:
 
 ```shell
-pip install pypaimon[sql]
+pip install 'pypaimon[sql]'
 ```
 
-This will install `pypaimon-rust` (which bundles DataFusion).
+This installs the Rust bindings and DataFusion dependencies used by SQL queries.
 
 ## Usage
 
@@ -131,3 +131,103 @@ The SQL engine is powered by Apache DataFusion, which supports a rich set of SQL
 - **System Tables**: `$options`, `$schemas`, `$snapshots`, `$tags`, `$manifests`
 
 For the DataFusion query syntax (JOINs, aggregations, subqueries, CTEs, window functions, etc.), see the [DataFusion SQL documentation](https://datafusion.apache.org/user-guide/sql/index.html).
+
+## SQL Command
+
+Execute SQL queries on Paimon tables directly from the command line. This feature is powered by pypaimon-rust and DataFusion.
+
+Install the [SQL extra](#installation) and configure `paimon.yaml` as shown in
+[CLI basic usage](./cli#basic-usage). Use database-qualified table names unless
+you have explicitly selected a default database.
+
+### One-Shot Query
+
+Execute a single SQL query and display the result:
+
+```shell
+paimon sql "SELECT * FROM users LIMIT 10"
+```
+
+Output:
+```
+ id    name  age      city
+  1   Alice   25   Beijing
+  2     Bob   30  Shanghai
+  3 Charlie   35 Guangzhou
+```
+
+**Options:**
+
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Direct table name (uses default catalog and database)
+paimon sql "SELECT * FROM users"
+
+# Two-part: database.table
+paimon sql "SELECT * FROM mydb.users"
+
+# Query with filter and aggregation
+paimon sql "SELECT city, COUNT(*) AS cnt FROM users GROUP BY city ORDER BY cnt DESC"
+
+# Output as JSON
+paimon sql "SELECT * FROM users LIMIT 5" --format json
+```
+
+### Interactive REPL
+
+Start an interactive SQL session by running `paimon sql` without a query argument. The REPL supports arrow keys for line editing, and command history is persisted across sessions in `~/.paimon_history`.
+
+```shell
+paimon sql
+```
+
+Output:
+```
+    ____        _
+   / __ \____ _(_)___ ___  ____  ____
+  / /_/ / __ `/ / __ `__ \/ __ \/ __ \
+ / ____/ /_/ / / / / / / / /_/ / / / /
+/_/    \__,_/_/_/ /_/ /_/\____/_/ /_/
+
+  Powered by pypaimon-rust + DataFusion
+  Type 'help' for usage, 'exit' to quit.
+
+paimon> SHOW DATABASES;
+default
+mydb
+
+paimon> USE mydb;
+Using database 'mydb'.
+
+paimon> SHOW TABLES;
+orders
+users
+
+paimon> SELECT count(*) AS cnt
+     > FROM users
+     > WHERE age > 18;
+ cnt
+  42
+(1 row in 0.05s)
+
+paimon> exit
+Bye!
+```
+
+SQL statements end with `;` and can span multiple lines. The continuation prompt `     >` indicates that more input is expected.
+
+**REPL Commands:**
+
+| Command | Description |
+|---|---|
+| `USE <database>;` | Switch the default database |
+| `SHOW DATABASES;` | List all databases |
+| `SHOW TABLES;` | List tables in the current database |
+| `SELECT ...;` | Execute a SQL query |
+| `help` | Show usage information |
+| `exit` / `quit` | Exit the REPL |
+
+See [Supported SQL Syntax](#supported-sql-syntax) for the SQL feature reference.
