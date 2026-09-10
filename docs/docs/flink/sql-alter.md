@@ -24,6 +24,17 @@ under the License.
 
 # Altering Tables
 
+Use `ALTER TABLE` for table options and schema evolution, and `ALTER DATABASE` for database
+properties. The examples assume a Paimon catalog is selected; see [SQL DDL](./sql-ddl).
+
+| Change | Sections |
+| --- | --- |
+| Table metadata | [Properties](#changingadding-table-properties), [comments](#changingadding-table-comment), [rename](#rename-table-name) |
+| Columns | [Add](#adding-new-columns), [rename](#renaming-column-name), [drop](#dropping-columns), [type](#changing-column-type), [nullability](#changing-column-nullability), [position](#changing-column-position) |
+| Partitions | [Drop partitions](#dropping-partitions) |
+| Event time | [Add](#adding-watermark), [drop](#dropping-watermark), or [change](#changing-watermark) a watermark |
+| Database metadata | [Database properties](#alter-database), [location](#altering-database-location) |
+
 ## Changing/Adding Table Properties
 
 The following SQL sets `write-buffer-size` table property to `256 MB`.
@@ -42,7 +53,7 @@ The following SQL removes `write-buffer-size` table property.
 ALTER TABLE my_table RESET ('write-buffer-size');
 ```
 
-##  Changing/Adding Table Comment
+## Changing/Adding Table Comment
 
 The following SQL changes comment of table `my_table` to `table comment`.
 
@@ -150,14 +161,17 @@ CREATE TABLE my_table (id INT PRIMARY KEY NOT ENFORCED, coupon_info FLOAT NOT NU
 ALTER TABLE my_table MODIFY coupon_info FLOAT;
 
 -- Change column `coupon_info` from nullable to NOT NULL
--- If there are NULL values already, set table option as below to drop those records silently before altering table.
-SET 'table.exec.sink.not-null-enforcer' = 'DROP';
+-- Verify and clean existing NULL values before changing the schema.
+ALTER TABLE my_table SET ('alter-column-null-to-not-null.disabled' = 'false');
 ALTER TABLE my_table MODIFY coupon_info FLOAT NOT NULL;
 ```
 
 :::info
 
-Changing nullable column to NOT NULL is only supported by Flink currently.
+Changing a nullable column to `NOT NULL` is supported by Flink, but is disabled by default in
+Paimon. The option above explicitly enables it. The operation changes the schema without
+rewriting existing rows. Flink's `table.exec.sink.not-null-enforcer` controls null handling for
+sink writes; it does not clean existing table data.
 
 :::
 
@@ -232,7 +246,7 @@ The following SQL modifies the watermark strategy to `ts - INTERVAL '2' HOUR`.
 ALTER TABLE my_table MODIFY WATERMARK FOR ts AS ts - INTERVAL '2' HOUR;
 ```
 
-# ALTER DATABASE
+## ALTER DATABASE
 
 The following SQL sets one or more properties in the specified database. If a particular property is already set in the database, override the old value with the new one.
 
@@ -240,7 +254,7 @@ The following SQL sets one or more properties in the specified database. If a pa
 ALTER DATABASE [catalog_name.]db_name SET (key1=val1, key2=val2, ...);
 ```
 
-## Altering Database Location
+### Altering Database Location
 
 The following SQL changes location of database `my_database` to `file:/temp/my_database`.
 

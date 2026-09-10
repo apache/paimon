@@ -27,6 +27,10 @@ under the License.
 Paimon allows specifying default values for columns. When users write to these tables without explicitly providing
 values for certain columns, Paimon automatically generates default values for these columns.
 
+An explicit `NULL` is also replaced by the configured default for supported writes. Do not use
+this feature when `NULL` must remain distinct from an omitted value. See
+[alter_column_default_value](./procedures/table-operations#alter_column_default_value) for the procedure signature.
+
 ## Create Table
 
 Flink SQL does not have native support for default values, so we can only create a table without default values:
