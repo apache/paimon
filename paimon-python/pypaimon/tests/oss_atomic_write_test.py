@@ -214,6 +214,9 @@ def test_lost_response_is_not_replayed_or_reported_as_conflict(oss_server):
     (False, False, 'test-bucket/table/p=a%2Fb/snapshot-1'),
     (False, True, 'table/p=a%2Fb/snapshot-1'),
     (True, False, 'table/p=a%2Fb/snapshot-1'),
+    (False, False, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
+    (False, True, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
+    (True, False, 'oss://AK:SK@endpoint/test-bucket/table/p=a%2Fb/snapshot-1'),
 ])
 def test_path_modes_and_sts(oss_server, jindo, legacy, path):
     io = file_io(oss_server)
@@ -222,11 +225,21 @@ def test_path_modes_and_sts(oss_server, jindo, legacy, path):
     assert io.try_to_write_atomic(path, 'data') is True
     assert oss_server.token == 'test-sts'
     assert list(oss_server.objects) == ['/test-bucket/table/p=a%2Fb/snapshot-1']
+    assert io.try_to_write_atomic('oss://test-bucket/table/p=a%2Fb/snapshot-1', 'overwrite') is False
+    assert list(oss_server.objects.values()) == [b'data']
 
 
-def test_wrong_bucket_rejected(oss_server):
+@pytest.mark.parametrize('path', ['oss://other/snapshot-1', 'oss://AK:SK@endpoint/other/snapshot-1'])
+def test_wrong_bucket_rejected(oss_server, path):
     with pytest.raises(ValueError, match='configured OSS bucket'):
-        file_io(oss_server).try_to_write_atomic('oss://other/snapshot-1', 'data')
+        file_io(oss_server).try_to_write_atomic(path, 'data')
+    assert oss_server.puts == 0
+
+
+@pytest.mark.parametrize('path', ['oss://AK:SK@endpoint/test-bucket', 'oss://AK:SK@endpoint/test-bucket/'])
+def test_credential_uri_bucket_root_is_not_an_object(oss_server, path):
+    assert file_io(oss_server).try_to_write_atomic(path, 'data') is False
+    assert oss_server.gets == 0
     assert oss_server.puts == 0
 
 

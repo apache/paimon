@@ -33,6 +33,8 @@ class OssFileIO(PyArrowFileIO):
             if uri.scheme != 'oss' or self._extract_oss_bucket(path) != self._oss_bucket:
                 raise ValueError("Atomic write must target the configured OSS bucket")
             key = re.sub(r'/+', '/', uri.path).lstrip('/')
+            if '@' in uri.netloc:
+                key = key.partition('/')[2]
         else:
             key = path
             if not self._use_jindo and not self._oss_bucket_in_endpoint:
