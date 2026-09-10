@@ -28,9 +28,12 @@ import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import javax.annotation.Nullable;
 
@@ -71,7 +74,6 @@ public class JsonFileFormat extends FileFormat {
     }
 
     private void validateDataType(DataType dataType) {
-        // JSON format supports all data types since they can be represented as JSON values
         DataTypeRoot typeRoot = dataType.getTypeRoot();
         switch (typeRoot) {
             case CHAR:
@@ -90,11 +92,22 @@ public class JsonFileFormat extends FileFormat {
             case TIME_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                break;
             case ARRAY:
+                validateDataType(((ArrayType) dataType).getElementType());
+                break;
             case VECTOR:
+                validateDataType(((VectorType) dataType).getElementType());
+                break;
             case MAP:
+                MapType mapType = (MapType) dataType;
+                validateDataType(mapType.getKeyType());
+                validateDataType(mapType.getValueType());
+                break;
             case ROW:
-                // All types are supported in JSON
+                for (DataType fieldType : ((RowType) dataType).getFieldTypes()) {
+                    validateDataType(fieldType);
+                }
                 break;
             default:
                 throw new UnsupportedOperationException(
