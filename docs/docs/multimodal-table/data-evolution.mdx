@@ -629,9 +629,11 @@ including fractional values such as `1.5`. Files strictly exceeding the threshol
 qualify for compaction below `compaction.min.file-num` when their dedicated-file
 ranges allow splitting.
 Changing the ratio does not change the output target size. Compaction includes all
-column updates for the same row-ID range and rolls normal output files near
-`target-file-size`. Actual sizes depend on compression and the writer's size-check
-granularity; the last file may be smaller.
+column updates for the same row-ID range. Before writing, it estimates rows per output
+from the total normal input file size, the logical row count, and `target-file-size`.
+It then adjusts the estimated cut points to safe dedicated-file boundaries.
+Actual output sizes can differ from the target because of compression, data skew,
+overwritten column versions, and dedicated-file ranges; the last file may be smaller.
 The write-time `target-file-row-num` limit does not apply to compaction.
 
 Row IDs, column updates, and logical deletions are preserved. This option only rewrites
@@ -641,10 +643,10 @@ their existing behavior. Files referenced by older snapshots or tags remain unti
 references expire and snapshot expiration removes them.
 
 Every BLOB or VECTOR file must remain fully contained in a single normal file's
-row-ID range. After reaching the target size, compaction waits for a boundary that
-does not cut through any dedicated file, including overlapping ranges from different
-columns or versions. Output files may therefore exceed `target-file-size`. If these
-ranges prevent any split, file size alone does not trigger a compaction task. Normal
+row-ID range. An estimated cut inside a dedicated file moves to the end of its range,
+including any overlapping ranges from different columns or versions and ranges produced
+by dedicated compaction in the same batch. Output files may therefore exceed
+`target-file-size`. If these ranges prevent any split, file size alone does not trigger a compaction task. Normal
 merging based on `compaction.min.file-num` remains available.
 
 ### Materialize Deletion Vectors

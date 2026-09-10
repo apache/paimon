@@ -60,7 +60,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.function.LongPredicate;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
@@ -104,8 +103,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final MemorySize maxDiskSize;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
-    @Nullable private LongPredicate fileRollingPredicate;
-    private boolean writeStarted;
     private SinkWriter<InternalRow> sinkWriter;
     private MemorySegmentPool memorySegmentPool;
 
@@ -189,20 +186,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         }
     }
 
-    /**
-     * Restricts automatic rolling of normal files to accepted boundaries, expressed as the number
-     * of records written since the last flush. Requires direct writes and must be configured before
-     * writing. Explicit flushes still close the current file.
-     */
-    public AppendOnlyWriter withFileRollingPredicate(LongPredicate predicate) {
-        Preconditions.checkState(!writeStarted, "Must configure rolling before writing.");
-        Preconditions.checkState(
-                sinkWriter instanceof DirectSinkWriter,
-                "File rolling predicate requires direct writes.");
-        this.fileRollingPredicate = Preconditions.checkNotNull(predicate);
-        return this;
-    }
-
     private BufferedSinkWriter<InternalRow> createBufferedSinkWriter(boolean spillable) {
         return new BufferedSinkWriter<>(
                 this::createRollingRowWriter,
@@ -222,7 +205,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 "Append-only writer can only accept insert or update_after row kind, but current row kind is: %s. "
                         + "You can configure 'ignore-delete' to ignore retract records.",
                 rowData.getRowKind());
-        writeStarted = true;
         boolean success = sinkWriter.write(rowData);
         if (!success) {
             flush(false, false);
@@ -238,7 +220,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void writeBundle(BundleRecords bundle) throws Exception {
-        writeStarted = true;
         if (sinkWriter instanceof BufferedSinkWriter) {
             for (InternalRow row : bundle) {
                 write(row);
@@ -365,28 +346,23 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     blobContext,
                     omitAllNonDedicatedWriteCols);
         }
-        RowDataRollingFileWriter writer =
-                new RowDataRollingFileWriter(
-                        fileIO,
-                        schemaId,
-                        fileFormat,
-                        targetFileSize,
-                        writeSchema,
-                        pathFactory,
-                        seqNumCounterProvider,
-                        fileCompression,
-                        statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
-                        fileIndexOptions,
-                        fileSource,
-                        asyncFileWrite,
-                        statsDenseStore,
-                        writeCols,
-                        rowSidecarFileFormat,
-                        targetFileRowNum);
-        if (fileRollingPredicate != null) {
-            writer.withFileRollingPredicate(fileRollingPredicate);
-        }
-        return writer;
+        return new RowDataRollingFileWriter(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounterProvider,
+                fileCompression,
+                statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                rowSidecarFileFormat,
+                targetFileRowNum);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

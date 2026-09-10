@@ -1128,6 +1128,76 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testPlanNormalOutputRangesAtDedicatedBoundaries() {
+        List<DataFileMeta> files =
+                Collections.singletonList(createDataFileMeta("file.parquet", 100, 10, 0, 1000));
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+        assertThat(task.planOutputRanges(400))
+                .containsExactly(new Range(100, 103), new Range(104, 107), new Range(108, 109));
+
+        task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        files,
+                        Arrays.asList(
+                                new Range(105, 107), new Range(103, 106), new Range(108, 109)));
+        // A cut after 103 lies inside overlapping dedicated files and moves to 107.
+        // The adjacent dedicated file starting at 108 must not prevent this boundary.
+        assertThat(task.planOutputRanges(400))
+                .containsExactly(new Range(100, 107), new Range(108, 109));
+        // A cut immediately before a dedicated file is also safe.
+        assertThat(task.planOutputRanges(300))
+                .containsExactly(new Range(100, 102), new Range(103, 107), new Range(108, 109));
+    }
+
+    @Test
+    public void testPlanNormalOutputRangesUsesLogicalRowCountAcrossVersions() {
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Arrays.asList(
+                                createDataFileMeta("base.parquet", 100, 10, 0, 400),
+                                createDataFileMeta("update.parquet", 100, 10, 1, 600)));
+        assertThat(task.planOutputRanges(500))
+                .containsExactly(new Range(100, 104), new Range(105, 109));
+    }
+
+    @Test
+    public void testPlanNormalOutputRangesAvoidsSizeAndRowIdOverflow() {
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Arrays.asList(
+                                createDataFileMeta(
+                                        "base.parquet", Long.MAX_VALUE - 10, 10, 0, Long.MAX_VALUE),
+                                createDataFileMeta(
+                                        "update.parquet",
+                                        Long.MAX_VALUE - 10,
+                                        10,
+                                        1,
+                                        Long.MAX_VALUE)));
+        assertThat(task.planOutputRanges(Long.MAX_VALUE))
+                .containsExactly(
+                        new Range(Long.MAX_VALUE - 10, Long.MAX_VALUE - 6),
+                        new Range(Long.MAX_VALUE - 5, Long.MAX_VALUE - 1));
+        task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Collections.singletonList(
+                                createDataFileMeta(
+                                        "last.parquet",
+                                        Long.MAX_VALUE - 9,
+                                        10,
+                                        0,
+                                        Long.MAX_VALUE)));
+        assertThat(task.planOutputRanges(Long.MAX_VALUE / 2))
+                .containsExactly(
+                        new Range(Long.MAX_VALUE - 9, Long.MAX_VALUE - 5),
+                        new Range(Long.MAX_VALUE - 4, Long.MAX_VALUE));
+    }
+
+    @Test
     public void testSerializerMaterializeDeletionTask() throws IOException {
         DataEvolutionCompactTaskSerializer serializer = new DataEvolutionCompactTaskSerializer();
 

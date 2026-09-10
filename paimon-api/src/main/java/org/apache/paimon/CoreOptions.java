@@ -2642,8 +2642,9 @@ public class CoreOptions implements Serializable {
                             "Whether data-evolution compaction selects normal data files larger than "
                                     + "data-evolution.compaction.large-file-ratio times target-file-size, "
                                     + "even below compaction.min.file-num when dedicated-file ranges allow splitting. "
-                                    + "Normal output rolls toward target-file-size without cutting through "
-                                    + "any BLOB or VECTOR file range, so output may exceed the target. "
+                                    + "Normal output ranges are estimated from input file sizes and row counts "
+                                    + "toward target-file-size, then adjusted to avoid cutting through any "
+                                    + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
                                     + "Row IDs and logical deletions are preserved, and associated "
                                     + "BLOB and VECTOR files are not rewritten by this option.");
 

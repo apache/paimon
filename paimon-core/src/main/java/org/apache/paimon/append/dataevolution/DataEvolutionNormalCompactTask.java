@@ -20,13 +20,14 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -37,6 +38,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
 import org.slf4j.Logger;
@@ -44,15 +46,14 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.LongPredicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
@@ -119,8 +120,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         if (options.dataEvolutionCompactionSplitLargeFiles()) {
             // Buffer flushes may close files before reaching a safe dedicated-file boundary.
             writeOptions.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "false");
-            writeOptions.put(
-                    CoreOptions.TARGET_FILE_SIZE.key(), options.targetFileSize(false) + " b");
+            writeOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), Long.MAX_VALUE + " b");
         }
         table = table.copy(writeOptions);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
@@ -146,25 +146,27 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
         storeWrite.withFileSource(FileSource.COMPACT);
-        AppendOnlyWriter writer = (AppendOnlyWriter) storeWrite.createWriter(partition, 0);
-        if (options.dataEvolutionCompactionSplitLargeFiles() && !protectedRanges.isEmpty()) {
-            writer.withFileRollingPredicate(fileRollingPredicate(firstRowId));
+        RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
+        List<Range> outputRanges =
+                options.dataEvolutionCompactionSplitLargeFiles()
+                        ? planOutputRanges(options.targetFileSize(false))
+                        : Collections.singletonList(checkContiguousRowRange(compactBefore));
+        List<DataFileMeta> writeResult = new ArrayList<>();
+        try (RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            for (Range range : outputRanges) {
+                for (long remaining = range.count(); remaining > 0; remaining--) {
+                    checkArgument(iterator.hasNext(), "Missing rows in normal compaction input.");
+                    writer.write(iterator.next());
+                }
+                List<DataFileMeta> output =
+                        writer.prepareCommit(false).newFilesIncrement().newFiles();
+                checkArgument(
+                        output.size() == 1,
+                        "Each planned compaction range should produce one normal file.");
+                writeResult.add(output.get(0));
+            }
+            checkArgument(!iterator.hasNext(), "Unexpected extra rows in normal compaction input.");
         }
-
-        reader.forEachRemaining(
-                row -> {
-                    try {
-                        writer.write(row);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-
-        List<DataFileMeta> writeResult = writer.prepareCommit(false).newFilesIncrement().newFiles();
-        checkArgument(
-                options.dataEvolutionCompactionSplitLargeFiles() || writeResult.size() == 1,
-                "Data evolution compaction should produce one file unless splitting is enabled.");
-
         try {
             writer.close();
             storeWrite.close();
@@ -198,20 +200,33 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         return commitMessage(compactBefore, compactAfter);
     }
 
-    private LongPredicate fileRollingPredicate(long firstRowId) {
-        Iterator<Range> ranges = protectedRanges.iterator();
-        return new LongPredicate() {
-            private Range current = ranges.hasNext() ? ranges.next() : null;
-
-            @Override
-            public boolean test(long writtenRows) {
-                long lastRowId = firstRowId + (writtenRows - 1);
-                while (current != null && current.to <= lastRowId) {
-                    current = ranges.hasNext() ? ranges.next() : null;
-                }
-                return current == null || lastRowId < current.from;
+    @VisibleForTesting
+    List<Range> planOutputRanges(long targetFileSize) {
+        Range inputRange = checkContiguousRowRange(compactBefore);
+        double inputSize = compactBefore.stream().mapToDouble(DataFileMeta::fileSize).sum();
+        long targetRows = Math.max(1L, (long) (inputRange.count() * (targetFileSize / inputSize)));
+        List<Range> result = new ArrayList<>();
+        int protectedIndex = 0;
+        long start = inputRange.from;
+        while (true) {
+            long end = start + Math.min(targetRows - 1, inputRange.to - start);
+            while (protectedIndex < protectedRanges.size()
+                    && protectedRanges.get(protectedIndex).to <= end) {
+                protectedIndex++;
             }
-        };
+            if (protectedIndex < protectedRanges.size()
+                    && protectedRanges.get(protectedIndex).from <= end) {
+                end = protectedRanges.get(protectedIndex).to;
+            }
+            checkArgument(
+                    end <= inputRange.to,
+                    "Dedicated range must be contained in the normal compaction range.");
+            result.add(new Range(start, end));
+            if (end == inputRange.to) {
+                return result;
+            }
+            start = end + 1;
+        }
     }
 
     @Nullable

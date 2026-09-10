@@ -245,8 +245,9 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
                 .isEmpty();
     }
 
-    @Test
-    public void testSplitAtBlobBoundariesRetainsDedicatedFiles() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2000})
+    public void testSplitAtBlobBoundariesRetainsDedicatedFiles(int estimatedRows) throws Exception {
         FileStoreTable table = createBlobSegmentsTable();
         List<DataFileMeta> dedicated = dedicatedFiles(table);
         assertThat(dedicated).hasSize(3);
@@ -257,23 +258,52 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         assertThat(merged.compactAfter().get(0).nonNullRowIdRange()).isEqualTo(new Range(0, 3749));
 
         options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "10");
-        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 b");
+        long targetSize =
+                Math.max(1L, merged.compactAfter().get(0).fileSize() * estimatedRows / 3750);
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), targetSize + " b");
         options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "true");
+        options.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "10");
         options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key(), "1.0");
         table = table.copy(options);
         DataEvolutionCompactTask split = compactSingleTask(table);
-        // Size rolling is checked after 1000 rows. It must wait another 250 rows for the BLOB end.
+        // Estimated cuts move to BLOB ends; adjacent ranges can share a normal output.
         assertThat(split.compactAfter().stream().map(DataFileMeta::nonNullRowIdRange))
-                .containsExactly(new Range(0, 1249), new Range(1250, 2499), new Range(2500, 3749));
+                .containsExactlyElementsOf(
+                        estimatedRows == 1
+                                ? Arrays.asList(
+                                        new Range(0, 1249),
+                                        new Range(1250, 2499),
+                                        new Range(2500, 3749))
+                                : Arrays.asList(new Range(0, 2499), new Range(2500, 3749)));
         assertDedicatedFilesContained(table, dedicated);
         assertBlobValues(table);
-        // Each resulting normal range is entirely protected, so another size-only pass is useless.
+        // Completed outputs must not be rewritten even if estimates leave them oversized.
         assertThat(
                         new DataEvolutionCompactCoordinator(
                                         table,
                                         false,
                                         false,
                                         table.snapshotManager().latestSnapshot())
+                                .withCompletedNormalFiles(
+                                        split.compactAfter().stream()
+                                                .map(DataFileMeta::fileName)
+                                                .collect(Collectors.toSet()))
+                                .plan())
+                .isEmpty();
+
+        options.put(CoreOptions.TARGET_FILE_SIZE.key(), "128 mb");
+        options.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        table = table.copy(options);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
+                .hasSize(1);
+        assertThat(
+                        new DataEvolutionCompactCoordinator(table, false, false, snapshot)
+                                .withCompletedNormalFiles(
+                                        split.compactAfter().stream()
+                                                .map(DataFileMeta::fileName)
+                                                .collect(Collectors.toSet()))
                                 .plan())
                 .isEmpty();
     }
@@ -492,7 +522,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
     }
 
     @Test
-    public void testCompletedParquetOutputsDoNotRepeatSmallFileCompaction() throws Exception {
+    public void testEstimatedRangesIgnoreParquetBufferSize() throws Exception {
         catalog.createTable(
                 identifier(),
                 Schema.newBuilder()
@@ -534,9 +564,9 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         DataEvolutionCompactTask compacted = compactSingleTask(table);
         assertThat(compacted.compactBefore()).hasSize(3);
         List<DataFileMeta> outputs = compacted.compactAfter();
-        // Parquet reaches the byte target using an uncompressed page buffer at each BLOB end.
-        // Closing compresses the page, so all three outputs remain small enough to merge again.
-        assertThat(outputs).extracting(DataFileMeta::rowCount).containsExactly(1000L, 1000L, 1000L);
+        // The input files fit in the target based on their compressed sizes, even though
+        // Parquet's uncompressed page buffer crosses that target every 1000 rows.
+        assertThat(outputs).extracting(DataFileMeta::rowCount).containsExactly(3000L);
         assertThat(outputs)
                 .allSatisfy(
                         file ->
@@ -545,17 +575,7 @@ public class DataEvolutionNormalCompactTaskTest extends TableTestBase {
         assertDedicatedFilesContained(table, dedicated);
 
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        List<DataEvolutionCompactTask> repeated =
-                new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan();
-        assertThat(repeated).hasSize(1);
-        assertThat(repeated.get(0).compactBefore()).containsExactlyInAnyOrderElementsOf(outputs);
-        assertThat(
-                        new DataEvolutionCompactCoordinator(table, false, false, snapshot)
-                                .withCompletedNormalFiles(
-                                        outputs.stream()
-                                                .map(DataFileMeta::fileName)
-                                                .collect(Collectors.toSet()))
-                                .plan())
+        assertThat(new DataEvolutionCompactCoordinator(table, false, false, snapshot).plan())
                 .isEmpty();
 
         List<Integer> ids = new ArrayList<>();

@@ -28,20 +28,14 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.function.LongPredicate;
 import java.util.function.Supplier;
 
 /** {@link RollingFileWriterImpl} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow, DataFileMeta> {
-
-    @Nullable private LongPredicate fileRollingPredicate;
-    private boolean pendingRoll;
 
     public RowDataRollingFileWriter(
             FileIO fileIO,
@@ -99,48 +93,5 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
                 },
                 targetFileSize,
                 targetFileRowNum);
-    }
-
-    /**
-     * Restricts automatic rolling to accepted boundaries, expressed as the cumulative number of
-     * records written by this writer. Must be configured before writing; closing the writer still
-     * closes the final file regardless of the predicate.
-     */
-    public RowDataRollingFileWriter withFileRollingPredicate(LongPredicate predicate) {
-        Preconditions.checkState(recordCount() == 0, "Must configure rolling before writing.");
-        this.fileRollingPredicate = Preconditions.checkNotNull(predicate);
-        return this;
-    }
-
-    @Override
-    protected void beforeWrite(InternalRow row) throws IOException {
-        if (pendingRoll && fileRollingPredicate.test(recordCount())) {
-            closeCurrentWriter();
-        }
-    }
-
-    @Override
-    protected void onRollingCondition(InternalRow row) throws IOException {
-        if (fileRollingPredicate == null || fileRollingPredicate.test(recordCount())) {
-            closeCurrentWriter();
-        } else {
-            pendingRoll = true;
-        }
-    }
-
-    @Override
-    protected void onCurrentWriterClosed() {
-        pendingRoll = false;
-    }
-
-    @Override
-    public void writeBundle(BundleRecords bundle) throws IOException {
-        if (fileRollingPredicate == null) {
-            super.writeBundle(bundle);
-        } else {
-            for (InternalRow row : bundle) {
-                write(row);
-            }
-        }
     }
 }
