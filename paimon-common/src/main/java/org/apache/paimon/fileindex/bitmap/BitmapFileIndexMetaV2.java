@@ -377,7 +377,10 @@ public class BitmapFileIndexMetaV2 extends BitmapFileIndexMeta {
                 key = entry.key;
             }
             int entryBytes = 2 * Integer.BYTES + keyBytesMapper.apply(entry.key);
-            if (serializedBytes + entryBytes > blockSizeLimit) {
+            // an empty block always accepts its first entry: the block size limit is a
+            // packing target, and rejecting a single oversized key would fail the whole
+            // index serialization
+            if (!entryList.isEmpty() && serializedBytes + entryBytes > blockSizeLimit) {
                 return false;
             }
             serializedBytes += entryBytes;
