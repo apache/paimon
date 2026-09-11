@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -178,21 +179,28 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
-        return newWrite(store().newWrite(commitUser, writeId));
+        return newWrite(commitUser, writeId, createRowKeyExtractor());
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
+        return newWrite(store().newWrite(commitUser, writeId), rowKeyExtractor);
     }
 
     @Override
     public TableWriteImpl<KeyValue> newPostponeFixedBucketWrite(
             String commitUser, @Nullable Integer writeId) {
-        return newWrite(store().newPostponeFixedBucketWrite(commitUser));
+        return newWrite(store().newPostponeFixedBucketWrite(commitUser), createRowKeyExtractor());
     }
 
-    private TableWriteImpl<KeyValue> newWrite(AbstractFileStoreWrite<KeyValue> storeWrite) {
+    private TableWriteImpl<KeyValue> newWrite(
+            AbstractFileStoreWrite<KeyValue> storeWrite, RowKeyExtractor rowKeyExtractor) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
                 storeWrite,
-                createRowKeyExtractor(),
+                rowKeyExtractor,
                 (record, rowKind) ->
                         kv.replace(
                                 record.primaryKey(),
