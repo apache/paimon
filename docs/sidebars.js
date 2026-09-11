@@ -486,10 +486,17 @@ const sidebars = {
       "id": "ecosystem/index"
     },
     "items": [
-      "ecosystem/starrocks",
-      "ecosystem/doris",
-      "ecosystem/hive",
-      "ecosystem/trino",
+      "ecosystem/connecting-engines",
+      {
+        type: "category",
+        "label": "Query Engines",
+        "items": [
+          "ecosystem/starrocks",
+          "ecosystem/doris",
+          "ecosystem/hive",
+          "ecosystem/trino"
+        ]
+      },
       "ecosystem/amoro"
     ]
   },
