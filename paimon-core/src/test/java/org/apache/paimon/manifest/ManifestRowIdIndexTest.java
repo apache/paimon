@@ -19,22 +19,30 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.ByteArraySeekableStream;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -331,6 +339,238 @@ class ManifestRowIdIndexTest {
                 };
         assertThatThrownBy(() -> ManifestRowIdIndex.read(failed, path, manifest, query, settings))
                 .isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void indexReadsUseBoundedBulkRequests() throws Exception {
+        byte[] header = header();
+        for (int blockCount : new int[] {5000, 25000}) {
+            ManifestRowIdIndex.Builder builder = new ManifestRowIdIndex.Builder(settings, header);
+            for (int blockNumber = 0; blockNumber < blockCount; blockNumber++) {
+                builder.beginBlock(header.length + blockNumber * 100L, 100, 1);
+                builder.add((long) blockNumber, 1);
+                builder.endBlock();
+            }
+            long size = header.length + blockCount * 100L;
+            byte[] data = builder.serialize("manifest-large", size, blockCount);
+            ManifestFileMeta meta = meta("manifest-large", size, blockCount);
+            CountingInput stream = new CountingInput(data, Integer.MAX_VALUE);
+            Path path = new Path(temp.toString(), meta.fileName());
+            FileIO io = mock(FileIO.class);
+            when(io.newInputStream(ManifestRowIdIndex.path(path))).thenReturn(stream);
+            ManifestRowIdIndex.Selection actual =
+                    ManifestRowIdIndex.read(
+                            io,
+                            path,
+                            meta,
+                            RowRangeIndex.create(Collections.singletonList(new Range(0, 0))),
+                            settings);
+            assertThat(actual.blocks()).hasSize(1);
+            assertThat(actual.blocks().get(0).offset).isEqualTo(header.length);
+            assertThat(stream.readLengths).hasSize((data.length + (1 << 20) - 1) / (1 << 20));
+            assertThat(stream.requests).allMatch(request -> request <= 1 << 20);
+            assertThat(stream.closed).isTrue();
+        }
+    }
+
+    @Test
+    void indexShortReadsAndExactBudget() throws Exception {
+        byte[] data = golden();
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_MAX_BYTES, data.length);
+        Path path = new Path(temp.toString(), "manifest-golden");
+        for (int maxRead : new int[] {Integer.MAX_VALUE, 7}) {
+            CountingInput stream = new CountingInput(data, maxRead);
+            FileIO io = mock(FileIO.class);
+            when(io.newInputStream(ManifestRowIdIndex.path(path))).thenReturn(stream);
+            ManifestRowIdIndex.Selection actual =
+                    ManifestRowIdIndex.read(
+                            io,
+                            path,
+                            goldenMeta(),
+                            RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
+                            new ManifestRowIdIndex.Settings(options));
+            assertThat(actual.blocks())
+                    .extracting(block -> block.firstRecord)
+                    .containsExactly(0L, 5L);
+            assertThat(stream.closed).isTrue();
+        }
+    }
+
+    @Test
+    void indexOverBudgetStopsAfterOneExtraByte() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_MAX_BYTES, 128);
+        Path path = new Path(temp.toString(), "manifest-golden");
+        CountingInput stream = new CountingInput(golden(), Integer.MAX_VALUE);
+        FileIO io = mock(FileIO.class);
+        when(io.newInputStream(ManifestRowIdIndex.path(path))).thenReturn(stream);
+        assertThat(
+                        ManifestRowIdIndex.read(
+                                io,
+                                path,
+                                goldenMeta(),
+                                RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
+                                new ManifestRowIdIndex.Settings(options)))
+                .isNull();
+        assertThat(stream.readLengths).containsExactly(129);
+        assertThat(stream.closed).isTrue();
+    }
+
+    @Test
+    void adjacentBlocksShareReadsForSingleByteConsumers() throws Exception {
+        byte[] header = header();
+        byte[] body = new byte[400];
+        for (int position = 0; position < body.length; position++) {
+            body[position] = (byte) position;
+        }
+        ManifestRowIdIndex.Selection selected =
+                ManifestRowIdIndex.select(
+                        golden(),
+                        goldenMeta(),
+                        RowRangeIndex.create(
+                                Arrays.asList(
+                                        new Range(0, 0),
+                                        new Range(8254058425445L, 8254058425445L))),
+                        settings);
+        byte[] manifest = Arrays.copyOf(header, header.length + body.length);
+        System.arraycopy(body, 0, manifest, header.length, body.length);
+        CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
+        Path path = new Path(temp.toString(), "manifest-golden");
+        FileIO io = mock(FileIO.class);
+        when(io.newInputStream(path)).thenReturn(stream);
+        ByteArrayOutputStream actual = new ByteArrayOutputStream();
+        try (InputStream input = ManifestRowIdIndex.openManifest(io, path, selected)) {
+            int value;
+            while ((value = input.read()) != -1) {
+                actual.write(value);
+            }
+            assertThat(input.read(new byte[1], 0, 0)).isZero();
+        }
+        assertThat(actual.toByteArray()).isEqualTo(Arrays.copyOf(manifest, header.length + 300));
+        assertThat(stream.readLengths).containsExactly(300);
+        assertThat(stream.seeks).containsExactly((long) header.length);
+        assertThat(stream.closed).isTrue();
+    }
+
+    @Test
+    void blockReadsSkipGapsAndEmptySelections() throws Exception {
+        byte[] header = header();
+        byte[] manifest = Arrays.copyOf(header, header.length + 400);
+        Arrays.fill(manifest, header.length + 100, header.length + 300, (byte) 7);
+        Path path = new Path(temp.toString(), "manifest-golden");
+        for (long point : new long[] {20, 16}) {
+            CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
+            FileIO io = mock(FileIO.class);
+            when(io.newInputStream(path)).thenReturn(stream);
+            byte[] actual;
+            try (InputStream input =
+                    ManifestRowIdIndex.openManifest(
+                            io, path, select(golden(), goldenMeta(), point))) {
+                actual = IOUtils.readFully(input, false);
+            }
+            if (point == 20) {
+                assertThat(actual).isEqualTo(Arrays.copyOf(header, header.length + 200));
+                assertThat(stream.readLengths).containsExactly(100, 100);
+                assertThat(stream.seeks)
+                        .containsExactly((long) header.length, header.length + 300L);
+            } else {
+                assertThat(actual).isEqualTo(header);
+                assertThat(stream.readLengths).isEmpty();
+                assertThat(stream.seeks).isEmpty();
+            }
+            assertThat(stream.closed).isTrue();
+        }
+    }
+
+    @Test
+    void largeBlockSpansUseBoundedReads() throws Exception {
+        byte[] header = header();
+        ManifestRowIdIndex.Builder builder = new ManifestRowIdIndex.Builder(settings, header);
+        long offset = header.length;
+        for (int length : new int[] {512 * 1024, 512 * 1024, 257}) {
+            builder.beginBlock(offset, length, 1);
+            builder.add(20L, 1);
+            builder.endBlock();
+            offset += length;
+        }
+        byte[] data = builder.serialize("manifest-large", offset, 3);
+        byte[] manifest = Arrays.copyOf(header, (int) offset);
+        CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
+        FileIO io = mock(FileIO.class);
+        Path path = new Path(temp.toString(), "manifest-large");
+        when(io.newInputStream(path)).thenReturn(stream);
+        try (InputStream input =
+                ManifestRowIdIndex.openManifest(
+                        io, path, select(data, meta("manifest-large", offset, 3), 20))) {
+            assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
+        }
+        assertThat(stream.readLengths).containsExactly(1 << 20, 257);
+        assertThat(stream.seeks).containsExactly((long) header.length);
+        assertThat(stream.closed).isTrue();
+    }
+
+    @Test
+    void blockShortReadsAndTruncation() throws Exception {
+        byte[] header = header();
+        Path path = new Path(temp.toString(), "manifest-golden");
+        ManifestRowIdIndex.Selection selected =
+                ManifestRowIdIndex.select(
+                        golden(),
+                        goldenMeta(),
+                        RowRangeIndex.create(
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
+                        settings);
+        for (int bodyLength : new int[] {400, 399}) {
+            byte[] manifest = Arrays.copyOf(header, header.length + bodyLength);
+            CountingInput stream = new CountingInput(manifest, 7);
+            FileIO io = mock(FileIO.class);
+            when(io.newInputStream(path)).thenReturn(stream);
+            try (InputStream input = ManifestRowIdIndex.openManifest(io, path, selected)) {
+                if (bodyLength == 400) {
+                    assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
+                } else {
+                    assertThatThrownBy(() -> IOUtils.readFully(input, false))
+                            .isInstanceOf(EOFException.class);
+                }
+            }
+            assertThat(stream.closed).isTrue();
+        }
+    }
+
+    private static class CountingInput extends ByteArraySeekableStream {
+        private final int maxRead;
+        private final List<Integer> requests = new ArrayList<>();
+        private final List<Integer> readLengths = new ArrayList<>();
+        private final List<Long> seeks = new ArrayList<>();
+        private boolean closed;
+
+        private CountingInput(byte[] data, int maxRead) {
+            super(data);
+            this.maxRead = maxRead;
+        }
+
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            requests.add(length);
+            int count = super.read(bytes, offset, Math.min(length, maxRead));
+            if (count > 0) {
+                readLengths.add(count);
+            }
+            return count;
+        }
+
+        @Override
+        public void seek(long position) throws IOException {
+            seeks.add(position);
+            super.seek(position);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
     }
 
     private ManifestRowIdIndex.Selection select(byte[] data, ManifestFileMeta meta, long point)

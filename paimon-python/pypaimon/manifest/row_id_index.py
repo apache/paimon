@@ -37,6 +37,7 @@ SUFFIX = '.row-id-index'
 MAGIC = b'PAIMRIDX'
 MAX_ROW_ID = (1 << 63) - 1
 MAX_AVRO_HEADER = 1024 * 1024
+READ_BUFFER_BYTES = 1024 * 1024
 HEADER = struct.Struct('>8sHHI32sqqI')
 BLOCK = struct.Struct('>qqqqI')
 PAIR = struct.Struct('>qq')
@@ -267,7 +268,7 @@ def read_index(file_io, manifest_path, manifest, query, settings):
         with file_io.new_input_stream(index_path) as stream:
             data = bytearray()
             while True:
-                chunk = stream.read(min(8192, settings.max_bytes + 1 - len(data)))
+                chunk = stream.read(min(READ_BUFFER_BYTES, settings.max_bytes + 1 - len(data)))
                 if not chunk:
                     break
                 data.extend(chunk)
@@ -288,16 +289,21 @@ def read_selected_bytes(file_io, manifest_path, selected):
     """
     data = bytearray(selected.header)
     with file_io.new_input_stream(manifest_path) as stream:
-        previous_end = -1
-        for block in selected.blocks:
-            if block.offset != previous_end:
-                stream.seek(block.offset)
-            remaining = block.length
+        block_position = 0
+        while block_position < len(selected.blocks):
+            block = selected.blocks[block_position]
+            block_position += 1
+            end = block.offset + block.length
+            while (block_position < len(selected.blocks)
+                   and selected.blocks[block_position].offset == end):
+                end += selected.blocks[block_position].length
+                block_position += 1
+            stream.seek(block.offset)
+            remaining = end - block.offset
             while remaining:
-                chunk = stream.read(min(remaining, 1024 * 1024))
+                chunk = stream.read(min(remaining, READ_BUFFER_BYTES))
                 if not chunk:
                     raise EOFError('Truncated manifest block')
                 data.extend(chunk)
                 remaining -= len(chunk)
-            previous_end = block.offset + block.length
     return bytes(data)

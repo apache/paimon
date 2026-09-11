@@ -63,6 +63,7 @@ public final class ManifestRowIdIndex {
     private static final int HEADER_BYTES = 68;
     private static final int DIGEST_BYTES = 32;
     private static final int MAX_AVRO_HEADER = 1024 * 1024;
+    private static final int READ_BUFFER_BYTES = 1024 * 1024;
 
     private ManifestRowIdIndex() {}
 
@@ -362,7 +363,7 @@ public final class ManifestRowIdIndex {
         return new Selection(header, selected);
     }
 
-    /** One bounded GET attempt, without a preceding HEAD. Null means read the original manifest. */
+    /** Bounded, bulk index reads. Null means read the original manifest. */
     @Nullable
     public static Selection read(
             FileIO io,
@@ -378,7 +379,7 @@ public final class ManifestRowIdIndex {
             try (InputStream in =
                     io.newInputStream(new Path(path.getParent(), manifest.indexFileName()))) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                byte[] buffer = new byte[8192];
+                byte[] buffer = new byte[Math.min(READ_BUFFER_BYTES, settings.maxBytes + 1)];
                 int n;
                 while ((n =
                                 in.read(
@@ -436,7 +437,9 @@ public final class ManifestRowIdIndex {
         private int headerPosition;
         private int blockPosition;
         private long remaining;
-        private long previousEnd = -1;
+        private byte[] buffer;
+        private int bufferPosition;
+        private int bufferLimit;
 
         private SelectedBlockInput(SeekableInputStream input, Selection selected) {
             this.input = input;
@@ -445,8 +448,10 @@ public final class ManifestRowIdIndex {
 
         @Override
         public int read() throws IOException {
-            byte[] one = new byte[1];
-            return read(one, 0, 1) < 0 ? -1 : one[0] & 255;
+            if (headerPosition < selected.header.length) {
+                return selected.header[headerPosition++] & 255;
+            }
+            return fillBuffer() ? buffer[bufferPosition++] & 255 : -1;
         }
 
         @Override
@@ -460,23 +465,47 @@ public final class ManifestRowIdIndex {
                 headerPosition += n;
                 return n;
             }
+            if (!fillBuffer()) {
+                return -1;
+            }
+            int copied = Math.min(length, bufferLimit - bufferPosition);
+            System.arraycopy(buffer, bufferPosition, bytes, offset, copied);
+            bufferPosition += copied;
+            return copied;
+        }
+
+        private boolean fillBuffer() throws IOException {
+            if (bufferPosition < bufferLimit) {
+                return true;
+            }
             if (remaining == 0) {
                 if (blockPosition == selected.blocks.size()) {
-                    return -1;
+                    return false;
                 }
                 Block block = selected.blocks.get(blockPosition++);
-                if (block.offset != previousEnd) {
-                    input.seek(block.offset);
+                long end = block.offset + block.length;
+                while (blockPosition < selected.blocks.size()
+                        && selected.blocks.get(blockPosition).offset == end) {
+                    end += selected.blocks.get(blockPosition++).length;
                 }
-                previousEnd = block.offset + block.length;
-                remaining = block.length;
+                input.seek(block.offset);
+                remaining = end - block.offset;
             }
-            int n = input.read(bytes, offset, (int) Math.min(length, remaining));
-            if (n < 0) {
-                throw new EOFException("Truncated manifest block");
+            int requested = (int) Math.min(READ_BUFFER_BYTES, remaining);
+            if (buffer == null || buffer.length < requested) {
+                buffer = new byte[requested];
             }
-            remaining -= n;
-            return n;
+            bufferPosition = 0;
+            bufferLimit = 0;
+            while (bufferLimit < requested) {
+                int count = input.read(buffer, bufferLimit, requested - bufferLimit);
+                if (count < 0) {
+                    throw new EOFException("Truncated manifest block");
+                }
+                bufferLimit += count;
+            }
+            remaining -= requested;
+            return true;
         }
 
         @Override

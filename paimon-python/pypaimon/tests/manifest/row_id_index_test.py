@@ -32,7 +32,7 @@ from unittest.mock import patch
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.row_id_index import (
-    Builder, Settings, SUFFIX, MAX_ROW_ID, Query, select, read_index,
+    Block, Builder, Selection, Settings, SUFFIX, MAX_ROW_ID, Query, select, read_index,
     read_selected_bytes,
 )
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -65,6 +65,121 @@ def golden_meta():
 
 def intersects(data, meta, ranges, settings):
     return bool(select(data, meta, ranges, settings).blocks)
+
+
+class CountingInput(BytesIO):
+    def __init__(self, data, max_read=None):
+        super().__init__(data)
+        self.max_read = max_read
+        self.reads = []
+        self.requests = []
+        self.seeks = []
+
+    def read(self, size=-1):
+        if size < 0:
+            raise AssertionError('Unbounded read')
+        self.requests.append(size)
+        position = self.tell()
+        data = super().read(size if self.max_read is None else min(size, self.max_read))
+        if data:
+            self.reads.append((position, len(data)))
+        return data
+
+    def seek(self, offset, whence=0):
+        self.seeks.append(offset)
+        return super().seek(offset, whence)
+
+
+class RowIdIndexReadTest(unittest.TestCase):
+    def test_index_reads_use_bounded_bulk_requests(self):
+        header = avro_header()
+        for block_count in (5000, 25000):
+            with self.subTest(block_count=block_count):
+                builder = Builder(Settings(), header)
+                for block_number in range(block_count):
+                    builder.begin_block(len(header) + block_number * 100, 100, 1)
+                    builder.add(block_number, 1)
+                    builder.end_block()
+                size = len(header) + block_count * 100
+                data = builder.serialize('manifest-large', size, block_count)
+                meta = SimpleNamespace(file_name='manifest-large', file_size=size,
+                                       num_added_files=block_count, num_deleted_files=0,
+                                       index_file_name='manifest-large' + SUFFIX)
+                stream = CountingInput(data)
+                file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+                actual = read_index(file_io, '/manifest/manifest-large', meta,
+                                    [Range(0, 0)], Settings())
+                self.assertEqual(actual, select(data, meta, [Range(0, 0)], Settings()))
+                self.assertEqual(len(stream.reads), (len(data) + (1 << 20) - 1) // (1 << 20))
+                self.assertLessEqual(max(stream.requests), 1 << 20)
+                self.assertTrue(stream.closed)
+
+    def test_index_short_reads_and_exact_budget(self):
+        data, meta = golden(), golden_meta()
+        meta.index_file_name = meta.file_name + SUFFIX
+        for max_read in (None, 7):
+            with self.subTest(max_read=max_read):
+                stream = CountingInput(data, max_read)
+                file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+                settings = Settings(max_bytes=len(data))
+                actual = read_index(file_io, '/manifest/manifest-golden', meta,
+                                    [Range(20, 20)], settings)
+                self.assertEqual(actual, select(data, meta, [Range(20, 20)], settings))
+                self.assertTrue(stream.closed)
+
+    def test_index_over_budget_stops_after_one_extra_byte(self):
+        data, meta = golden(), golden_meta()
+        meta.index_file_name = meta.file_name + SUFFIX
+        stream = CountingInput(data)
+        file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+        self.assertIsNone(read_index(file_io, '/manifest/manifest-golden', meta,
+                                     [Range(20, 20)], Settings(max_bytes=128)))
+        self.assertEqual(stream.reads, [(0, 129)])
+        self.assertTrue(stream.closed)
+
+    def test_adjacent_blocks_share_reads_without_reading_gaps(self):
+        header = avro_header()
+        body = bytes(range(200)) * 2
+        for points, spans in [([0, 8254058425445], [(0, 300)]),
+                              ([20], [(0, 100), (300, 100)]), ([16], [])]:
+            with self.subTest(points=points):
+                selected = select(golden(), golden_meta(),
+                                  [Range(point, point) for point in points], Settings())
+                stream = CountingInput(header + body)
+                file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+                actual = read_selected_bytes(file_io, '/manifest/manifest-golden', selected)
+                expected = header + b''.join(body[start:start + size] for start, size in spans)
+                self.assertEqual(actual, expected)
+                self.assertEqual(stream.reads, [(len(header) + start, size) for start, size in spans])
+                self.assertEqual(stream.seeks, [len(header) + start for start, _ in spans])
+                self.assertTrue(stream.closed)
+
+    def test_large_block_spans_use_bounded_reads(self):
+        header = avro_header()
+        block_size = 512 * 1024
+        body = bytes(2 * block_size + 257)
+        selected = Selection(header, (Block(len(header), block_size, 0, 1),
+                                      Block(len(header) + block_size, block_size, 1, 1),
+                                      Block(len(header) + 2 * block_size, 257, 2, 1)))
+        stream = CountingInput(header + body)
+        file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+        self.assertEqual(read_selected_bytes(file_io, '/manifest/manifest-large', selected), header + body)
+        self.assertEqual(stream.reads, [(len(header), 1 << 20), (len(header) + (1 << 20), 257)])
+        self.assertEqual(stream.seeks, [len(header)])
+        self.assertTrue(stream.closed)
+
+    def test_block_short_reads_and_truncation(self):
+        header = avro_header()
+        body = bytes(range(200)) * 2
+        selected = select(golden(), golden_meta(), [Range(0, MAX_ROW_ID)], Settings())
+        stream = CountingInput(header + body, 7)
+        file_io = SimpleNamespace(new_input_stream=lambda path: stream)
+        self.assertEqual(read_selected_bytes(file_io, '/manifest/manifest-golden', selected), header + body)
+        self.assertTrue(stream.closed)
+        stream = CountingInput(header + body[:-1], 7)
+        with self.assertRaises(EOFError):
+            read_selected_bytes(file_io, '/manifest/manifest-golden', selected)
+        self.assertTrue(stream.closed)
 
 
 class RowIdIndexFormatTest(unittest.TestCase):
