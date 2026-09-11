@@ -23,6 +23,8 @@ import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
@@ -45,6 +47,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link HttpClient}. */
@@ -255,6 +258,23 @@ public class HttpClientTest {
         assertEquals(restAuthParameter.parameters().get(queryKey), queryParameters.get(queryKey));
     }
 
+    @Test
+    public void testErrorCodeFallsBackToHttpStatus() throws Exception {
+        // "code" is optional in the error schema, so an error body may omit it. The HTTP status
+        // has to be used then, otherwise a 404 no longer maps to NoSuchResourceException.
+        assertNull(RESTApi.fromJson("{\"message\":\"x\"}", ErrorResponse.class).getCode());
+        server.enqueueResponse("{\"message\":\"Table t does not exist\"}", 404);
+        assertThrows(
+                NoSuchResourceException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+
+        // classification follows the status, so a different one maps differently
+        server.enqueueResponse("{\"message\":\"denied\"}", 403);
+        assertThrows(
+                ForbiddenException.class,
+                () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+    }
+
     private Map<String, String> getParameters(String path) {
         String[] paths = path.split("\\?");
         if (paths.length == 1) {
@@ -293,6 +313,10 @@ public class HttpClientTest {
             Assertions.assertTrue(
                     e.getMessage().contains("Empty error message"),
                     "Parsed-but-empty message must not be labelled unparseable");
+            Assertions.assertTrue(
+                    e.getMessage().contains("403"),
+                    "The HTTP status must be reported, not the absent body code: "
+                            + e.getMessage());
         }
     }
 
