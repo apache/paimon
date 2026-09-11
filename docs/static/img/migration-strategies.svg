@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+  <title id="title">Choose the path by what must stay</title>
+  <desc id="desc">Migrate moves Hive files into Paimon and replaces the Hive table by default. Clone copies data into a separate Paimon table and keeps the source. Tag-to-partition exposes snapshots of an existing Paimon table as Hive partitions without moving its data.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/>
+    </marker>
+  </defs>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="1" y="1" width="898" height="518" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="28" y="43" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Choose the path by what must stay</text>
+    <text x="28" y="77" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Source ownership and the reader interface determine the workflow</text>
+    <text x="28" y="126" font-size="16" fill="#946200" font-weight="700" text-anchor="start">MIGRATE</text>
+    <rect x="28" y="141" width="292" height="73" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="44" y="170" font-size="21" fill="#172b4d" font-weight="700" text-anchor="start">Hive table</text>
+    <text x="44" y="197" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Original table replaced</text>
+    <text x="454" y="162" font-size="19" fill="#946200" font-weight="700" text-anchor="middle">Move files</text>
+    <path d="M 334 181 H 573" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="588" y="141" width="284" height="73" rx="8" fill="#fff7e6" stroke="#e4cb92" stroke-width="1.5"/>
+    <text x="604" y="170" font-size="21" fill="#946200" font-weight="700" text-anchor="start">Paimon append table</text>
+    <text x="604" y="197" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Same table name by default</text>
+    <text x="28" y="252" font-size="16" fill="#2463b4" font-weight="700" text-anchor="start">CLONE</text>
+    <rect x="28" y="267" width="292" height="73" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="44" y="296" font-size="21" fill="#172b4d" font-weight="700" text-anchor="start">Hive / Paimon table</text>
+    <text x="44" y="323" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Source remains available</text>
+    <text x="454" y="288" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Copy data</text>
+    <path d="M 334 307 H 573" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="588" y="267" width="284" height="73" rx="8" fill="#eaf2ff" stroke="#bfd2ed" stroke-width="1.5"/>
+    <text x="604" y="296" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Separate Paimon table</text>
+    <text x="604" y="323" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Validate before switching</text>
+    <text x="28" y="378" font-size="16" fill="#087f6e" font-weight="700" text-anchor="start">TAG TO PARTITION</text>
+    <rect x="28" y="393" width="292" height="73" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+    <text x="44" y="422" font-size="21" fill="#172b4d" font-weight="700" text-anchor="start">Paimon upsert table</text>
+    <text x="44" y="449" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Keep updating this table</text>
+    <text x="454" y="414" font-size="19" fill="#087f6e" font-weight="700" text-anchor="middle">Expose views</text>
+    <path d="M 334 433 H 573" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="588" y="393" width="284" height="73" rx="8" fill="#e8f7f2" stroke="#b8dcd2" stroke-width="1.5"/>
+    <text x="604" y="422" font-size="21" fill="#087f6e" font-weight="700" text-anchor="start">Hive partition interface</text>
+    <text x="604" y="449" font-size="18" fill="#526277" font-weight="400" text-anchor="start">dt selects a tag or preview</text>
+    <text x="28" y="499" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Hive migration and Hive clone produce append tables; tag mapping keeps the Paimon table.</text>
+  </g>
+</svg>
