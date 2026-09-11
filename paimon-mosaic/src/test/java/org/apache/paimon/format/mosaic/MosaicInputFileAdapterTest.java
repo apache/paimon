@@ -83,6 +83,101 @@ class MosaicInputFileAdapterTest {
     }
 
     @Test
+    void testFailedExtraStreamOpenReleasesItsSlot() throws Exception {
+        CountDownLatch readsStarted = new CountDownLatch(1);
+        CountDownLatch releaseReads = new CountDownLatch(1);
+        CountDownLatch thirdOpen = new CountDownLatch(1);
+        AtomicInteger opens = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) throws IOException {
+                        // The second open (the first extra stream) fails once.
+                        int open = opens.incrementAndGet();
+                        if (open == 2) {
+                            throw new IOException("open failed");
+                        }
+                        if (open == 3) {
+                            thirdOpen.countDown();
+                        }
+                        return new BlockingStream(readsStarted, releaseReads);
+                    }
+                };
+        MosaicInputFileAdapter adapter =
+                new MosaicInputFileAdapter(fileIO, new Path("file:/tmp/mosaic-adapter-test"), 2);
+        AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+        Thread holder = new Thread(() -> read(adapter, holderFailure));
+        holder.start();
+        readsStarted.await();
+
+        // The failed open must not keep the second slot reserved.
+        AtomicReference<Throwable> failed = new AtomicReference<>();
+        read(adapter, failed);
+        assertThat(failed.get()).isInstanceOf(IOException.class).hasMessage("open failed");
+        CountDownLatch secondRead = new CountDownLatch(1);
+        AtomicReference<Throwable> retryFailure = new AtomicReference<>();
+        Thread retry =
+                new Thread(
+                        () -> {
+                            read(adapter, retryFailure);
+                            secondRead.countDown();
+                        });
+        retry.start();
+        // The retry must open its own stream while the first one is still held.
+        thirdOpen.await();
+        releaseReads.countDown();
+        retry.join();
+        holder.join();
+        assertThat(retryFailure.get()).isNull();
+        assertThat(holderFailure.get()).isNull();
+        assertThat(opens.get()).isEqualTo(3);
+        adapter.close();
+    }
+
+    @Test
+    void testCloseClosesEveryStreamAndRejectsLaterReads() throws Exception {
+        CountDownLatch readsStarted = new CountDownLatch(2);
+        CountDownLatch releaseReads = new CountDownLatch(1);
+        List<BlockingStream> streams = new ArrayList<>();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path path) {
+                        BlockingStream stream = new BlockingStream(readsStarted, releaseReads);
+                        synchronized (streams) {
+                            streams.add(stream);
+                        }
+                        return stream;
+                    }
+                };
+        MosaicInputFileAdapter adapter =
+                new MosaicInputFileAdapter(fileIO, new Path("file:/tmp/mosaic-adapter-test"), 3);
+        List<Thread> readers = new ArrayList<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        for (int i = 0; i < 2; i++) {
+            Thread thread = new Thread(() -> read(adapter, failure));
+            thread.start();
+            readers.add(thread);
+        }
+        readsStarted.await();
+        releaseReads.countDown();
+        for (Thread thread : readers) {
+            thread.join();
+        }
+        assertThat(failure.get()).isNull();
+        assertThat(streams).hasSize(2);
+
+        adapter.close();
+        assertThat(streams).allMatch(stream -> stream.closeCount == 1);
+        AtomicReference<Throwable> afterClose = new AtomicReference<>();
+        read(adapter, afterClose);
+        assertThat(afterClose.get()).isInstanceOf(IOException.class);
+        // Closing again is a no-op.
+        adapter.close();
+        assertThat(streams).allMatch(stream -> stream.closeCount == 1);
+    }
+
+    @Test
     void testCloseWakesWaitingReader() throws Exception {
         CountDownLatch readsStarted = new CountDownLatch(1);
         CountDownLatch releaseReads = new CountDownLatch(1);
@@ -110,6 +205,8 @@ class MosaicInputFileAdapterTest {
         assertThat(second.get()).isInstanceOf(IOException.class);
         releaseReads.countDown();
         holder.join();
+        // The read that held the stream completes; the stream is closed by close().
+        assertThat(first.get()).isNull();
     }
 
     private static void read(MosaicInputFileAdapter adapter, AtomicReference<Throwable> failure) {
@@ -157,6 +254,10 @@ class MosaicInputFileAdapterTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            closeCount++;
+        }
+
+        private volatile int closeCount;
     }
 }

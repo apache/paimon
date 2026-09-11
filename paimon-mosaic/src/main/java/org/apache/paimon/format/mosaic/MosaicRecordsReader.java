@@ -370,7 +370,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             this.future = future;
         }
 
-        /** Waits for the data; the batch is not released here even when the wait fails. */
+        /** Waits for the data; a failed wait leaves the batch queued so close() still drains it. */
         @Nullable
         VectorSchemaRoot await() throws IOException {
             if (future == null) {
@@ -419,6 +419,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                     // The native read still uses the reader handle; it must complete first.
                     interrupted = true;
                 } catch (ExecutionException e) {
+                    // A failed read holds no data to release.
                     return interrupted;
                 }
             }

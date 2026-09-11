@@ -31,6 +31,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -54,6 +55,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -404,6 +406,44 @@ class MosaicReaderWriterTest {
         assertThat(reader.readBatch()).isNotNull();
         // Closing must wait for and release them (an Arrow allocator leak would throw here).
         assertThatCode(reader::close).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testReaderOpensAtMostDepthPlusOneStreams() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+        GenericRow[] rows = new GenericRow[20_000];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = GenericRow.of(i, BinaryString.fromString("value_" + i + "_padding"));
+        }
+        writeRows(rowType, path, new Options(), MemorySize.ofKibiBytes(32), rows);
+
+        AtomicInteger opened = new AtomicInteger();
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public SeekableInputStream newInputStream(Path file) throws IOException {
+                        opened.incrementAndGet();
+                        return super.newInputStream(file);
+                    }
+                };
+        FormatReaderFactory readerFactory = createReaderFactory(rowType, null, 3);
+        int count = 0;
+        try (RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                while (batch.next() != null) {
+                    count++;
+                }
+                batch.releaseBatch();
+            }
+        }
+        assertThat(count).isEqualTo(rows.length);
+        // One stream per row group being opened plus one for the consumer.
+        assertThat(opened.get()).isBetween(1, 4);
     }
 
     private void writeRows(
