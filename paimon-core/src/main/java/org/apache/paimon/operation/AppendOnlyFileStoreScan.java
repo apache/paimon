@@ -90,6 +90,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
+    protected boolean requiresFullManifestEntryForPartitionScan() {
+        return inputFilter != null;
+    }
+
+    @Override
     public FileStoreScan withCompleteFilter(Predicate predicate) {
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;

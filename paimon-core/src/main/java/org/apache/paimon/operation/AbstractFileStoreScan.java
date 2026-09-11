@@ -365,16 +365,19 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<PartitionEntry> readPartitionEntries() {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
-        Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
-        Consumer<ManifestFileMeta> processor =
-                m ->
-                        PartitionEntry.merge(
-                                readManifest(m, PartitionEntry::fromManifestEntry, null, null),
-                                partitions);
-        randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
-        return partitions.values().stream()
-                .filter(p -> p.fileCount() > 0)
-                .collect(Collectors.toList());
+        return new PartitionEntryScanner(
+                        manifestFileFactory,
+                        manifest ->
+                                readManifest(
+                                        manifest, PartitionEntry::fromManifestEntry, null, null),
+                        manifestsReader.partitionFilter(),
+                        createBucketFilter(),
+                        specifiedLevel,
+                        levelFilter,
+                        fileNameFilter,
+                        manifestEntryFilter != null || requiresFullManifestEntryForPartitionScan(),
+                        parallelism)
+                .scan(manifests);
     }
 
     @Override
@@ -475,6 +478,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    /**
+     * Returns whether partition scanning needs a complete manifest entry for subclass-specific
+     * filtering. Subclasses should opt in to projected scanning only when all active filters can be
+     * evaluated from the partition entry projection.
+     */
+    protected boolean requiresFullManifestEntryForPartitionScan() {
+        return true;
+    }
 
     protected boolean postFilterManifestEntriesEnabled() {
         return false;

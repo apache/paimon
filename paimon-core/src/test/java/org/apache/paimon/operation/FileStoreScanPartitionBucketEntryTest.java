@@ -20,7 +20,9 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.manifest.BucketEntry;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
@@ -32,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -188,6 +191,100 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
     }
 
     @Test
+    public void testProjectedPartitionEntriesWithStructuralFilters() throws Exception {
+        createAppendOnlyTable();
+        writeRows(1, 0, 5);
+        writeRows(1, 5, 15);
+
+        List<ManifestEntry> files = table.store().newScan().plan().files();
+        assertThat(files).hasSize(2);
+        ManifestEntry selected =
+                files.stream().filter(file -> file.file().rowCount() == 5).findFirst().get();
+
+        List<PartitionEntry> fileNameFiltered =
+                table.newSnapshotReader()
+                        .withDataFileNameFilter(
+                                fileName -> fileName.equals(selected.file().fileName()))
+                        .partitionEntries();
+        assertThat(fileNameFiltered)
+                .singleElement()
+                .satisfies(
+                        entry -> {
+                            assertThat(entry.recordCount()).isEqualTo(5);
+                            assertThat(entry.fileCount()).isEqualTo(1);
+                        });
+
+        assertThat(table.newSnapshotReader().withLevelFilter(level -> false).partitionEntries())
+                .isEmpty();
+        assertThat(table.newSnapshotReader().withBucket(1).partitionEntries()).isEmpty();
+    }
+
+    @Test
+    public void testPartitionEntriesFallbackForManifestEntryFilter() throws Exception {
+        createAppendOnlyTable();
+        writeRows(1, 0, 5);
+        writeRows(1, 5, 15);
+        AtomicInteger filterCalls = new AtomicInteger();
+
+        List<PartitionEntry> entries =
+                table.newSnapshotReader()
+                        .withManifestEntryFilter(
+                                entry -> {
+                                    filterCalls.incrementAndGet();
+                                    return entry.file().embeddedIndex() == null;
+                                })
+                        .partitionEntries();
+
+        assertThat(filterCalls).hasValueGreaterThan(0);
+        assertThat(entries)
+                .singleElement()
+                .satisfies(
+                        entry -> {
+                            assertThat(entry.recordCount()).isEqualTo(15);
+                            assertThat(entry.fileCount()).isEqualTo(2);
+                        });
+    }
+
+    @Test
+    public void testPartitionEntriesFallbackForAppendStatsFilter() throws Exception {
+        createAppendOnlyTable();
+        writeRows(1, 0, 5);
+        writeRows(1, 5, 15);
+
+        List<PartitionEntry> entries =
+                table.newSnapshotReader()
+                        .withFilter(new PredicateBuilder(table.rowType()).lessThan(1, 5))
+                        .partitionEntries();
+
+        assertThat(entries)
+                .singleElement()
+                .satisfies(
+                        entry -> {
+                            assertThat(entry.recordCount()).isEqualTo(5);
+                            assertThat(entry.fileCount()).isEqualTo(1);
+                        });
+    }
+
+    @Test
+    public void testPartitionEntriesFallbackForKeyStatsFilter() throws Exception {
+        writeRows(1, 0, 5);
+        writeRows(1, 5, 15);
+
+        List<PartitionEntry> entries =
+                table.newSnapshotReader()
+                        .withFilter(new PredicateBuilder(table.rowType()).lessThan(1, 5))
+                        .partitionEntries();
+
+        assertThat(entries)
+                .singleElement()
+                .satisfies(
+                        entry -> {
+                            assertThat(entry.recordCount()).isEqualTo(5);
+                            assertThat(entry.fileCount()).isEqualTo(1);
+                        });
+    }
+
+    @Test
     public void testReadBucketEntriesSinglePartition() throws Exception {
         // Write data to a single partition with 1 bucket
         BatchTableWrite write = table.newWrite(commitUser);
@@ -296,5 +393,17 @@ public class FileStoreScanPartitionBucketEntryTest extends ScannerTestBase {
             assertThat(entry.recordCount()).isEqualTo(10);
             assertThat(entry.fileCount()).isEqualTo(1);
         }
+    }
+
+    private void writeRows(int partition, int from, int to) throws Exception {
+        BatchTableWrite write = table.newWrite(commitUser);
+        for (int i = from; i < to; i++) {
+            write.write(GenericRow.of(partition, i, (long) i));
+        }
+        List<CommitMessage> messages = write.prepareCommit();
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(messages);
+        write.close();
+        commit.close();
     }
 }
