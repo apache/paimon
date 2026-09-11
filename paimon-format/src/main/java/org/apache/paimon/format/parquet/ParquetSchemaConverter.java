@@ -471,9 +471,6 @@ public class ParquetSchemaConverter {
                     elementDataType = elementDataType.notNull();
                 }
                 paimonDataType = new ArrayType(elementDataType);
-            } else if (ParquetListLayoutResolver.isLegacyNestedList(groupType)) {
-                paimonDataType =
-                        new ArrayType(convertToPaimonField(groupType.getType(0)).type().notNull());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -482,6 +479,9 @@ public class ParquetSchemaConverter {
                                 // back to Paimon, set as nullable by default.
                                 convertToPaimonField(keyValueType.getLeft()).type().nullable(),
                                 convertToPaimonField(keyValueType.getRight()).type());
+            } else if (ParquetListLayoutResolver.isLegacyNestedList(groupType)) {
+                paimonDataType =
+                        new ArrayType(convertToPaimonField(groupType.getType(0)).type().notNull());
             } else {
                 paimonDataType =
                         new RowType(

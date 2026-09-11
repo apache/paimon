@@ -399,4 +399,55 @@ public class ParquetSchemaConverterTest {
                                                 new ArrayType(unannotatedElement.notNull())))))
                 .isEqualTo(convertToPaimonRowType(unannotated));
     }
+
+    @Test
+    public void testInferArrayOfMapsFromOldAvroList() {
+        MessageType oldAvroListOfMaps =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .as(LogicalTypeAnnotation.listType())
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                .as(LogicalTypeAnnotation.mapType())
+                                                .addField(
+                                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                                .addField(
+                                                                        Types.primitive(
+                                                                                        BINARY,
+                                                                                        Type
+                                                                                                .Repetition
+                                                                                                .REQUIRED)
+                                                                                .as(
+                                                                                        LogicalTypeAnnotation
+                                                                                                .stringType())
+                                                                                .named("key")
+                                                                                .withId(3))
+                                                                .addField(
+                                                                        Types.primitive(
+                                                                                        INT32,
+                                                                                        Type
+                                                                                                .Repetition
+                                                                                                .OPTIONAL)
+                                                                                .named("value")
+                                                                                .withId(4))
+                                                                .named("key_value")
+                                                                .withId(2))
+                                                .named("array")
+                                                .withId(1))
+                                .named("my_list")
+                                .withId(0));
+        assertThat(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(
+                                                0,
+                                                "my_list",
+                                                new ArrayType(
+                                                        new MapType(
+                                                                        DataTypes.STRING(),
+                                                                        DataTypes.INT())
+                                                                .notNull())))))
+                .isEqualTo(convertToPaimonRowType(oldAvroListOfMaps));
+    }
 }

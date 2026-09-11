@@ -62,6 +62,7 @@ public final class ParquetListLayoutResolver {
      */
     public static boolean isLegacyNestedList(GroupType groupType) {
         return groupType.isRepetition(Type.Repetition.REPEATED)
+                && groupType.getLogicalTypeAnnotation() == null
                 && groupType.getFieldCount() == 1
                 && groupType.getType(0).getRepetition() == Type.Repetition.REPEATED;
     }
