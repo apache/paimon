@@ -625,8 +625,8 @@ const sidebars = {
     },
     "items": [
       "migration/migration-from-hive",
-      "migration/upsert-to-partitioned",
-      "migration/clone-to-paimon"
+      "migration/clone-to-paimon",
+      "migration/upsert-to-partitioned"
     ]
   },
   {
