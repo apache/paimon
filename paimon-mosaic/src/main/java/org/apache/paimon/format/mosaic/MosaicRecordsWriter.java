@@ -125,7 +125,7 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
     private static void setInitialCapacity(FieldVector vector, int capacity) {
         if (vector instanceof BaseRepeatedValueVector) {
-            // The plain overload would size the element vector for 5 elements per row.
+            // Avoid Arrow's 5x estimate for fixed- or variable-width element vectors.
             ((BaseRepeatedValueVector) vector).setInitialCapacity(capacity, 1.0);
         } else {
             vector.setInitialCapacity(capacity);

@@ -33,7 +33,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Adapter that exposes a Paimon {@link SeekableInputStream} as a Mosaic {@link InputFile}.
+ * Adapter that exposes a Paimon file as a Mosaic {@link InputFile} through a small pool of {@link
+ * SeekableInputStream}s.
  *
  * <p>Each read borrows one of at most {@code maxStreams} input streams, so concurrent reads do not
  * serialize on a single stream; a read that finds every stream busy waits for one.
@@ -119,19 +120,22 @@ public class MosaicInputFileAdapter implements InputFile, Closeable {
             }
         }
         SeekableInputStream opened = null;
+        boolean closedMeanwhile;
         try {
             opened = fileIO.newInputStream(path);
         } finally {
             synchronized (this) {
                 openingStreams--;
+                closedMeanwhile = closed;
                 if (opened != null && !closed) {
                     allStreams.add(opened);
                 } else {
+                    // The slot is free again for another borrower.
                     notifyAll();
                 }
             }
         }
-        if (closed) {
+        if (closedMeanwhile) {
             opened.close();
             throw new IOException("Input file " + path + " is closed");
         }
