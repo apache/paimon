@@ -79,6 +79,9 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             Executors.newCachedThreadPool(new ExecutorThreadFactory("mosaic-row-group-prefetch"));
 
     private final int prefetchDepth;
+    private final long prefetchMaxBytes;
+    private final long estimatedRowBytes;
+    private long pendingBytes;
     private final ArrayDeque<RowGroupBatch> pending = new ArrayDeque<>();
     private int nextRowGroupToSchedule;
     private long scheduledRowCount;
@@ -189,21 +192,51 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
         this.reader = createdReader;
         this.numRowGroups = createdNumRowGroups;
-        this.prefetchDepth =
-                boundedPrefetchDepth(
-                        prefetchRowGroups, prefetchMaxBytes, fileSize, createdNumRowGroups);
+        this.prefetchDepth = Math.max(0, prefetchRowGroups);
+        this.prefetchMaxBytes = Math.max(0, prefetchMaxBytes);
+        this.estimatedRowBytes = estimatedRowBytes(projectedRowType);
         this.allProjectedColumnsMissing = createdAllProjectedColumnsMissing;
         this.arrowBatchReader = createdArrowBatchReader;
     }
 
-    /** Caps the depth so the row groups ahead, by their average file size, fit the byte budget. */
-    static int boundedPrefetchDepth(int rowGroups, long maxBytes, long fileSize, int numRowGroups) {
-        int depth = Math.max(0, rowGroups);
-        if (depth == 0 || fileSize <= 0 || numRowGroups <= 0) {
-            return depth;
+    /** Rough decoded size of one row of the projected columns, used for the prefetch budget. */
+    static long estimatedRowBytes(RowType projectedRowType) {
+        long bytes = 0;
+        for (DataField field : projectedRowType.getFields()) {
+            switch (field.type().getTypeRoot()) {
+                case BOOLEAN:
+                case TINYINT:
+                    bytes += 2;
+                    break;
+                case SMALLINT:
+                    bytes += 3;
+                    break;
+                case INTEGER:
+                case FLOAT:
+                case DATE:
+                case TIME_WITHOUT_TIME_ZONE:
+                    bytes += 5;
+                    break;
+                case BIGINT:
+                case DOUBLE:
+                case TIMESTAMP_WITHOUT_TIME_ZONE:
+                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                    bytes += 9;
+                    break;
+                case DECIMAL:
+                    bytes += 17;
+                    break;
+                case CHAR:
+                case VARCHAR:
+                case BINARY:
+                case VARBINARY:
+                    bytes += 40;
+                    break;
+                default:
+                    bytes += 128;
+            }
         }
-        long rowGroupBytes = Math.max(1, fileSize / numRowGroups);
-        return (int) Math.min(depth, Math.max(0, maxBytes) / rowGroupBytes);
+        return Math.max(1, bytes);
     }
 
     int prefetchDepth() {
@@ -273,6 +306,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         openNanos += System.nanoTime() - waitStart;
         openedRowGroups++;
         pending.poll();
+        pendingBytes -= head.bytes;
         currentVsr = vsr;
         if (prefetchDepth > 0) {
             // currentVsr is owned by this reader, so a failure here leaves nothing unreleased.
@@ -281,16 +315,24 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         return head;
     }
 
-    /** Schedules matching row groups until {@code wanted} of them are queued. */
+    /** Schedules matching row groups until {@code wanted} are queued or the byte budget is used. */
     private void fillPrefetchQueue(int wanted) {
         while (pending.size() < wanted && nextRowGroupToSchedule < numRowGroups) {
-            int index = nextRowGroupToSchedule++;
+            int index = nextRowGroupToSchedule;
             int numRows = reader.rowGroupNumRows(index);
             long startPosition = scheduledRowCount;
-            scheduledRowCount += numRows;
             if (!matchesRowGroup(index, numRows)) {
+                nextRowGroupToSchedule++;
+                scheduledRowCount += numRows;
                 continue;
             }
+            long bytes = numRows * estimatedRowBytes;
+            // The first queued row group is always read; the rest must fit the decoded budget.
+            if (!pending.isEmpty() && pendingBytes + bytes > prefetchMaxBytes) {
+                return;
+            }
+            nextRowGroupToSchedule++;
+            scheduledRowCount += numRows;
             Future<VectorSchemaRoot> future = null;
             if (!allProjectedColumnsMissing) {
                 FutureTask<VectorSchemaRoot> task =
@@ -302,7 +344,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 }
                 future = task;
             }
-            pending.add(new RowGroupBatch(index, numRows, startPosition, future));
+            pending.add(new RowGroupBatch(index, numRows, startPosition, bytes, future));
+            pendingBytes += bytes;
         }
     }
 
@@ -311,16 +354,19 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         final int index;
         final int numRows;
         final long startPosition;
+        final long bytes;
         @Nullable private final Future<VectorSchemaRoot> future;
 
         RowGroupBatch(
                 int index,
                 int numRows,
                 long startPosition,
+                long bytes,
                 @Nullable Future<VectorSchemaRoot> future) {
             this.index = index;
             this.numRows = numRows;
             this.startPosition = startPosition;
+            this.bytes = bytes;
             this.future = future;
         }
 
@@ -473,6 +519,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         boolean interrupted = false;
         RowGroupBatch batch;
         while ((batch = pending.poll()) != null) {
+            pendingBytes -= batch.bytes;
             try {
                 interrupted |= batch.discard();
             } catch (Throwable t) {

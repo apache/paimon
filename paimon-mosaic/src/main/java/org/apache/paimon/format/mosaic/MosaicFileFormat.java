@@ -93,10 +93,10 @@ public class MosaicFileFormat extends FileFormat {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(64))
                     .withDescription(
-                            "Upper bound on the file bytes of the row groups a reader opens ahead, "
-                                    + "estimated from the file size divided by its row group count. "
-                                    + "Large row groups therefore lower the effective "
-                                    + "'mosaic.read.prefetch-row-groups'.");
+                            "Upper bound on the estimated decoded size of the row groups a reader "
+                                    + "keeps ahead, from their row counts and the projected column "
+                                    + "types. Wide projections or large row groups therefore lower "
+                                    + "the effective 'mosaic.read.prefetch-row-groups'.");
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
