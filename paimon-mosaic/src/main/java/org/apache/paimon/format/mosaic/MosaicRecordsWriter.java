@@ -36,6 +36,7 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.BaseValueVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.complex.BaseRepeatedValueVector;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
@@ -103,12 +104,12 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             createdArrowWriter =
                     ArrowFormatWriter.forBorrowedAllocator(
                             rowType, writeBatchSize, true, allocator, writeBatchMemory);
-            // Size vectors by the batch, but never above Arrow's default so that large batch
-            // limits bounded by write.batch-memory do not allocate more up front than before.
-            int initialCapacity =
-                    Math.min(writeBatchSize, BaseValueVector.INITIAL_VALUE_ALLOCATION);
-            for (FieldVector vector : createdArrowWriter.getVectorSchemaRoot().getFieldVectors()) {
-                vector.setInitialCapacity(initialCapacity);
+            // Only batches smaller than Arrow's default allocation are sized by the batch.
+            if (writeBatchSize < BaseValueVector.INITIAL_VALUE_ALLOCATION) {
+                for (FieldVector vector :
+                        createdArrowWriter.getVectorSchemaRoot().getFieldVectors()) {
+                    setInitialCapacity(vector, writeBatchSize);
+                }
             }
             Schema arrowSchema = createdArrowWriter.getVectorSchemaRoot().getSchema();
             createdNativeWriter =
@@ -120,6 +121,15 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
         this.arrowFormatWriter = createdArrowWriter;
         this.nativeWriter = createdNativeWriter;
+    }
+
+    private static void setInitialCapacity(FieldVector vector, int capacity) {
+        if (vector instanceof BaseRepeatedValueVector) {
+            // The plain overload would size the element vector for 5 elements per row.
+            ((BaseRepeatedValueVector) vector).setInitialCapacity(capacity, 1.0);
+        } else {
+            vector.setInitialCapacity(capacity);
+        }
     }
 
     @Override
