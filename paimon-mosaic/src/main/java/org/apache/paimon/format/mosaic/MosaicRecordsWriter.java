@@ -33,6 +33,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
 
@@ -101,6 +102,10 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             createdArrowWriter =
                     ArrowFormatWriter.forBorrowedAllocator(
                             rowType, writeBatchSize, true, allocator, writeBatchMemory);
+            // Arrow otherwise allocates thousands of values per vector; size them by the batch.
+            for (FieldVector vector : createdArrowWriter.getVectorSchemaRoot().getFieldVectors()) {
+                vector.setInitialCapacity(writeBatchSize);
+            }
             Schema arrowSchema = createdArrowWriter.getVectorSchemaRoot().getSchema();
             createdNativeWriter =
                     nativeWriterFactory.create(outputStream, arrowSchema, options, allocator);

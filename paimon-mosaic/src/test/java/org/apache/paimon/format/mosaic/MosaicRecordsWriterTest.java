@@ -20,6 +20,7 @@ package org.apache.paimon.format.mosaic;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.mosaic.MosaicWriter;
 import org.apache.paimon.options.Options;
@@ -155,6 +156,33 @@ class MosaicRecordsWriterTest {
         writer.close();
 
         verify(nativeWriter).write(any(VectorSchemaRoot.class));
+    }
+
+    @Test
+    void testVectorsAreSizedByWriteBatchSize() throws Exception {
+        // 2,000 columns: Arrow's default per-vector allocation would exceed 60 MB here.
+        RowType.Builder builder = RowType.builder();
+        for (int i = 0; i < 2000; i++) {
+            builder.field("c" + i, DataTypes.DOUBLE());
+        }
+        RowType wideType = builder.build();
+        MosaicWriter nativeWriter = mock(MosaicWriter.class);
+        try (RootAllocator allocator = new RootAllocator()) {
+            MosaicRecordsWriter writer =
+                    new MosaicRecordsWriter(
+                            new ByteArrayOutputStream(),
+                            wideType,
+                            new FileFormatFactory.FormatContext(new Options(), 1024, 4),
+                            Collections.emptyList(),
+                            null,
+                            allocator,
+                            (outputStream, arrowSchema, options, bufferAllocator) -> nativeWriter);
+            GenericRow row = new GenericRow(wideType.getFieldCount());
+            row.setField(0, 1.0d);
+            writer.addElement(row);
+            assertThat(allocator.getAllocatedMemory()).isLessThan(8L * 1024 * 1024);
+            writer.close();
+        }
     }
 
     private static MosaicRecordsWriter createWriter(
