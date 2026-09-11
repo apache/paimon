@@ -77,7 +77,7 @@ public class ZIndexer implements Serializable {
     public ZIndexer(RowType rowType, List<String> orderColumns, int varTypeSize) {
         List<String> fields = rowType.getFieldNames();
         fieldsIndex = new int[orderColumns.size()];
-        int varTypeCount = 0;
+        int total = 0;
         for (int i = 0; i < fieldsIndex.length; i++) {
             int index = fields.indexOf(orderColumns.get(i));
             if (index == -1) {
@@ -88,15 +88,10 @@ public class ZIndexer implements Serializable {
                                 + fields);
             }
             fieldsIndex[i] = index;
-
-            if (isVarType(rowType.getFieldTypes().get(index))) {
-                varTypeCount++;
-            }
+            total += zBytes(rowType.getFieldTypes().get(index), varTypeSize);
         }
         this.functionSet = constructFunctionMap(rowType.getFields(), varTypeSize);
-        this.totalBytes =
-                PRIMITIVE_BUFFER_SIZE * (this.fieldsIndex.length - varTypeCount)
-                        + varTypeSize * varTypeCount;
+        this.totalBytes = total;
     }
 
     private static boolean isVarType(DataType dataType) {
@@ -104,6 +99,26 @@ public class ZIndexer implements Serializable {
                 || dataType instanceof VarCharType
                 || dataType instanceof BinaryType
                 || dataType instanceof VarBinaryType;
+    }
+
+    /**
+     * Bytes the z-value reserves for a column. A DECIMAL gets a width that holds any unscaled value
+     * of its precision, so it keeps full ordering resolution; 8 bytes cannot, and projecting into
+     * them collapses ordinary wide-decimal values to one key.
+     */
+    private static int zBytes(DataType type, int varTypeSize) {
+        if (isVarType(type)) {
+            return varTypeSize;
+        }
+        if (type instanceof DecimalType) {
+            return decimalBytes(((DecimalType) type).getPrecision());
+        }
+        return PRIMITIVE_BUFFER_SIZE;
+    }
+
+    /** Two's-complement byte width that holds any unscaled value with {@code precision} digits. */
+    private static int decimalBytes(int precision) {
+        return BigInteger.TEN.pow(precision).bitLength() / 8 + 1;
     }
 
     public void open() {
@@ -139,8 +154,7 @@ public class ZIndexer implements Serializable {
     public static RowProcessor zmapColumnToCalculator(DataField field, int index, int varTypeSize) {
         DataType type = field.type();
         return new RowProcessor(
-                type.accept(new TypeVisitor(index, varTypeSize)),
-                isVarType(type) ? varTypeSize : PRIMITIVE_BUFFER_SIZE);
+                type.accept(new TypeVisitor(index, varTypeSize)), zBytes(type, varTypeSize));
     }
 
     /** Type Visitor to generate function map from row column to z-index. */
@@ -240,31 +254,37 @@ public class ZIndexer implements Serializable {
         public ZProcessFunction visit(DecimalType decimalType) {
             final InternalRow.FieldGetter fieldGetter =
                     InternalRow.createFieldGetter(decimalType, fieldIndex);
-            // An unscaled value of a DECIMAL(p, s) is up to p digits wide, past what a long holds
-            // for p > 18. Right-shift it into the signed-long range by a per-column amount before
-            // the long transform: an arithmetic shift by a fixed width is a monotonic projection
-            // that keeps the high-order bits, so separated values keep distinct z-keys instead of
-            // saturating to one bound the way clamping did. The widest magnitude for the column is
-            // below 10^p, so shifting off (bitLength(10^p) - 63) bits leaves at most 63, which fits
-            // a long without reaching Long.MIN_VALUE (whose z-value is the null sentinel). Compact
-            // decimals (p <= 18) always fit, so the shift is 0.
-            final int unscaledShift =
-                    Math.max(0, BigInteger.TEN.pow(decimalType.getPrecision()).bitLength() - 63);
+            // Encode the unscaled value as a fixed-width, sign-flipped big-endian two's complement.
+            // The width holds any value of this precision, so the encoding is order-preserving
+            // under the unsigned comparison a z-value gets and keeps full resolution: small
+            // separated values, their negatives, and values past the long range all get distinct
+            // keys. An 8-byte projection cannot, since one wide-decimal column exceeds 64 bits and
+            // every value below the shift collapses to a single key.
+            final int width = decimalBytes(decimalType.getPrecision());
+            final byte[] nullBytes = new byte[width];
             return (row, reuse) -> {
                 Object o = fieldGetter.getFieldOrNull(row);
                 if (o == null) {
-                    return NULL_BYTES;
+                    return nullBytes;
                 }
                 Decimal decimal = (Decimal) o;
-                long unscaled =
+                BigInteger unscaled =
                         decimal.isCompact()
-                                ? decimal.toUnscaledLong() >> unscaledShift
-                                : decimal.toBigDecimal()
-                                        .unscaledValue()
-                                        .shiftRight(unscaledShift)
-                                        .longValue();
-                return ZOrderByteUtils.longToOrderedBytes(unscaled, reuse).array();
+                                ? BigInteger.valueOf(decimal.toUnscaledLong())
+                                : decimal.toBigDecimal().unscaledValue();
+                return orderedDecimalBytes(unscaled, width, reuse);
             };
+        }
+
+        private static byte[] orderedDecimalBytes(
+                BigInteger unscaled, int width, ByteBuffer reuse) {
+            byte[] buffer = ZOrderByteUtils.reuse(reuse, width).array();
+            Arrays.fill(buffer, 0, width, unscaled.signum() < 0 ? (byte) 0xFF : (byte) 0x00);
+            byte[] magnitude = unscaled.toByteArray();
+            System.arraycopy(magnitude, 0, buffer, width - magnitude.length, magnitude.length);
+            // Flip the sign bit so signed order becomes unsigned lexicographic order.
+            buffer[0] ^= (byte) 0x80;
+            return buffer;
         }
 
         @Override

@@ -33,6 +33,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
@@ -119,42 +120,42 @@ public class TestZOrderByteUtil {
         row2.setField(0, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
         row2.setField(1, Decimal.fromBigDecimal(new BigDecimal("1.00"), 20, 2));
 
-        byte[] z1 = Arrays.copyOf(indexer.index(row1), 16);
-        byte[] z2 = Arrays.copyOf(indexer.index(row2), 16);
-        // Interleaved bits: column a dominates the high bits of the first 8 bytes.
+        byte[] z1 = Arrays.copyOf(indexer.index(row1), indexer.size());
+        byte[] z2 = Arrays.copyOf(indexer.index(row2), indexer.size());
+        // Interleaved bits: column a dominates the high bits of the z-value.
         assertThat(compareUnsigned(z1, z2)).isLessThan(0);
 
         GenericRow rowNull = new GenericRow(2);
         rowNull.setField(0, null);
         rowNull.setField(1, null);
-        byte[] zNull = Arrays.copyOf(indexer.index(rowNull), 16);
+        byte[] zNull = Arrays.copyOf(indexer.index(rowNull), indexer.size());
         // The null sentinel (all-zero bytes) sorts below every real value.
         assertThat(compareUnsigned(zNull, z1)).isLessThan(0);
         assertThat(compareUnsigned(zNull, z2)).isLessThan(0);
 
-        // An unscaled value too wide for a long is shifted into range, not narrowed: it stays a
-        // large positive key above the small positives instead of wrapping to Long.MIN_VALUE.
+        // A large magnitude still orders correctly against the small positives: the fixed-width
+        // encoding holds the whole unscaled value rather than projecting it into 8 bytes.
         GenericRow big = new GenericRow(2);
         big.setField(0, Decimal.fromBigDecimal(new BigDecimal("92233720368547758.08"), 20, 2));
         big.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
-        byte[] zBig = Arrays.copyOf(indexer.index(big), 16);
+        byte[] zBig = Arrays.copyOf(indexer.index(big), indexer.size());
         assertThat(compareUnsigned(zBig, z2)).isGreaterThan(0);
 
-        // Its negative counterpart shifts to a large negative key: below the small negatives, but
-        // still above the all-zero null sentinel.
+        // Its negative counterpart orders below the small negatives, but still above the null
+        // sentinel.
         Decimal minUnscaled =
                 Decimal.fromBigDecimal(new BigDecimal("-92233720368547758.08"), 20, 2);
         GenericRow negativeBig = new GenericRow(2);
         negativeBig.setField(0, minUnscaled);
         negativeBig.setField(1, minUnscaled);
-        byte[] zNegativeBig = Arrays.copyOf(indexer.index(negativeBig), 16);
+        byte[] zNegativeBig = Arrays.copyOf(indexer.index(negativeBig), indexer.size());
         assertThat(compareUnsigned(zNull, zNegativeBig)).isLessThan(0);
         assertThat(compareUnsigned(zNegativeBig, z1)).isLessThan(0);
     }
 
     /**
-     * High-precision decimals whose unscaled value exceeds the long range must still cluster:
-     * separated values keep distinct, correctly ordered z-keys rather than saturating to one bound.
+     * High-precision decimals must keep full clustering resolution: ordinary small values, their
+     * negatives, and values past the long range all get distinct, correctly ordered z-keys.
      */
     @Test
     public void testZIndexerHighPrecisionDecimalClustering() {
@@ -166,29 +167,44 @@ public class TestZOrderByteUtil {
         ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
         indexer.open();
 
-        // Unscaled 10^19, 2*10^19 and 9*10^19 all exceed Long.MAX_VALUE; clamping collapsed them
-        // to one key, so the decimal column stopped clustering across its whole ordinary range.
-        byte[] z10 = highPrecisionKey(indexer, "10");
-        byte[] z20 = highPrecisionKey(indexer, "20");
-        byte[] z90 = highPrecisionKey(indexer, "90");
-        assertThat(compareUnsigned(z10, z20)).isLessThan(0);
-        assertThat(compareUnsigned(z20, z90)).isLessThan(0);
+        // Strictly ascending values, including small ones well below an 8-byte projection's
+        // overflow point (which collapsed 0..18 to a single key), sub-unit fractions, negatives,
+        // and a value past Long.MAX_VALUE. Each must get a strictly greater z-key than the last.
+        List<String> ascending =
+                Arrays.asList(
+                        "-90",
+                        "-10",
+                        "-2",
+                        "-1",
+                        "0",
+                        "0.001",
+                        "0.002",
+                        "1",
+                        "2",
+                        "3",
+                        "10",
+                        "20",
+                        "90",
+                        "12345678901234567890.123456789012345678");
+        byte[] previous = null;
+        for (String value : ascending) {
+            byte[] key = highPrecisionKey(indexer, value);
+            if (previous != null) {
+                assertThat(compareUnsigned(previous, key)).isLessThan(0);
+            }
+            previous = key;
+        }
 
-        // Negatives past the long range stay ordered among themselves and below the positives.
-        byte[] zNeg90 = highPrecisionKey(indexer, "-90");
-        byte[] zNeg10 = highPrecisionKey(indexer, "-10");
-        assertThat(compareUnsigned(zNeg90, zNeg10)).isLessThan(0);
-        assertThat(compareUnsigned(zNeg10, z10)).isLessThan(0);
-
-        byte[] zNull = Arrays.copyOf(indexer.index(new GenericRow(2)), 16);
-        assertThat(compareUnsigned(zNull, zNeg90)).isLessThan(0);
+        // Null sorts below every real value.
+        byte[] zNull = Arrays.copyOf(indexer.index(new GenericRow(2)), indexer.size());
+        assertThat(compareUnsigned(zNull, highPrecisionKey(indexer, "-90"))).isLessThan(0);
     }
 
     private static byte[] highPrecisionKey(ZIndexer indexer, String value) {
         GenericRow row = new GenericRow(2);
         row.setField(0, Decimal.fromBigDecimal(new BigDecimal(value), 38, 18));
         row.setField(1, Decimal.fromBigDecimal(new BigDecimal("0"), 38, 18));
-        return Arrays.copyOf(indexer.index(row), 16);
+        return Arrays.copyOf(indexer.index(row), indexer.size());
     }
 
     private static int compareUnsigned(byte[] left, byte[] right) {
