@@ -529,6 +529,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The size threshold for triggering full compaction of manifest.");
 
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_SKIP_ON_WRITE_ONLY =
+            key("manifest.merge.skip-on-write-only")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip automatic manifest merging during commit when write-only is true."
+                                    + " This also skips automatic manifest sort rewrite."
+                                    + " Explicit manifest compaction is not affected.");
+
     public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
             key("manifest.merge-min-count")
                     .intType()
@@ -771,7 +780,8 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("write.compaction-skip")
                     .withDescription(
                             "If set to true, compactions and snapshot expiration will be skipped. "
-                                    + "This option is used along with dedicated compact jobs.");
+                                    + "This option is used along with dedicated compact jobs. "
+                                    + "Automatic manifest merging is also skipped when manifest.merge.skip-on-write-only is true.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             key("source.split.target-size")
@@ -3527,6 +3537,10 @@ public class CoreOptions implements Serializable {
                 .changelogMaxDeletes(snapshotExpireLimit())
                 .consumerChangelogOnly(consumerChangelogOnly())
                 .build();
+    }
+
+    public boolean manifestMergeSkipOnWriteOnly() {
+        return options.get(MANIFEST_MERGE_SKIP_ON_WRITE_ONLY);
     }
 
     public int manifestMergeMinCount() {

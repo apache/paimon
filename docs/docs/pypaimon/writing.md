@@ -83,6 +83,19 @@ write_builder = table.new_batch_write_builder().overwrite()
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
+### Manifest Merging
+
+`manifest.merge.skip-on-write-only` defaults to `false` in both Python and Java,
+so commits keep their automatic manifest merging behavior. Set both this option
+and `write-only` to `true` to retain existing manifest files during commit and
+avoid the cost of reading and rewriting them. This option has no effect when
+`write-only=false`, which is also the default.
+
+Python supports minor manifest compaction, using `manifest.merge-min-count` and
+`manifest.target-file-size`. Python does not support manifest sort rewrite.
+In Java, skipping automatic manifest merging also skips automatic manifest sort
+rewrite; explicit manifest compaction remains available.
+
 ### Commit Callback
 
 You can register `CommitCallback` instances on a `TableCommit` to be notified after each successful
