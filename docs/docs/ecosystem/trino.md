@@ -24,89 +24,120 @@ under the License.
 
 # Trino
 
-This documentation is a guide for using Paimon in Trino.
+Use the separately distributed Paimon connector to query tables from Trino. The examples on this
+page describe the **Trino 440 connector**. For other versions, follow the matching revision of
+[Apache Paimon Trino](https://github.com/apache/paimon-trino).
 
 ## Version
 
-Paimon currently supports Trino 440.
+Match the Trino server version, connector artifact, and Java runtime. The connector repository
+has its own release cycle and Paimon dependency; its default branch can target a different Trino
+and Java version from the examples here.
 
-## Filesystem
+The write examples below require a connector with write support and a supported table layout.
+They do not imply that every historical Trino connector supports these operations.
 
-From version 0.8, Paimon share Trino filesystem for all actions, which means, you should 
-config Trino filesystem before using trino-paimon. You can find information about how to config
-filesystems for Trino on Trino official website.
+## Installation {#preparing-paimon-jar-file}
 
-## Preparing Paimon Jar File
+### Obtain the Plugin
 
-[Download](../project/download)
+Use the [download page](../project/download#engine-jars) to locate the Trino 440 plugin archive.
+For other versions, use the [connector repository](https://github.com/apache/paimon-trino).
+The plugin is a distribution containing its dependencies, rather than a single jar to place on
+the general Trino classpath.
 
-You can also manually build a bundled jar from the source code. However, there are a few preliminary steps that need to be taken before compiling:
-
-- To build from the source code, [clone the git repository](@@TRINO_GITHUB_REPO@@).
-- Install JDK21 locally, and configure JDK21 as a global environment variable;
-
-Then,you can build bundled jar with the following command:
+To build from source, check out a connector revision matching the Trino server and use the Java
+version required by that revision's `pom.xml`. Run its documented build; for revisions using the
+Maven build, the command is:
 
 ```bash
 mvn clean install -DskipTests
 ```
 
-You can find Trino connector jar in `./paimon-trino-<trino-version>/target/paimon-trino-<trino-version>-@@VERSION@@-plugin.tar.gz`.
+Locate the plugin archive in that revision's build output. Artifact names and module paths
+vary across revisions. Use the connector artifact's actual version rather than substituting
+the Paimon version shown by this documentation.
 
-We use [hadoop-apache](https://mvnrepository.com/artifact/io.trino.hadoop/hadoop-apache) as a dependency for Hadoop,
-and the default Hadoop dependency typically supports both Hadoop 2 and Hadoop 3. 
-If you encounter an unsupported scenario, you can specify the corresponding Apache Hadoop version.
+### Install Paimon Connector
 
-For example, if you want to use Hadoop 3.3.5-1, you can use the following command to build the jar:
+For a Trino 440 distribution named
+`paimon-trino-440-<connector-version>-plugin.tar.gz`, extract it under the Trino plugin directory
+on the coordinator and every worker:
+
 ```bash
-mvn clean install -DskipTests -Dhadoop.apache.version=3.3.5-1
+tar -zxf paimon-trino-440-<connector-version>-plugin.tar.gz -C "${TRINO_HOME}/plugin"
 ```
+
+For the Trino 440 connector running on JDK 21, include these entries in `etc/jvm.config`:
+
+```text
+--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+--add-opens=java.base/java.nio=ALL-UNNAMED
+```
+
+Restart Trino after installing the plugin and completing the catalog configuration.
 
 ## Configure Paimon Catalog
 
-### Install Paimon Connector
-```bash
-tar -zxf paimon-trino-<trino-version>-@@VERSION@@-plugin.tar.gz -C ${TRINO_HOME}/plugin
-```
-
-> NOTE: For JDK 21, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
-
-### Configure
-
-Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
+Create `etc/catalog/paimon.properties` on the Trino nodes. The file name registers the SQL
+catalog as `paimon`:
 
 ```properties
 connector.name=paimon
-warehouse=file:/tmp/warehouse
+warehouse=hdfs://namenode:8020/warehouse/paimon
 ```
 
-If you are using HDFS, choose one of the following ways to configure your HDFS:
+This example uses a filesystem catalog and assumes HDFS access is configured. For a local
+single-node experiment, `warehouse=file:/tmp/warehouse` is sufficient. Use shared storage for
+a distributed deployment.
 
-- set environment variable HADOOP_HOME.
-- set environment variable HADOOP_CONF_DIR.
-- configure `hadoop-conf-dir` in the properties.
+### Filesystem
 
-If you are using a Hadoop filesystem, you can still use trino-hdfs and trino-hive to config it.
-For example, if you use oss as a storage, you can write in `paimon.properties` according to [Trino Reference](https://trino.io/docs/current/connector/hive.html#hdfs-configuration):
+The Trino 440 connector uses Trino's filesystem integration. Configure storage access before
+querying a table. For HDFS, provide `HADOOP_HOME`, `HADOOP_CONF_DIR`, or the connector's
+`hadoop-conf-dir` property as appropriate for the deployment.
+
+For Hadoop-backed object storage, supply the filesystem configuration through:
 
 ```properties
 hive.config.resources=/path/to/core-site.xml
 ```
 
-Then, config core-site.xml according to [Jindo Reference](https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.12/oss/presto/jindosdk_on_presto)
+Make the configuration file and required filesystem libraries available on all nodes that access
+the warehouse. Follow the filesystem instructions for your **Trino and connector versions**;
+properties from newer Trino releases may differ.
 
-## Kerberos
+Connector revisions using `io.trino.hadoop:hadoop-apache` can override that dependency when a
+specific Hadoop distribution is required. For example, if supported by the selected revision:
 
-You can configure kerberos keytab file when using KERBEROS authentication in the properties.
+```bash
+mvn clean install -DskipTests -Dhadoop.apache.version=3.3.5-1
+```
+
+### Kerberos
+
+For the Trino 440 connector's Kerberos login, set these catalog properties:
 
 ```properties
-security.kerberos.login.principal=hadoop-user
+security.kerberos.login.principal=hadoop-user@EXAMPLE.COM
 security.kerberos.login.keytab=/etc/trino/hdfs.keytab
 ```
 
-Keytab files must be distributed to every node in the cluster that runs Trino.
+Distribute the keytab to every Trino node that needs it and configure access for the service user.
+
+### Temporary Directory {#tmp-dir}
+
+Paimon extracts jars for code generation into the JVM temporary directory. Choose a writable
+location that is not removed by periodic cleanup while Trino is running. Set this JVM option
+in `etc/jvm.config` on each node:
+
+```text
+-Djava.io.tmpdir=/path/to/trino-tmp
+```
 
 ## Create Schema
+
+The following examples form one sequence in the `paimon` catalog:
 
 ```sql
 CREATE SCHEMA paimon.test_db;
@@ -114,16 +145,19 @@ CREATE SCHEMA paimon.test_db;
 
 ## Create Table
 
+Create a primary-key table with a fixed bucket count. Include the partition column in the
+primary key:
+
 ```sql
 CREATE TABLE paimon.test_db.orders (
     order_key bigint,
-    orders_tatus varchar,
+    order_status varchar,
     total_price decimal(18,4),
     order_date date
 )
 WITH (
     file_format = 'ORC',
-    primary_key = ARRAY['order_key','order_date'],
+    primary_key = ARRAY['order_key', 'order_date'],
     partitioned_by = ARRAY['order_date'],
     bucket = '2',
     bucket_key = 'order_key',
@@ -131,25 +165,15 @@ WITH (
 );
 ```
 
-## Add Column
+## Insert
+
+The Trino 440 connector supports inserts into primary-key tables with fixed buckets and
+non-primary-key tables with `bucket = -1`.
 
 ```sql
-CREATE TABLE paimon.test_db.orders (
-    order_key bigint,
-    orders_tatus varchar,
-    total_price decimal(18,4),
-    order_date date
-)
-WITH (
-    file_format = 'ORC',
-    primary_key = ARRAY['order_key','order_date'],
-    partitioned_by = ARRAY['order_date'],
-    bucket = '2',
-    bucket_key = 'order_key',
-    changelog_producer = 'input'
-);
-
-ALTER TABLE paimon.test_db.orders ADD COLUMN shipping_address varchar;
+INSERT INTO paimon.test_db.orders
+    (order_key, order_status, total_price, order_date)
+VALUES (1, 'NEW', DECIMAL '19.9900', DATE '2024-01-01');
 ```
 
 ## Query
@@ -158,153 +182,63 @@ ALTER TABLE paimon.test_db.orders ADD COLUMN shipping_address varchar;
 SELECT * FROM paimon.test_db.orders;
 ```
 
-## Query with Time Traveling
+## Add Column
+
+Continue with the existing table; there is no need to create it again:
 
 ```sql
--- read the snapshot from specified timestamp
-SELECT * FROM t FOR TIMESTAMP AS OF TIMESTAMP '2023-01-01 00:00:00 Asia/Shanghai';
-
--- read the snapshot with id 1L (use snapshot id as version)
-SELECT * FROM t FOR VERSION AS OF 1;
-
--- read tag 'my-tag'
-SELECT * FROM t FOR VERSION AS OF 'my-tag';
-
+ALTER TABLE paimon.test_db.orders ADD COLUMN shipping_address varchar;
 ```
 
-:::warning
+## Query with Time Traveling
 
-If tag's name is a number and equals to a snapshot id, the VERSION AS OF syntax will consider tag first. For example, if
-you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM paimon.test_db.orders FOR VERSION AS OF '1'` actually queries snapshot 2
-instead of snapshot 1.
+Use a retained snapshot or tag. The timestamp and identifiers below are examples; replace them
+with values from the table's history.
+
+```sql
+-- Select the snapshot at the specified timestamp.
+SELECT * FROM paimon.test_db.orders
+FOR TIMESTAMP AS OF TIMESTAMP '2024-01-01 00:00:00 Asia/Shanghai';
+
+-- Select snapshot 1 if it is still retained.
+SELECT * FROM paimon.test_db.orders FOR VERSION AS OF 1;
+
+-- Select an existing tag.
+SELECT * FROM paimon.test_db.orders FOR VERSION AS OF 'my-tag';
+```
+
+:::warning Numeric tag names
+
+A numeric tag name takes precedence over a matching snapshot ID when supplied as a string.
+If tag `'1'` points to snapshot 2, `FOR VERSION AS OF '1'` reads snapshot 2. Prefer descriptive
+tag names to avoid ambiguity.
 
 :::
 
-## Insert
+See [Snapshot Management](../maintenance/manage-snapshots) and [Tags](../maintenance/manage-tags)
+for retention and tag creation.
 
-```sql
-INSERT INTO paimon.test_db.orders VALUES (.....);
-```
+## Type Mapping {#trino-to-paimon-type-mapping}
 
-Supports:
-- primary key table with fixed bucket.
-- non-primary-key table with bucket -1.
+Common read mappings for the connector are summarized below using SQL type names. Check the
+matching connector revision for precision limits and unsupported types.
 
-## Trino to Paimon type mapping
+| Paimon type | Trino type |
+| --- | --- |
+| `BOOLEAN` | `BOOLEAN` |
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT` |
+| `FLOAT`, `DOUBLE` | `REAL`, `DOUBLE` |
+| `DECIMAL(p, s)` | `DECIMAL(p, s)` |
+| `CHAR(n)` | `CHAR(n)` |
+| `VARCHAR(n)`, `STRING` | `VARCHAR(n)`, `VARCHAR` |
+| `VARBINARY` | `VARBINARY` |
+| `DATE` | `DATE` |
+| `TIMESTAMP` | `TIMESTAMP` |
+| `TIMESTAMP WITH LOCAL TIME ZONE` | `TIMESTAMP WITH TIME ZONE` |
+| `ARRAY`, `MAP`, `ROW` | `ARRAY`, `MAP`, `ROW` |
 
-This section lists all supported type conversion between Trino and Paimon.
-All Trino's data types are available in package `io.trino.spi.type`.
+## Next Steps
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 10%">Trino Data Type</th>
-      <th class="text-left" style="width: 10%">Paimon Data Type</th>
-      <th class="text-left" style="width: 5%">Atomic Type</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>RowType</code></td>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>MapType</code></td>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>ArrayType</code></td>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>BooleanType</code></td>
-      <td><code>BooleanType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TinyintType</code></td>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>SmallintType</code></td>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>IntegerType</code></td>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BigintType</code></td>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>RealType</code></td>
-      <td><code>FloatType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DoubleType</code></td>
-      <td><code>DoubleType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>CharType(length)</code></td>
-      <td><code>CharType(length)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
-      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarCharType(length)</code></td>
-      <td><code>VarCharType(length), length is less than VarCharType.MAX_LENGTH</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DateType</code></td>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TimestampType</code></td>
-      <td><code>TimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarBinaryType(length)</code></td>
-      <td><code>VarBinaryType(length)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TimestampWithTimeZoneType</code></td>
-      <td><code>LocalZonedTimestampType</code></td>
-      <td>true</td>
-    </tr>
-    </tbody>
-</table>
-
-## Tmp Dir
-
-Paimon will unzip some jars to the tmp directory for codegen. By default, Trino will use `'/tmp'` as the temporary
-directory, but `'/tmp'` may be periodically deleted.
-
-You can configure this environment variable when Trino starts:
-```shell
--Djava.io.tmpdir=/path/to/other/tmpdir
-```
-
-Let Paimon use a secure temporary directory.
+Use [Connecting Engines](./connecting-engines#troubleshooting) for catalog and storage checks.
+Report connector-specific problems to [Apache Paimon Trino](https://github.com/apache/paimon-trino/issues),
+including the Trino, Java, and connector versions and the table options.

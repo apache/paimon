@@ -24,189 +24,148 @@ under the License.
 
 # Doris
 
-This documentation is a guide for using Paimon in Doris.
-
-> More details can be found in [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog)
+Query existing Paimon tables through a Doris external catalog. Use
+[Connecting Engines](./connecting-engines) to identify the catalog backend and warehouse first.
 
 ## Version
 
-Paimon currently supports Apache Doris 2.0.6 and above.
+Select a Doris release that supports your catalog backend and Paimon table features.
+The [Doris Paimon catalog documentation](https://doris.apache.org/docs/3.x/lakehouse/catalogs/paimon-catalog/)
+provides version-specific settings. The REST catalog example below requires Doris 3.1 or later.
+
+This integration reads Paimon tables. An external catalog exposes existing tables without copying
+them into Doris; it does not enable writes to Paimon.
+
+## Prerequisites
+
+Prepare an existing Paimon table and configure metastore and storage access for the Doris
+processes that perform metadata and data reads. The examples below use placeholder hosts and
+credentials; replace them with your deployment's settings.
 
 ## Create Paimon Catalog
 
-Use `CREATE CATALOG` statement in Apache Doris to create Paimon Catalog.
+Choose one catalog definition for the backend used by the writer. HDFS examples assume the
+cluster's Hadoop access is already configured.
 
-Doris support multi types of Paimon Catalogs. Here are some examples:
+### Filesystem Catalog on HDFS
 
 ```sql
--- HDFS based Paimon Catalog
-CREATE CATALOG `paimon_hdfs` PROPERTIES (
-    "type" = "paimon",
-    "warehouse" = "hdfs://172.21.0.1:8020/user/paimon",
-    "hadoop.username" = "hadoop"
-);
-
--- Aliyun OSS based Paimon Catalog
-CREATE CATALOG `paimon_oss` PROPERTIES (
-    "type" = "paimon",
-    "warehouse" = "oss://paimon-bucket/paimonoss",
-    "oss.endpoint" = "oss-cn-beijing.aliyuncs.com",
-    "oss.access_key" = "ak",
-    "oss.secret_key" = "sk"
-);
-
--- Hive Metastore based Paimon Catalog
-CREATE CATALOG `paimon_hms` PROPERTIES (
-    "type" = "paimon",
-    "paimon.catalog.type" = "hms",
-    "warehouse" = "hdfs://172.21.0.1:8020/user/zhangdong/paimon2",
-    "hive.metastore.uris" = "thrift://172.21.0.44:7004",
-    "hadoop.username" = "hadoop"
-);
-
--- Integrate with Aliyun DLF 1.0
-CREATE CATALOG paimon_dlf PROPERTIES (
+CREATE CATALOG paimon_hdfs PROPERTIES (
     'type' = 'paimon',
-    'paimon.catalog.type' = 'dlf',
-    'warehouse' = 'oss://paimon-bucket/paimonoss/',
-    'dlf.proxy.mode' = 'DLF_ONLY',
-    'dlf.uid' = 'xxxxx',
-    'dlf.region' = 'cn-beijing',
-    'dlf.access_key' = 'ak',
-    'dlf.secret_key' = 'sk'
-);
-
--- Integrate with Aliyun DLF 3.0 Paimon Rest
--- Apache Doris supported since version 3.1.0
-CREATE CATALOG dlf_paimon_rest PROPERTIES (
-    'type' = 'paimon',
-    'uri' = 'http://cn-beijing-vpc.dlf.aliyuncs.com',
-    'warehouse' = 'catalog_name',
-    'paimon.rest.token.provider' = 'dlf',
-    'paimon.rest.dlf.access-key-id' = 'ak',
-    'paimon.rest.dlf.access-key-secret' = 'sk'
+    'paimon.catalog.type' = 'filesystem',
+    'warehouse' = 'hdfs://namenode:8020/warehouse/paimon',
+    'hadoop.username' = 'hadoop'
 );
 ```
 
-See [Apache Doris Website](https://doris.apache.org/docs/dev/lakehouse/catalogs/paimon-catalog#examples) for more examples.
+### Filesystem Catalog on OSS
+
+```sql
+CREATE CATALOG paimon_oss PROPERTIES (
+    'type' = 'paimon',
+    'paimon.catalog.type' = 'filesystem',
+    'warehouse' = 'oss://paimon-bucket/warehouse',
+    'oss.endpoint' = 'oss-cn-beijing.aliyuncs.com',
+    'oss.access_key' = '<access-key-id>',
+    'oss.secret_key' = '<access-key-secret>'
+);
+```
+
+### Hive Metastore Catalog
+
+```sql
+CREATE CATALOG paimon_hms PROPERTIES (
+    'type' = 'paimon',
+    'paimon.catalog.type' = 'hms',
+    'warehouse' = 'hdfs://namenode:8020/warehouse/paimon',
+    'hive.metastore.uris' = 'thrift://metastore:9083',
+    'hadoop.username' = 'hadoop'
+);
+```
+
+### DLF 1.0 Catalog
+
+```sql
+CREATE CATALOG paimon_dlf PROPERTIES (
+    'type' = 'paimon',
+    'paimon.catalog.type' = 'dlf',
+    'warehouse' = 'oss://paimon-bucket/warehouse',
+    'dlf.proxy.mode' = 'DLF_ONLY',
+    'dlf.uid' = '<account-id>',
+    'dlf.region' = 'cn-beijing',
+    'dlf.access_key' = '<access-key-id>',
+    'dlf.secret_key' = '<access-key-secret>'
+);
+```
+
+### DLF REST Catalog
+
+For Doris 3.1+, configure the REST backend explicitly. Here, `warehouse` is the DLF catalog
+name, rather than an object-storage path.
+
+```sql
+CREATE CATALOG dlf_paimon_rest PROPERTIES (
+    'type' = 'paimon',
+    'paimon.catalog.type' = 'rest',
+    'uri' = 'http://cn-beijing-vpc.dlf.aliyuncs.com',
+    'warehouse' = '<catalog-name>',
+    'paimon.rest.token.provider' = 'dlf',
+    'paimon.rest.dlf.access-key-id' = '<access-key-id>',
+    'paimon.rest.dlf.access-key-secret' = '<access-key-secret>'
+);
+```
+
+See the [Doris catalog examples](https://doris.apache.org/docs/3.x/lakehouse/catalogs/paimon-catalog/#examples)
+for storage authentication and differences between Doris releases.
 
 ## Access Paimon Catalog
 
-1. Query Paimon table with full qualified name
+Query a fully qualified table name:
 
-    ```sql
-    SELECT * FROM paimon_hdfs.paimon_db.paimon_table;
-    ```
+```sql
+SELECT * FROM paimon_hdfs.paimon_db.paimon_table LIMIT 10;
+```
 
-2. Switch to Paimon Catalog and query
+Alternatively, select the catalog and database for the session:
 
-    ```sql
-    SWITCH paimon_hdfs;
-    USE paimon_db;
-    SELECT * FROM paimon_table;
-    ```
+```sql
+SWITCH paimon_hdfs;
+USE paimon_db;
+SELECT * FROM paimon_table LIMIT 10;
+```
 
 ## Query Optimization
 
-- Read optimized for Primary Key Table
+Primary-key tables can require merging multiple row versions. Review the reader capabilities in
+your Doris release before selecting a [table mode](../primary-key-table/table-mode).
 
-    Doris can utilize the [Read optimized](https://paimon.apache.org/docs/0.8/primary-key-table/read-optimized/) feature for Primary Key Table(release in Paimon 0.6), by reading base data files using native Parquet/ORC reader and delta file using JNI.
+- **Read optimized:** reading compacted base data can reduce merge work, but a
+  [read-optimized view](../concepts/system-tables#read-optimized-table) can omit recent changes.
+- **Deletion vectors:** readers must apply deletion vectors to suppress obsolete rows. See
+  [Merge On Write](../primary-key-table/table-mode#merge-on-write) for the Paimon configuration
+  and read semantics, and check Doris support before enabling it.
 
-- Deletion Vectors
+## Type Mapping {#doris-to-paimon-type-mapping}
 
-    Doris(2.1.4+) natively supports [Deletion Vectors](https://paimon.apache.org/docs/0.8/primary-key-table/deletion-vectors/)(released in Paimon 0.8).
+This is a summary of common **Paimon-to-Doris read mappings**. Check the
+[Doris type mapping](https://doris.apache.org/docs/3.x/lakehouse/catalogs/paimon-catalog/#column-type-mapping)
+for the installed version; binary and timestamp mappings can depend on release and catalog options.
 
-## Doris to Paimon type mapping
+| Paimon type | Doris type |
+| --- | --- |
+| `BOOLEAN` | `BOOLEAN` |
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | Corresponding integer type |
+| `FLOAT`, `DOUBLE` | `FLOAT`, `DOUBLE` |
+| `DECIMAL(p, s)` | `DECIMAL(p, s)` |
+| `CHAR`, `VARCHAR` | `STRING` |
+| `BINARY`, `VARBINARY` | See the version-specific binary mapping |
+| `DATE` | `DATE` |
+| `TIMESTAMP`, `TIMESTAMP WITH LOCAL TIME ZONE` | See the version-specific timestamp mapping and precision limits |
+| `ARRAY` | `ARRAY` |
+| `MAP` | `MAP` |
+| `ROW` | `STRUCT` |
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 10%">Doris Data Type</th>
-      <th class="text-left" style="width: 10%">Paimon Data Type</th>
-      <th class="text-left" style="width: 5%">Atomic Type</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>Boolean</code></td>
-      <td><code>BooleanType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TinyInt</code></td>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>SmallInt</code></td>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Int</code></td>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BigInt</code></td>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Float</code></td>
-      <td><code>FloatType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Double</code></td>
-      <td><code>DoubleType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarChar</code></td>
-      <td><code>VarCharType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Char</code></td>
-      <td><code>CharType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Binary</code></td>
-      <td><code>VarBinaryType, BinaryType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Decimal(precision, scale)</code></td>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Datetime</code></td>
-      <td><code>TimestampType,LocalZonedTimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Date</code></td>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>Array</code></td>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>Map</code></td>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>Struct</code></td>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    </tbody>
-</table>
+## Next Steps
 
+Use the Doris guide for time-travel and system-table syntax supported by your release. For
+connection or visibility problems, follow [Connecting Engines](./connecting-engines#troubleshooting).
