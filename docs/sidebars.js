@@ -591,12 +591,27 @@ const sidebars = {
       "id": "program-api/index"
     },
     "items": [
-      "program-api/rest-api",
+      {
+        type: "category",
+        "label": "Java API",
+        "link": {type: "doc", "id": "program-api/java-api"},
+        "items": [
+          "program-api/catalog-api",
+          "program-api/java-reading",
+          "program-api/java-writing",
+          "program-api/java-types"
+        ]
+      },
       "program-api/flink-api",
-      "program-api/java-api",
-      "program-api/catalog-api",
-      "program-api/cpp-api",
-      "program-api/rust-api",
+      {
+        type: "category",
+        "label": "Other Clients",
+        "items": [
+          "program-api/rest-api",
+          "program-api/cpp-api",
+          "program-api/rust-api"
+        ]
+      },
       "program-api/file-cache"
     ]
   },
