@@ -192,6 +192,72 @@ class MosaicRecordsReaderTest {
     }
 
     @Test
+    void testAllProjectedColumnsMissingPreservesSelectedPositionsAcrossRowGroups()
+            throws IOException {
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        MosaicReader reader = createReader();
+        when(reader.numRowGroups()).thenReturn(3);
+        when(reader.rowGroupNumRows(0)).thenReturn(2);
+        when(reader.rowGroupNumRows(1)).thenReturn(2);
+        when(reader.rowGroupNumRows(2)).thenReturn(2);
+
+        Path filePath = new Path("file:/tmp/mosaic-reader-test");
+        RoaringBitmap32 selection = RoaringBitmap32.bitmapOf(1, 5);
+        MosaicRecordsReader recordsReader =
+                new MosaicRecordsReader(
+                        inputFileAdapter,
+                        0,
+                        rowType(),
+                        rowType(),
+                        null,
+                        filePath,
+                        selection,
+                        allocator,
+                        (inputFile, fileSize, bufferAllocator) -> reader);
+        DataFileRecordReader dataFileReader =
+                new DataFileRecordReader(
+                        rowType(),
+                        recordsReader,
+                        false,
+                        false,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        0,
+                        Collections.emptyMap(),
+                        selection,
+                        filePath);
+
+        FileRecordIterator<InternalRow> firstBatch = dataFileReader.readBatch();
+        assertThat(firstBatch).isNotNull();
+        InternalRow firstRow = firstBatch.next();
+        assertThat(firstRow).isNotNull();
+        assertThat(firstRow.isNullAt(0)).isTrue();
+        assertThat(firstBatch.returnedPosition()).isEqualTo(1);
+        assertThat(firstBatch.next()).isNull();
+        firstBatch.releaseBatch();
+
+        FileRecordIterator<InternalRow> secondBatch = dataFileReader.readBatch();
+        assertThat(secondBatch).isNotNull();
+        InternalRow secondRow = secondBatch.next();
+        assertThat(secondRow).isNotNull();
+        assertThat(secondRow.isNullAt(0)).isTrue();
+        assertThat(secondBatch.returnedPosition()).isEqualTo(5);
+        assertThat(secondBatch.next()).isNull();
+        secondBatch.releaseBatch();
+
+        assertThat(dataFileReader.readBatch()).isNull();
+        verify(reader, never()).readRowGroup(anyInt(), any());
+
+        dataFileReader.close();
+        assertThat(allocator.getAllocatedMemory()).isZero();
+    }
+
+    @Test
     void testSelectionSkipsUnmatchedRowGroupsAndPreservesPositions() throws IOException {
         CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
         MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
