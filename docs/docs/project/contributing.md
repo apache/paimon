@@ -24,200 +24,131 @@ under the License.
 
 # Contributing
 
-Apache Paimon is developed by an open and friendly community. Everybody is cordially welcome to join
-the community and contribute to Apache Paimon. There are several ways to interact with the community and contribute
-to Paimon including asking questions, filing bug reports, proposing new features, joining discussions on the mailing
-lists, contributing code or documentation, improving website, testing release candidates and writing corresponding blog etc.
+Apache Paimon welcomes contributions of code, documentation, testing, reviews,
+and community support. Start with a task below, and discuss questions in the
+relevant issue or on the [mailing lists](https://github.com/apache/paimon#mailing-lists).
 
 ## What do you want to do?
-Contributing to Apache Paimon goes beyond writing code for the project. Below, we list different opportunities to help the project:
 
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th>Area</th>
-      <th>Further information</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span> Report Bug</td>
-      <td>To report a problem with Paimon, open <a href="https://github.com/apache/paimon/issues">Paimon's issues</a>. <br/>
-      Please give detailed information about the problem you encountered and, if possible, add a description that helps to reproduce the problem.</td>
-    </tr>
-    <tr>
-      <td><span class="glyphicon glyphicon-console" aria-hidden="true"></span> Contribute Code</td>
-      <td>Read the <a href="#code-contribution-guide">Code Contribution Guide</a></td>
-    </tr>
-    <tr>
-      <td><span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Code Reviews</td>
-      <td>Read the <a href="#code-review-guide">Code Review Guide</a></td>
-    </tr>
-    <tr>
-      <td><span class="glyphicon glyphicon-thumbs-up" aria-hidden="true"></span> Release Version</td>
-      <td>Releasing a new Paimon version.</td>
-    </tr>
-    <tr>
-      <td><span class="glyphicon glyphicon-user" aria-hidden="true"></span> Support Users</td>
-      <td>Reply to questions on the <a href="https://github.com/apache/paimon#mailing-lists">user mailing list</a>,
-          check the latest issues in <a href="https://github.com/apache/paimon/issues">Issues</a> for tickets which are actually user questions.
-      </td>
-    </tr>
-    <tr>
-      <td><span class="glyphicon glyphicon-volume-up" aria-hidden="true"></span> Spread the Word About Paimon</td>
-      <td>Organize or attend a Paimon Meetup, contribute to the Paimon blog, share your conference, meetup or blog
-          post on the <a href="https://github.com/apache/paimon#mailing-lists">dev@paimon.apache.org mailing list</a>.
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2">
-        <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span> Any other question? Reach out to the
-                     <a href="https://github.com/apache/paimon#mailing-lists">dev@paimon.apache.org mailing list</a> to get help!
-      </td>
-    </tr>
-  </tbody>
-</table>
+| Contribution | How to start |
+| --- | --- |
+| Ask or answer a question | Use the [user mailing list](https://github.com/apache/paimon#mailing-lists), or help users in existing issues. |
+| Report a bug | Open a [GitHub issue](https://github.com/apache/paimon/issues) with the Paimon and engine versions, expected and actual behavior, and a minimal reproduction. Remove credentials from logs and configuration. |
+| Report a possible vulnerability | Follow the private [security reporting process](./security.md#reporting-security-issues). |
+| Propose a feature | Explain the use case and design in an issue or on `dev@paimon.apache.org` before implementation. |
+| Contribute code | Follow the [code contribution guide](#code-contribution-guide). |
+| Improve documentation | Describe what readers need, update the relevant page, and [build the documentation](#documentation-changes). |
+| Review code | Use the [code review guide](#code-review-guide). |
+| Test a release candidate | Follow the [verification guide](./verifying-a-release-candidate.md) and report the checks you completed. |
+| Help the community grow | Write about Paimon, organize or attend a meetup, and share useful material on `dev@paimon.apache.org`. |
 
 ## Code Contribution Guide
 
-Apache Paimon is maintained, improved, and extended by code contributions of volunteers. We welcome contributions to Paimon.
+![Contribution workflow: discuss the problem and agree on an approach, implement a focused change, address review feedback, and let a committer merge it.](/img/project/contribution-workflow.svg)
 
-Please feel free to ask questions at any time. Either send a mail to the Dev mailing list or comment on the issue you are working on.
+[Open the contribution diagram at full size](/img/project/contribution-workflow.svg).
 
-<style>
-.contribute-grid {
-  margin-bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  margin-left: -2px;
-  margin-right: -2px;
-}
+### Discuss {#consensus}
 
-.contribute-grid .column {
-  margin-top: 4px;
-  padding: 0 2px;
-}
+Create an issue or mailing-list discussion that explains the problem and your
+proposed approach. Reach agreement before making a substantial change.
 
-@media only screen and (min-width: 480px) {
-  .contribute-grid {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
+When requesting assignment to an issue, explain your understanding, design,
+and, where useful, a proof of concept. An assignment request alone does not
+provide enough information. If you are working on an issue, wait until it is
+assigned to you before opening the pull request.
 
-  .contribute-grid .column {
-    flex: 0 0 50%;
-  }
+### Implement {#implement}
 
-  .contribute-grid .column {
-    margin-top: 4px;
-  }
-}
+1. Implement the approach agreed in the discussion. Keep the change focused and
+   avoid unrelated refactoring or formatting.
+2. Add tests that exercise the changed behavior, including a regression test
+   for a bug fix. Update documentation for user-visible behavior.
+3. Follow the repository's [build instructions](https://github.com/apache/paimon#building).
+   Run the relevant tests and formatting checks, and enable GitHub Actions in
+   your fork.
+4. Open a pull request describing the problem, resulting behavior, and
+   validation. Link the issue, if there is one; use `Fixes #123` when the pull
+   request resolves it.
 
-@media only screen and (min-width: 960px) {
-  .contribute-grid {
-    flex-wrap: nowrap;
-  }
+### Review {#review}
 
-  .contribute-grid .column {
-    flex: 0 0 25%;
-  }
-}
+Work with reviewers and explain how each concern was addressed. Keep tests
+passing as the change evolves. Leave review conversations open for reviewers
+to resolve after they check your response.
 
-.contribute-grid .panel {
-  height: 100%;
-  margin: 0;
-}
+If implementation reveals a need to change the agreed approach, explain the
+new design before expanding the pull request.
 
-.contribute-grid .panel-body {
-  padding: 10px;
-}
+### Merge {#merge}
 
-.contribute-grid h2 {
-  margin: 0 0 10px 0;
-  padding: 0;
-  display: flex;
-  align-items: flex-start;
-}
+A Paimon committer checks that the contribution meets the project requirements
+and merges it after review. A pull request with passing tests still needs
+review and agreement on its behavior.
 
-.contribute-grid .number {
-  margin-right: 0.25em;
-  font-size: 1.5em;
-  line-height: 0.9;
-}
-</style>
+## Documentation changes
 
-<div class="contribute-grid">
-  <div class="column">
-    <div class="panel panel-default">
-      <div class="panel-body">
-        <h2 id="consensus"><span class="number">1</span><a href="#consensus">Discuss</a></h2>
-        <p>Create an Issue or mailing list discussion and reach consensus</p>
-        <p><b>To request an issue, please note that it is not just a "please assign it to me", you need to explain your understanding of the issue, and your design, and if possible, you need to provide your POC code.</b></p>
-      </div>
-    </div>
-  </div>
-  <div class="column">
-    <div class="panel panel-default">
-      <div class="panel-body">
-        <h2 id="implement"><span class="number">2</span><a href="#implement">Implement</a></h2>
-        <p>Create the Pull Request and the approach agreed upon in the issue.</p>
-        <p><b>1.Only create the PR if you are assigned to the issue. 2.Please associate an issue (if any), e.g. fix #123. 3.Please enable the actions of your own clone project.</b></p>
-      </div>
-    </div>
-  </div>
-  <div class="column">
-    <div class="panel panel-default">
-      <div class="panel-body">
-        <h2 id="review"><span class="number">3</span><a href="#review">Review</a></h2>
-        <p>Work with the reviewer.</p><br />
-        <p><b>1.Make sure no unrelated or unnecessary reformatting changes are included. 2.Please ensure that the test passing. 3.Please don't resolve conversation.</b></p>
-      </div>
-    </div>
-  </div>
-  <div class="column">
-    <div class="panel panel-default">
-      <div class="panel-body">
-        <h2 id="merge"><span class="number">4</span><a href="#merge">Merge</a></h2>
-        <p>A committer of Paimon checks if the contribution fulfills the requirements and merges the code to the codebase.</p>
-      </div>
-    </div>
-  </div>
-</div>
+The documentation source is in `docs/docs`, static images are in
+`docs/static/img`, and navigation is defined explicitly in `docs/sidebars.js`.
+When adding a page, add its document ID to the appropriate sidebar category.
+Use relative Markdown links between pages so that links remain within the
+selected documentation version.
+
+Prefer editable SVG for diagrams. Give each diagram descriptive alternative
+text and explain its essential steps in the page so that the information is
+also available without the image.
+
+From the repository root, install the documentation dependencies and build the
+site:
+
+```shell
+cd docs
+yarn install
+yarn build
+```
+
+The build runs the REST OpenAPI contract checks and compiles the documentation.
+Review the output for broken links and inspect the changed pages with
+`yarn serve`, including images and narrow-screen layouts. See the
+[documentation README](https://github.com/apache/paimon/blob/master/docs/README.md)
+for local development and generated configuration tables.
 
 ## Code Review Guide
 
-Every review needs to check the following six aspects. **We encourage to check these aspects in order, to avoid
-spending time on detailed code quality reviews when formal requirements are not met or there is no consensus in
-the community to accept the change.**
+Review these four areas in order. Establish the purpose and agreement on the
+change before spending time on implementation details.
 
-#### 1. Is the Contribution Well-Described?
+### 1. Is the contribution well described?
 
-Check whether the contribution is sufficiently well-described to support a good review. Trivial changes and fixes
-do not need a long description. If the implementation is exactly according to a prior discussion on issue or the
-development mailing list, only a short reference to that discussion is needed.
+The description should make the problem and resulting behavior clear. Small
+fixes need only a short explanation. Link prior issue or mailing-list
+discussions when the implementation follows an agreed design; explain any
+departures from that design.
 
-If the implementation is different from the agreed approach in the consensus discussion, a detailed description of
-the implementation is required for any further review of the contribution.
+### 2. Does it need attention from specific committers?
 
-#### 2. Does the Contribution Need Attention from some Specific Committers?
+Some changes need review from people familiar with the affected component or
+contract. When specific attention is required, one of the tagged committers
+or contributors should give the final approval.
 
-Some changes require attention and approval from specific committers.
+### 3. Does the implementation meet Paimon's quality standards?
 
-If the pull request needs specific attention, one of the tagged committers/contributors should give the final approval.
+- Check correctness, robustness, maintainability, and testability.
+- Consider performance when changing a performance-sensitive path.
+- Check that tests cover the changed behavior and run efficiently.
+- When dependencies change, check whether `LICENSE` or `NOTICE` needs updating.
 
-#### 3. Is the Overall Code Quality Good, Meeting Standard we Want to Maintain in Paimon?
+Refer to the [Flink Java Code Style and Quality Guide](https://flink.apache.org/how-to-contribute/code-style-and-quality-java/)
+for code guidelines.
 
-- Does the code follow the right software engineering practices? Is the code correct, robust, maintainable, testable?
-- Are the changes performance aware, when changing a performance sensitive part?
-- Are the changes sufficiently covered by tests? Are the tests executing fast?
-- If dependencies have been changed, were the NOTICE files updated?
+### 4. Is the documentation current?
 
-Code guidelines can be found in the [Flink Java Code Style and Quality Guide](https://flink.apache.org/how-to-contribute/code-style-and-quality-java/).
-
-#### 4. Are the documentation updated?
-
-If the pull request introduces a new feature, the feature should be documented.
+Document new features and changes to configuration, public APIs, or observable
+behavior. Check examples and links, and ensure that the documentation build
+passes.
 
 ## Become a Committer
 
-When you have made enough contributions, you can be nominated as Paimon's Committer. See [Committer](./committer).
+Sustained code and community contributions can lead to nomination as a
+committer. See the [committer guide](./committer.md) for the nomination process
+and community expectations.

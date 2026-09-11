@@ -24,16 +24,20 @@ under the License.
 
 # Committer
 
+Committers help maintain Paimon's code and community. This guide explains how
+contributors are nominated and the judgment expected when using repository
+write access. Start with [Contributing](./contributing.md) for ways to participate.
+
 ## Become a Committer
 
-#### How to become a committer
+### How nominations work
 
 There is no strict protocol for becoming a committer. Candidates for new committers are typically people that are
 active contributors and community members. Candidates are suggested by current committers or PMC members, and
 voted upon by the PMC.
 
-If you would like to become a committer, you should engage with the community and start contributing to Apache Paimon in
-any of the above ways. You might also want to talk to other committers and ask for their advice and guidance.
+If you would like to become a committer, you should engage with the community and start contributing to Apache Paimon through
+code or community work. You might also want to talk to other committers and ask for their advice and guidance.
 
 - Community contributions include helping to answer user questions on the mailing list, verifying release candidates,
   giving talks, organizing community events, and other forms of evangelism and community building. The "Apache Way" has
@@ -44,7 +48,7 @@ any of the above ways. You might also want to talk to other committers and ask f
   and other help in identifying and fixing bugs. Especially constructive and high quality design discussions, as well
   as helping other contributors, are strong indicators.
 
-#### Identify promising candidates
+### Qualities of a committer
 
 While the prior points give ways to identify promising candidates, the following are "must haves" for any committer candidate:
 
@@ -57,9 +61,19 @@ While the prior points give ways to identify promising candidates, the following
 
 - They have shown to be respectful towards other community members and constructive in discussions.
 
+## Working as a committer
+
+Use the [code review guide](./contributing.md#code-review-guide) when evaluating
+contributions, and ask another reviewer when a change reaches beyond your
+expertise. Help contributors understand review feedback and reach agreement on
+the approach.
+
+Committers can also help [verify release candidates](./verifying-a-release-candidate.md).
+The [release overview](./releases.md) explains the RM and voter responsibilities.
+
 ## Committer Rights
 
 JetBrains provides a free license to Apache Committers, allowing them to access all JetBrains IDEs, such as
 IntelliJ IDEA, PyCharm, and other desktop tools.
 
-Please use your @apache.org email address to [All Products Packs for Apache committers](https://www.jetbrains.com/shop/eform/apache?product=ALL).
+Use your `@apache.org` email address to apply through [All Products Packs for Apache committers](https://www.jetbrains.com/shop/eform/apache?product=ALL).

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="718" viewBox="0 0 960 718" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Follow each artifact from the same signed RC tag</title>
+<desc id="desc">A signed RC tag identifies one commit. The Release Manager creates and signs the Paimon and PyPaimon source archives locally, stages them in ASF dist dev, and promotes them after approval. GitHub Actions packages Java on JDK 8, 11, and 17; the Release Manager signs the merged repository and closes it in Nexus, then promotes it to Maven Central after approval. Python validation and packaging publish the RC to TestPyPI independently of Java. After approval, the final signed tag at the same commit builds the final PyPI version.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="716" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Follow each artifact from the same signed RC tag</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Sources define the Apache release; Java and Python packages are convenience artifacts.</text>
+<rect x="28" y="101" width="904" height="52" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="480" y="133" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Signed RC tag  →  one recorded commit and matching Paimon / PyPaimon versions</text>
+<text x="192" y="192" font-size="16" fill="#172b4d" font-weight="700" text-anchor="middle">BUILD AND SIGN</text>
+<text x="514" y="192" font-size="16" fill="#172b4d" font-weight="700" text-anchor="middle">CANDIDATE FOR REVIEW</text>
+<text x="820" y="192" font-size="16" fill="#087f6e" font-weight="700" text-anchor="middle">AFTER VOTE APPROVAL</text>
+<path d="M 665 178 V 653" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="28" y="213" width="328" height="114" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="192.0" y="246" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Source archives · RM</text>
+<text x="192.0" y="276" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Build both sources locally</text>
+<text x="192.0" y="301" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Sign and checksum each archive</text>
+<rect x="404" y="213" width="220" height="114" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="514.0" y="246" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">ASF dist dev</text>
+<text x="514.0" y="276" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Paimon + PyPaimon</text>
+<text x="514.0" y="301" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Signed source archives</text>
+<rect x="692" y="213" width="240" height="114" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="812.0" y="246" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">ASF dist release</text>
+<text x="812.0" y="276" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Move approved directories</text>
+<text x="812.0" y="301" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Preserve every file</text>
+<path d="M 356 270 H 404" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 624 270 H 692" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="355" width="328" height="137" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="192.0" y="388" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Java · Actions, then RM</text>
+<text x="192.0" y="418" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Package on JDK 8 / 11 / 17</text>
+<text x="192.0" y="443" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Merge the unsigned repository</text>
+<text x="192.0" y="468" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">RM signs and stages locally</text>
+<rect x="404" y="355" width="220" height="137" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="514.0" y="388" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Closed Nexus repo</text>
+<text x="514.0" y="418" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">One complete repository</text>
+<text x="514.0" y="443" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Signatures + checksums</text>
+<text x="514.0" y="468" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Same RC commit</text>
+<rect x="692" y="355" width="240" height="137" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="812.0" y="388" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Maven Central</text>
+<text x="812.0" y="418" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Release the approved repo</text>
+<text x="812.0" y="443" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Preserve every artifact</text>
+<text x="812.0" y="468" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">No Java rebuild</text>
+<path d="M 356 423 H 404" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 624 423 H 692" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="520" width="328" height="137" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="192.0" y="553" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Python · Actions</text>
+<text x="192.0" y="583" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Validate and package</text>
+<text x="192.0" y="608" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Publish after Python succeeds</text>
+<text x="192.0" y="633" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Runs independently of Java</text>
+<rect x="404" y="520" width="220" height="137" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="514.0" y="553" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">TestPyPI</text>
+<text x="514.0" y="583" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Candidate version</text>
+<text x="514.0" y="608" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">VERSIONrcN</text>
+<text x="514.0" y="633" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">For community testing</text>
+<rect x="692" y="520" width="240" height="137" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="812.0" y="553" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">PyPI</text>
+<text x="812.0" y="583" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Final tag at RC commit</text>
+<text x="812.0" y="608" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Build the final VERSION</text>
+<text x="812.0" y="633" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Same approved source</text>
+<path d="M 356 588 H 404" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 624 588 H 692" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="28" y="690" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Solid arrows: stage / promote artifacts. Dashed arrow: build the final Python version.</text>
+</g>
+</svg>
