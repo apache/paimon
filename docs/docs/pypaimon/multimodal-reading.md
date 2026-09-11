@@ -89,19 +89,12 @@ match delta.
 Inputs are snapshot-pinned (`resolved_snapshots`). Left rows stream, right join
 keys stay in memory, and BLOBs remain descriptors.
 
-Use `interpolate_linear` for numeric state columns. It interpolates between the
-surrounding rows in the same group, does not extrapolate, and requires both rows
-to satisfy `tolerance`. Numeric scalars and fixed-size numeric lists are
-supported.
+Use `interpolate_linear` for numeric scalars or fixed-size numeric lists. It
+requires surrounding rows in the same group and never extrapolates.
 
 ```python
-from pypaimon.multimodal import interpolate_linear
-
-states_at_steps = interpolate_linear(
-    actions.scan(),
+states_at_steps = aligned.interpolate_linear(
     states.scan().select(["joint_position", "velocity"]),
-    on="event_time",
-    by="episode_id",
     tolerance=timedelta(milliseconds=50),
 )
 ```
