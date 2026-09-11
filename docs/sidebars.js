@@ -687,8 +687,10 @@ const sidebars = {
       "id": "learn-paimon/index"
     },
     "items": [
+      "learn-paimon/scenario-guide",
+      "learn-paimon/ai-pipelines",
       "learn-paimon/understand-files",
-      "learn-paimon/scenario-guide"
+      "learn-paimon/small-files"
     ]
   }
 ],
