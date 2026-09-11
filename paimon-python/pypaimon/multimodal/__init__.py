@@ -44,6 +44,7 @@ from pypaimon.multimodal.table import (
 )
 from pypaimon.multimodal.temporal import (
     AsOfJoin,
+    interpolate_linear,
     join_asof,
 )
 from pypaimon.multimodal.video import VideoFrameCollator
@@ -76,6 +77,7 @@ __all__ = [
     "VideoFrameCollator",
     "VideoFrameDescriptor",
     "connect",
+    "interpolate_linear",
     "join_asof",
     "lit",
     "source_col",

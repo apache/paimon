@@ -54,6 +54,29 @@ _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE = 64 * 1024 * 1024
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
               right_on=None, suffix="_right") -> "AsOfJoin":
     """Join each left row with at most one time-aligned right row."""
+    on, by = _normalize_temporal_keys(on, by)
+    return AsOfJoin(left, on, by).join_asof(
+        right,
+        direction=direction,
+        tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
+
+
+def interpolate_linear(left, right, *, on, by, tolerance=None,
+                       right_on=None, suffix="_right") -> "AsOfJoin":
+    """Linearly interpolate numeric right values at each left timestamp."""
+    on, by = _normalize_temporal_keys(on, by)
+    return AsOfJoin(left, on, by).interpolate_linear(
+        right,
+        tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
+
+
+def _normalize_temporal_keys(on, by):
     if not isinstance(on, str) or not on:
         raise ValueError("on must be a non-empty column name.")
     if isinstance(by, str):
@@ -70,13 +93,7 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
     if (any(not isinstance(name, str) or not name for name in by)
             or len(set(by)) != len(by)):
         raise ValueError("by must contain unique, non-empty column names.")
-    return AsOfJoin(left, on, by).join_asof(
-        right,
-        direction=direction,
-        tolerance=tolerance,
-        right_on=right_on,
-        suffix=suffix,
-    )
+    return on, by
 
 
 class AsOfJoin:
@@ -107,7 +124,24 @@ class AsOfJoin:
             right_on,
             suffix,
         )
+        return self._append(source)
 
+    def interpolate_linear(self, right, *, tolerance=None, right_on=None,
+                           suffix="_right") -> "AsOfJoin":
+        """Append linear interpolation of numeric right-side values."""
+        position = len(self._sources) + 1
+        source = _LinearInterpolationRight(
+            "right source %d" % position,
+            right,
+            self._on,
+            self._by,
+            tolerance,
+            right_on,
+            suffix,
+        )
+        return self._append(source)
+
+    def _append(self, source):
         result = object.__new__(AsOfJoin)
         result._anchor = self._anchor
         result._on = self._on
@@ -218,7 +252,7 @@ class AsOfJoin:
                 else source_fetchers[position].schema
             )
             for name in source.payload_schema.names:
-                field = payload_schema.field(name)
+                field = source.output_field(payload_schema.field(name))
                 output_name = field.name
                 if output_name in names:
                     output_name += source.suffix
@@ -242,21 +276,7 @@ class AsOfJoin:
         arrays = [anchor[name] for name in self._anchor_schema.names]
 
         for source, fetcher in zip(self._sources, source_fetchers):
-            matches = [source.match(row) for row in anchor_rows]
-            matched_ids = [match for match in matches if match is not None]
-            unique_ids = list(dict.fromkeys(matched_ids))
-            values = fetcher.fetch(unique_ids)
-            positions = {
-                row_id: index for index, row_id in enumerate(unique_ids)
-            }
-            take = pa.array([
-                None if match is None else positions[match]
-                for match in matches
-            ], type=pa.int64())
-            for field in source.payload_schema:
-                array = pc.take(values[field.name], take)
-                array.validate()
-                arrays.append(array)
+            arrays.extend(source.build_arrays(anchor_rows, fetcher))
 
         if arrays:
             table = pa.Table.from_arrays(
@@ -347,6 +367,112 @@ class _AsOfJoinRight:
             return None
         return self._row_ids[index].as_py()
 
+    @staticmethod
+    def output_field(field):
+        return field
+
+    def build_arrays(self, anchor_rows, fetcher):
+        matches = [self.match(row) for row in anchor_rows]
+        matched_ids = [match for match in matches if match is not None]
+        unique_ids = list(dict.fromkeys(matched_ids))
+        values = fetcher.fetch(unique_ids)
+        positions = {
+            row_id: index for index, row_id in enumerate(unique_ids)
+        }
+        take = pa.array([
+            None if match is None else positions[match]
+            for match in matches
+        ], type=pa.int64())
+        arrays = []
+        for field in self.payload_schema:
+            array = pc.take(values[field.name], take)
+            array.validate()
+            arrays.append(array)
+        return arrays
+
+
+class _LinearInterpolationRight(_AsOfJoinRight):
+
+    def __init__(self, label, query, anchor_on, by, tolerance,
+                 right_on, suffix):
+        super().__init__(
+            label, query, anchor_on, by, "nearest", tolerance,
+            right_on, suffix)
+        for field in self.payload_schema:
+            self.output_field(field)
+
+    @staticmethod
+    def output_field(field):
+        return pa.field(
+            field.name, _linear_output_type(field.type), nullable=True,
+            metadata=field.metadata)
+
+    def match(self, anchor_row):
+        key = tuple(anchor_row[name] for name in self.by)
+        bounds = self._index.get(key)
+        if bounds is None:
+            return None
+        start, end = bounds
+        target = anchor_row[_TIME_KEY]
+        position = bisect_left(self._time_keys, target, start, end)
+        if position < end and self._time_keys[position] == target:
+            exact = bisect_right(
+                self._time_keys, target, position, end) - 1
+            row_id = self._row_ids[exact].as_py()
+            return row_id, row_id, 0.0
+        if position == start or position == end:
+            return None
+
+        before = position - 1
+        after = position
+        before_time = _python_scalar(self._time_keys[before])
+        after_time = _python_scalar(self._time_keys[after])
+        if (self._tolerance_key is not None
+                and max(target - before_time, after_time - target)
+                > self._tolerance_key):
+            return None
+        weight = float(target - before_time) / (after_time - before_time)
+        return (
+            self._row_ids[before].as_py(),
+            self._row_ids[after].as_py(),
+            weight,
+        )
+
+    def build_arrays(self, anchor_rows, fetcher):
+        matches = [self.match(row) for row in anchor_rows]
+        matched_ids = []
+        for match in matches:
+            if match is not None:
+                matched_ids.extend(match[:2])
+        unique_ids = list(dict.fromkeys(matched_ids))
+        values = fetcher.fetch(unique_ids)
+        positions = {
+            row_id: index for index, row_id in enumerate(unique_ids)
+        }
+        before = pa.array([
+            None if match is None else positions[match[0]]
+            for match in matches
+        ], type=pa.int64())
+        after = pa.array([
+            None if match is None else positions[match[1]]
+            for match in matches
+        ], type=pa.int64())
+        weights = pa.array([
+            None if match is None else match[2]
+            for match in matches
+        ], type=pa.float64())
+
+        arrays = []
+        for field in self.payload_schema:
+            array = _interpolate_array(
+                pc.take(values[field.name], before),
+                pc.take(values[field.name], after),
+                weights,
+            )
+            array.validate()
+            arrays.append(array)
+        return arrays
+
 
 def _validate_join_options(direction, tolerance, right_on, suffix):
     if direction not in ("backward", "forward", "nearest"):
@@ -368,6 +494,47 @@ def _validate_join_options(direction, tolerance, right_on, suffix):
         zero = timedelta(0) if isinstance(tolerance, timedelta) else 0
         if tolerance < zero:
             raise ValueError("tolerance must be non-negative.")
+
+
+def _linear_output_type(data_type):
+    if pa.types.is_integer(data_type):
+        return pa.float64()
+    if pa.types.is_floating(data_type):
+        return data_type
+    if pa.types.is_fixed_size_list(data_type):
+        return pa.list_(
+            _linear_output_type(data_type.value_type), data_type.list_size)
+    raise TypeError(
+        "Linear interpolation requires numeric scalar or fixed-size list "
+        "columns; got %s." % data_type)
+
+
+def _interpolate_array(before, after, weights):
+    if isinstance(before, pa.ChunkedArray):
+        before = before.combine_chunks()
+    if isinstance(after, pa.ChunkedArray):
+        after = after.combine_chunks()
+    data_type = before.type
+    output_type = _linear_output_type(data_type)
+    if pa.types.is_fixed_size_list(data_type):
+        size = data_type.list_size
+        repeated = pa.array([
+            weight for weight in weights.to_pylist() for unused in range(size)
+        ], type=pa.float64())
+        values = _interpolate_array(
+            before.values.slice(before.offset * size, len(before) * size),
+            after.values.slice(after.offset * size, len(after) * size),
+            repeated,
+        )
+        mask = pc.or_(before.is_null(), after.is_null())
+        return pa.FixedSizeListArray.from_arrays(values, size, mask=mask)
+
+    start = pc.cast(before, pa.float64())
+    end = pc.cast(after, pa.float64())
+    result = pc.add(start, pc.multiply(pc.subtract(end, start), weights))
+    if result.type != output_type:
+        result = pc.cast(result, output_type)
+    return result
 
 
 def _require_scan(query, label):
