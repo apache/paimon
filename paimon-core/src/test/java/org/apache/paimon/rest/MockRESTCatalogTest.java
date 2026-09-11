@@ -64,6 +64,7 @@ import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -76,6 +77,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.URI;
@@ -821,6 +824,57 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(partition.recordCount()).isEqualTo(4L);
         // An aligned non-path option is not a path reset and does not patch stored options.
         assertThat(partition.options()).containsExactlyInAnyOrderEntriesOf(originalOptions);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"truncate-table", "truncate-partition", "overwrite"})
+    void testPartitionReplacementWithSchemeLessTableLocation(String operation) throws Exception {
+        restCatalogServer.shutdown();
+        dataPath = new Path(dataPath).toUri().getPath();
+        restCatalog = initCatalog(false);
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        assertThat(new Path(table.location()).toUri().getScheme()).isNull();
+
+        Map<String, String> spec = Collections.singletonMap("dt", "2026/07%17");
+        Map<String, String> partitionOptions = Collections.singletonMap("owner", "data-platform");
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(partitionStatistics(spec, 9L)),
+                true,
+                Collections.singletonList(partitionOptions));
+        Path directory = new Path(new Path(table.location()), "dt=2026%2F07%2517");
+        Path dataFile = new Path(directory, "data.parquet");
+        table.fileIO().mkdirs(directory);
+        table.fileIO().overwriteFileUtf8(dataFile, "old data");
+
+        try (BatchTableCommit commit =
+                table.newBatchWriteBuilder().withOverwrite(spec).newCommit()) {
+            switch (operation) {
+                case "truncate-table":
+                    commit.truncateTable();
+                    break;
+                case "truncate-partition":
+                    commit.truncatePartitions(Collections.singletonList(spec));
+                    break;
+                case "overwrite":
+                    commit.commit(Collections.emptyList());
+                    break;
+                default:
+                    throw new IllegalArgumentException(operation);
+            }
+        }
+
+        assertThat(table.fileIO().exists(dataFile)).isFalse();
+        assertThat(table.fileIO().exists(directory)).isTrue();
+        Partition partition = onlyPartition(identifier);
+        assertThat(partition.spec()).isEqualTo(spec);
+        assertThat(partition.recordCount()).isZero();
+        assertThat(partition.fileSizeInBytes()).isZero();
+        assertThat(partition.fileCount()).isZero();
+        assertThat(partition.options()).isEqualTo(partitionOptions);
     }
 
     @Test

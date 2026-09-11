@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -599,15 +600,16 @@ public class FormatTableCommit implements BatchTableCommit {
             partitionOptions = new ArrayList<>(specs.size());
             for (Map<String, String> spec : specs) {
                 statisticsByPartition.putIfAbsent(spec, emptyStatistics(spec, commitTime));
+                Path partitionPath =
+                        buildPartitionPath(
+                                location, spec, formatTablePartitionOnlyValueInPath, partitionKeys);
+                if (partitionPath.toUri().getScheme() == null) {
+                    // Scheme-less table paths use local storage, but catalog partition locations
+                    // require a fully qualified URI. Keep escaped partition values intact.
+                    partitionPath = new Path(new File(partitionPath.toString()).toURI());
+                }
                 partitionOptions.add(
-                        Collections.singletonMap(
-                                CoreOptions.PATH.key(),
-                                buildPartitionPath(
-                                                location,
-                                                spec,
-                                                formatTablePartitionOnlyValueInPath,
-                                                partitionKeys)
-                                        .toString()));
+                        Collections.singletonMap(CoreOptions.PATH.key(), partitionPath.toString()));
             }
         }
         partitionManager.createPartitions(
