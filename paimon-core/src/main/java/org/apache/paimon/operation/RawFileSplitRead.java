@@ -396,10 +396,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         FileIndexResult fileIndexResult = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
-        boolean rangePushdown =
-                fileRowRange != null
-                        && formatReaderMapping.getReaderFactory().supportsRowRangeSkip();
-        if (rangePushdown) {
+        if (fileRowRange != null) {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
