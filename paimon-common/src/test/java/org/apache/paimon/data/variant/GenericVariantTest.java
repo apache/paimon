@@ -277,6 +277,38 @@ public class GenericVariantTest {
     }
 
     @Test
+    public void testVariantGetDecimalWithScaleAbovePrecision() {
+        // precision() counts the digits of the unscaled value, so it is below the scale for any
+        // value under 0.1. The scale 38 case is the widest the reader admits, and it is the
+        // first one here that needs a non compact Decimal.
+        String tiny = "0.00000000000000000000000000000000000001";
+        Variant variant = GenericVariant.fromJson("{\"small\": 0.05, \"tiny\": " + tiny + "}");
+        VariantCastArgs castArgs = new VariantCastArgs(false, ZoneOffset.UTC);
+
+        assertThat(variant.variantGet("$.small", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("0.05"));
+        assertThat(variant.variantGet("$.small", DataTypes.DECIMAL(5, 3), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("0.050"), 5, 3));
+        assertThat(variant.variantGet("$.tiny", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString(tiny));
+        assertThat(variant.variantGet("$.tiny", DataTypes.DECIMAL(38, 38), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal(tiny), 38, 38));
+    }
+
+    @Test
+    public void testVariantGetDecimalWithNegativeScale() {
+        // getDecimal() strips trailing zeros, which turns 100.00 into 1E+2, a negative scale
+        Variant variant = GenericVariant.fromJson("{\"round\": 100.00}");
+        VariantCastArgs castArgs = new VariantCastArgs(false, ZoneOffset.UTC);
+
+        // rescaling rather than un-stripping keeps this in step with toJson
+        assertThat(variant.variantGet("$.round", DataTypes.STRING(), castArgs))
+                .isEqualTo(BinaryString.fromString("100"));
+        assertThat(variant.variantGet("$.round", DataTypes.DECIMAL(5, 1), castArgs))
+                .isEqualTo(Decimal.fromBigDecimal(new BigDecimal("100.0"), 5, 1));
+    }
+
+    @Test
     public void testObjectFieldOrderingCompatibility() {
         String bmpKey = "\uE000";
         String supplementaryKey = new String(Character.toChars(0x10000));
