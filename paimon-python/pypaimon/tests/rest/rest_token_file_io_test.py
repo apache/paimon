@@ -283,6 +283,26 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertTrue(hasattr(uri_reader_factory, 'create'),
                             "uri_reader_factory should support create method")
 
+    def test_close_only_closes_instance_uri_reader_factory(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+
+        factory = MagicMock()
+        shared_file_io = MagicMock()
+        file_io._uri_reader_factory_cache = factory
+        file_io.file_io = MagicMock(return_value=shared_file_io)
+
+        file_io.close()
+        file_io.close()
+
+        factory.close.assert_called_once_with()
+        self.assertIsNone(file_io._uri_reader_factory_cache)
+        shared_file_io.close.assert_not_called()
+
     def test_filesystem_and_uri_reader_factory_after_serialization(self):
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             original_file_io = RESTTokenFileIO(
