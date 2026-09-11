@@ -69,6 +69,8 @@ class TestFileStoreCommitRowTracking(unittest.TestCase):
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
         self.mock_table.options.manifest_merge_min_count.return_value = 30
+        self.mock_table.options.write_only.return_value = False
+        self.mock_table.options.manifest_merge_skip_on_write_only.return_value = False
         self.mock_snapshot_commit = Mock()
 
     def _create_file_store_commit(self):
@@ -272,6 +274,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.file_io = Mock()
         self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
         self.mock_table.options.manifest_merge_min_count.return_value = 30
+        self.mock_table.options.write_only.return_value = False
+        self.mock_table.options.manifest_merge_skip_on_write_only.return_value = False
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
@@ -514,6 +518,34 @@ class TestFileStoreCommit(unittest.TestCase):
              in result.manifest_merge_result.merge_after_manifests],
         )
         file_store_commit.manifest_file_merger.merge.assert_called_once()
+
+    def test_disabled_manifest_merge_preserves_manifests_on_retry(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        options = CoreOptions(Options({
+            'write-only': 'true',
+            'manifest.merge.skip-on-write-only': 'true',
+        }))
+        self.mock_table.options.write_only.side_effect = options.write_only
+        self.mock_table.options.manifest_merge_skip_on_write_only.side_effect = (
+            options.manifest_merge_skip_on_write_only)
+        current = [self._manifest_meta('before-a'), self._manifest_meta('before-b')]
+        first_commit, retry_result = self._run_manifest_commit_attempt(
+            commit_result=False, existing_manifests=current)
+
+        self.assertIsInstance(retry_result, CommitFailRetryResult)
+        self.assertIsNone(retry_result.manifest_merge_result)
+        first_commit.manifest_file_merger.merge.assert_not_called()
+        self.assertEqual(
+            current, first_commit.manifest_list_manager.write.call_args_list[-1].args[1])
+
+        current.append(self._manifest_meta('concurrent'))
+        retry_commit, result = self._run_manifest_commit_attempt(
+            commit_result=True, retry_result=retry_result, existing_manifests=current)
+
+        self.assertTrue(result.is_success())
+        retry_commit.manifest_file_merger.merge.assert_not_called()
+        self.assertEqual(
+            current, retry_commit.manifest_list_manager.write.call_args_list[-1].args[1])
 
     def test_atomic_commit_exception_does_not_retain_manifest_merge_result(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
