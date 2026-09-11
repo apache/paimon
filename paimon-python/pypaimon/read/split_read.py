@@ -152,6 +152,7 @@ class SplitRead(ABC):
         self.nested_name_paths = nested_name_paths
         self.limit = limit
         self._blob_parallelism = 1
+        self._parquet_row_group_cache = None
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
         # flags to merge functions that enforce NOT-NULL on every add().
@@ -393,7 +394,8 @@ class SplitRead(ABC):
                 options=self.table.options,
                 nested_name_paths=ordered_nested_paths,
                 predicate_field_names=predicate_fields,
-                row_ranges=parquet_row_ranges)
+                row_ranges=parquet_row_ranges,
+                row_group_cache=self._parquet_row_group_cache)
         elif file_format == CoreOptions.FILE_FORMAT_ROW:
             if has_nested:
                 raise NotImplementedError(

@@ -160,6 +160,7 @@ class TableRead:
         self.nested_name_paths = nested_name_paths
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
+        self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
         limit = self.limit
@@ -851,6 +852,7 @@ class TableRead:
             post_filter_after_inline,
         )
         sr._blob_parallelism = blob_parallelism
+        sr._parquet_row_group_cache = self._parquet_row_group_cache
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,

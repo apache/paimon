@@ -80,7 +80,7 @@ class _FileFormatDatasetCache:
         self._loads = {}
         self._lock = threading.Lock()
 
-    def get_or_load(self, key: Tuple[Any, str, str], loader: Callable[[], Any],
+    def get_or_load(self, key: Tuple[Any, ...], loader: Callable[[], Any],
                     size_estimator: Callable[[Any], Optional[int]]):
         with self._lock:
             entry = self._entries.get(key)
@@ -109,7 +109,8 @@ class _FileFormatDatasetCache:
             raise
 
         with self._lock:
-            if estimated_size is not None:
+            if (estimated_size is not None
+                    and estimated_size <= self.max_size):
                 estimated_size = max(1, estimated_size)
                 self._entries[key] = (dataset, estimated_size)
                 self.estimated_size += estimated_size
@@ -119,6 +120,23 @@ class _FileFormatDatasetCache:
         with self._lock:
             self._loads.pop(key, None)
         return dataset
+
+    def get(self, key):
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            self._entries.move_to_end(key)
+            return entry[0]
+
+    def put(self, key, dataset, estimated_size):
+        estimated_size = max(1, estimated_size)
+        with self._lock:
+            if estimated_size > self.max_size or key in self._entries:
+                return
+            self._entries[key] = (dataset, estimated_size)
+            self.estimated_size += estimated_size
+            self._evict()
 
     def resize(self, max_size: int):
         with self._lock:
@@ -131,6 +149,32 @@ class _FileFormatDatasetCache:
                 or len(self._entries) > self.max_entries):
             _, (_, evicted_size) = self._entries.popitem(last=False)
             self.estimated_size -= evicted_size
+
+
+class _DecodedRowGroupCache:
+    def __init__(self, max_size: int):
+        self._cache = _FileFormatDatasetCache(max_size)
+
+    def iter_or_load(self, key, loader):
+        cached = self._cache.get(key)
+        if cached is not None:
+            yield from cached
+            return
+
+        batches = []
+        size = 0
+        for batch in loader():
+            # Yield while loading so one oversized row group is never
+            # materialized in full merely to discover that it cannot fit.
+            if batches is not None:
+                size += batch.nbytes
+                if size <= self._cache.max_size:
+                    batches.append(batch)
+                else:
+                    batches = None
+            yield batch
+        if batches is not None:
+            self._cache.put(key, batches, size)
 
 
 _FILE_FORMAT_DATASET_CACHE = None
@@ -253,9 +297,14 @@ class FormatPyArrowReader(RecordBatchReader):
                  nested_name_paths: Optional[List[List[str]]] = None,
                  predicate_field_names: Optional[Set[str]] = None,
                  row_indices: Optional[List[int]] = None,
-                 row_ranges: Optional[List[Tuple[int, int]]] = None):
+                 row_ranges: Optional[List[Tuple[int, int]]] = None,
+                 row_group_cache: Optional[_DecodedRowGroupCache] = None):
         self._predicate_field_names = predicate_field_names or set()
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+        self._row_group_cache = row_group_cache
+        self._row_group_cache_filesystem = _FilesystemIdentity(
+            file_io.filesystem)
+        self._row_group_cache_path = file_path_for_pyarrow
         cache_max_size = _file_format_metadata_cache_max_size(file_io)
         self.dataset = _file_format_dataset(
             file_io, file_format, file_path, cache_max_size)
@@ -397,18 +446,32 @@ class FormatPyArrowReader(RecordBatchReader):
     def _iter_row_group_batches(self):
         columns = self._row_group_read_columns()
         for row_group in self._surviving_row_group_ids():
-            for batch in self._parquet_file.iter_batches(
-                    row_groups=[row_group],
-                    columns=columns,
-                    batch_size=self._scan_batch_size):
+            if (self._row_group_cache is not None
+                    and self._selected_parquet_row_groups is not None):
+                key = (
+                    self._row_group_cache_filesystem,
+                    self._row_group_cache_path,
+                    row_group,
+                    tuple(columns),
+                    self._scan_batch_size,
+                )
+                batches = self._row_group_cache.iter_or_load(
+                    key,
+                    lambda: self._read_parquet_row_group_batches(
+                        row_group, columns),
+                )
+            else:
+                batches = self._read_parquet_row_group_batches(
+                    row_group, columns)
+            for batch in batches:
                 if self._has_nested_path:
-                    batches = [batch]
+                    filtered_batches = [batch]
                     if self._scan_filter is not None:
                         table = ds.dataset(
                             pa.Table.from_batches([batch])
                         ).scanner(filter=self._scan_filter).to_table()
-                        batches = table.to_batches()
-                    for filtered in batches:
+                        filtered_batches = table.to_batches()
+                    for filtered in filtered_batches:
                         out = self._select_nested_fields(filtered)
                         if out.num_rows:
                             yield out
@@ -424,6 +487,13 @@ class FormatPyArrowReader(RecordBatchReader):
                 for out in table.to_batches():
                     if out.num_rows:
                         yield out
+
+    def _read_parquet_row_group_batches(self, row_group, columns):
+        return self._parquet_file.iter_batches(
+            row_groups=[row_group],
+            columns=columns,
+            batch_size=self._scan_batch_size,
+        )
 
     def _row_group_read_columns(self):
         if self._has_nested_path:
