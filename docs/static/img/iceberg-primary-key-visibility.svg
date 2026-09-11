@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="558" viewBox="0 0 960 558" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">When primary key changes reach Iceberg</title>
+<desc id="desc">For incremental publication without Iceberg deletion vectors, full compaction makes highest-level files eligible. With v3 deletion vectors, files above L0 and deletion vectors are eligible. Initial publication and metadata rebuilds use raw-readable snapshot splits.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="556" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">When primary key changes reach Iceberg</text>
+<text x="28" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">File eligibility during incremental metadata publication</text>
+<rect x="28" y="102" width="440" height="362" rx="10" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="48" y="140" font-size="23" font-weight="700" text-anchor="start" fill="#172b4d">Full-compaction mode</text>
+<rect x="48" y="162" width="400" height="71" rx="10" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="248.0" y="194" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">L0: pending changes</text>
+<rect x="492" y="102" width="440" height="362" rx="10" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="512" y="140" font-size="23" font-weight="700" text-anchor="start" fill="#172b4d">Iceberg v3 deletion vectors</text>
+<rect x="512" y="162" width="400" height="71" rx="10" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="712.0" y="194" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">L0: pending changes</text>
+<path d="M 248 233 V 291" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="266" y="270" font-size="17" font-weight="400" text-anchor="start" fill="#526277">full compaction</text>
+<path d="M 712 233 V 291" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="730" y="259" font-size="17" font-weight="400" text-anchor="start" fill="#526277">lookup /</text>
+<text x="730" y="281" font-size="17" font-weight="400" text-anchor="start" fill="#526277">compaction</text>
+<rect x="48" y="297" width="400" height="83" rx="10" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="248.0" y="329" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">Highest LSM level</text>
+<text x="248.0" y="357" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Merged rows</text>
+<rect x="512" y="297" width="400" height="83" rx="10" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="712.0" y="329" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">Files above L0 + deletion vectors</text>
+<text x="712.0" y="357" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Obsolete row positions are filtered</text>
+<path d="M 248 380 V 409" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 712 380 V 409" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="248" y="443" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">Publish metadata → refresh reader</text>
+<text x="712" y="443" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">Publish metadata → refresh reader</text>
+<text x="28" y="504" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Initial publication and rebuilds use raw-readable snapshot splits.</text>
+<text x="28" y="532" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Use compaction to establish a predictable visibility boundary.</text>
+</g>
+</svg>

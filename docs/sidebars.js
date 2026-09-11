@@ -631,19 +631,33 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "Iceberg Metadata",
+    "label": "Iceberg Compatibility",
     "collapsed": true,
     "link": {
       type: "doc",
       "id": "iceberg/index"
     },
     "items": [
-      "iceberg/append-table",
-      "iceberg/primary-key-table",
+      {
+        type: "category",
+        "label": "Read Tables",
+        "items": [
+          "iceberg/append-table",
+          "iceberg/primary-key-table"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Catalogs",
+        "link": { type: "doc", "id": "iceberg/catalogs" },
+        "items": [
+          "iceberg/hive-catalog",
+          "iceberg/rest-catalog"
+        ]
+      },
       "iceberg/iceberg-tags",
-      "iceberg/hive-catalog",
-      "iceberg/rest-catalog",
       "iceberg/ecosystem",
+      "iceberg/data-types",
       "iceberg/configurations"
     ]
   },

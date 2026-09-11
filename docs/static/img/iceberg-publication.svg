@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One data set, two read paths</title>
+<desc id="desc">A Paimon writer commits a snapshot and publishes Iceberg metadata. Paimon and Iceberg readers both read the original data files. Hive or REST publication also updates an external catalog.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="498" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">One data set, two read paths</text>
+<text x="28" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Paimon owns writes and maintenance. Iceberg metadata exposes a readable view.</text>
+<rect x="28" y="108" width="220" height="90" rx="10" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="138.0" y="140" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">Paimon writer</text>
+<text x="138.0" y="168" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Flink / Spark</text>
+<path d="M 248 153 H 304" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="310" y="108" width="270" height="90" rx="10" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="445.0" y="140" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">1. Commit snapshot</text>
+<text x="445.0" y="168" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Paimon metadata</text>
+<path d="M 580 153 H 636" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="642" y="108" width="290" height="114" rx="10" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="787.0" y="140" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">2. Publish metadata</text>
+<text x="787.0" y="168" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Iceberg manifests + snapshots</text>
+<text x="787.0" y="192" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Hive / REST registration</text>
+<path d="M 445 198 V 326" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="458" y="267" font-size="16" font-weight="400" text-anchor="start" fill="#526277">references</text>
+<rect x="28" y="332" width="220" height="90" rx="10" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="138.0" y="364" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">Paimon reader</text>
+<text x="138.0" y="392" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Load Paimon metadata</text>
+<rect x="310" y="332" width="340" height="90" rx="10" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="480.0" y="364" font-size="21" font-weight="700" text-anchor="middle" fill="#10705d">Shared data files</text>
+<text x="480.0" y="392" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Remain in the Paimon table</text>
+<rect x="712" y="332" width="220" height="90" rx="10" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="822.0" y="364" font-size="21" font-weight="700" text-anchor="middle" fill="#2463b4">Iceberg reader</text>
+<text x="822.0" y="392" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Load published metadata</text>
+<path d="M 248 377 H 304" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 712 377 H 656" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 822 222 V 326" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="837" y="274" font-size="16" font-weight="400" text-anchor="start" fill="#526277">refresh</text>
+<text x="480" y="465" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">Publication creates metadata; it does not duplicate the table’s data.</text>
+</g>
+</svg>
