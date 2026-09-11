@@ -278,6 +278,10 @@ public class PredicateBuilder {
         return in(idx, literals).negate().get();
     }
 
+    public Predicate notIn(Transform transform, List<Object> literals) {
+        return in(transform, literals).negate().get();
+    }
+
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(

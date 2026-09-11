@@ -18,16 +18,22 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
@@ -1183,6 +1189,413 @@ class ParquetFiltersTest {
         } else {
             assertThat(filter).isEqualTo(FilterCompat.NOOP);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // nested fields
+    // ---------------------------------------------------------------------------------------
+
+    private static final RowType ADDR_TYPE =
+            RowType.of(
+                    new DataType[] {new VarCharType(), new VarCharType()},
+                    new String[] {"city", "zip"});
+
+    private static RowType nestedRowType() {
+        return RowType.of(
+                new DataType[] {
+                    new BigIntType(),
+                    RowType.of(
+                            new DataType[] {new BigIntType(), ADDR_TYPE},
+                            new String[] {"id", "addr"}),
+                    new ArrayType(ADDR_TYPE)
+                },
+                new String[] {"pk", "user", "addrs"});
+    }
+
+    private static Predicate nestedPredicate(RowType rowType, String column, String... path) {
+        DataField field = rowType.getFields().get(rowType.getFieldIndex(column));
+        FieldRef ref = new FieldRef(rowType.getFieldIndex(column), field.name(), field.type());
+        return new PredicateBuilder(rowType)
+                .equal(
+                        new NestedFieldTransform(ref, Arrays.asList(path)),
+                        BinaryString.fromString("Beijing"));
+    }
+
+    @Test
+    public void testNestedField() {
+        RowType rowType = nestedRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+
+        // user.addr.city
+        test(
+                schema,
+                nestedPredicate(rowType, "user", "addr", "city"),
+                "eq(user.addr.city, Binary{\"Beijing\"})",
+                true);
+    }
+
+    /** A nested field is dispatched through the same visitors as a top-level one. */
+    @Test
+    public void testNestedFieldSupportsEveryPushableFunction() {
+        RowType rowType = nestedRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        // user.id, a BIGINT one level down
+        FieldRef ref = new FieldRef(1, "user", rowType.getTypeAt(1));
+        NestedFieldTransform id = new NestedFieldTransform(ref, Collections.singletonList("id"));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.isNull(id), "eq(user.id, null)", true);
+        test(schema, builder.isNotNull(id), "noteq(user.id, null)", true);
+        test(schema, builder.equal(id, 5L), "eq(user.id, 5)", true);
+        test(schema, builder.notEqual(id, 5L), "noteq(user.id, 5)", true);
+        test(schema, builder.lessThan(id, 5L), "lt(user.id, 5)", true);
+        test(schema, builder.lessOrEqual(id, 5L), "lteq(user.id, 5)", true);
+        test(schema, builder.greaterThan(id, 5L), "gt(user.id, 5)", true);
+        test(schema, builder.greaterOrEqual(id, 5L), "gteq(user.id, 5)", true);
+        test(schema, builder.between(id, 1L, 3L), "and(gteq(user.id, 1), lteq(user.id, 3))", true);
+        test(
+                schema,
+                builder.in(id, Arrays.asList(1L, 2L)),
+                "or(eq(user.id, 1), eq(user.id, 2))",
+                true);
+        test(
+                schema,
+                builder.notIn(id, Arrays.asList(1L, 2L)),
+                "and(noteq(user.id, 1), noteq(user.id, 2))",
+                true);
+
+        // AND/OR mixing a nested field with a top-level one
+        test(
+                schema,
+                PredicateBuilder.and(builder.greaterThan(id, 5L), builder.lessThan(0, 100L)),
+                "and(gt(user.id, 5), lt(pk, 100))",
+                true);
+
+        // string functions have no parquet equivalent, for nested and top-level alike
+        test(schema, builder.startsWith(id, BinaryString.fromString("x")), (String) null, false);
+    }
+
+    /**
+     * A field under a repeated group has no single value per row, and parquet-mr rejects a
+     * predicate on one outright. A table declaring a struct over a file that repeats it - a format
+     * table reading files someone else wrote - must give up rather than hand one over.
+     */
+    @Test
+    public void testNestedFieldUnderRepeatedGroupIsNotPushedDown() {
+        RowType rowType = nestedRowType();
+        MessageType schema =
+                new MessageType(
+                        "paimon_schema",
+                        Types.repeatedGroup()
+                                .addField(Types.required(PrimitiveTypeName.INT64).named("id"))
+                                .addField(
+                                        Types.requiredGroup()
+                                                .addField(
+                                                        Types.required(PrimitiveTypeName.BINARY)
+                                                                .as(
+                                                                        LogicalTypeAnnotation
+                                                                                .stringType())
+                                                                .named("city"))
+                                                .named("addr"))
+                                .named("user"));
+
+        test(schema, nestedPredicate(rowType, "user", "addr", "city"), (String) null, false);
+    }
+
+    /** A nested column the file does not hold still prunes: parquet-mr reads it as all-null. */
+    @Test
+    public void testNestedFieldMissingFromFile() {
+        RowType rowType = nestedRowType();
+        MessageType schema =
+                ParquetSchemaConverter.convertToParquetMessageType(
+                        RowType.of(new DataType[] {new BigIntType()}, new String[] {"pk"}));
+
+        test(
+                schema,
+                nestedPredicate(rowType, "user", "addr", "city"),
+                "eq(user.addr.city, Binary{\"Beijing\"})",
+                true);
+    }
+
+    private static RowType payloadRowType() {
+        return RowType.of(
+                new DataType[] {
+                    new BigIntType(),
+                    RowType.of(
+                            new DataType[] {
+                                new DecimalType(10, 2),
+                                new TimestampType(3),
+                                new LocalZonedTimestampType(3),
+                                new BigIntType()
+                            },
+                            new String[] {"amount", "ts", "ltz", "qty"}),
+                    new DecimalType(10, 2)
+                },
+                new String[] {"pk", "payload", "amt_top"});
+    }
+
+    private static NestedFieldTransform payloadLeaf(RowType rowType, String leaf) {
+        RowType payload = (RowType) rowType.getTypeAt(1);
+        return new NestedFieldTransform(
+                new FieldRef(1, "payload", payload), Collections.singletonList(leaf));
+    }
+
+    /** Control: the two shapes that already worked must keep working. */
+    @Test
+    public void testTopLevelDecimalAndNestedBigIntAreUnaffected() {
+        RowType rowType = payloadRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Decimal amount = Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2);
+
+        test(schema, builder.equal(2, amount), "eq(amt_top, 1234)", true);
+        test(
+                schema,
+                builder.greaterThan(payloadLeaf(rowType, "qty"), 5L),
+                "gt(payload.qty, 5)",
+                true);
+    }
+
+    /**
+     * A nested DECIMAL must be filtered on its full path. The physical type is resolved by walking
+     * the path, but the column handed to parquet-mr used to be rebuilt from the leaf {@code
+     * PrimitiveType}, which only knows its own name — parquet-mr then saw a missing top-level
+     * column and could drop every row group.
+     */
+    @Test
+    public void testNestedDecimalKeepsTheFullPath() {
+        RowType rowType = payloadRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        NestedFieldTransform amount = payloadLeaf(rowType, "amount");
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2);
+
+        test(schema, builder.equal(amount, value), "eq(payload.amount, 1234)", true);
+        test(schema, builder.lessThan(amount, value), "lt(payload.amount, 1234)", true);
+    }
+
+    /** Same as {@link #testNestedDecimalKeepsTheFullPath()} for TIMESTAMP. */
+    @Test
+    public void testNestedTimestampKeepsTheFullPath() {
+        RowType rowType = payloadRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        NestedFieldTransform ts = payloadLeaf(rowType, "ts");
+        Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
+        long millis = value.getMillisecond();
+
+        test(schema, builder.equal(ts, value), "eq(payload.ts, " + millis + ")", true);
+        test(schema, builder.greaterThan(ts, value), "gt(payload.ts, " + millis + ")", true);
+    }
+
+    /** Same as {@link #testNestedDecimalKeepsTheFullPath()} for LOCAL ZONED TIMESTAMP. */
+    @Test
+    public void testNestedLocalZonedTimestampKeepsTheFullPath() {
+        RowType rowType = payloadRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        NestedFieldTransform ltz = payloadLeaf(rowType, "ltz");
+        Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
+        long millis = value.getMillisecond();
+
+        test(schema, builder.equal(ltz, value), "eq(payload.ltz, " + millis + ")", true);
+    }
+
+    /**
+     * A nested decimal schema with an explicit physical type, the way a Format Table may hold it.
+     */
+    private static MessageType nestedDecimalSchema(
+            PrimitiveTypeName physicalType, int fixedLength, int precision, int scale) {
+        Types.PrimitiveBuilder<PrimitiveType> builder = Types.optional(physicalType);
+        if (physicalType == PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+            builder.length(fixedLength);
+        }
+        PrimitiveType amount =
+                builder.as(LogicalTypeAnnotation.decimalType(scale, precision)).named("amount");
+        return new MessageType(
+                "paimon_schema",
+                Arrays.asList(
+                        Types.optional(PrimitiveTypeName.INT64).named("pk"),
+                        Types.optionalGroup().addField(amount).named("payload")));
+    }
+
+    private void testNestedDecimalPhysicalType(
+            PrimitiveTypeName physicalType, int fixedLength, int precision, String literal) {
+        int scale = 2;
+        RowType payload =
+                RowType.of(
+                        new DataType[] {new DecimalType(precision, scale)},
+                        new String[] {"amount"});
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {new BigIntType(), payload}, new String[] {"pk", "payload"});
+        MessageType schema = nestedDecimalSchema(physicalType, fixedLength, precision, scale);
+        NestedFieldTransform amount =
+                new NestedFieldTransform(
+                        new FieldRef(1, "payload", payload), Collections.singletonList("amount"));
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal(literal), precision, scale);
+
+        FilterPredicate filter =
+                convert(schema, new PredicateBuilder(rowType).equal(amount, value));
+        // whatever the physical type, the column must be the full path
+        assertThat(filter.toString()).startsWith("eq(payload.amount, ");
+    }
+
+    /** The decimal visitor builds a column per physical type; every branch must keep the path. */
+    @Test
+    public void testNestedDecimalKeepsTheFullPathForEveryPhysicalType() {
+        // precision <= 9 -> INT32
+        testNestedDecimalPhysicalType(PrimitiveTypeName.INT32, 0, 8, "12.34");
+        // precision <= 18 -> INT64
+        testNestedDecimalPhysicalType(PrimitiveTypeName.INT64, 0, 15, "12.34");
+        // larger -> FIXED_LEN_BYTE_ARRAY
+        testNestedDecimalPhysicalType(PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY, 16, 30, "12.34");
+        // a Format Table may hold a decimal as BINARY
+        testNestedDecimalPhysicalType(PrimitiveTypeName.BINARY, 0, 30, "12.34");
+    }
+
+    /** Micros-precision timestamps take a different literal path than millis. */
+    @Test
+    public void testNestedTimestampMicrosKeepsTheFullPath() {
+        RowType payload =
+                RowType.of(
+                        new DataType[] {new TimestampType(6), new LocalZonedTimestampType(6)},
+                        new String[] {"ts", "ltz"});
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {new BigIntType(), payload}, new String[] {"pk", "payload"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        FieldRef payloadRef = new FieldRef(1, "payload", payload);
+        Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
+        long micros = value.toMicros();
+
+        test(
+                schema,
+                builder.equal(
+                        new NestedFieldTransform(payloadRef, Collections.singletonList("ts")),
+                        value),
+                "eq(payload.ts, " + micros + ")",
+                true);
+        test(
+                schema,
+                builder.greaterThan(
+                        new NestedFieldTransform(payloadRef, Collections.singletonList("ltz")),
+                        value),
+                "gt(payload.ltz, " + micros + ")",
+                true);
+    }
+
+    /** IN and NOT IN build the column through the same visitor; a nested decimal must keep it. */
+    @Test
+    public void testNestedDecimalInAndNotInKeepTheFullPath() {
+        RowType rowType = payloadRowType();
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        NestedFieldTransform amount = payloadLeaf(rowType, "amount");
+        Decimal one = Decimal.fromBigDecimal(new BigDecimal("1.00"), 10, 2);
+        Decimal two = Decimal.fromBigDecimal(new BigDecimal("2.00"), 10, 2);
+
+        test(
+                schema,
+                builder.in(amount, Arrays.asList(one, two)),
+                "or(eq(payload.amount, 100), eq(payload.amount, 200))",
+                true);
+        test(
+                schema,
+                builder.notIn(amount, Arrays.asList(one, two)),
+                "and(noteq(payload.amount, 100), noteq(payload.amount, 200))",
+                true);
+    }
+
+    /** The path walk is recursive; three levels must resolve as well as two. */
+    @Test
+    public void testDeeplyNestedFieldKeepsTheFullPath() {
+        RowType level3 = RowType.of(new DataType[] {new BigIntType()}, new String[] {"d"});
+        RowType level2 = RowType.of(new DataType[] {level3}, new String[] {"c"});
+        RowType level1 = RowType.of(new DataType[] {level2}, new String[] {"b"});
+        RowType rowType =
+                RowType.of(new DataType[] {new BigIntType(), level1}, new String[] {"pk", "a"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+
+        NestedFieldTransform deep =
+                new NestedFieldTransform(
+                        new FieldRef(1, "a", level1), Arrays.asList("b", "c", "d"));
+        test(schema, new PredicateBuilder(rowType).equal(deep, 7L), "eq(a.b.c.d, 7)", true);
+    }
+
+    /**
+     * A nested component whose own name contains a dot cannot be expressed as a dot-joined path:
+     * parquet-mr would split {@code s.a.b} into three components and miss the real two-component
+     * column, treating it as all-null and pruning matching row groups. Refuse the pushdown.
+     */
+    @Test
+    public void testNestedComponentContainingADotIsNotPushedDown() {
+        RowType inner = RowType.of(new DataType[] {new BigIntType()}, new String[] {"a.b"});
+        RowType rowType =
+                RowType.of(new DataType[] {new BigIntType(), inner}, new String[] {"pk", "s"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        // the file really holds s -> "a.b"; a dot-joined "s.a.b" does not address it
+        assertThat(schema.getType("s").asGroupType().containsField("a.b")).isTrue();
+
+        NestedFieldTransform dotted =
+                new NestedFieldTransform(
+                        new FieldRef(1, "s", inner), Collections.singletonList("a.b"));
+        test(schema, builder.equal(dotted, 7L), (String) null, false);
+    }
+
+    /**
+     * The dot may also sit in the top-level column's own name. The joined path then splits into
+     * components the file does not have — and, worse, could collide with a genuinely nested column
+     * of the same spelling. Refuse the pushdown here too.
+     */
+    @Test
+    public void testNestedFieldUnderATopLevelNameContainingADotIsNotPushedDown() {
+        RowType inner = RowType.of(new DataType[] {new VarCharType()}, new String[] {"city"});
+        RowType rowType =
+                RowType.of(new DataType[] {new BigIntType(), inner}, new String[] {"pk", "a.b"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+
+        // the file holds ["a.b", "city"]; the joined name "a.b.city" splits into [a, b, city]
+        assertThat(schema.containsField("a.b")).isTrue();
+        assertThat(schema.containsField("a")).isFalse();
+
+        NestedFieldTransform nested =
+                new NestedFieldTransform(
+                        new FieldRef(1, "a.b", inner), Collections.singletonList("city"));
+        test(
+                schema,
+                new PredicateBuilder(rowType).equal(nested, BinaryString.fromString("Beijing")),
+                (String) null,
+                false);
+    }
+
+    /**
+     * No component contains a dot here, but the joined path still equals the literal name of an
+     * unrelated top-level sibling column. findFileColumn resolves a nested predicate's joined name
+     * against the file by exact top-level match before walking components, so it would bind this
+     * predicate to that unrelated column's physical type. Refuse the pushdown instead of risking
+     * it.
+     */
+    @Test
+    public void testNestedFieldCollidingWithADottedTopLevelSiblingIsNotPushedDown() {
+        RowType inner = RowType.of(new DataType[] {new BigIntType()}, new String[] {"a"});
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {new BigIntType(), new IntType(), inner},
+                        new String[] {"pk", "s.a", "s"});
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+
+        // the file holds both a top-level "s.a" and a nested s -> a; the joined name collides
+        assertThat(schema.containsField("s.a")).isTrue();
+        assertThat(schema.getType("s").asGroupType().containsField("a")).isTrue();
+
+        NestedFieldTransform nested =
+                new NestedFieldTransform(
+                        new FieldRef(2, "s", inner), Collections.singletonList("a"));
+        test(schema, new PredicateBuilder(rowType).equal(nested, 7L), (String) null, false);
     }
 
     private FilterPredicate convert(MessageType schema, Predicate predicate) {

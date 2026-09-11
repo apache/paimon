@@ -61,7 +61,7 @@ object SparkExpressionConverter {
     }
 
     exp match {
-      case n: NamedReference => Some(new FieldTransform(toPaimonFieldRef(n, rowType)))
+      case n: NamedReference => toPaimonFieldTransform(n, rowType)
       case s: GeneralScalarExpression =>
         s.name() match {
           case CONCAT => convertChildren(s.children()).map(i => new ConcatTransform(i))
@@ -147,6 +147,43 @@ object SparkExpressionConverter {
         throw new UnsupportedOperationException(
           s"Convert value: $value to datatype: $dataType is unsupported.")
     }
+  }
+
+  /**
+   * A reference is either a top-level column or a path down into row-typed ones. Anything the path
+   * cannot descend - a field inside an array or a map, a name the schema does not hold - yields
+   * None, leaving the predicate for Spark to evaluate after the scan.
+   */
+  private def toPaimonFieldTransform(ref: NamedReference, rowType: RowType): Option[Transform] = {
+    val parts = ref.fieldNames()
+    val index = rowType.getFieldIndex(parts.head)
+    if (index == -1) {
+      return None
+    }
+    val root = rowType.getField(parts.head)
+    val rootRef = new FieldRef(index, root.name(), root.`type`())
+    if (parts.length == 1) {
+      return Some(new FieldTransform(rootRef))
+    }
+
+    // Keep the components Spark gave us: they are the transform's identity, and joining them
+    // would lose the boundaries of a name that itself contains a dot.
+    val path = new java.util.ArrayList[String](parts.length - 1)
+    var current = root.`type`()
+    parts.tail.foreach {
+      part =>
+        current match {
+          case nested: RowType =>
+            val position = nested.getFieldIndex(part)
+            if (position == -1) {
+              return None
+            }
+            path.add(part)
+            current = nested.getTypeAt(position)
+          case _ => return None
+        }
+    }
+    Some(new NestedFieldTransform(rootRef, path))
   }
 
   private def toPaimonFieldRef(ref: NamedReference, rowType: RowType): FieldRef = {

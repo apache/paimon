@@ -25,6 +25,7 @@ import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NestedFieldTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -56,6 +57,7 @@ import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.Operators.DoubleColumn;
 import org.apache.parquet.filter2.predicate.Operators.FloatColumn;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
@@ -76,6 +78,9 @@ import java.util.Set;
 
 /** Convert {@link Predicate} to {@link FilterCompat.Filter}. */
 public class ParquetFilters {
+
+    /** Columns here are named, never indexed, so a nested field's index is left unset. */
+    private static final int UNUSED_INDEX = -1;
 
     private ParquetFilters() {}
 
@@ -287,9 +292,41 @@ public class ParquetFilters {
             throw new UnsupportedOperationException();
         }
 
+        /**
+         * A nested field carries no index into the file, only a path, so it is re-dispatched under
+         * a {@link FieldRef} naming that path. Every other transform - casts, string functions -
+         * has no column of its own to filter on and is given up here.
+         */
         @Override
         public FilterPredicate visitNonFieldLeaf(LeafPredicate predicate) {
-            throw new UnsupportedOperationException();
+            if (!(predicate.transform() instanceof NestedFieldTransform)) {
+                throw new UnsupportedOperationException();
+            }
+            NestedFieldTransform nested = (NestedFieldTransform) predicate.transform();
+            // The path reaches parquet-mr as a dot-joined string, which it splits back into
+            // components. A component that itself contains a dot does not survive that round trip:
+            // the filter would address a column the file does not hold, and a missing column reads
+            // as all-null, pruning row groups that actually match. Give up the pruning instead.
+            if (nested.fieldRef().name().indexOf('.') >= 0) {
+                throw new UnsupportedOperationException();
+            }
+            for (String component : nested.path()) {
+                if (component.indexOf('.') >= 0) {
+                    throw new UnsupportedOperationException();
+                }
+            }
+            // Even with no dot inside any component, the joined path can still equal the literal
+            // name of an unrelated top-level column (both a top-level "s.a" and a nested s -> a
+            // are valid siblings). findFileColumn resolves that joined name against the file by
+            // exact top-level match first, so it would pick that unrelated column's type - column
+            // identity itself round-trips back to the right path (parquet-mr re-splits any
+            // dot-joined name it is given), but the type mismatch fails the read outright. Give up
+            // the pushdown rather than risk it whenever the file actually has such a column.
+            if (findChild(fileSchema, nested.fieldName(), caseSensitive) != null) {
+                throw new UnsupportedOperationException();
+            }
+            FieldRef pathRef = new FieldRef(UNUSED_INDEX, nested.fieldName(), nested.outputType());
+            return predicate.function().visit(this, pathRef, predicate.literals());
         }
 
         private <T> Set<T> convertSets(List<Object> values, Class<T> kclass, FieldRef fieldRef) {
@@ -320,7 +357,7 @@ public class ParquetFilters {
                 DecimalType decimalType = (DecimalType) fieldRef.type();
                 Decimal decimal = normalizeDecimal((Decimal) value, decimalType);
                 PrimitiveType primitiveType =
-                        decimalPrimitiveType(fieldRef, fileSchema, caseSensitive);
+                        decimalColumn(fieldRef, fileSchema, caseSensitive).type;
                 switch (primitiveType.getPrimitiveTypeName()) {
                     case INT32:
                         long intValue = toUnscaledLong(decimal);
@@ -341,7 +378,7 @@ public class ParquetFilters {
 
             if (value instanceof Timestamp) {
                 Timestamp timestamp = (Timestamp) value;
-                timestampPrimitiveType(fieldRef, fileSchema, caseSensitive);
+                timestampColumn(fieldRef, fileSchema, caseSensitive);
                 int precision = getTimestampPrecision(type);
                 if (precision <= 3) {
                     // milliseconds
@@ -492,9 +529,10 @@ public class ParquetFilters {
         }
     }
 
-    private static PrimitiveType decimalPrimitiveType(
+    private static FileColumn decimalColumn(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
-        PrimitiveType primitiveType = primitiveType(fieldRef, fileSchema, caseSensitive);
+        FileColumn column = fileColumn(fieldRef, fileSchema, caseSensitive);
+        PrimitiveType primitiveType = column.type;
         LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
         if (!(logicalType instanceof DecimalLogicalTypeAnnotation)) {
             throw new UnsupportedOperationException();
@@ -505,19 +543,20 @@ public class ParquetFilters {
         if (decimalLogicalType.getScale() != ((DecimalType) fieldRef.type()).getScale()) {
             throw new UnsupportedOperationException();
         }
-        return primitiveType;
+        return column;
     }
 
-    private static PrimitiveType timestampPrimitiveType(
+    private static FileColumn timestampColumn(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
-        PrimitiveType primitiveType = primitiveType(fieldRef, fileSchema, caseSensitive);
+        FileColumn column = fileColumn(fieldRef, fileSchema, caseSensitive);
+        PrimitiveType primitiveType = column.type;
         if (primitiveType.getPrimitiveTypeName() != PrimitiveType.PrimitiveTypeName.INT64) {
             throw new UnsupportedOperationException();
         }
 
         LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
         if (logicalType == null) {
-            return primitiveType;
+            return column;
         }
         if (!(logicalType instanceof TimestampLogicalTypeAnnotation)) {
             throw new UnsupportedOperationException();
@@ -534,35 +573,100 @@ public class ParquetFilters {
                 || timestampType.isAdjustedToUTC() != expectedAdjustedToUtc) {
             throw new UnsupportedOperationException();
         }
-        return primitiveType;
+        return column;
     }
 
-    private static PrimitiveType primitiveType(
+    /**
+     * The column the file holds for {@code fieldRef}, with the file's own spelling of the path.
+     * Callers that build a parquet column must use {@link FileColumn#path}: a {@link PrimitiveType}
+     * only knows its own leaf name, so rebuilding the column from it drops the enclosing path and
+     * addresses a column the file does not have.
+     */
+    private static FileColumn fileColumn(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
-        PrimitiveType matched = findPrimitiveType(fieldRef, fileSchema, caseSensitive);
+        FileColumn matched = findFileColumn(fieldRef, fileSchema, caseSensitive);
         if (matched == null) {
             throw new UnsupportedOperationException();
         }
         return matched;
     }
 
+    /** A column the file actually holds: its own spelling of the path, and its physical type. */
+    private static class FileColumn {
+
+        private final String path;
+        private final PrimitiveType type;
+
+        private FileColumn(String path, PrimitiveType type) {
+            this.path = path;
+            this.type = type;
+        }
+    }
+
     /**
      * The file's column for {@code fieldRef}, or null when the file has no such column. A column
      * that exists but is not primitive cannot carry a predicate at all, so it is rejected outright.
+     *
+     * <p>{@code fieldRef} names a nested field with dots ({@code addr.city}), which is resolved by
+     * descending the file's groups. A top-level column matching the whole name wins over that walk,
+     * keeping flat columns spelled with dots resolving as they always did. parquet-mr identifies
+     * columns by dot-joined path too, so it cannot tell the two apart either way.
      */
     @Nullable
-    private static PrimitiveType findPrimitiveType(
+    private static FileColumn findFileColumn(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
-        // Paimon predicates currently reference top-level fields only. Nested field
-        // predicates are rejected before reaching the format reader.
-        for (Type field : fileSchema.getFields()) {
+        Type matched = findChild(fileSchema, fieldRef.name(), caseSensitive);
+        if (matched != null) {
+            return toFileColumn(matched.getName(), matched);
+        }
+
+        String[] parts = fieldRef.name().split("\\.");
+        if (parts.length < 2) {
+            return null;
+        }
+
+        StringBuilder resolved = new StringBuilder();
+        GroupType parent = fileSchema;
+        for (int i = 0; i < parts.length; i++) {
+            Type child = findChild(parent, parts[i], caseSensitive);
+            if (child == null) {
+                return null;
+            }
+            if (child.getRepetition() == Type.Repetition.REPEATED) {
+                // A column under repetition has no one value per row, and parquet-mr refuses a
+                // predicate on it outright.
+                throw new UnsupportedOperationException();
+            }
+            if (i > 0) {
+                resolved.append('.');
+            }
+            resolved.append(child.getName());
+
+            if (i == parts.length - 1) {
+                return toFileColumn(resolved.toString(), child);
+            }
+            if (child.isPrimitive()) {
+                return null;
+            }
+            parent = child.asGroupType();
+        }
+        return null;
+    }
+
+    private static FileColumn toFileColumn(String path, Type field) {
+        if (!field.isPrimitive()) {
+            throw new UnsupportedOperationException();
+        }
+        return new FileColumn(path, field.asPrimitiveType());
+    }
+
+    @Nullable
+    private static Type findChild(GroupType parent, String name, boolean caseSensitive) {
+        for (Type field : parent.getFields()) {
             if (caseSensitive
-                    ? field.getName().equals(fieldRef.name())
-                    : field.getName().equalsIgnoreCase(fieldRef.name())) {
-                if (!field.isPrimitive()) {
-                    throw new UnsupportedOperationException();
-                }
-                return field.asPrimitiveType();
+                    ? field.getName().equals(name)
+                    : field.getName().equalsIgnoreCase(name)) {
+                return field;
             }
         }
         return null;
@@ -585,10 +689,11 @@ public class ParquetFilters {
     private static PushdownTarget pushdownTarget(
             FieldRef fieldRef, MessageType fileSchema, boolean caseSensitive) {
         PrimitiveType.PrimitiveTypeName[] acceptable = acceptableTypes(fieldRef.type());
-        PrimitiveType fileType = findPrimitiveType(fieldRef, fileSchema, caseSensitive);
-        if (fileType == null) {
+        FileColumn fileColumn = findFileColumn(fieldRef, fileSchema, caseSensitive);
+        if (fileColumn == null) {
             return new PushdownTarget(fieldRef.name(), acceptable[0]);
         }
+        PrimitiveType fileType = fileColumn.type;
 
         validateBigIntCompatibility(fieldRef, fileType);
 
@@ -602,7 +707,7 @@ public class ParquetFilters {
 
         for (PrimitiveType.PrimitiveTypeName candidate : acceptable) {
             if (fileType.getPrimitiveTypeName() == candidate) {
-                return new PushdownTarget(fileType.getName(), candidate);
+                return new PushdownTarget(fileColumn.path, candidate);
             }
         }
         throw new UnsupportedOperationException();
@@ -828,15 +933,16 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(DecimalType decimalType) {
-            PrimitiveType primitiveType = decimalPrimitiveType(fieldRef, fileSchema, caseSensitive);
+            FileColumn column = decimalColumn(fieldRef, fileSchema, caseSensitive);
+            PrimitiveType primitiveType = column.type;
             switch (primitiveType.getPrimitiveTypeName()) {
                 case INT32:
-                    return FilterApi.intColumn(primitiveType.getName());
+                    return FilterApi.intColumn(column.path);
                 case INT64:
-                    return FilterApi.longColumn(primitiveType.getName());
+                    return FilterApi.longColumn(column.path);
                 case BINARY:
                 case FIXED_LEN_BYTE_ARRAY:
-                    return FilterApi.binaryColumn(primitiveType.getName());
+                    return FilterApi.binaryColumn(column.path);
                 default:
                     throw new UnsupportedOperationException();
             }
@@ -847,7 +953,7 @@ public class ParquetFilters {
             int precision = timestampType.getPrecision();
             if (precision <= 6) {
                 return FilterApi.longColumn(
-                        timestampPrimitiveType(fieldRef, fileSchema, caseSensitive).getName());
+                        timestampColumn(fieldRef, fileSchema, caseSensitive).path);
             }
             // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();
@@ -858,7 +964,7 @@ public class ParquetFilters {
             int precision = localZonedTimestampType.getPrecision();
             if (precision <= 6) {
                 return FilterApi.longColumn(
-                        timestampPrimitiveType(fieldRef, fileSchema, caseSensitive).getName());
+                        timestampColumn(fieldRef, fileSchema, caseSensitive).path);
             }
             // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();

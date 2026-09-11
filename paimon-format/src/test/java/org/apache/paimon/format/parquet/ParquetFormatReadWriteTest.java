@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
@@ -36,7 +37,12 @@ import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.NestedFieldTransform;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -52,8 +58,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -332,5 +341,229 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             Assertions.assertThat(rows)
                     .containsExactly(GenericRow.of(1.25f, 2.5d), GenericRow.of(3.75f, 5.0d));
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // end-to-end: a nested predicate must not silently drop rows
+    // -----------------------------------------------------------------------------------------
+
+    private RowType nestedPayloadType() {
+        return RowType.of(
+                new DataType[] {
+                    DataTypes.BIGINT(),
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.DECIMAL(10, 2),
+                                DataTypes.TIMESTAMP(3),
+                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                                DataTypes.BIGINT()
+                            },
+                            new String[] {"amount", "ts", "ltz", "qty"})
+                },
+                new String[] {"pk", "payload"});
+    }
+
+    /**
+     * Reads with {@code predicate} pushed down and returns the primary keys that survived. Parquet
+     * filtering is row-group granular, so a matching row may come back alongside non-matching ones
+     * — what must never happen is the matching row disappearing.
+     */
+    private List<Long> readPks(RowType rowType, Predicate predicate) throws IOException {
+        List<Predicate> filters = new ArrayList<>();
+        filters.add(predicate);
+        List<Long> pks = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat()
+                        .createReaderFactory(rowType, rowType, filters)
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                InternalRow row;
+                while ((row = batch.next()) != null) {
+                    pks.add(row.getLong(0));
+                }
+                batch.releaseBatch();
+            }
+        }
+        return pks;
+    }
+
+    private void writeTwoPayloadRows(RowType rowType) throws IOException {
+        Decimal match = Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2);
+        Decimal other = Decimal.fromBigDecimal(new BigDecimal("99.99"), 10, 2);
+        org.apache.paimon.data.Timestamp early =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1704067200000L);
+        org.apache.paimon.data.Timestamp late =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1704067200000L + 60_000L);
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(1L, GenericRow.of(match, early, early, 7L)),
+                GenericRow.of(2L, GenericRow.of(other, late, late, 8L)));
+    }
+
+    private NestedFieldTransform payloadLeaf(RowType rowType, String leaf) {
+        RowType payload = (RowType) rowType.getTypeAt(1);
+        return new NestedFieldTransform(
+                new FieldRef(1, "payload", payload), Collections.singletonList(leaf));
+    }
+
+    /** Control: a nested BIGINT predicate already carried its full path and kept its row. */
+    @Test
+    public void testNestedBigIntPredicateKeepsMatchingRows() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        Predicate onQty = new PredicateBuilder(rowType).equal(payloadLeaf(rowType, "qty"), 7L);
+        Assertions.assertThat(readPks(rowType, onQty))
+                .as("control: the row whose payload.qty equals 7 must survive the filter")
+                .contains(1L);
+    }
+
+    /**
+     * Reading with a predicate on a nested DECIMAL must still return the matching row. The column
+     * handed to parquet-mr used to carry only the leaf name, so parquet-mr saw a missing top-level
+     * column, treated it as all-null and pruned the row group holding the match.
+     */
+    @Test
+    public void testNestedDecimalPredicateKeepsMatchingRows() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        Decimal match = Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2);
+        Predicate onAmount =
+                new PredicateBuilder(rowType).equal(payloadLeaf(rowType, "amount"), match);
+        Assertions.assertThat(readPks(rowType, onAmount))
+                .as("the row whose payload.amount equals the literal must survive the filter")
+                .contains(1L);
+    }
+
+    /** Same as {@link #testNestedDecimalPredicateKeepsMatchingRows()} for LOCAL ZONED TIMESTAMP. */
+    @Test
+    public void testNestedLocalZonedTimestampPredicateKeepsMatchingRows() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        org.apache.paimon.data.Timestamp early =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1704067200000L);
+        Predicate onLtz = new PredicateBuilder(rowType).equal(payloadLeaf(rowType, "ltz"), early);
+        Assertions.assertThat(readPks(rowType, onLtz))
+                .as("the row whose payload.ltz equals the literal must survive the filter")
+                .contains(1L);
+    }
+
+    /** Same as {@link #testNestedDecimalPredicateKeepsMatchingRows()} for TIMESTAMP. */
+    @Test
+    public void testNestedTimestampPredicateKeepsMatchingRows() throws IOException {
+        RowType rowType = nestedPayloadType();
+        writeTwoPayloadRows(rowType);
+        org.apache.paimon.data.Timestamp early =
+                org.apache.paimon.data.Timestamp.fromEpochMillis(1704067200000L);
+        Predicate onTs = new PredicateBuilder(rowType).equal(payloadLeaf(rowType, "ts"), early);
+        Assertions.assertThat(readPks(rowType, onTs))
+                .as("the row whose payload.ts equals the literal must survive the filter")
+                .contains(1L);
+    }
+
+    /**
+     * A nested component whose own name contains a dot cannot be addressed by a dot-joined path.
+     * Resolution fails, the filter is built against a path the file does not hold, and every row
+     * group is pruned — so the matching row disappears.
+     */
+    @Test
+    public void testNestedComponentContainingADotKeepsMatchingRows() throws IOException {
+        RowType inner = RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a.b"});
+        RowType rowType =
+                RowType.of(new DataType[] {DataTypes.BIGINT(), inner}, new String[] {"pk", "s"});
+
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(1L, GenericRow.of(7L)),
+                GenericRow.of(2L, GenericRow.of(8L)));
+
+        Predicate onDotted =
+                new PredicateBuilder(rowType)
+                        .equal(
+                                new NestedFieldTransform(
+                                        new FieldRef(1, "s", inner),
+                                        Collections.singletonList("a.b")),
+                                7L);
+
+        Assertions.assertThat(readPks(rowType, onDotted))
+                .as("the row whose s.`a.b` equals 7 must survive the filter")
+                .contains(1L);
+    }
+
+    /** The dot may sit in the top-level column's own name; the matching row must still survive. */
+    @Test
+    public void testTopLevelNameContainingADotKeepsMatchingRows() throws IOException {
+        RowType inner = RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"city"});
+        RowType rowType =
+                RowType.of(new DataType[] {DataTypes.BIGINT(), inner}, new String[] {"pk", "a.b"});
+
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(1L, GenericRow.of(7L)),
+                GenericRow.of(2L, GenericRow.of(8L)));
+
+        Predicate onNested =
+                new PredicateBuilder(rowType)
+                        .equal(
+                                new NestedFieldTransform(
+                                        new FieldRef(1, "a.b", inner),
+                                        Collections.singletonList("city")),
+                                7L);
+
+        Assertions.assertThat(readPks(rowType, onNested))
+                .as("the row whose `a.b`.city equals 7 must survive the filter")
+                .contains(1L);
+    }
+
+    /**
+     * A nested path that joins cleanly (no component contains a dot) can still collide with an
+     * unrelated top-level column whose own literal name equals that joined path. The schema below
+     * has both a top-level column named {@code "s.a"} (declared INT, so its physical column is
+     * INT32) and a nested {@code s.a} (row {@code s} with BIGINT field {@code a}, physical INT64).
+     * A predicate on the nested field is re-dispatched as {@code FieldRef("s.a")}, and {@link
+     * org.apache.parquet.filter2.predicate.ParquetFilters}'s column lookup checks an exact
+     * top-level name before walking the split components - so it resolves the predicate's physical
+     * type against the unrelated top-level column instead of {@code s -> a}.
+     *
+     * <p>parquet-mr itself re-splits any dot-joined column name it is given, so the {@link
+     * org.apache.parquet.filter2.predicate.FilterPredicate} still ends up addressing the real,
+     * two-segment {@code s -> a} column chunk - but tagged with the wrong (top-level) column's
+     * physical type. parquet-mr's {@code SchemaCompatibilityValidator} catches that mismatch at
+     * read time and throws {@link IllegalArgumentException}, so today this does not silently drop
+     * the row - it fails the read outright for a query that has nothing wrong with it.
+     */
+    @Test
+    public void testNestedPathCollidingWithADottedTopLevelNameKeepsMatchingRows()
+            throws IOException {
+        RowType inner = RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"a"});
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.INT(), inner},
+                        new String[] {"pk", "s.a", "s"});
+
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                // top-level `s.a` (INT32) = 999 (does not match), nested s.a (INT64) = 7 (matches)
+                GenericRow.of(1L, 999, GenericRow.of(7L)));
+
+        Predicate onNestedSA =
+                new PredicateBuilder(rowType)
+                        .equal(
+                                new NestedFieldTransform(
+                                        new FieldRef(2, "s", inner),
+                                        Collections.singletonList("a")),
+                                7L);
+
+        Assertions.assertThat(readPks(rowType, onNestedSA))
+                .as(
+                        "the row whose nested s.a equals 7 must survive the filter, "
+                                + "even though the unrelated top-level `s.a` column does not")
+                .contains(1L);
     }
 }
