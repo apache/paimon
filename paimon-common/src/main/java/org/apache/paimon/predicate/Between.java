@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
@@ -133,7 +134,7 @@ public class Between extends LeafTernaryFunction {
             if (leafPredicate.function() == LessOrEqual.INSTANCE) {
                 if (lessOrEqual == null) {
                     lessOrEqual = leafPredicate;
-                } else {
+                } else if (!hasNullLiteral(lessOrEqual) && !hasNullLiteral(leafPredicate)) {
                     lessOrEqual =
                             compareLiteral(
                                                     type,
@@ -142,11 +143,14 @@ public class Between extends LeafTernaryFunction {
                                             < 0
                                     ? lessOrEqual
                                     : leafPredicate;
+                } else {
+                    // A null bound matches nothing; keep the null-bearing predicate.
+                    lessOrEqual = hasNullLiteral(lessOrEqual) ? lessOrEqual : leafPredicate;
                 }
             } else if (leafPredicate.function() == GreaterOrEqual.INSTANCE) {
                 if (greaterOrEqual == null) {
                     greaterOrEqual = leafPredicate;
-                } else {
+                } else if (!hasNullLiteral(greaterOrEqual) && !hasNullLiteral(leafPredicate)) {
                     greaterOrEqual =
                             compareLiteral(
                                                     type,
@@ -155,6 +159,9 @@ public class Between extends LeafTernaryFunction {
                                             > 0
                                     ? greaterOrEqual
                                     : leafPredicate;
+                } else {
+                    greaterOrEqual =
+                            hasNullLiteral(greaterOrEqual) ? greaterOrEqual : leafPredicate;
                 }
             } else {
                 result.add(leafPredicate);
@@ -166,7 +173,12 @@ public class Between extends LeafTernaryFunction {
             // Determine which is the lower bound and which is the upper bound
             Object lowerBound = greaterOrEqual.literals().get(0);
             Object upperBound = lessOrEqual.literals().get(0);
-            if (compareLiteral(type, lowerBound, upperBound) >= 0) {
+            if (lowerBound == null || upperBound == null) {
+                // A null bound makes the conjunction match nothing; never compare
+                // nulls (SQL null literals are unordered).
+                result.add(lessOrEqual);
+                result.add(greaterOrEqual);
+            } else if (compareLiteral(type, lowerBound, upperBound) >= 0) {
                 // No valid intersection, keep all original predicates
                 result.add(lessOrEqual);
                 result.add(greaterOrEqual);
@@ -190,6 +202,10 @@ public class Between extends LeafTernaryFunction {
         return result;
     }
 
+    private static boolean hasNullLiteral(LeafPredicate predicate) {
+        return predicate.literals().stream().anyMatch(Objects::isNull);
+    }
+
     private static List<LeafPredicate> mergeMultipleBetweens(
             FieldTransform field, List<LeafPredicate> predicates) {
         List<LeafPredicate> results = new ArrayList<>();
@@ -211,16 +227,26 @@ public class Between extends LeafTernaryFunction {
         Object maxLower = null;
         Object minUpper = null;
 
+        boolean anyNullLiteral = false;
         for (LeafPredicate between : betweens) {
             Object lower = between.literals().get(0);
             Object upper = between.literals().get(1);
 
+            if (lower == null || upper == null) {
+                anyNullLiteral = true;
+                continue;
+            }
             if (maxLower == null || compareLiteral(fieldType, lower, maxLower) > 0) {
                 maxLower = lower;
             }
             if (minUpper == null || compareLiteral(fieldType, upper, minUpper) < 0) {
                 minUpper = upper;
             }
+        }
+        if (anyNullLiteral) {
+            // A null bound makes the conjunction match nothing; leave the predicates
+            // unmerged instead of comparing nulls.
+            return predicates;
         }
 
         // Check if intersection is valid
