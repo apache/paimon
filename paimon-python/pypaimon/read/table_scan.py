@@ -21,7 +21,10 @@ from typing import List, Optional, Tuple
 
 from pypaimon.catalog.catalog_exception import TableNoPermissionException
 from pypaimon.common.identifier import UNKNOWN_DATABASE
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexSearchMode,
+)
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -164,6 +167,12 @@ class TableScan:
         if self.table.bucket_mode() in (BucketMode.HASH_DYNAMIC, BucketMode.CROSS_PARTITION):
             return False
         options = self.table.options.options
+        # A static plan cannot decide whether indexed rows satisfy LIMIT after
+        # residual filtering. ReadBuilder.to_arrow handles that two-stage path;
+        # other adaptive reads retain Python FULL fallback semantics.
+        if (self.table.options.scalar_index_search_mode()
+                == GlobalIndexSearchMode.ADAPTIVE):
+            return False
         if (any(options.contains_key(key)
                 for key in _NATIVE_FAMILY_SEARCH_MODE_OPTIONS)):
             from pypaimon.read.native_plan import native_family_search_modes_available

@@ -235,6 +235,7 @@ Updates to already indexed rows also require the [update policy](#update-indexed
 | --- | --- | --- |
 | `fast` | Search indexed coverage only. | The index is current, or partial coverage is acceptable. |
 | `full` | Check row-ID coverage against snapshot `nextRowId`; scan raw data for detected gaps where supported. | Newly appended ranges need to be included. |
+| `adaptive` | For a limited PyPaimon Arrow read, search indexed rows first and scan uncovered ranges only if the limit is not reached. Other reads use `full` semantics. | Point or small-result scalar lookups that must include newly appended rows. |
 | `detail` | Compare active data-file row-ID ranges with index coverage, then scan detected gaps where supported. | Coverage should be checked against current files, including partition filtering. |
 
 ![An index covers the original row range; appended rows need another index build or a search mode that includes uncovered data.](/img/multimodal-index-coverage.svg)
@@ -278,6 +279,12 @@ row-ID ranges of current data files. Neither mode compares indexed values with
 the latest column values. An update that preserves row IDs can therefore leave
 stale index entries even when coverage is complete. Handle those updates through
 the [index update policy](#update-indexed-columns) and an index build.
+
+PyPaimon's `adaptive` scalar mode optimizes materialized `ReadBuilder.to_arrow()`
+and multimodal `scan(...).to_arrow()` / `read_blobs()` calls with a finite limit.
+Both stages use the same snapshot, and fallback is skipped only after all read
+filters have run. Without a limit, or through a static `new_scan().plan()`, it
+behaves like `full`.
 
 Use `scalar-index.search-mode`, `vector-index.search-mode`, or
 `full-text-index.search-mode` for one index family. The legacy

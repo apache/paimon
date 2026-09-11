@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from unittest.mock import patch
 from datetime import date, datetime
 from decimal import Decimal
 import os
@@ -25,6 +26,8 @@ import types
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.build_plan import (
     filter_non_indexable_splits as _filter_non_indexable_splits,
     split_by_global_index_shard as _split_by_global_index_shard,
@@ -198,6 +201,120 @@ class GlobalIndexBuildTest(
         'bucket': '-1',
         'file.format': 'parquet',
     }
+
+    def _adaptive_builder(self, table, predicate, limit=None):
+        adaptive = table.copy({'scalar-index.search-mode': 'adaptive'})
+        builder = adaptive.new_read_builder().with_filter(predicate)
+        if limit is not None:
+            builder.with_limit(limit)
+        return builder
+
+    def test_adaptive_scalar_index_reads_fallback_only_when_needed(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table({
+            'id': [1], 'name': ['indexed'], 'age': [10], 'city': ['old'],
+        }, schema=self.pa_schema))
+        table.create_global_index('id')
+        self._write_arrow(table, pa.table({
+            'id': [1, 2],
+            'name': ['unindexed-residual', 'unindexed-miss'],
+            'age': [20, 30],
+            'city': ['new', 'raw'],
+        }, schema=self.pa_schema))
+
+        pb = table.new_read_builder().new_predicate_builder()
+        indexed_builder = self._adaptive_builder(
+            table,
+            PredicateBuilder.and_predicates([
+                pb.equal('id', 1), pb.equal('city', 'old')]),
+            limit=1,
+        )
+        from pypaimon.read.table_scan import TableScan
+        with patch.object(
+                TableScan,
+                'with_row_ranges',
+                side_effect=AssertionError('raw fallback was planned')):
+            indexed = indexed_builder.to_arrow()
+        self.assertEqual(['indexed'], indexed.column('name').to_pylist())
+
+        raw = self._adaptive_builder(
+            table, pb.equal('id', 2), limit=1).to_arrow()
+        self.assertEqual(['unindexed-miss'], raw.column('name').to_pylist())
+
+        residual = self._adaptive_builder(
+            table,
+            PredicateBuilder.and_predicates([
+                pb.equal('id', 1), pb.equal('city', 'new')]),
+            limit=1,
+        ).to_arrow()
+        self.assertEqual(
+            ['unindexed-residual'], residual.column('name').to_pylist())
+
+        partial = self._adaptive_builder(
+            table, pb.equal('id', 1), limit=2).to_arrow()
+        self.assertEqual(
+            {'indexed', 'unindexed-residual'},
+            set(partial.column('name').to_pylist()),
+        )
+        self.assertEqual(2, partial.num_rows)
+
+    def test_adaptive_scalar_index_pins_fallback_snapshot(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table({
+            'id': [1], 'name': ['indexed'], 'age': [10], 'city': ['old'],
+        }, schema=self.pa_schema))
+        table.create_global_index('id')
+        self._write_arrow(table, pa.table({
+            'id': [2], 'name': ['visible'], 'age': [20], 'city': ['raw'],
+        }, schema=self.pa_schema))
+
+        pb = table.new_read_builder().new_predicate_builder()
+        builder = self._adaptive_builder(table, pb.equal('id', 2), limit=2)
+        from pypaimon.read.table_read import TableRead
+        original_to_arrow = TableRead.to_arrow
+        appended = [False]
+
+        def append_after_indexed_read(table_read, *args, **kwargs):
+            result = original_to_arrow(table_read, *args, **kwargs)
+            if (not appended[0]
+                    and table_read.table.options.scalar_index_search_mode()
+                    == GlobalIndexSearchMode.FAST):
+                appended[0] = True
+                self._write_arrow(table, pa.table({
+                    'id': [2], 'name': ['too-new'],
+                    'age': [30], 'city': ['raw'],
+                }, schema=self.pa_schema))
+            return result
+
+        with patch.object(
+                TableRead, 'to_arrow', new=append_after_indexed_read):
+            result = builder.to_arrow()
+
+        self.assertTrue(appended[0])
+        self.assertEqual(['visible'], result.column('name').to_pylist())
+
+    def test_adaptive_without_limit_keeps_full_semantics(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table({
+            'id': [1], 'name': ['indexed'], 'age': [10], 'city': ['old'],
+        }, schema=self.pa_schema))
+        table.create_global_index('id')
+        self._write_arrow(table, pa.table({
+            'id': [2], 'name': ['unindexed'], 'age': [20], 'city': ['new'],
+        }, schema=self.pa_schema))
+
+        pb = table.new_read_builder().new_predicate_builder()
+        builder = self._adaptive_builder(table, pb.equal('id', 2))
+        result = builder.to_arrow()
+
+        self.assertEqual(['unindexed'], result.column('name').to_pylist())
+
+        limited = self._adaptive_builder(
+            table, pb.equal('id', 2), limit=1)
+        plan = limited.new_scan().plan()
+        result = limited.new_read().to_arrow(plan.splits())
+
+        self.assertEqual(['unindexed'], result.column('name').to_pylist())
 
     def test_create_btree_global_index_from_python(self):
         table = self._create_table()

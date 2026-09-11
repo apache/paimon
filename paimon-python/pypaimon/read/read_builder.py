@@ -17,6 +17,12 @@
 
 from typing import List, Optional
 
+import pyarrow as pa
+
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexSearchMode,
+)
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
@@ -97,6 +103,137 @@ class ReadBuilder:
             nested_name_paths=self._nested_name_paths(),
             limit=self._limit,
         )
+
+    def to_arrow(
+        self,
+        parallelism: Optional[int] = None,
+        blob_parallelism: Optional[int] = None,
+    ) -> pa.Table:
+        """Plan and materialize this read as an Arrow table.
+
+        In adaptive scalar-index mode, supported limited reads first read the
+        indexed ranges and plan uncovered ranges only when the filtered result
+        does not reach the limit. Other cases retain FULL semantics.
+        """
+        if self._adaptive_scalar_read_supported():
+            result = self._adaptive_scalar_to_arrow(
+                parallelism, blob_parallelism)
+            if result is not None:
+                return result
+        return self._read_once(parallelism, blob_parallelism)
+
+    def _read_once(self, parallelism, blob_parallelism) -> pa.Table:
+        plan = self.new_scan().plan()
+        return self.new_read().to_arrow(
+            plan.splits(),
+            parallelism=parallelism,
+            blob_parallelism=blob_parallelism,
+        )
+
+    def _adaptive_scalar_read_supported(self) -> bool:
+        options = self.table.options
+        return (
+            options.scalar_index_search_mode()
+            == GlobalIndexSearchMode.ADAPTIVE
+            and self._limit is not None
+            and self._limit > 0
+            and self._predicate is not None
+            and options.data_evolution_enabled()
+            and not self.table.is_primary_key_table
+            and not options.options.contains(
+                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)
+        )
+
+    def _adaptive_scalar_to_arrow(
+        self,
+        parallelism: Optional[int],
+        blob_parallelism: Optional[int],
+    ) -> Optional[pa.Table]:
+        snapshot = self._target_snapshot()
+        if snapshot is None:
+            return None
+
+        pinned = self._table_at_snapshot(
+            snapshot.id, GlobalIndexSearchMode.ADAPTIVE)
+        evaluation_builder = self._copy_for_table(pinned)
+        index_plan = (
+            evaluation_builder.new_scan().file_scanner._eval_global_index(
+                snapshot)
+        )
+
+        from pypaimon.read.scanner.file_scanner import (
+            _GlobalIndexPlanningResult,
+        )
+        if not isinstance(index_plan, _GlobalIndexPlanningResult):
+            return evaluation_builder._read_once(
+                parallelism, blob_parallelism)
+
+        indexed_table = self._table_at_snapshot(
+            snapshot.id, GlobalIndexSearchMode.FAST)
+        indexed_builder = self._copy_for_table(indexed_table)
+        indexed_scan = indexed_builder.new_scan().with_global_index_result(
+            index_plan.indexed_result)
+        indexed = indexed_builder.new_read().to_arrow(
+            indexed_scan.plan().splits(),
+            parallelism=parallelism,
+            blob_parallelism=blob_parallelism,
+        )
+        if indexed.num_rows >= self._limit or not index_plan.unindexed_ranges:
+            return indexed
+
+        fallback_table = self._table_at_snapshot(
+            snapshot.id, GlobalIndexSearchMode.FULL)
+        fallback_builder = self._copy_for_table(
+            fallback_table, limit=self._limit - indexed.num_rows)
+        fallback_scan = fallback_builder.new_scan().with_row_ranges(
+            index_plan.unindexed_ranges)
+        fallback = fallback_builder.new_read().to_arrow(
+            fallback_scan.plan().splits(),
+            parallelism=parallelism,
+            blob_parallelism=blob_parallelism,
+        )
+        if indexed.num_rows == 0:
+            return fallback
+        if fallback.num_rows == 0:
+            return indexed
+        return pa.concat_tables([indexed, fallback])
+
+    def _target_snapshot(self):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+
+        manager = self.table.snapshot_manager()
+        snapshot = TimeTravelUtil.try_travel_to_snapshot(
+            self.table.options.options,
+            self.table.tag_manager(),
+            manager,
+        )
+        return (
+            snapshot if snapshot is not None else manager.get_latest_snapshot()
+        )
+
+    def _table_at_snapshot(self, snapshot_id, search_mode):
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+
+        options = self.table.options.options
+        overrides = {
+            key: None for key in SCAN_KEYS if options.contains_key(key)
+        }
+        overrides.update({
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id),
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(): search_mode.value,
+        })
+        return self.table.copy(overrides)
+
+    def _copy_for_table(self, table, limit=None):
+        builder = ReadBuilder(table)
+        if self._predicate is not None:
+            builder.with_filter(self._predicate)
+        if self._partition_filter is not None:
+            builder.with_partition_filter(self._partition_filter)
+        if self._projection is not None:
+            builder.with_projection(self._projection)
+        builder.with_limit(self._limit if limit is None else limit)
+        return builder
 
     def _nested_name_paths(self) -> Optional[List[List[str]]]:
         """Resolve the current nested-projection state into a parallel list
