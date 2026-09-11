@@ -28,6 +28,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
@@ -233,6 +234,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void compactManifests() {
         commit.compactManifest();
+    }
+
+    @Override
+    public void replaceManifests(
+            List<ManifestFileMeta> removedManifests, List<ManifestFileMeta> addedManifests) {
+        commit.replaceManifest(removedManifests, addedManifests);
     }
 
     public boolean rollbackToAsLatest(Tag targetTag) {

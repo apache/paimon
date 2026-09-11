@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -82,6 +83,16 @@ public interface FileStoreCommit extends AutoCloseable {
 
     /** Compact the manifest entries only. */
     void compactManifest();
+
+    /**
+     * Replace the manifest entries with the given rewritten manifests. The {@code removedManifests}
+     * are the manifests the caller read and sorted (used for conflict detection); the {@code
+     * addedManifests} are the sorted rewrite result produced by the caller. The commit reuses the
+     * optimistic concurrency mode of {@link #compactManifest()}: on conflict, new delta manifests
+     * added by other commits are appended to the tail of {@code addedManifests}.
+     */
+    void replaceManifest(
+            List<ManifestFileMeta> removedManifests, List<ManifestFileMeta> addedManifests);
 
     /** Roll back to the target snapshot and materialize it as the latest snapshot. */
     boolean rollbackToAsLatest(Snapshot targetSnapshot);
