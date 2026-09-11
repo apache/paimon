@@ -81,7 +81,13 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
     private void readLookupDataBenchmark(byte[][] inputs, byte[][] randomInputs, boolean nullResult)
             throws IOException {
         Benchmark benchmark =
-                new Benchmark("reader-" + randomInputs.length, randomInputs.length)
+                new Benchmark(
+                                String.format(
+                                        "reader-%d-records-bloom-%s-%s",
+                                        recordCount,
+                                        bloomFilterEnabled,
+                                        nullResult ? "miss" : "hit"),
+                                randomInputs.length)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         for (int valueLength : VALUE_LENGTHS) {

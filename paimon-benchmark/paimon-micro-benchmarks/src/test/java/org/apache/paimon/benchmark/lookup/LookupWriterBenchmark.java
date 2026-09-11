@@ -61,7 +61,13 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
 
     private void writeLookupDataBenchmark(byte[][] inputs, boolean sameValue) {
         Benchmark benchmark =
-                new Benchmark("writer-" + inputs.length, inputs.length)
+                new Benchmark(
+                                String.format(
+                                        "writer-%d-records-bloom-%s-%s",
+                                        inputs.length,
+                                        bloomFilterEnabled,
+                                        sameValue ? "same-value" : "diff-value"),
+                                inputs.length)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         for (int valueLength : VALUE_LENGTHS) {
