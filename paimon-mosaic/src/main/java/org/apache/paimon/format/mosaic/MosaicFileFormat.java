@@ -75,6 +75,16 @@ public class MosaicFileFormat extends FileFormat {
                     .noDefaultValue()
                     .withDescription("Number of column buckets for parallel IO.");
 
+    public static final ConfigOption<Integer> READ_PREFETCH_ROW_GROUPS =
+            ConfigOptions.key("mosaic.read.prefetch-row-groups")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "Number of row groups a reader opens ahead of the one being consumed. "
+                                    + "Opening a row group issues several dependent range reads, "
+                                    + "so prefetching overlaps that latency with decoding. "
+                                    + "0 disables prefetching.");
+
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
     }
@@ -91,7 +101,11 @@ public class MosaicFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates) {
-        return new MosaicReaderFactory(dataSchemaRowType, projectedRowType, predicates);
+        return new MosaicReaderFactory(
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                Math.max(0, formatContext.options().get(READ_PREFETCH_ROW_GROUPS)));
     }
 
     @Override

@@ -31,22 +31,30 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
 
@@ -64,9 +72,25 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private final boolean allProjectedColumnsMissing;
     @Nullable private final List<Predicate> predicates;
 
-    private int currentRowGroup;
+    /** Opens upcoming row groups while the current one is consumed; opens are thread-safe. */
+    private static final ExecutorService PREFETCH_POOL =
+            Executors.newCachedThreadPool(new ExecutorThreadFactory("mosaic-row-group-prefetch"));
+
+    private final int prefetchDepth;
+    private final ArrayDeque<RowGroupBatch> pending = new ArrayDeque<>();
+    private int nextRowGroupToSchedule;
+    private long scheduledRowCount;
+
     private long returnedPosition = -1;
     private VectorSchemaRoot currentVsr;
+
+    private static final Logger LOG = LoggerFactory.getLogger(MosaicRecordsReader.class);
+
+    // Read statistics reported at debug level when the reader closes.
+    private int openedRowGroups;
+    private long openNanos;
+    private long rowsReturned;
+    private final long createdNanos = System.nanoTime();
 
     public MosaicRecordsReader(
             MosaicInputFileAdapter inputFileAdapter,
@@ -82,8 +106,27 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 projectedRowType,
                 predicates,
                 filePath,
+                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
+    }
+
+    public MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            int prefetchRowGroups) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
                 new RootAllocator(),
-                MosaicReader::open);
+                MosaicReader::open,
+                prefetchRowGroups);
     }
 
     MosaicRecordsReader(
@@ -95,12 +138,35 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             Path filePath,
             BufferAllocator allocator,
             NativeReaderOpener nativeReaderOpener) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                allocator,
+                nativeReaderOpener,
+                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            BufferAllocator allocator,
+            NativeReaderOpener nativeReaderOpener,
+            int prefetchRowGroups) {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
         this.allocator = allocator;
+        this.prefetchDepth = Math.max(0, prefetchRowGroups);
 
         MosaicReader createdReader = null;
         int createdNumRowGroups;
@@ -136,62 +202,151 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         this.reader = createdReader;
         this.numRowGroups = createdNumRowGroups;
         this.allProjectedColumnsMissing = createdAllProjectedColumnsMissing;
-        this.currentRowGroup = 0;
         this.arrowBatchReader = createdArrowBatchReader;
     }
 
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
-        while (currentRowGroup < numRowGroups) {
-            int numRows = reader.rowGroupNumRows(currentRowGroup);
-            if (!matchesRowGroup(currentRowGroup, numRows)) {
-                returnedPosition += numRows;
-                currentRowGroup++;
+        releaseCurrentVsr();
+
+        RowGroupBatch batch = nextRowGroup();
+        if (batch == null) {
+            return null;
+        }
+        // Rows of skipped row groups still count towards the file position.
+        returnedPosition = batch.startPosition - 1;
+        rowsReturned += batch.numRows;
+
+        if (allProjectedColumnsMissing) {
+            return allNullIterator(batch.numRows);
+        }
+
+        VectorSchemaRoot vsr = batch.vsr;
+        this.currentVsr = vsr;
+
+        Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
+
+        return new FileRecordIterator<InternalRow>() {
+            @Override
+            public long returnedPosition() {
+                return returnedPosition;
+            }
+
+            @Override
+            public Path filePath() {
+                return filePath;
+            }
+
+            @Nullable
+            @Override
+            public InternalRow next() {
+                if (rows.hasNext()) {
+                    returnedPosition++;
+                    return rows.next();
+                }
+                return null;
+            }
+
+            @Override
+            public void releaseBatch() {
+                releaseCurrentVsr();
+            }
+        };
+    }
+
+    /** Returns the next matching row group with its data ready, or null at end of file. */
+    @Nullable
+    private RowGroupBatch nextRowGroup() throws IOException {
+        fillPrefetchQueue();
+        RowGroupBatch head = pending.poll();
+        if (head == null) {
+            return null;
+        }
+        // Keep the pipeline full while waiting for the head to arrive.
+        fillPrefetchQueue();
+        long waitStart = System.nanoTime();
+        head.await();
+        openNanos += System.nanoTime() - waitStart;
+        openedRowGroups++;
+        return head;
+    }
+
+    /** Schedules matching row groups until the queue holds the head plus {@code prefetchDepth}. */
+    private void fillPrefetchQueue() {
+        int wanted = prefetchDepth + 1;
+        while (pending.size() < wanted && nextRowGroupToSchedule < numRowGroups) {
+            int index = nextRowGroupToSchedule++;
+            int numRows = reader.rowGroupNumRows(index);
+            long startPosition = scheduledRowCount;
+            scheduledRowCount += numRows;
+            if (!matchesRowGroup(index, numRows)) {
                 continue;
             }
-
-            releaseCurrentVsr();
-
+            RowGroupBatch batch = new RowGroupBatch(index, numRows, startPosition);
             if (allProjectedColumnsMissing) {
-                currentRowGroup++;
-                return allNullIterator(numRows);
+                // Nothing to read from the file for this batch.
+            } else if (prefetchDepth == 0) {
+                batch.vsr = reader.readRowGroup(index, allocator);
+            } else {
+                batch.future = PREFETCH_POOL.submit(() -> reader.readRowGroup(index, allocator));
             }
-
-            VectorSchemaRoot vsr = reader.readRowGroup(currentRowGroup, allocator);
-            currentRowGroup++;
-            this.currentVsr = vsr;
-
-            Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
-
-            return new FileRecordIterator<InternalRow>() {
-                @Override
-                public long returnedPosition() {
-                    return returnedPosition;
-                }
-
-                @Override
-                public Path filePath() {
-                    return filePath;
-                }
-
-                @Nullable
-                @Override
-                public InternalRow next() {
-                    if (rows.hasNext()) {
-                        returnedPosition++;
-                        return rows.next();
-                    }
-                    return null;
-                }
-
-                @Override
-                public void releaseBatch() {
-                    releaseCurrentVsr();
-                }
-            };
+            pending.add(batch);
         }
-        return null;
+    }
+
+    /** A row group whose data is being, or has been, loaded. */
+    private static final class RowGroupBatch {
+        final int index;
+        final int numRows;
+        final long startPosition;
+        @Nullable Future<VectorSchemaRoot> future;
+        @Nullable VectorSchemaRoot vsr;
+
+        RowGroupBatch(int index, int numRows, long startPosition) {
+            this.index = index;
+            this.numRows = numRows;
+            this.startPosition = startPosition;
+        }
+
+        void await() throws IOException {
+            if (future == null) {
+                return;
+            }
+            try {
+                vsr = future.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while opening row group " + index, e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof IOException) {
+                    throw (IOException) cause;
+                }
+                if (cause instanceof RuntimeException) {
+                    throw (RuntimeException) cause;
+                }
+                if (cause instanceof Error) {
+                    throw (Error) cause;
+                }
+                throw new IOException("Failed to open row group " + index, cause);
+            } finally {
+                future = null;
+            }
+        }
+
+        /** Releases data that was loaded but never consumed. */
+        void discard() {
+            try {
+                await();
+            } catch (Throwable ignored) {
+                // The reader is being closed; the failure has no consumer anymore.
+            }
+            if (vsr != null) {
+                vsr.close();
+                vsr = null;
+            }
+        }
     }
 
     private FileRecordIterator<InternalRow> allNullIterator(int numRows) {
@@ -277,10 +432,34 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     public void close() throws IOException {
         Throwable throwable = null;
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Closing mosaic reader for {}: row groups {} (opened {}), rows {}, "
+                            + "waited {} ms for row groups, lifetime {} ms, {}",
+                    filePath.getName(),
+                    numRowGroups,
+                    openedRowGroups,
+                    rowsReturned,
+                    openNanos / 1_000_000,
+                    (System.nanoTime() - createdNanos) / 1_000_000,
+                    inputFileAdapter.ioStats());
+        }
+
         try {
             releaseCurrentVsr();
         } catch (Throwable t) {
             throwable = t;
+        }
+
+        // Prefetched row groups must finish and be released before the native reader and the
+        // allocator go away.
+        RowGroupBatch batch;
+        while ((batch = pending.poll()) != null) {
+            try {
+                batch.discard();
+            } catch (Throwable t) {
+                throwable = addSuppressed(throwable, t);
+            }
         }
 
         try {

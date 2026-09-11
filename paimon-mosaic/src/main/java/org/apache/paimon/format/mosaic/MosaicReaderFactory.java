@@ -35,14 +35,28 @@ public class MosaicReaderFactory implements FormatReaderFactory {
     private final RowType dataSchemaRowType;
     private final RowType projectedRowType;
     @Nullable private final List<Predicate> predicates;
+    private final int prefetchRowGroups;
 
     public MosaicReaderFactory(
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates) {
+        this(
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
+    }
+
+    public MosaicReaderFactory(
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            int prefetchRowGroups) {
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedRowType = projectedRowType;
         this.predicates = predicates;
+        this.prefetchRowGroups = prefetchRowGroups;
     }
 
     @Override
@@ -55,6 +69,7 @@ public class MosaicReaderFactory implements FormatReaderFactory {
                 dataSchemaRowType,
                 projectedRowType,
                 predicates,
-                context.filePath());
+                context.filePath(),
+                prefetchRowGroups);
     }
 }

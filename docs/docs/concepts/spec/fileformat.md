@@ -285,6 +285,7 @@ Format Options:
 | --- | --- | --- | --- |
 | `mosaic.num-buckets` | auto | Integer | Number of column buckets for parallel I/O. When set to 0 or not specified, the format auto-determines the bucket count. |
 | `mosaic.stats-columns` | (empty) | String | Comma-separated column names to collect min/max statistics for filter pushdown. Empty means no statistics are collected. |
+| `mosaic.read.prefetch-row-groups` | 8 | Integer | Number of row groups a reader opens ahead of the one being consumed. Opening a row group issues several dependent range reads, so prefetching overlaps that latency with decoding. 0 disables prefetching. |
 
 Limitations:
 1. Mosaic does not support complex types: ARRAY, MAP, MULTISET, ROW, VARIANT, BLOB, VECTOR.
