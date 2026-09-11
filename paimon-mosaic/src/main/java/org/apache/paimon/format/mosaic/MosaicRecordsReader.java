@@ -32,6 +32,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -73,6 +74,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private final int projectedFieldCount;
     private final boolean allProjectedColumnsMissing;
     @Nullable private final List<Predicate> predicates;
+    @Nullable private final RoaringBitmap32 selection;
 
     /** Opens upcoming row groups while the current one is consumed; opens are thread-safe. */
     private static final ExecutorService PREFETCH_POOL =
@@ -113,6 +115,29 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 projectedRowType,
                 predicates,
                 filePath,
+                null,
+                prefetchRowGroups,
+                prefetchMaxBytes);
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            @Nullable RoaringBitmap32 selection,
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                selection,
                 new RootAllocator(),
                 MosaicReader::open,
                 prefetchRowGroups,
@@ -135,6 +160,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 projectedRowType,
                 predicates,
                 filePath,
+                null,
                 allocator,
                 nativeReaderOpener,
                 MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue(),
@@ -152,11 +178,38 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             NativeReaderOpener nativeReaderOpener,
             int prefetchRowGroups,
             long prefetchMaxBytes) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                null,
+                allocator,
+                nativeReaderOpener,
+                prefetchRowGroups,
+                prefetchMaxBytes);
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            @Nullable RoaringBitmap32 selection,
+            BufferAllocator allocator,
+            NativeReaderOpener nativeReaderOpener,
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
+        this.selection = selection;
         this.allocator = allocator;
 
         MosaicReader createdReader = null;
@@ -321,7 +374,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             int index = nextRowGroupToSchedule;
             int numRows = reader.rowGroupNumRows(index);
             long startPosition = scheduledRowCount;
-            if (!matchesRowGroup(index, numRows)) {
+            if (!matchesSelection(startPosition, numRows) || !matchesRowGroup(index, numRows)) {
                 nextRowGroupToSchedule++;
                 scheduledRowCount += numRows;
                 continue;
@@ -347,6 +400,21 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             pending.add(new RowGroupBatch(index, numRows, startPosition, bytes, future));
             pendingBytes += bytes;
         }
+    }
+
+    private boolean matchesSelection(long rowGroupStart, long rowCount) {
+        if (selection == null) {
+            return true;
+        }
+        if (rowCount <= 0 || rowGroupStart < 0 || rowGroupStart > RoaringBitmap32.MAX_VALUE) {
+            return false;
+        }
+
+        long maxSupremum = (long) RoaringBitmap32.MAX_VALUE + 1;
+        long remainingAddressableRows = maxSupremum - rowGroupStart;
+        long rowGroupEnd =
+                rowCount > remainingAddressableRows ? maxSupremum : rowGroupStart + rowCount;
+        return selection.intersects(rowGroupStart, rowGroupEnd);
     }
 
     /** A row group whose data is being, or has been, loaded. */
