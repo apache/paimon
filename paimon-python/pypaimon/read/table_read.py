@@ -666,6 +666,8 @@ class TableRead:
 
         if not splits:
             schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            if self.include_row_kind:
+                schema = self._add_row_kind_to_schema(schema)
             empty_table = pyarrow.Table.from_arrays(
                 [pyarrow.array([], type=field.type) for field in schema],
                 schema=schema
@@ -686,6 +688,7 @@ class TableRead:
                 predicate=self.predicate,
                 limit=self.limit,
                 nested_name_paths=self.nested_name_paths,
+                include_row_kind=self.include_row_kind,
             )
         )
         ds = ray.data.read_datasource(
