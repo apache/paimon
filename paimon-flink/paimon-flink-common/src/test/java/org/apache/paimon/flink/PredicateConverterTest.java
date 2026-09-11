@@ -22,6 +22,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NotBetween;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -37,7 +40,9 @@ import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.DoubleType;
+import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
@@ -46,6 +51,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -79,8 +85,7 @@ public class PredicateConverterTest {
     @ParameterizedTest
     public void testVisitAndAutoTypeInference(ResolvedExpression expression, Predicate expected) {
         if (expression instanceof CallExpression) {
-            assertThat(CONVERTER.visit((CallExpression) expression).toString())
-                    .isEqualTo(expected.toString());
+            assertThat(CONVERTER.visit((CallExpression) expression)).isEqualTo(expected);
         } else {
             assertThatThrownBy(() -> CONVERTER.visit(expression))
                     .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
@@ -258,7 +263,7 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.BETWEEN,
                                 Arrays.asList(longRefExpr, intLitExpr, intLitExpr2),
                                 DataTypes.BOOLEAN()),
-                        BUILDER.between(0, 10, 20)),
+                        BUILDER.between(0, 10L, 20L)),
                 Arguments.of(
                         CallExpression.permanent(
                                 BuiltInFunctionDefinitions.IS_TRUE,
@@ -312,6 +317,449 @@ public class PredicateConverterTest {
 
         assertThat(nullLowerBound.test(GenericRow.of(15L))).isFalse();
         assertThat(nullUpperBound.test(GenericRow.of(15L))).isFalse();
+    }
+
+    @Test
+    public void testInAndNotInRowSemantics() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        CallExpression in =
+                call(
+                        BuiltInFunctionDefinitions.IN,
+                        field(0, DataTypes.BIGINT()),
+                        literal(1, DataTypes.INT()),
+                        literal(null, DataTypes.BIGINT()),
+                        literal(3, DataTypes.INT()));
+
+        Predicate inPredicate = in.accept(converter);
+        Predicate notInPredicate = call(BuiltInFunctionDefinitions.NOT, in).accept(converter);
+
+        assertThat(inPredicate).isEqualTo(builder.in(0, Arrays.asList(1L, null, 3L)));
+        assertThat(notInPredicate).isEqualTo(PredicateBuilder.alwaysFalse());
+        assertThat(inPredicate.test(GenericRow.of(1L))).isTrue();
+        assertThat(inPredicate.test(GenericRow.of(2L))).isFalse();
+        assertThat(inPredicate.test(GenericRow.of(3L))).isTrue();
+        assertThat(inPredicate.test(GenericRow.of((Object) null))).isFalse();
+        for (Object value : Arrays.asList(null, 1L, 2L, 3L, 4L)) {
+            assertThat(notInPredicate.test(GenericRow.of(value))).isFalse();
+        }
+    }
+
+    @Test
+    public void testLargeInAndNotIn() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        List<ResolvedExpression> children = new ArrayList<>();
+        List<Object> expectedLiterals = new ArrayList<>();
+        children.add(field(0, DataTypes.BIGINT()));
+        for (int i = 0; i < 21; i++) {
+            children.add(literal(i, DataTypes.INT()));
+            expectedLiterals.add((long) i);
+        }
+        CallExpression in =
+                new CallExpression(
+                        false, null, BuiltInFunctionDefinitions.IN, children, DataTypes.BOOLEAN());
+
+        Predicate inPredicate = in.accept(converter);
+        Predicate notInPredicate = call(BuiltInFunctionDefinitions.NOT, in).accept(converter);
+
+        assertThat(inPredicate).isEqualTo(builder.in(0, expectedLiterals));
+        assertThat(inPredicate).isInstanceOf(LeafPredicate.class);
+        assertThat(((LeafPredicate) inPredicate).function()).isEqualTo(In.INSTANCE);
+        assertThat(((LeafPredicate) inPredicate).literals())
+                .containsExactlyElementsOf(expectedLiterals);
+        assertThat(notInPredicate).isEqualTo(builder.notIn(0, expectedLiterals));
+        assertThat(inPredicate.test(GenericRow.of(20L))).isTrue();
+        assertThat(inPredicate.test(GenericRow.of(21L))).isFalse();
+        assertThat(inPredicate.test(GenericRow.of((Object) null))).isFalse();
+        assertThat(notInPredicate.test(GenericRow.of(20L))).isFalse();
+        assertThat(notInPredicate.test(GenericRow.of(21L))).isTrue();
+        assertThat(notInPredicate.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testNotBetweenStructure() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        CallExpression between =
+                call(
+                        BuiltInFunctionDefinitions.BETWEEN,
+                        field(0, DataTypes.BIGINT()),
+                        literal(10, DataTypes.INT()),
+                        literal(20, DataTypes.INT()));
+
+        Predicate predicate = call(BuiltInFunctionDefinitions.NOT, between).accept(converter);
+
+        assertThat(predicate).isEqualTo(builder.between(0, 10L, 20L).negate().get());
+        assertThat(predicate).isInstanceOf(LeafPredicate.class);
+        assertThat(((LeafPredicate) predicate).function()).isEqualTo(NotBetween.INSTANCE);
+        assertThat(((LeafPredicate) predicate).literals()).containsExactly(10L, 20L);
+    }
+
+    @Test
+    public void testNotBetweenWithNullBoundsRemainUnsupported() {
+        RowType rowType = RowType.of(new BigIntType());
+        PredicateConverter converter = new PredicateConverter(rowType);
+        FieldReferenceExpression field = field(0, DataTypes.BIGINT());
+        CallExpression nullUpper =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                field,
+                                literal(15, DataTypes.INT()),
+                                literal(null, DataTypes.BIGINT())));
+        CallExpression nullLower =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                field,
+                                literal(null, DataTypes.BIGINT()),
+                                literal(10, DataTypes.INT())));
+
+        assertThatThrownBy(() -> nullUpper.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> nullLower.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThat(PredicateConverter.convert(rowType, nullUpper)).isEmpty();
+        assertThat(PredicateConverter.convert(rowType, nullLower)).isEmpty();
+    }
+
+    @MethodSource("provideNegatedComparisons")
+    @ParameterizedTest
+    public void testNegatedComparisons(
+            FunctionDefinition function, boolean literalOnLeft, Predicate expected) {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        ResolvedExpression field = field(0, DataTypes.BIGINT());
+        ResolvedExpression literal = literal(1, DataTypes.INT());
+        CallExpression comparison =
+                literalOnLeft ? call(function, literal, field) : call(function, field, literal);
+
+        assertThat(call(BuiltInFunctionDefinitions.NOT, comparison).accept(converter))
+                .isEqualTo(expected);
+    }
+
+    public static Stream<Arguments> provideNegatedComparisons() {
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        return Stream.of(
+                Arguments.of(BuiltInFunctionDefinitions.EQUALS, false, builder.notEqual(0, 1L)),
+                Arguments.of(BuiltInFunctionDefinitions.NOT_EQUALS, false, builder.equal(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.GREATER_THAN, false, builder.lessOrEqual(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                        false,
+                        builder.lessThan(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.LESS_THAN, false, builder.greaterOrEqual(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
+                        false,
+                        builder.greaterThan(0, 1L)),
+                Arguments.of(BuiltInFunctionDefinitions.EQUALS, true, builder.notEqual(0, 1L)),
+                Arguments.of(BuiltInFunctionDefinitions.NOT_EQUALS, true, builder.equal(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.GREATER_THAN,
+                        true,
+                        builder.greaterOrEqual(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                        true,
+                        builder.greaterThan(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.LESS_THAN, true, builder.lessOrEqual(0, 1L)),
+                Arguments.of(
+                        BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL,
+                        true,
+                        builder.lessThan(0, 1L)));
+    }
+
+    @MethodSource("provideNegatedFloatingPointComparisons")
+    @ParameterizedTest
+    public void testNegatedFloatingPointComparisonsRemainUnsupported(
+            LogicalType fieldType,
+            DataType fieldDataType,
+            ResolvedExpression literal,
+            Object greater,
+            Object lesser,
+            Object nan) {
+        RowType rowType = RowType.of(fieldType);
+        PredicateConverter converter = new PredicateConverter(rowType);
+        ResolvedExpression field = field(0, fieldDataType);
+        for (FunctionDefinition function :
+                Arrays.asList(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        BuiltInFunctionDefinitions.NOT_EQUALS,
+                        BuiltInFunctionDefinitions.GREATER_THAN,
+                        BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL,
+                        BuiltInFunctionDefinitions.LESS_THAN,
+                        BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL)) {
+            CallExpression negated =
+                    call(BuiltInFunctionDefinitions.NOT, call(function, field, literal));
+            CallExpression negatedLiteralOnLeft =
+                    call(BuiltInFunctionDefinitions.NOT, call(function, literal, field));
+            assertThatThrownBy(() -> negated.accept(converter))
+                    .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+            assertThatThrownBy(() -> negatedLiteralOnLeft.accept(converter))
+                    .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+            assertThat(PredicateConverter.convert(rowType, negated)).isEmpty();
+            assertThat(PredicateConverter.convert(rowType, negatedLiteralOnLeft)).isEmpty();
+        }
+
+        ResolvedExpression nanLiteral = literal(nan, fieldDataType);
+        CallExpression notIn =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(BuiltInFunctionDefinitions.IN, field, nanLiteral));
+        CallExpression notBetween =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(BuiltInFunctionDefinitions.BETWEEN, field, literal, nanLiteral));
+        assertThatThrownBy(() -> notIn.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> notBetween.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThat(PredicateConverter.convert(rowType, notIn)).isEmpty();
+        assertThat(PredicateConverter.convert(rowType, notBetween)).isEmpty();
+
+        // Non-negated comparisons stay supported. Paimon orders NaN via compareTo,
+        // so GreaterThan(NaN, 1.0) is true, unlike Flink's Java operators.
+        Predicate greaterThan =
+                call(BuiltInFunctionDefinitions.GREATER_THAN, field, literal).accept(converter);
+        assertThat(greaterThan.test(GenericRow.of(greater))).isTrue();
+        assertThat(greaterThan.test(GenericRow.of(lesser))).isFalse();
+        assertThat(greaterThan.test(GenericRow.of(nan))).isTrue();
+        Predicate equal =
+                call(BuiltInFunctionDefinitions.EQUALS, field, nanLiteral).accept(converter);
+        assertThat(equal.test(GenericRow.of(nan))).isTrue();
+        Predicate in = call(BuiltInFunctionDefinitions.IN, field, nanLiteral).accept(converter);
+        assertThat(in.test(GenericRow.of(nan))).isTrue();
+        Predicate between =
+                call(BuiltInFunctionDefinitions.BETWEEN, field, literal, nanLiteral)
+                        .accept(converter);
+        assertThat(between.test(GenericRow.of(greater))).isTrue();
+    }
+
+    public static Stream<Arguments> provideNegatedFloatingPointComparisons() {
+        return Stream.of(
+                Arguments.of(
+                        new DoubleType(),
+                        DataTypes.DOUBLE(),
+                        literal(1.0d, DataTypes.DOUBLE()),
+                        2.0d,
+                        0.5d,
+                        Double.NaN),
+                Arguments.of(
+                        new FloatType(),
+                        DataTypes.FLOAT(),
+                        literal(1.0f, DataTypes.FLOAT()),
+                        2.0f,
+                        0.5f,
+                        Float.NaN));
+    }
+
+    @Test
+    public void testNegatedFloatingPointComparisonInCompoundRemainsUnsupported() {
+        // Covers unsimplified NOT(AND(float_cmp, ...)) reaching the converter,
+        // which simple SQL NOT (d > 1.0) does not (Flink rewrites that to d <= 1.0).
+        RowType rowType = RowType.of(new DoubleType(), new BigIntType());
+        PredicateConverter converter = new PredicateConverter(rowType);
+        CallExpression negated =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(
+                                BuiltInFunctionDefinitions.AND,
+                                call(
+                                        BuiltInFunctionDefinitions.GREATER_THAN,
+                                        field(0, DataTypes.DOUBLE()),
+                                        literal(1.0d, DataTypes.DOUBLE())),
+                                call(
+                                        BuiltInFunctionDefinitions.EQUALS,
+                                        field(1, DataTypes.BIGINT()),
+                                        literal(10L, DataTypes.BIGINT()))));
+
+        assertThatThrownBy(() -> negated.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThat(PredicateConverter.convert(rowType, negated)).isEmpty();
+    }
+
+    @Test
+    public void testNegatedFloatingPointSignedZerosRemainUnsupported() {
+        RowType rowType = RowType.of(new DoubleType());
+        PredicateConverter converter = new PredicateConverter(rowType);
+        ResolvedExpression field = field(0, DataTypes.DOUBLE());
+        ResolvedExpression zero = literal(0.0d, DataTypes.DOUBLE());
+        // Java: -0.0 == 0.0, so NOT (d <> 0.0) keeps -0.0. Double.compare does not.
+        CallExpression negatedNotEquals =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(BuiltInFunctionDefinitions.NOT_EQUALS, field, zero));
+        CallExpression negatedEquals =
+                call(
+                        BuiltInFunctionDefinitions.NOT,
+                        call(BuiltInFunctionDefinitions.EQUALS, field, zero));
+
+        assertThatThrownBy(() -> negatedNotEquals.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> negatedEquals.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThat(PredicateConverter.convert(rowType, negatedNotEquals)).isEmpty();
+        assertThat(PredicateConverter.convert(rowType, negatedEquals)).isEmpty();
+
+        // Non-negated equal stays on the pre-existing compareTo path.
+        Predicate equal = call(BuiltInFunctionDefinitions.EQUALS, field, zero).accept(converter);
+        assertThat(equal.test(GenericRow.of(0.0d))).isTrue();
+        assertThat(equal.test(GenericRow.of(-0.0d))).isFalse();
+    }
+
+    @Test
+    public void testGenericNotComparisonAndDoubleNot() {
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        CallExpression equal =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, DataTypes.BIGINT()),
+                        literal(10, DataTypes.INT()));
+        CallExpression equalNull =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, DataTypes.BIGINT()),
+                        literal(null, DataTypes.BIGINT()));
+
+        Predicate notEqual = call(BuiltInFunctionDefinitions.NOT, equal).accept(converter);
+        Predicate notEqualNull = call(BuiltInFunctionDefinitions.NOT, equalNull).accept(converter);
+        Predicate doubleNot =
+                call(BuiltInFunctionDefinitions.NOT, call(BuiltInFunctionDefinitions.NOT, equal))
+                        .accept(converter);
+
+        assertThat(notEqual).isEqualTo(builder.notEqual(0, 10L));
+        assertThat(notEqualNull).isEqualTo(builder.notEqual(0, null));
+        assertThat(doubleNot).isEqualTo(builder.equal(0, 10L));
+        assertThat(notEqual.test(GenericRow.of(9L))).isTrue();
+        assertThat(notEqual.test(GenericRow.of(10L))).isFalse();
+        assertThat(notEqual.test(GenericRow.of((Object) null))).isFalse();
+        assertThat(notEqualNull.test(GenericRow.of(10L))).isFalse();
+        assertThat(notEqualNull.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testGenericNotAndOr() {
+        PredicateBuilder builder = predicateBuilder(RowType.of(new BigIntType()));
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        CallExpression equal10 =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, DataTypes.BIGINT()),
+                        literal(10L, DataTypes.BIGINT()));
+        CallExpression equal20 =
+                call(
+                        BuiltInFunctionDefinitions.EQUALS,
+                        field(0, DataTypes.BIGINT()),
+                        literal(20L, DataTypes.BIGINT()));
+
+        Predicate notAnd =
+                call(
+                                BuiltInFunctionDefinitions.NOT,
+                                call(BuiltInFunctionDefinitions.AND, equal10, equal20))
+                        .accept(converter);
+        Predicate notOr =
+                call(
+                                BuiltInFunctionDefinitions.NOT,
+                                call(BuiltInFunctionDefinitions.OR, equal10, equal20))
+                        .accept(converter);
+
+        assertThat(notAnd)
+                .isEqualTo(PredicateBuilder.or(builder.notEqual(0, 10L), builder.notEqual(0, 20L)));
+        assertThat(notOr)
+                .isEqualTo(
+                        PredicateBuilder.and(builder.notEqual(0, 10L), builder.notEqual(0, 20L)));
+        assertThat(notAnd.test(GenericRow.of(10L))).isTrue();
+        assertThat(notAnd.test(GenericRow.of((Object) null))).isFalse();
+        assertThat(notOr.test(GenericRow.of(10L))).isFalse();
+        assertThat(notOr.test(GenericRow.of(15L))).isTrue();
+        assertThat(notOr.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testBooleanTruthPredicatesAndNot() {
+        PredicateBuilder builder =
+                predicateBuilder(RowType.of(DataTypes.BOOLEAN().getLogicalType()));
+        PredicateConverter converter =
+                new PredicateConverter(RowType.of(DataTypes.BOOLEAN().getLogicalType()));
+        ResolvedExpression boolField = field(0, DataTypes.BOOLEAN());
+        CallExpression isTrue = call(BuiltInFunctionDefinitions.IS_TRUE, boolField);
+        CallExpression isFalse = call(BuiltInFunctionDefinitions.IS_FALSE, boolField);
+        CallExpression isNotTrue = call(BuiltInFunctionDefinitions.IS_NOT_TRUE, boolField);
+        CallExpression isNotFalse = call(BuiltInFunctionDefinitions.IS_NOT_FALSE, boolField);
+
+        Predicate truePredicate = isTrue.accept(converter);
+        Predicate falsePredicate = isFalse.accept(converter);
+        Predicate notTruePredicate = isNotTrue.accept(converter);
+        Predicate notFalsePredicate = isNotFalse.accept(converter);
+
+        assertThat(truePredicate).isEqualTo(builder.equal(0, true));
+        assertThat(falsePredicate).isEqualTo(builder.equal(0, false));
+        assertBooleanResults(truePredicate, true, false, false);
+        assertBooleanResults(falsePredicate, false, true, false);
+        assertBooleanResults(notTruePredicate, false, true, true);
+        assertBooleanResults(notFalsePredicate, true, false, true);
+        assertBooleanResults(
+                call(BuiltInFunctionDefinitions.NOT, isTrue).accept(converter), false, true, true);
+        assertBooleanResults(
+                call(BuiltInFunctionDefinitions.NOT, isFalse).accept(converter), true, false, true);
+        assertBooleanResults(
+                call(BuiltInFunctionDefinitions.NOT, isNotTrue).accept(converter),
+                true,
+                false,
+                false);
+        assertBooleanResults(
+                call(BuiltInFunctionDefinitions.NOT, isNotFalse).accept(converter),
+                false,
+                true,
+                false);
+    }
+
+    @Test
+    public void testUnsupportedNotLike() {
+        RowType rowType = RowType.of(new VarCharType());
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        CallExpression unsupportedLike =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("%middle%", STRING()));
+
+        assertThatThrownBy(
+                        () ->
+                                call(BuiltInFunctionDefinitions.NOT, unsupportedLike)
+                                        .accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+
+        CallExpression prefixLike =
+                call(
+                        BuiltInFunctionDefinitions.LIKE,
+                        field(0, STRING()),
+                        literal("prefix%", STRING()));
+        CallExpression notPrefixLike = call(BuiltInFunctionDefinitions.NOT, prefixLike);
+        assertThatThrownBy(() -> notPrefixLike.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThat(PredicateConverter.convert(rowType, notPrefixLike)).isEmpty();
+    }
+
+    private static void assertBooleanResults(
+            Predicate predicate,
+            boolean expectedForTrue,
+            boolean expectedForFalse,
+            boolean expectedForNull) {
+        assertThat(predicate.test(GenericRow.of(true))).isEqualTo(expectedForTrue);
+        assertThat(predicate.test(GenericRow.of(false))).isEqualTo(expectedForFalse);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(expectedForNull);
+    }
+
+    private static PredicateBuilder predicateBuilder(RowType rowType) {
+        return new PredicateBuilder(LogicalTypeConversion.toDataType(rowType));
     }
 
     @MethodSource("provideLikeExpressions")
