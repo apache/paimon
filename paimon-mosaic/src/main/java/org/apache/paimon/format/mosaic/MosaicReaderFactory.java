@@ -55,6 +55,7 @@ public class MosaicReaderFactory implements FormatReaderFactory {
                 dataSchemaRowType,
                 projectedRowType,
                 predicates,
-                context.filePath());
+                context.filePath(),
+                context.selection());
     }
 }

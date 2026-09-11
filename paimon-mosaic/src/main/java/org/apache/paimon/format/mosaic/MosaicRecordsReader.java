@@ -31,6 +31,7 @@ import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -63,8 +64,11 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private final int projectedFieldCount;
     private final boolean allProjectedColumnsMissing;
     @Nullable private final List<Predicate> predicates;
+    @Nullable private final RoaringBitmap32 selection;
 
     private int currentRowGroup;
+    // Unlike returnedPosition, this always advances by the full physical row-group size.
+    private long nextRowGroupStart;
     private long returnedPosition = -1;
     private VectorSchemaRoot currentVsr;
 
@@ -82,6 +86,27 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 projectedRowType,
                 predicates,
                 filePath,
+                null,
+                new RootAllocator(),
+                MosaicReader::open);
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            @Nullable RoaringBitmap32 selection) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                selection,
                 new RootAllocator(),
                 MosaicReader::open);
     }
@@ -95,11 +120,34 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             Path filePath,
             BufferAllocator allocator,
             NativeReaderOpener nativeReaderOpener) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                null,
+                allocator,
+                nativeReaderOpener);
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            @Nullable RoaringBitmap32 selection,
+            BufferAllocator allocator,
+            NativeReaderOpener nativeReaderOpener) {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
+        this.selection = selection;
         this.allocator = allocator;
 
         MosaicReader createdReader = null;
@@ -145,8 +193,12 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
         while (currentRowGroup < numRowGroups) {
             int numRows = reader.rowGroupNumRows(currentRowGroup);
-            if (!matchesRowGroup(currentRowGroup, numRows)) {
-                returnedPosition += numRows;
+            long rowGroupStart = nextRowGroupStart;
+            returnedPosition = rowGroupStart - 1;
+            if (!matchesSelection(rowGroupStart, numRows)
+                    || !matchesRowGroup(currentRowGroup, numRows)) {
+                nextRowGroupStart += numRows;
+                returnedPosition = nextRowGroupStart - 1;
                 currentRowGroup++;
                 continue;
             }
@@ -154,11 +206,13 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             releaseCurrentVsr();
 
             if (allProjectedColumnsMissing) {
+                nextRowGroupStart += numRows;
                 currentRowGroup++;
                 return allNullIterator(numRows);
             }
 
             VectorSchemaRoot vsr = reader.readRowGroup(currentRowGroup, allocator);
+            nextRowGroupStart += numRows;
             currentRowGroup++;
             this.currentVsr = vsr;
 
@@ -192,6 +246,21 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             };
         }
         return null;
+    }
+
+    private boolean matchesSelection(long rowGroupStart, long rowCount) {
+        if (selection == null) {
+            return true;
+        }
+        if (rowCount <= 0 || rowGroupStart < 0 || rowGroupStart > RoaringBitmap32.MAX_VALUE) {
+            return false;
+        }
+
+        long maxSupremum = (long) RoaringBitmap32.MAX_VALUE + 1;
+        long remainingAddressableRows = maxSupremum - rowGroupStart;
+        long rowGroupEnd =
+                rowCount > remainingAddressableRows ? maxSupremum : rowGroupStart + rowCount;
+        return selection.intersects(rowGroupStart, rowGroupEnd);
     }
 
     private FileRecordIterator<InternalRow> allNullIterator(int numRows) {
