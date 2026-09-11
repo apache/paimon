@@ -23,6 +23,7 @@ import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.mosaic.MosaicWriter;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -178,6 +179,36 @@ class MosaicRecordsWriterTest {
                             allocator,
                             (outputStream, arrowSchema, options, bufferAllocator) -> nativeWriter);
             GenericRow row = new GenericRow(wideType.getFieldCount());
+            row.setField(0, 1.0d);
+            writer.addElement(row);
+            assertThat(allocator.getAllocatedMemory()).isLessThan(8L * 1024 * 1024);
+            writer.close();
+        }
+    }
+
+    @Test
+    void testLargeBatchSizeWithSmallMemoryBudgetStaysWithinArrowDefaultAllocation()
+            throws Exception {
+        // write.batch-size=65536 with write.batch-memory=128 KiB: the memory budget flushes long
+        // before the row limit, so the first row must not allocate for the whole batch size.
+        RowType.Builder builder = RowType.builder();
+        for (int i = 0; i < 100; i++) {
+            builder.field("c" + i, DataTypes.DOUBLE());
+        }
+        RowType rowType = builder.build();
+        MosaicWriter nativeWriter = mock(MosaicWriter.class);
+        try (RootAllocator allocator = new RootAllocator(16L * 1024 * 1024)) {
+            MosaicRecordsWriter writer =
+                    new MosaicRecordsWriter(
+                            new ByteArrayOutputStream(),
+                            rowType,
+                            new FileFormatFactory.FormatContext(
+                                    new Options(), 1024, 65536, MemorySize.ofKibiBytes(128)),
+                            Collections.emptyList(),
+                            null,
+                            allocator,
+                            (outputStream, arrowSchema, options, bufferAllocator) -> nativeWriter);
+            GenericRow row = new GenericRow(rowType.getFieldCount());
             row.setField(0, 1.0d);
             writer.addElement(row);
             assertThat(allocator.getAllocatedMemory()).isLessThan(8L * 1024 * 1024);
