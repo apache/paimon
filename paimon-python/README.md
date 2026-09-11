@@ -24,6 +24,12 @@ plus `fs.oss.securityToken` when using STS. An endpoint without a scheme uses
 HTTPS for metadata writes. Credentials supplied only through an underlying
 filesystem's credential provider must also be supplied through these options.
 
+Metadata requests always use OSS Signature V4 for both AK and STS credentials,
+independently of the Jindo data-access signer setting. Set `fs.oss.region` to the
+bucket's region ID, such as `cn-hangzhou`. If unset, it is inferred from standard
+`oss-<region>.aliyuncs.com` or `oss-<region>-internal.aliyuncs.com` endpoints.
+Other endpoints, including acceleration endpoints, require an explicit region.
+
 Atomic metadata PUTs also forward the OSS server-side encryption options, using
 the same resolution as Java `OSSFileIO`:
 

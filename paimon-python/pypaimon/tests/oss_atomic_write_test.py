@@ -54,8 +54,19 @@ def oss_server():
         def error(self, status, code):
             self.respond(status, ('<Error><Code>' + code + '</Code></Error>').encode())
 
+        def authenticate(self):
+            authorization = self.headers.get('Authorization', '')
+            server.auth_headers.append((self.command, authorization, self.headers.get('x-oss-security-token')))
+            if not (authorization.startswith('OSS4-HMAC-SHA256 ') and
+                    '/cn-hangzhou/oss/aliyun_v4_request' in authorization):
+                self.error(403, 'AccessDenied')
+                return False
+            return True
+
         def do_GET(self):
             server.gets += 1
+            if not self.authenticate():
+                return
             assert urlsplit(self.path).query in ('versioning', 'versioning=')
             if server.fail_method == 'GET':
                 self.error(*server.failure)
@@ -65,6 +76,8 @@ def oss_server():
                                '</VersioningConfiguration>').encode())
 
         def do_PUT(self):
+            if not self.authenticate():
+                return
             key = unquote(urlsplit(self.path).path)
             data = self.rfile.read(int(self.headers['Content-Length']))
             with server.lock:
@@ -100,6 +113,7 @@ def oss_server():
     server.gets = 0
     server.token = None
     server.sse_headers = {}
+    server.auth_headers = []
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     yield server
@@ -112,6 +126,7 @@ def options_for(server, token=None):
     return Options({
         'fs.oss.impl': 'legacy',
         'fs.oss.endpoint': 'http://127.0.0.1:{}'.format(server.server_port),
+        'fs.oss.region': 'cn-hangzhou',
         'fs.oss.accessKeyId': 'test-ak',
         'fs.oss.accessKeySecret': 'test-sk',
         'fs.oss.securityToken': token,
@@ -125,6 +140,47 @@ def file_io(server, resolving=False):
             CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(): 'true'}))
     with mock.patch.object(OssFileIO, '_initialize_oss_fs'):
         return FileIO.get('oss://test-bucket/', options)
+
+
+@pytest.mark.parametrize('token,endpoint,region', [
+    (None, 'https://oss-cn-beijing.aliyuncs.com', 'cn-hangzhou'),
+    ('sts-token', None, 'cn-hangzhou'),
+    (None, 'https://oss-cn-hangzhou.aliyuncs.com', None),
+    ('sts-token', 'https://oss-cn-hangzhou-internal.aliyuncs.com', None),
+])
+def test_v4_authentication_reaches_conditional_put(oss_server, monkeypatch, tmp_path, token, endpoint, region):
+    io = file_io(oss_server)
+    io._use_jindo = True
+    io.filesystem = pafs.SubTreeFileSystem(str(tmp_path), pafs.LocalFileSystem())
+    local_endpoint = io.properties.to_map()['fs.oss.endpoint']
+    io.properties = Options(dict(options_for(oss_server, token).to_map(), **{
+        'fs.oss.endpoint': endpoint or local_endpoint,
+        'fs.oss.region': region,
+        'fs.oss.signer.version': '4',
+    }))
+    send = oss2.Session.do_request
+
+    def redirect(session, request, timeout):
+        # Sign the original endpoint, then send the real SDK request to the local server.
+        request.url = local_endpoint + urlsplit(request.url).path
+        return send(session, request, timeout)
+
+    monkeypatch.setattr(oss2.Session, 'do_request', redirect)
+    path = 'oss://test-bucket/snapshot-1'
+    assert io.try_to_write_atomic(path, 'data') is True
+    assert io.try_to_write_atomic(path, 'overwrite') is False
+    assert list(oss_server.objects.values()) == [b'data']
+    assert [method for method, _, _ in oss_server.auth_headers] == ['GET', 'PUT', 'GET', 'PUT']
+    assert all(header_token == token for _, _, header_token in oss_server.auth_headers)
+
+
+@pytest.mark.parametrize('endpoint', ['http://127.0.0.1', 'https://oss-accelerate.aliyuncs.com'])
+def test_v4_requires_region_for_non_regional_endpoints(oss_server, endpoint):
+    io = file_io(oss_server)
+    io.properties = Options(dict(io.properties.to_map(), **{'fs.oss.endpoint': endpoint, 'fs.oss.region': None}))
+    with pytest.raises(ValueError, match='fs.oss.region'):
+        io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
+    assert oss_server.gets == oss_server.puts == 0
 
 
 @pytest.mark.parametrize('resolving', [False, True])

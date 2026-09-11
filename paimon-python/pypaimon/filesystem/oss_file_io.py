@@ -62,14 +62,22 @@ class OssFileIO(PyArrowFileIO):
                 "and fs.oss.endpoint; pass fs.oss.securityToken for STS credentials.")
         if '://' not in endpoint:
             endpoint = 'https://' + endpoint
+        region = (self.properties.get(OssOptions.OSS_REGION) or '').strip()
+        if not region:
+            match = re.fullmatch(
+                r'oss-(?!accelerate(?:[.-]))([a-z0-9-]+?)(?:-internal)?\.aliyuncs\.com',
+                urlparse(endpoint).hostname or '')
+            region = match.group(1) if match else None
+        if not region:
+            raise ValueError("Set fs.oss.region for OSS V4 signing when the endpoint is not regional")
         headers = self._sse_headers()
         headers['x-oss-forbid-overwrite'] = 'true'
-        auth = oss2.StsAuth(access_key, secret_key, token) if token else oss2.Auth(access_key, secret_key)
+        auth = (oss2.StsAuth(access_key, secret_key, token, auth_version='v4')
+                if token else oss2.AuthV4(access_key, secret_key))
 
         session = oss2.Session()
         try:
-            bucket = oss2.Bucket(auth, endpoint, self._oss_bucket, session=session,
-                                 region=self.properties.get(OssOptions.OSS_REGION))
+            bucket = oss2.Bucket(auth, endpoint, self._oss_bucket, session=session, region=region)
             try:
                 versioning = bucket.get_bucket_versioning().status
             except oss2.exceptions.ServerError as error:
