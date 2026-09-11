@@ -61,9 +61,14 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
                 return Optional.of(Range.toRanges(rowIds));
             } else if (function instanceof Between) {
                 List<Object> literals = predicate.literals();
-                return Optional.of(
-                        Collections.singletonList(
-                                new Range((Long) literals.get(0), (Long) literals.get(1))));
+                long from = (Long) literals.get(0);
+                long to = (Long) literals.get(1);
+                // BETWEEN with inverted bounds (SQL allows BETWEEN 10 AND 5) is empty.
+                if (from > to) {
+                    // Mutable: the Or union path accumulates into the returned list.
+                    return Optional.of(new ArrayList<>());
+                }
+                return Optional.of(Collections.singletonList(new Range(from, to)));
             }
         }
         return Optional.empty();
