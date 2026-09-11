@@ -30,7 +30,7 @@ PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
 FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
 UNKNOWN_COMMIT_ID = "UNKNOWN"
 
-VERSION = "2.1.dev"
+VERSION = "2.1.0"
 
 
 def _repository_root():
