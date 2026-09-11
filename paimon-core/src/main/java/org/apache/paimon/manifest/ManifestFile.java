@@ -91,7 +91,18 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     protected ManifestEntryCache createCache(
             @Nullable SegmentsCache<Path> cache, RowType formatType) {
         return new ManifestEntryCache(
-                cache, serializer, formatType, super::fileSize, this::createIterator);
+                cache,
+                serializer,
+                formatType,
+                super::fileSize,
+                this::createIterator,
+                (path, fileSize, partitionFilter, bucketFilter) ->
+                        createManifestIterator(
+                                fileIO,
+                                path,
+                                ManifestEntry.MANIFEST_ROW_TYPE,
+                                partitionFilter,
+                                bucketFilter));
     }
 
     @Override
