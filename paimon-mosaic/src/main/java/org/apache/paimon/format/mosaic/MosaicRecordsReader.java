@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -55,6 +56,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 import static org.apache.paimon.format.mosaic.MosaicObjects.convertStatsValue;
 
@@ -222,10 +224,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             return allNullIterator(batch.numRows);
         }
 
-        VectorSchemaRoot vsr = batch.vsr;
-        this.currentVsr = vsr;
-
-        Iterator<InternalRow> rows = arrowBatchReader.readBatch(vsr).iterator();
+        Iterator<InternalRow> rows = arrowBatchReader.readBatch(currentVsr).iterator();
 
         return new FileRecordIterator<InternalRow>() {
             @Override
@@ -258,23 +257,29 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     /** Returns the next matching row group with its data ready, or null at end of file. */
     @Nullable
     private RowGroupBatch nextRowGroup() throws IOException {
-        fillPrefetchQueue();
-        RowGroupBatch head = pending.poll();
+        if (pending.isEmpty()) {
+            fillPrefetchQueue(Math.max(1, prefetchDepth));
+        }
+        RowGroupBatch head = pending.peek();
         if (head == null) {
             return null;
         }
-        // Keep the pipeline full while waiting for the head to arrive.
-        fillPrefetchQueue();
+        // The head stays queued until its data has arrived, so close() can still wait for it.
         long waitStart = System.nanoTime();
-        head.await();
+        VectorSchemaRoot vsr = head.await();
         openNanos += System.nanoTime() - waitStart;
         openedRowGroups++;
+        pending.poll();
+        currentVsr = vsr;
+        if (prefetchDepth > 0) {
+            // currentVsr is owned by this reader, so a failure here leaves nothing unreleased.
+            fillPrefetchQueue(prefetchDepth);
+        }
         return head;
     }
 
-    /** Schedules matching row groups until the queue holds the head plus {@code prefetchDepth}. */
-    private void fillPrefetchQueue() {
-        int wanted = prefetchDepth + 1;
+    /** Schedules matching row groups until {@code wanted} of them are queued. */
+    private void fillPrefetchQueue(int wanted) {
         while (pending.size() < wanted && nextRowGroupToSchedule < numRowGroups) {
             int index = nextRowGroupToSchedule++;
             int numRows = reader.rowGroupNumRows(index);
@@ -283,15 +288,18 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             if (!matchesRowGroup(index, numRows)) {
                 continue;
             }
-            RowGroupBatch batch = new RowGroupBatch(index, numRows, startPosition);
-            if (allProjectedColumnsMissing) {
-                // Nothing to read from the file for this batch.
-            } else if (prefetchDepth == 0) {
-                batch.vsr = reader.readRowGroup(index, allocator);
-            } else {
-                batch.future = PREFETCH_POOL.submit(() -> reader.readRowGroup(index, allocator));
+            Future<VectorSchemaRoot> future = null;
+            if (!allProjectedColumnsMissing) {
+                FutureTask<VectorSchemaRoot> task =
+                        new FutureTask<>(() -> reader.readRowGroup(index, allocator));
+                if (prefetchDepth == 0) {
+                    task.run();
+                } else {
+                    PREFETCH_POOL.execute(task);
+                }
+                future = task;
             }
-            pending.add(batch);
+            pending.add(new RowGroupBatch(index, numRows, startPosition, future));
         }
     }
 
@@ -300,24 +308,33 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         final int index;
         final int numRows;
         final long startPosition;
-        @Nullable Future<VectorSchemaRoot> future;
-        @Nullable VectorSchemaRoot vsr;
+        @Nullable private final Future<VectorSchemaRoot> future;
 
-        RowGroupBatch(int index, int numRows, long startPosition) {
+        RowGroupBatch(
+                int index,
+                int numRows,
+                long startPosition,
+                @Nullable Future<VectorSchemaRoot> future) {
             this.index = index;
             this.numRows = numRows;
             this.startPosition = startPosition;
+            this.future = future;
         }
 
-        void await() throws IOException {
+        /** Waits for the data; the batch is not released here even when the wait fails. */
+        @Nullable
+        VectorSchemaRoot await() throws IOException {
             if (future == null) {
-                return;
+                return null;
             }
             try {
-                vsr = future.get();
+                return future.get();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while opening row group " + index, e);
+                InterruptedIOException interrupted =
+                        new InterruptedIOException("Interrupted while opening row group " + index);
+                interrupted.initCause(e);
+                throw interrupted;
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof IOException) {
@@ -330,21 +347,31 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                     throw (Error) cause;
                 }
                 throw new IOException("Failed to open row group " + index, cause);
-            } finally {
-                future = null;
             }
         }
 
-        /** Releases data that was loaded but never consumed. */
-        void discard() {
-            try {
-                await();
-            } catch (Throwable ignored) {
-                // The reader is being closed; the failure has no consumer anymore.
+        /**
+         * Waits for the read to finish, even if the current thread is interrupted, and releases its
+         * data. Returns whether an interrupt was swallowed while waiting.
+         */
+        boolean discard() {
+            if (future == null) {
+                return false;
             }
-            if (vsr != null) {
-                vsr.close();
-                vsr = null;
+            boolean interrupted = false;
+            while (true) {
+                try {
+                    VectorSchemaRoot vsr = future.get();
+                    if (vsr != null) {
+                        vsr.close();
+                    }
+                    return interrupted;
+                } catch (InterruptedException e) {
+                    // The native read still uses the reader handle; it must complete first.
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    return interrupted;
+                }
             }
         }
     }
@@ -452,11 +479,12 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         }
 
         // Prefetched row groups must finish and be released before the native reader and the
-        // allocator go away.
+        // allocator go away, even if this thread is interrupted.
+        boolean interrupted = false;
         RowGroupBatch batch;
         while ((batch = pending.poll()) != null) {
             try {
-                batch.discard();
+                interrupted |= batch.discard();
             } catch (Throwable t) {
                 throwable = addSuppressed(throwable, t);
             }
@@ -480,6 +508,9 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             throwable = addSuppressed(throwable, t);
         }
 
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
         if (throwable != null) {
             rethrow(throwable);
         }
