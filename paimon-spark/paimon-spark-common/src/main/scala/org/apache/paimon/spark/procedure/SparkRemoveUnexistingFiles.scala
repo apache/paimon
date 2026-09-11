@@ -85,26 +85,26 @@ case class SparkRemoveUnexistingFiles(
       .repartition(1)
       .cache()
 
-    if (!dryRun) {
-      pathAndMessage.foreachPartition {
-        iter =>
-          {
-            val serializer = new CommitMessageSerializer()
-            val messages = new util.ArrayList[CommitMessage]()
-            iter.foreach {
-              case (_, bytes) => messages.add(serializer.deserialize(serializer.getVersion, bytes))
-            }
-            val commit = table.newCommit(UUID.randomUUID().toString)
-            try {
-              commit.commit(Long.MaxValue, messages)
-            } finally {
-              commit.close()
-            }
-          }
-      }
-    }
-
     try {
+      if (!dryRun) {
+        pathAndMessage.foreachPartition {
+          iter =>
+            {
+              val serializer = new CommitMessageSerializer()
+              val messages = new util.ArrayList[CommitMessage]()
+              iter.foreach {
+                case (_, bytes) =>
+                  messages.add(serializer.deserialize(serializer.getVersion, bytes))
+              }
+              val commit = table.newCommit(UUID.randomUUID().toString)
+              try {
+                commit.commit(messages)
+              } finally {
+                commit.close()
+              }
+            }
+        }
+      }
       pathAndMessage.flatMap { case (paths, _) => paths }.collect()
     } finally {
       pathAndMessage.unpersist()
