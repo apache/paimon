@@ -1,15 +1,11 @@
 ---
-title: "Mysql CDC"
+title: "MySQL CDC"
 sidebar_position: 2
 ---
 
-```mdx-code-block
 import ConfigTable from '@site/src/components/ConfigTable';
 import mysqlSyncTableHtml from '@site/generated/mysql_sync_table.html';
 import mysqlSyncDatabaseHtml from '@site/generated/mysql_sync_database.html';
-```
-
-
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -32,27 +28,87 @@ under the License.
 
 # MySQL CDC
 
-Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://nightlies.apache.org/flink/flink-cdc-docs-stable/).
+Synchronize MySQL tables into one Paimon table, or synchronize selected tables into a Paimon database.
 
-## Prepare CDC Bundled Jar
+See [CDC Action Configuration](./action-configuration) for command syntax, computed columns, and job settings,
+and [Schema Evolution and Type Mapping](./schema-evolution) for shared behavior.
 
-Download `CDC Bundled Jar` and put them under \<FLINK_HOME>/lib/.
+## Prerequisites {#prepare-cdc-bundled-jar}
 
-| Version | Bundled Jar                                                                                                                                                                                                                                                                                                                                |
-|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 3.5.0   | <li> <a href="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/3.5.0/flink-sql-connector-mysql-cdc-3.5.0.jar">flink-sql-connector-mysql-cdc-3.5.0.jar</a> <li> <a href="https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.27/mysql-connector-java-8.0.27.jar">mysql-connector-java-8.0.27.jar</a> |
+Place these dependencies in `<FLINK_HOME>/lib/` alongside the Paimon Flink bundled jar.
+The dependency baseline for this Paimon version is Flink CDC **3.5.0**.
 
-:::danger
+- [flink-sql-connector-mysql-cdc-3.5.0.jar](https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-mysql-cdc/3.5.0/flink-sql-connector-mysql-cdc-3.5.0.jar)
+- [mysql-connector-java-8.0.27.jar](https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.27/mysql-connector-java-8.0.27.jar)
 
-Only CDC 3.5.0 or above is supported.
-
-:::
+All source tables selected by the table action must have primary keys, including when you supply
+`--primary_keys` for the target. Schemas must be compatible when merging multiple source tables.
+The partitioned examples below assume each source table has `id` and `create_time` fields.
 
 ## Synchronizing Tables
 
-By using [MySqlSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
+By using [MySqlSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
 
-To use this feature through `flink run`, run the following shell command.
+If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
+
+### Example 1: synchronize tables into one Paimon table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mysql_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition_keys pt \
+    --primary_keys id,pt \
+    --computed_column 'pt=date_format(create_time,yyyy-MM-dd)' \
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name='source_db' \
+    --mysql_conf table-name='source_table1|source_table2' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+As example shows, the mysql_conf's table-name supports regular expressions to monitor multiple tables that satisfy
+the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
+
+### Example 2: synchronize shards into one Paimon table
+
+You can also set 'database-name' with a regular expression to capture multiple databases. A typical scenario is that a
+table 'source_table' is split into database 'source_db1', 'source_db2' ..., then you can synchronize data of all the
+'source_table's into one Paimon table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mysql_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition_keys pt \
+    --primary_keys id,pt \
+    --computed_column 'pt=date_format(create_time,yyyy-MM-dd)' \
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name='source_db.+' \
+    --mysql_conf table-name='source_table' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
+```
+
+### Table Action Reference
+
+Command syntax (square brackets indicate optional arguments):
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -71,106 +127,27 @@ To use this feature through `flink run`, run the following shell command.
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
-```mdx-code-block
-```mdx-code-block
 <ConfigTable html={mysqlSyncTableHtml} />
-```
-```
-
-If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
-
-### Example 1: synchronize tables into one Paimon table
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-@@VERSION@@.jar \
-    mysql_sync_table \
-    --warehouse hdfs:///path/to/warehouse \
-    --database test_db \
-    --table test_table \
-    --partition_keys pt \
-    --primary_keys pt,uid \
-    --computed_column '_year=year(age)' \
-    --mysql_conf hostname=127.0.0.1 \
-    --mysql_conf username=root \
-    --mysql_conf password=123456 \
-    --mysql_conf database-name='source_db' \
-    --mysql_conf table-name='source_table1|source_table2' \
-    --catalog_conf metastore=hive \
-    --catalog_conf uri=thrift://hive-metastore:9083 \
-    --table_conf bucket=4 \
-    --table_conf changelog-producer=input \
-    --table_conf sink.parallelism=4
-```
-
-As example shows, the mysql_conf's table-name supports regular expressions to monitor multiple tables that satisfy
-the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
-
-### Example 2: synchronize shards into one Paimon table
-
-You can also set 'database-name' with a regular expression to capture multiple databases. A typical scenario is that a 
-table 'source_table' is split into database 'source_db1', 'source_db2' ..., then you can synchronize data of all the 
-'source_table's into one Paimon table.
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-@@VERSION@@.jar \
-    mysql_sync_table \
-    --warehouse hdfs:///path/to/warehouse \
-    --database test_db \
-    --table test_table \
-    --partition_keys pt \
-    --primary_keys pt,uid \
-    --computed_column '_year=year(age)' \
-    --mysql_conf hostname=127.0.0.1 \
-    --mysql_conf username=root \
-    --mysql_conf password=123456 \
-    --mysql_conf database-name='source_db.+' \
-    --mysql_conf table-name='source_table' \
-    --catalog_conf metastore=hive \
-    --catalog_conf uri=thrift://hive-metastore:9083 \
-    --table_conf bucket=4 \
-    --table_conf changelog-producer=input \
-    --table_conf sink.parallelism=4
-```
 
 ## Synchronizing Databases
 
-By using [MySqlSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
-
-To use this feature through `flink run`, run the following shell command.
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-@@VERSION@@.jar \
-    mysql_sync_database \
-    --warehouse <warehouse-path> \
-    --database <database-name> \
-    [--ignore_incompatible <true/false>] \
-    [--merge_shards <true/false>] \
-    [--table_prefix <paimon-table-prefix>] \
-    [--table_suffix <paimon-table-suffix>] \
-    [--including_tables <mysql-table-name|name-regular-expr>] \
-    [--excluding_tables <mysql-table-name|name-regular-expr>] \
-    [--mode <sync-mode>] \
-    [--metadata_column <metadata-column>] \
-    [--type_mapping <option1,option2...>] \
-    [--partition_keys <partition_keys>] \
-    [--primary_keys <primary-keys>] \
-    [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
-    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
-    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
-```
-
-```mdx-code-block
-```mdx-code-block
-<ConfigTable html={mysqlSyncDatabaseHtml} />
-```
-```
+By using [MySqlSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
 
 Only tables with primary keys will be synchronized.
 
-For each MySQL table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
+The action creates a target for each selected source table and checks existing target schemas for
+compatibility. When shard merging is enabled, only source tables with the same table name are
+merged into the same target.
+
+### Choose a Synchronization Mode
+
+| Mode | Behavior |
+| --- | --- |
+| `divided` (default) | Build a separate sink for each table selected at startup. Restore the job with an expanded table filter to add previously excluded tables. |
+| `combined` | Use a shared sink and support newly created source tables that match the filters without restarting. |
+
+Adding a previously excluded table with historical data is different from capturing a table
+created after the job starts. Use the savepoint workflow below when expanding the selected set.
 
 ### Example 1: synchronize entire database
 
@@ -193,7 +170,7 @@ For each MySQL table to be synchronized, if the corresponding Paimon table does 
 
 ### Example 2: synchronize newly added tables under database
 
-Let's say at first a Flink job is synchronizing tables [product, user, address] 
+Let's say at first a Flink job is synchronizing tables [product, user, address]
 under database `source_db`. The command to submit the job looks like:
 
 ```bash
@@ -214,13 +191,13 @@ under database `source_db`. The command to submit the job looks like:
     --including_tables 'product|user|address'
 ```
 
-At a later point we would like the job to also synchronize tables [order, custom], 
+At a later point we would like the job to also synchronize tables [order, custom],
 which contains history data. We can achieve this by recovering from the previous
-snapshot of the job and thus reusing existing state of the job. The recovered job will 
-first snapshot newly added tables, and then continue reading changelog from previous 
+savepoint of the job and thus reusing existing state of the job. The recovered job will
+first snapshot newly added tables, and then continue reading changelog from previous
 position automatically.
 
-The command to recover from previous snapshot and add new tables to synchronize looks like:
+The command to restore from a savepoint and add new tables to synchronize looks like:
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -247,7 +224,7 @@ You can set `--mode combined` to enable synchronizing newly added tables without
 
 ### Example 3: synchronize and merge multiple shards
 
-Let's say you have multiple database shards `db1`, `db2`, ... and each database has tables `tbl1`, `tbl2`, .... You can 
+Let's say you have multiple database shards `db1`, `db2`, ... and each database has tables `tbl1`, `tbl2`, .... You can
 synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... by following command:
 
 ```bash
@@ -268,15 +245,43 @@ synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... 
     --including_tables 'tbl.+'
 ```
 
-By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 
+By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases
 and merge tables of the same name into one table.
 
 :::info
 
-You can set `--merge_shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName' 
+You can set `--merge_shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName'
 to avoid potential name conflict.
 
 :::
+
+### Database Action Reference
+
+Command syntax (square brackets indicate optional arguments):
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mysql_sync_database \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    [--ignore_incompatible <true/false>] \
+    [--merge_shards <true/false>] \
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <mysql-table-name|name-regular-expr>] \
+    [--excluding_tables <mysql-table-name|name-regular-expr>] \
+    [--mode <sync-mode>] \
+    [--metadata_column <metadata-column>] \
+    [--type_mapping <option1,option2...>] \
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
+    [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
+```
+
+<ConfigTable html={mysqlSyncDatabaseHtml} />
 
 ## Run with Flink Kubernetes Operator
 
@@ -358,12 +363,12 @@ Kubernetes Secrets instead of writing them directly in the manifest.
 
 ## FAQ
 
-1. Chinese characters in records ingested from MySQL are garbled.
+### Garbled Characters
 
-* Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`(Flink version \< 1.19) or `config.yaml`(Flink version >= 1.19)
-(the option is changed to `env.java.opts.all` since Flink-1.17).
+Set `env.java.opts.all: -Dfile.encoding=UTF-8` in the Flink configuration (`config.yaml` for
+Flink 1.19 and later, `flink-conf.yaml` for earlier versions). Before Flink 1.17, use `env.java.opts`.
 
-2. Synchronize MySQL table and column comment.
+### Table and Column Comments
 
-* Synchronize MySQL create table comment to the paimon table, you need to configure `--mysql_conf jdbc.properties.useInformationSchema=true`.
-* Synchronize MySQL alter table or column comment to the paimon table, you need to configure `--mysql_conf debezium.include.schema.comments=true`.
+- For comments on newly created MySQL tables, set `--mysql_conf jdbc.properties.useInformationSchema=true`.
+- For comment changes, set `--mysql_conf debezium.include.schema.comments=true`.
