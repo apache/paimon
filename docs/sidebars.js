@@ -502,11 +502,27 @@ const sidebars = {
       "id": "cdc-ingestion/index"
     },
     "items": [
-      "cdc-ingestion/mysql-cdc",
-      "cdc-ingestion/postgres-cdc",
-      "cdc-ingestion/kafka-cdc",
-      "cdc-ingestion/mongo-cdc",
-      "cdc-ingestion/pulsar-cdc",
+      {
+        type: "category",
+        label: "Source Guides",
+        collapsed: false,
+        items: [
+          "cdc-ingestion/mysql-cdc",
+          "cdc-ingestion/postgres-cdc",
+          "cdc-ingestion/mongo-cdc",
+          "cdc-ingestion/kafka-cdc",
+          "cdc-ingestion/pulsar-cdc"
+        ]
+      },
+      {
+        type: "category",
+        label: "Configuration and Formats",
+        items: [
+          "cdc-ingestion/schema-evolution",
+          "cdc-ingestion/action-configuration",
+          "cdc-ingestion/kafka-debezium-bson"
+        ]
+      },
       "cdc-ingestion/flink-cdc"
     ]
   },

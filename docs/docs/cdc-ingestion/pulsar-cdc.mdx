@@ -1,11 +1,11 @@
 ---
-title: "Kafka CDC"
-sidebar_position: 3
+title: "Pulsar CDC"
+sidebar_position: 5
 ---
 
 import ConfigTable from '@site/src/components/ConfigTable';
-import kafkaSyncTableHtml from '@site/generated/kafka_sync_table.html';
-import kafkaSyncDatabaseHtml from '@site/generated/kafka_sync_database.html';
+import pulsarSyncTableHtml from '@site/generated/pulsar_sync_table.html';
+import pulsarSyncDatabaseHtml from '@site/generated/pulsar_sync_database.html';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,24 +26,24 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Kafka CDC
+# Pulsar CDC
 
-Consume change events from Kafka and write them into one Paimon table or route them to separate tables in a Paimon database.
+Consume change events from Pulsar and write them into one Paimon table or route them to separate tables in a Paimon database.
 
 See [CDC Action Configuration](./action-configuration) for command syntax, computed columns, and job settings,
 and [Schema Evolution and Type Mapping](./schema-evolution) for shared behavior.
 
-## Prerequisites {#prepare-kafka-bundled-jar}
+## Prerequisites {#prepare-pulsar-bundled-jar}
 
 Place the connector jar matching your Flink runtime in `<FLINK_HOME>/lib/`:
 
 ```text
-flink-sql-connector-kafka-*.jar
+flink-connector-pulsar-*.jar
 ```
 
 ## Supported Formats
 
-Set the event format with `--kafka_conf value.format=<format>`. Paimon parses insert, update,
+Set the event format with `--pulsar_conf value.format=<format>`. Paimon parses insert, update,
 and delete events from the message value. Plain JSON represents insert-only data.
 
 | `value.format` | Input |
@@ -54,8 +54,6 @@ and delete events from the message value. Plain JSON represents insert-only data
 | `maxwell-json` | Maxwell JSON change events |
 | `ogg-json` | Oracle GoldenGate JSON change events |
 | `json` | Plain JSON records, treated as inserts |
-| `aws-dms-json` | AWS Database Migration Service change events |
-| `debezium-bson` | [MongoDB events captured by Debezium](./kafka-debezium-bson) |
 
 Check the event metadata before choosing a synchronization mode:
 
@@ -67,7 +65,7 @@ Check the event metadata before choosing a synchronization mode:
 
 ## Synchronizing Tables
 
-By using [KafkaSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from Kafka's one topic into one Paimon table.
+By using [PulsarSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncTableAction.html) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from Pulsar's one topic into one Paimon table.
 
 If the target does not exist, the action creates it from the first usable data record found during
 schema discovery. It then evolves the schema as records arrive. For an existing target, it checks
@@ -80,17 +78,18 @@ This example assumes the source event contains `id` and `create_time`, and deriv
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_table \
+    pulsar_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
     --partition_keys pt \
     --primary_keys id,pt \
     --computed_column 'pt=date_format(create_time,yyyy-MM-dd)' \
-    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka_conf topic=order \
-    --kafka_conf properties.group.id=123456 \
-    --kafka_conf value.format=canal-json \
+    --pulsar_conf topic=order \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
     --catalog_conf metastore=hive \
     --catalog_conf uri=thrift://hive-metastore:9083 \
     --table_conf bucket=4 \
@@ -112,16 +111,17 @@ Use `value.format=json` for records such as logs that contain only inserts. This
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_table \
+    pulsar_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
     --partition_keys pt \
     --computed_column 'pt=date_format(event_tm, yyyyMMdd)' \
-    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka_conf topic=test_log \
-    --kafka_conf properties.group.id=123456 \
-    --kafka_conf value.format=json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf topic=test_log \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
+    --pulsar_conf value.format=json \
     --catalog_conf metastore=hive \
     --catalog_conf uri=thrift://hive-metastore:9083 \
     --table_conf sink.parallelism=4
@@ -134,7 +134,7 @@ Command syntax (square brackets indicate optional arguments):
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_table \
+    pulsar_sync_table \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
@@ -142,18 +142,16 @@ Command syntax (square brackets indicate optional arguments):
     [--primary_keys <primary-keys>] \
     [--type_mapping to-string] \
     [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
-    [--metadata_column <metadata-column> [--metadata_column ...]] \
-    [--metadata_column_prefix <metadata-column-prefix>] \
-    [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
+    [--pulsar_conf <pulsar-source-conf> [--pulsar_conf <pulsar-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
-<ConfigTable html={kafkaSyncTableHtml} />
+<ConfigTable html={pulsarSyncTableHtml} />
 
 ## Synchronizing Databases
 
-By using [KafkaSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction.html) in a Flink DataStream job or directly through `flink run`, users can route source tables from one or more topics into a Paimon database.
+By using [PulsarSyncDatabaseAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncDatabaseAction.html) in a Flink DataStream job or directly through `flink run`, users can route source tables from one or more topics into a Paimon database.
 
 The action uses a shared sink for the selected tables. It creates each missing target from that
 source table's records and applies supported schema changes to existing targets. Source tables
@@ -164,13 +162,14 @@ without primary keys are also supported; choose target keys that match the event
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_database \
+    pulsar_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka_conf topic=order \
-    --kafka_conf properties.group.id=123456 \
-    --kafka_conf value.format=canal-json \
+    --pulsar_conf topic=order \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
     --catalog_conf metastore=hive \
     --catalog_conf uri=thrift://hive-metastore:9083 \
     --table_conf bucket=4 \
@@ -185,13 +184,14 @@ Separate topic names with semicolons and quote the argument so the shell passes 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_database \
+    pulsar_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka_conf 'topic=order;logistic_order;user' \
-    --kafka_conf properties.group.id=123456 \
-    --kafka_conf value.format=canal-json \
+    --pulsar_conf 'topic=order;logistic_order;user' \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
     --catalog_conf metastore=hive \
     --catalog_conf uri=thrift://hive-metastore:9083 \
     --table_conf bucket=4 \
@@ -206,41 +206,38 @@ Command syntax (square brackets indicate optional arguments):
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-@@VERSION@@.jar \
-    kafka_sync_database \
+    pulsar_sync_database \
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--table_mapping <table-name>=<paimon-table-name1> [--table_mapping <table-name2>=<paimon-table-name2> ...]] \
     [--table_prefix <paimon-table-prefix>] \
     [--table_suffix <paimon-table-suffix>] \
-    [--table_prefix_db <db-name1>=<table-prefix1> [--table_prefix_db <db-name2>=<table-prefix2> ...]] \
-    [--table_suffix_db <db-name1>=<table-suffix1> [--table_suffix_db <db-name2>=<table-suffix2> ...]] \
     [--including_tables <table-name|name-regular-expr>] \
     [--excluding_tables <table-name|name-regular-expr>] \
-    [--including_dbs <database-name|name-regular-expr>] \
-    [--excluding_dbs <database-name|name-regular-expr>] \
     [--type_mapping to-string] \
     [--partition_keys <partition_keys>] \
     [--primary_keys <primary-keys>] \
-    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
-    [--metadata_column <metadata-column> [--metadata_column ...]] \
-    [--metadata_column_prefix <metadata-column-prefix>] \
-    [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
+    [--pulsar_conf <pulsar-source-conf> [--pulsar_conf <pulsar-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
-<ConfigTable html={kafkaSyncDatabaseHtml} />
+<ConfigTable html={pulsarSyncDatabaseHtml} />
 
-## Additional Kafka Configuration {#additional-kafka_config}
+## Additional Pulsar Configuration {#additional-pulsar_config}
 
-Pass this option through `--kafka_conf` in addition to the source connection settings:
+Pass these options through `--pulsar_conf`:
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `value.format` | None | Event format from the supported formats table. |
+| `topic` | None | Semicolon-separated topic names. Set either `topic` or `topic-pattern`. |
+| `topic-pattern` | None | Regular expression for topics to subscribe to. |
+| `pulsar.startCursor.fromMessageId` | `EARLIEST` | Start at `ledgerId,entryId,partitionIndex`, `EARLIEST`, or `LATEST`. Mutually exclusive with `fromPublishTime`. |
+| `pulsar.startCursor.fromPublishTime` | None | Start at the given message publish timestamp (milliseconds). |
+| `pulsar.startCursor.fromMessageIdInclusive` | `true` | Include the specified message ID. Does not apply to `EARLIEST` or `LATEST`. |
+| `pulsar.stopCursor.atMessageId` | None | Stop before the specified message ID, expressed as `ledgerId,entryId,partitionIndex` or `LATEST`. |
+| `pulsar.stopCursor.afterMessageId` | None | Stop after consuming the specified message ID, expressed as `ledgerId,entryId,partitionIndex` or `LATEST`. |
+| `pulsar.stopCursor.atEventTime` | None | Stop before messages whose event timestamp is greater than or equal to this value (milliseconds). |
+| `pulsar.stopCursor.afterEventTime` | None | Stop before messages whose event timestamp is greater than this value (milliseconds). |
+| `pulsar.source.unbounded` | `true` | Run as an unbounded source. |
 | `schema.registry.url` | None | Confluent schema registry URL, required for `value.format=debezium-avro`. |
-
-## Debezium-bson
-
-For MongoDB events captured by Debezium, use `value.format=debezium-bson`. See
-[Kafka Debezium BSON Format](./kafka-debezium-bson) for full-document requirements, the Kafka key
-fallback, and BSON-to-string conversion examples.
