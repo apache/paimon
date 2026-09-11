@@ -28,6 +28,7 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -65,7 +66,10 @@ class S3ResolvingTwoPhaseCommitITCase {
         ResolvingFileIO resolver = new ResolvingFileIO();
         resolver.configure(
                 CatalogContext.create(
-                        Options.fromMap(MINIO.getS3ConfigOptions()), S3_LOADER, null));
+                        Options.fromMap(MINIO.getS3ConfigOptions()),
+                        new Configuration(),
+                        S3_LOADER,
+                        null));
         return resolver;
     }
 
