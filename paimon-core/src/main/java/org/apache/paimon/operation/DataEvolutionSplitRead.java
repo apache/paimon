@@ -739,7 +739,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         key ->
                                 formatBuilder(readRowType, fileFilters, nestedFieldEnabled)
                                         .build(formatIdentifier, schema, dataSchema));
-
         FileIndexResult fileIndexResult = null;
         if (fileIndexReadEnabled || fileRowRange != null) {
             // fileRowRange is non-null only for a full-scan range read (no filter / DV), so it
@@ -836,11 +835,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             @Nullable FileIndexResult fileIndexResult,
             @Nullable RowRange fileRowRange)
             throws IOException {
-        // When a row range is requested but the caller did not pre-compute a file index result
-        // (e.g. the DataBunch merge path), build the selection bitmap here so a pushdown-capable
-        // format (parquet) prunes row groups by both endpoints. fileRowRange is non-null only for a
-        // full-scan range read (no filter / DV), so physical == effective here.
-        if (fileRowRange != null && fileIndexResult == null) {
+        boolean rangePushdown =
+                fileRowRange != null
+                        && formatReaderMapping.getReaderFactory().supportsRowRangeSkip();
+        if (rangePushdown && fileIndexResult == null) {
             fileIndexResult =
                     FileIndexEvaluator.evaluate(
                             fileIO,
@@ -894,17 +892,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             fileRecordReader =
                     new ApplyBitmapIndexRecordReader(fileRecordReader, bitmapIndexResult);
         }
-
-        // fileRowRange is non-null only for a full-scan range read (no filter / DV), so
-        // deletionVector is guaranteed null in that case. When the format consumed the selection
-        // bitmap (rangePushdown, parquet), the delegate already returns exactly [localStart,
-        // localEnd] with the right count, so no wrapper is needed. When it cannot (orc/avro), the
-        // delegate reads the whole file, so wrap with a per-file skip+limit to yield the local
-        // slice. The per-file wrap (rather than an outer wrap over the merged output) is required
-        // here because a merge group reads several bunches in lockstep: every bunch must yield the
-        // same count of rows to keep positional alignment in DataEvolutionIterator.
         if (fileRowRange != null) {
-            if (formatReaderMapping.getReaderFactory().supportsRowRangeSkip()) {
+            if (rangePushdown) {
                 return fileRecordReader;
             }
             return new RangeSkipReader<>(
