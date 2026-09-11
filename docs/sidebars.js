@@ -671,11 +671,25 @@ const sidebars = {
     },
     "items": [
       "project/download",
-      "project/creating-a-release",
-      "project/verifying-a-release-candidate",
-      "project/contributing",
-      "project/committer",
-      "project/security"
+      "project/security",
+      {
+        type: "category",
+        "label": "Community",
+        "items": [
+          "project/contributing",
+          "project/committer"
+        ]
+      },
+      {
+        type: "category",
+        "label": "Releases",
+        "link": { type: "doc", "id": "project/releases" },
+        "items": [
+          "project/creating-a-release",
+          "project/verifying-a-release-candidate",
+          "project/publishing-a-release"
+        ]
+      }
     ]
   },
   {
