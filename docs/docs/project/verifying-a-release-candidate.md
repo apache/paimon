@@ -29,6 +29,29 @@ PyPaimon source archives are the release. Maven, TestPyPI, and GitHub Actions
 checks supplement source verification but do not replace it.
 
 Report only the checks, platforms, and tool versions that you actually used.
+For roles and artifact relationships, see the [release overview](./releases.md).
+
+## Verification checklist
+
+Work through the checks in order, using the candidate named in the vote email.
+Keep notes for the [vote report](#report-your-vote).
+
+| Check | Evidence to record |
+| --- | --- |
+| [Collect inputs](#collect-the-candidate-inputs) | Version, RC number, source URLs, tag, commit, workflow, and staging URLs |
+| [Verify signatures and checksums](#verify-signatures-and-checksums) | Signing-key fingerprint and successful checks for both archives |
+| [Verify Git provenance](#verify-git-provenance) | Signed tag resolves to the announced commit |
+| [Inspect archives](#inspect-the-source-archives) | Expected source contents, versions, licenses, and legal reports |
+| [Build Java from source](#build-java-from-the-source-archive) | JDK, Maven, platform, build scope, and test or smoke-test result |
+| [Inspect Java staging](#verify-the-java-staging-repository) | Closed repository, complete artifacts, and representative runtime checks |
+| [Build and test PyPaimon](#build-and-test-pypaimon-from-source) | Python versions, package contents, and actual test results |
+| [Check TestPyPI](#verify-the-testpypi-candidate) | Exact RC installation and representative read/write result |
+| [Review workflow evidence](#review-github-actions-evidence) | Matching provenance, package manifests, and successful packaging lanes |
+
+For a binding `+1`, download all signed source packages, verify them, compile
+them, and test the result on your own platform, as required by the
+[ASF Release Policy](https://www.apache.org/legal/release-policy.html#release-approval).
+The optional packaging commands below skip tests and do not replace this work.
 
 ## Collect the candidate inputs
 
@@ -319,8 +342,9 @@ test suite for the PyPaimon candidate is supplied in the signed Paimon source
 archive; the PyPaimon source distribution must not be used by itself for an
 independent release. Run the tests from
 `paimon-PAIMON_VERSION/paimon-python` on as many supported Python versions as
-your environment allows. The project CI selects Python 3.6, 3.7, 3.10, and
-3.11 for its main compatibility lanes:
+your environment allows. Use the Python matrix in the candidate's
+`.github/workflows/paimon-python-checks.yml` to select relevant versions rather
+than assuming that a matrix from another release applies:
 
 ```shell
 (
