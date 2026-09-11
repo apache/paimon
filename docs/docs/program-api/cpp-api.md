@@ -212,7 +212,7 @@ Set the projected fields on the same read context:
 
 ```c++
 // Return f3, f1, and f2, in that order
-read_context_builder.SetReadSchema({"f3", "f1", "f2"});
+read_context_builder.SetReadFieldNames({"f3", "f1", "f2"});
 ```
 
 ### Generate Splits
