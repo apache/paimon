@@ -55,6 +55,7 @@ import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_SOFT_VALUES;
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -128,6 +129,31 @@ class TableWriteCoordinatorTest extends TableTestBase {
         ScanCoordinationResponse scan = coordinator.scan(request);
 
         assertThat(scan.extractVectorIndexPayloads()).containsExactly(ann);
+    }
+
+    @Test
+    public void testScanPreservesStatsWhenDeleteManifestStatsAreDropped() throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("k")
+                        .option(CoreOptions.BUCKET.key(), "1")
+                        .option(CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS.key(), "true")
+                        .build();
+        catalog.createDatabase("db", false);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+        write(table, GenericRow.of(1, 10));
+
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        ScanCoordinationRequest request =
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false, false);
+        ScanCoordinationResponse scan = coordinator.scan(request);
+
+        assertThat(scan.extractDataFiles()).hasSize(1);
+        assertThat(scan.extractDataFiles().get(0).valueStats()).isNotEqualTo(EMPTY_STATS);
     }
 
     @Test

@@ -757,7 +757,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private ManifestEntryChanges collectChanges(List<CommitMessage> commitMessages) {
-        ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
+        ManifestEntryChanges changes =
+                new ManifestEntryChanges(options.bucket(), options.manifestDeleteFileDropStats());
         commitMessages.forEach(changes::collect);
         LOG.info("Finished collecting changes, including: {}", changes);
         return changes;
