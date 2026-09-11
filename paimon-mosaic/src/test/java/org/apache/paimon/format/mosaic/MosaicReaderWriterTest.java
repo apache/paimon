@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -393,8 +394,7 @@ class MosaicReaderWriterTest {
         }
         writeRows(rowType, path, new Options(), MemorySize.ofKibiBytes(32), rows);
 
-        MosaicFileFormat format = createFormat();
-        FormatReaderFactory readerFactory = new MosaicReaderFactory(rowType, rowType, null, 4);
+        FormatReaderFactory readerFactory = createReaderFactory(rowType, null, 4);
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(
@@ -403,8 +403,7 @@ class MosaicReaderWriterTest {
         // Consume one batch only; the prefetched row groups are still in flight or buffered.
         assertThat(reader.readBatch()).isNotNull();
         // Closing must wait for and release them (an Arrow allocator leak would throw here).
-        reader.close();
-        assertThat(format).isNotNull();
+        assertThatCode(reader::close).doesNotThrowAnyException();
     }
 
     private void writeRows(
@@ -431,7 +430,7 @@ class MosaicReaderWriterTest {
             List<Long> positions)
             throws IOException {
         FormatReaderFactory readerFactory =
-                new MosaicReaderFactory(rowType, rowType, predicates, prefetchRowGroups);
+                createReaderFactory(rowType, predicates, prefetchRowGroups);
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(
@@ -490,6 +489,16 @@ class MosaicReaderWriterTest {
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         reader.close();
         return result;
+    }
+
+    private static FormatReaderFactory createReaderFactory(
+            RowType rowType, List<Predicate> predicates, int prefetchRowGroups) {
+        return new MosaicReaderFactory(
+                rowType,
+                rowType,
+                predicates,
+                prefetchRowGroups,
+                MosaicFileFormat.READ_PREFETCH_MAX_BYTES.defaultValue().getBytes());
     }
 
     private static MosaicFileFormat createFormat() {

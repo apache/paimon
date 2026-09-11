@@ -100,25 +100,9 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates,
-            Path filePath) {
-        this(
-                inputFileAdapter,
-                fileSize,
-                dataSchemaRowType,
-                projectedRowType,
-                predicates,
-                filePath,
-                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
-    }
-
-    public MosaicRecordsReader(
-            MosaicInputFileAdapter inputFileAdapter,
-            long fileSize,
-            RowType dataSchemaRowType,
-            RowType projectedRowType,
-            @Nullable List<Predicate> predicates,
             Path filePath,
-            int prefetchRowGroups) {
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
         this(
                 inputFileAdapter,
                 fileSize,
@@ -128,7 +112,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 filePath,
                 new RootAllocator(),
                 MosaicReader::open,
-                prefetchRowGroups);
+                prefetchRowGroups,
+                prefetchMaxBytes);
     }
 
     MosaicRecordsReader(
@@ -149,7 +134,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 filePath,
                 allocator,
                 nativeReaderOpener,
-                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
+                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue(),
+                MosaicFileFormat.READ_PREFETCH_MAX_BYTES.defaultValue().getBytes());
     }
 
     MosaicRecordsReader(
@@ -161,14 +147,14 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             Path filePath,
             BufferAllocator allocator,
             NativeReaderOpener nativeReaderOpener,
-            int prefetchRowGroups) {
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
         this.allocator = allocator;
-        this.prefetchDepth = Math.max(0, prefetchRowGroups);
 
         MosaicReader createdReader = null;
         int createdNumRowGroups;
@@ -203,8 +189,25 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
         this.reader = createdReader;
         this.numRowGroups = createdNumRowGroups;
+        this.prefetchDepth =
+                boundedPrefetchDepth(
+                        prefetchRowGroups, prefetchMaxBytes, fileSize, createdNumRowGroups);
         this.allProjectedColumnsMissing = createdAllProjectedColumnsMissing;
         this.arrowBatchReader = createdArrowBatchReader;
+    }
+
+    /** Caps the depth so the row groups ahead, by their average file size, fit the byte budget. */
+    static int boundedPrefetchDepth(int rowGroups, long maxBytes, long fileSize, int numRowGroups) {
+        int depth = Math.max(0, rowGroups);
+        if (depth == 0 || fileSize <= 0 || numRowGroups <= 0) {
+            return depth;
+        }
+        long rowGroupBytes = Math.max(1, fileSize / numRowGroups);
+        return (int) Math.min(depth, Math.max(0, maxBytes) / rowGroupBytes);
+    }
+
+    int prefetchDepth() {
+        return prefetchDepth;
     }
 
     @Nullable
@@ -459,19 +462,6 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     public void close() throws IOException {
         Throwable throwable = null;
 
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Closing mosaic reader for {}: row groups {} (opened {}), rows {}, "
-                            + "waited {} ms for row groups, lifetime {} ms, {}",
-                    filePath.getName(),
-                    numRowGroups,
-                    openedRowGroups,
-                    rowsReturned,
-                    openNanos / 1_000_000,
-                    (System.nanoTime() - createdNanos) / 1_000_000,
-                    inputFileAdapter.ioStats());
-        }
-
         try {
             releaseCurrentVsr();
         } catch (Throwable t) {
@@ -508,6 +498,18 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             throwable = addSuppressed(throwable, t);
         }
 
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Closed mosaic reader for {}: row groups {} (opened {}, prefetch depth {}), "
+                            + "rows {}, waited {} ms for row groups, lifetime {} ms",
+                    filePath.getName(),
+                    numRowGroups,
+                    openedRowGroups,
+                    prefetchDepth,
+                    rowsReturned,
+                    openNanos / 1_000_000,
+                    (System.nanoTime() - createdNanos) / 1_000_000);
+        }
         if (interrupted) {
             Thread.currentThread().interrupt();
         }

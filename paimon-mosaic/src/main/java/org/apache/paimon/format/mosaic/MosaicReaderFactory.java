@@ -36,33 +36,27 @@ public class MosaicReaderFactory implements FormatReaderFactory {
     private final RowType projectedRowType;
     @Nullable private final List<Predicate> predicates;
     private final int prefetchRowGroups;
-
-    public MosaicReaderFactory(
-            RowType dataSchemaRowType,
-            RowType projectedRowType,
-            @Nullable List<Predicate> predicates) {
-        this(
-                dataSchemaRowType,
-                projectedRowType,
-                predicates,
-                MosaicFileFormat.READ_PREFETCH_ROW_GROUPS.defaultValue());
-    }
+    private final long prefetchMaxBytes;
 
     public MosaicReaderFactory(
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates,
-            int prefetchRowGroups) {
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedRowType = projectedRowType;
         this.predicates = predicates;
-        this.prefetchRowGroups = prefetchRowGroups;
+        this.prefetchRowGroups = Math.max(0, prefetchRowGroups);
+        this.prefetchMaxBytes = prefetchMaxBytes;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+        // One stream per row group being opened, plus one for the consumer's own reads.
         MosaicInputFileAdapter inputFile =
-                new MosaicInputFileAdapter(context.fileIO(), context.filePath());
+                new MosaicInputFileAdapter(
+                        context.fileIO(), context.filePath(), prefetchRowGroups + 1);
         return new MosaicRecordsReader(
                 inputFile,
                 context.fileSize(),
@@ -70,6 +64,7 @@ public class MosaicReaderFactory implements FormatReaderFactory {
                 projectedRowType,
                 predicates,
                 context.filePath(),
-                prefetchRowGroups);
+                prefetchRowGroups,
+                prefetchMaxBytes);
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
@@ -82,8 +83,20 @@ public class MosaicFileFormat extends FileFormat {
                     .withDescription(
                             "Number of row groups a reader opens ahead of the one being consumed. "
                                     + "Opening a row group issues several dependent range reads, "
-                                    + "so prefetching overlaps that latency with decoding. "
+                                    + "so prefetching overlaps that latency with decoding. Each "
+                                    + "row group ahead keeps its decoded batch in memory and uses "
+                                    + "its own input stream, see 'mosaic.read.prefetch-max-bytes'. "
                                     + "0 disables prefetching.");
+
+    public static final ConfigOption<MemorySize> READ_PREFETCH_MAX_BYTES =
+            ConfigOptions.key("mosaic.read.prefetch-max-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(64))
+                    .withDescription(
+                            "Upper bound on the file bytes of the row groups a reader opens ahead, "
+                                    + "estimated from the file size divided by its row group count. "
+                                    + "Large row groups therefore lower the effective "
+                                    + "'mosaic.read.prefetch-row-groups'.");
 
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
@@ -105,7 +118,8 @@ public class MosaicFileFormat extends FileFormat {
                 dataSchemaRowType,
                 projectedRowType,
                 predicates,
-                Math.max(0, formatContext.options().get(READ_PREFETCH_ROW_GROUPS)));
+                formatContext.options().get(READ_PREFETCH_ROW_GROUPS),
+                formatContext.options().get(READ_PREFETCH_MAX_BYTES).getBytes());
     }
 
     @Override

@@ -27,84 +27,49 @@ import org.apache.paimon.mosaic.InputFile;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Adapts Paimon's {@link FileIO} to Mosaic's {@link InputFile}; each concurrent read borrows its
- * own {@link SeekableInputStream} from a pool because streams serialize concurrent reads.
+ * Adapter that exposes a Paimon {@link SeekableInputStream} as a Mosaic {@link InputFile}.
+ *
+ * <p>Each read borrows one of at most {@code maxStreams} input streams, so concurrent reads do not
+ * serialize on a single stream; a read that finds every stream busy waits for one.
  */
 public class MosaicInputFileAdapter implements InputFile, Closeable {
 
     private final FileIO fileIO;
     private final Path path;
+    private final int maxStreams;
 
     private final ArrayDeque<SeekableInputStream> idleStreams = new ArrayDeque<>();
     private final List<SeekableInputStream> allStreams = new ArrayList<>();
+    private int openingStreams;
     private boolean closed;
 
-    // I/O counters (diagnostics; see MosaicRecordsReader#close).
-    private final AtomicLong readCount = new AtomicLong();
-    private final AtomicLong smallReadCount = new AtomicLong();
-    private final AtomicLong mediumReadCount = new AtomicLong(); // [4 KiB, 256 KiB)
-    private final AtomicLong largeReadCount = new AtomicLong(); // [256 KiB, 1 MiB)
-    private final AtomicLong hugeReadCount = new AtomicLong(); // >= 1 MiB
-    private final AtomicLong readBytes = new AtomicLong();
-    private final AtomicLong readNanos = new AtomicLong();
-    private final AtomicLong maxReadNanos = new AtomicLong();
-
     public MosaicInputFileAdapter(FileIO fileIO, Path path) throws IOException {
-        this.fileIO = fileIO;
-        this.path = path;
-        // Open eagerly so that a missing file fails here rather than in a native callback.
-        release(fileIO.newInputStream(path));
+        this(fileIO, path, 1);
     }
 
-    public String ioStats() {
-        return "reads="
-                + readCount.get()
-                + "|small_reads="
-                + smallReadCount.get()
-                + "|medium_reads="
-                + mediumReadCount.get()
-                + "|large_reads="
-                + largeReadCount.get()
-                + "|huge_reads="
-                + hugeReadCount.get()
-                + "|bytes="
-                + readBytes.get()
-                + "|read_ms="
-                + readNanos.get() / 1_000_000
-                + "|max_read_ms="
-                + maxReadNanos.get() / 1_000_000
-                + "|streams="
-                + streamCount();
+    public MosaicInputFileAdapter(FileIO fileIO, Path path, int maxStreams) throws IOException {
+        this.fileIO = fileIO;
+        this.path = path;
+        this.maxStreams = Math.max(1, maxStreams);
+        // Open eagerly so that a missing file fails here rather than in a native callback.
+        SeekableInputStream first = fileIO.newInputStream(path);
+        allStreams.add(first);
+        idleStreams.push(first);
     }
 
     @Override
     public void readFully(long position, byte[] buffer, int offset, int length) throws IOException {
-        long start = System.nanoTime();
         SeekableInputStream in = borrow();
         try {
             doReadFully(in, position, buffer, offset, length);
         } finally {
             release(in);
-            long nanos = System.nanoTime() - start;
-            readCount.incrementAndGet();
-            if (length < 4096) {
-                smallReadCount.incrementAndGet();
-            } else if (length < 256 * 1024) {
-                mediumReadCount.incrementAndGet();
-            } else if (length < 1024 * 1024) {
-                largeReadCount.incrementAndGet();
-            } else {
-                hugeReadCount.incrementAndGet();
-            }
-            readBytes.addAndGet(length);
-            readNanos.addAndGet(nanos);
-            maxReadNanos.accumulateAndGet(nanos, Math::max);
         }
     }
 
@@ -132,21 +97,43 @@ public class MosaicInputFileAdapter implements InputFile, Closeable {
 
     private SeekableInputStream borrow() throws IOException {
         synchronized (this) {
-            if (closed) {
-                throw new IOException("Input file " + path + " is closed");
-            }
-            SeekableInputStream idle = idleStreams.poll();
-            if (idle != null) {
-                return idle;
+            while (true) {
+                if (closed) {
+                    throw new IOException("Input file " + path + " is closed");
+                }
+                SeekableInputStream idle = idleStreams.poll();
+                if (idle != null) {
+                    return idle;
+                }
+                if (allStreams.size() + openingStreams < maxStreams) {
+                    openingStreams++;
+                    break;
+                }
+                try {
+                    wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedIOException(
+                            "Interrupted while waiting for an input stream of " + path);
+                }
             }
         }
-        SeekableInputStream opened = fileIO.newInputStream(path);
-        synchronized (this) {
-            if (closed) {
-                opened.close();
-                throw new IOException("Input file " + path + " is closed");
+        SeekableInputStream opened = null;
+        try {
+            opened = fileIO.newInputStream(path);
+        } finally {
+            synchronized (this) {
+                openingStreams--;
+                if (opened != null && !closed) {
+                    allStreams.add(opened);
+                } else {
+                    notifyAll();
+                }
             }
-            allStreams.add(opened);
+        }
+        if (closed) {
+            opened.close();
+            throw new IOException("Input file " + path + " is closed");
         }
         return opened;
     }
@@ -154,18 +141,12 @@ public class MosaicInputFileAdapter implements InputFile, Closeable {
     private void release(SeekableInputStream in) throws IOException {
         synchronized (this) {
             if (!closed) {
-                if (!allStreams.contains(in)) {
-                    allStreams.add(in);
-                }
                 idleStreams.push(in);
+                notifyAll();
                 return;
             }
         }
         in.close();
-    }
-
-    private synchronized int streamCount() {
-        return allStreams.size();
     }
 
     @Override
@@ -179,6 +160,7 @@ public class MosaicInputFileAdapter implements InputFile, Closeable {
             toClose = new ArrayList<>(allStreams);
             allStreams.clear();
             idleStreams.clear();
+            notifyAll();
         }
         IOException failure = null;
         for (SeekableInputStream in : toClose) {

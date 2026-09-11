@@ -353,16 +353,54 @@ class MosaicRecordsReaderTest {
         CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
         MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
         CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
-        MosaicReader reader = createProjectedReader(allocator, 2);
-        RuntimeException failure = new RuntimeException("row group 1 metadata failed");
-        when(reader.rowGroupNumRows(1)).thenThrow(failure);
+        MosaicReader reader = createProjectedReader(allocator, 3);
+        RuntimeException failure = new RuntimeException("row group 2 metadata failed");
+        when(reader.rowGroupNumRows(2)).thenThrow(failure);
 
         MosaicRecordsReader recordsReader =
                 createRecordsReader(inputFileAdapter, allocator, reader, 1);
-        // Row group 0 was read; scheduling row group 1 fails while refilling the queue.
+        // Row group 0 is handed over; scheduling row group 2 fails while refilling behind it.
+        assertThat(recordsReader.readBatch()).isNotNull();
         assertThatThrownBy(recordsReader::readBatch).isSameAs(failure);
 
         // Row group 0 must still be released, otherwise the allocator reports a leak here.
+        recordsReader.close();
+        assertThat(allocator.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testPrefetchDepthIsBoundedByRowGroupBytes() throws IOException {
+        long mb = 1024 * 1024;
+        // 100 MB row groups against a 64 MB budget: nothing is read ahead.
+        assertThat(MosaicRecordsReader.boundedPrefetchDepth(8, 64 * mb, 400 * mb, 4)).isEqualTo(0);
+        // 100 MB row groups against a 250 MB budget: two ahead.
+        assertThat(MosaicRecordsReader.boundedPrefetchDepth(8, 250 * mb, 400 * mb, 4)).isEqualTo(2);
+        // 1 MB row groups: the configured depth applies.
+        assertThat(MosaicRecordsReader.boundedPrefetchDepth(8, 64 * mb, 400 * mb, 400))
+                .isEqualTo(8);
+        // Unknown file size keeps the configured depth; depth 0 stays 0.
+        assertThat(MosaicRecordsReader.boundedPrefetchDepth(8, 64 * mb, 0, 4)).isEqualTo(8);
+        assertThat(MosaicRecordsReader.boundedPrefetchDepth(0, 64 * mb, 400 * mb, 4)).isEqualTo(0);
+
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        MosaicReader reader = createProjectedReader(allocator, 4);
+        MosaicRecordsReader recordsReader =
+                new MosaicRecordsReader(
+                        inputFileAdapter,
+                        400 * mb,
+                        rowType(),
+                        rowType(),
+                        null,
+                        new Path("file:/tmp/mosaic-reader-test"),
+                        allocator,
+                        (inputFile, fileSize, bufferAllocator) -> reader,
+                        8,
+                        64 * mb);
+        assertThat(recordsReader.prefetchDepth()).isEqualTo(0);
+        assertThat(recordsReader.readBatch()).isNotNull();
+        verify(reader, times(1)).readRowGroup(anyInt(), any());
         recordsReader.close();
         assertThat(allocator.closeCount()).isEqualTo(1);
     }
@@ -436,7 +474,8 @@ class MosaicRecordsReaderTest {
                 new Path("file:/tmp/mosaic-reader-test"),
                 allocator,
                 (inputFile, fileSize, bufferAllocator) -> reader,
-                prefetchRowGroups);
+                prefetchRowGroups,
+                MosaicFileFormat.READ_PREFETCH_MAX_BYTES.defaultValue().getBytes());
     }
 
     private static MosaicReader createReader() {
