@@ -16,6 +16,7 @@
 # under the License.
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,8 @@ class BuildInfoTest(unittest.TestCase):
     def test_full_version(self):
         self.assertRegex(
             build_info.full_version(),
-            r"^python-2\.1\.dev-(UNKNOWN|[0-9a-f]{40})$",
+            r"^python-{}-(UNKNOWN|[0-9a-f]{{40}})$".format(
+                re.escape(build_info._source_version())),
         )
 
     def test_embedded_full_version(self):
@@ -104,7 +106,10 @@ class BuildInfoTest(unittest.TestCase):
             embedded_file = os.path.join(extracted, "pypaimon", "_full_version")
             with open(embedded_file, "r") as full_version_file:
                 embedded = full_version_file.read().strip()
-            self.assertEqual("python-2.1.dev-" + upstream_commit, embedded)
+            self.assertEqual(
+                "python-{}-{}".format(build_info._source_version(), upstream_commit),
+                embedded,
+            )
 
             downstream_commit = self._init_git_repository(extracted, "downstream")
             self.assertNotEqual(upstream_commit, downstream_commit)
