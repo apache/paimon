@@ -225,12 +225,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         boolean hasDv = hasDeletionVector(files, dvFactories);
         boolean fullScanRange =
                 rowRange != null && !hasFilter && topN == null && limit == null && !hasDv;
-        boolean canPushdown =
-                fullScanRange
-                        && !files.isEmpty()
-                        && formatReaderMapping(files.get(0), formatReaderMappingBuilder)
-                                .getReaderFactory()
-                                .supportsRowRangeSkip();
+        boolean canPushdown = fullScanRange && !files.isEmpty();
+        if (canPushdown) {
+            for (DataFileMeta file : files) {
+                if (!formatReaderMapping(file, formatReaderMappingBuilder)
+                        .getReaderFactory()
+                        .supportsRowRangeSkip()) {
+                    canPushdown = false;
+                    break;
+                }
+            }
+        }
 
         long fileStartGlobal = 0L;
         for (DataFileMeta file : files) {
@@ -391,10 +396,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             throws IOException {
         FileIndexResult fileIndexResult = null;
         DeletionVector deletionVector = dvFactory == null ? null : dvFactory.get();
-        // fileRowRange is non-null only on the canPushdown path (parquet full-scan range read);
-        // see createReader. Push the local range as a selection bitmap so the reader returns
-        // exactly [localStart, localEnd]. When fileRowRange is null the regular file-index path
-        // runs and any range is enforced by the outer RangeSkipReader.
         boolean rangePushdown =
                 fileRowRange != null
                         && formatReaderMapping.getReaderFactory().supportsRowRangeSkip();
@@ -474,10 +475,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         if (deletionVector != null && !deletionVector.isEmpty()) {
             fileRecordReader = new ApplyDeletionVectorReader(fileRecordReader, deletionVector);
         }
-        // fileRowRange is non-null only on the canPushdown path (parquet), where the selection
-        // bitmap above already makes the reader return exactly [localStart, localEnd] with no
-        // extra rows — so no RangeSkipReader is needed. The non-pushdown case (fileRowRange ==
-        // null) is handled by the single outer RangeSkipReader in createReader.
         return fileRecordReader;
     }
 }

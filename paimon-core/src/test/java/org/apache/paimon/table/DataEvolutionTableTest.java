@@ -2587,6 +2587,67 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(actual).isEqualTo(expected);
     }
 
+    /**
+     * Regression: a partial-column ORC read over a DataEvolution column merge. ORC cannot push a
+     * row range down (supportsRowRangeSkip() == false), so the range must be enforced exactly once
+     * by an outer RangeSkipReader, not both by a selection bitmap (ApplyBitmapIndexRecordReader)
+     * and a RangeSkipReader — the double application used to yield [] for RowRange.of(10, 19).
+     *
+     * <p>The table is stored as two ORC column files (f0+f1 in one, f2 in another) so the read goes
+     * through the column-merge / DataBunch path; the existing parquet case does not cover this
+     * branch.
+     */
+    @Test
+    public void testRowRangeOrcColumnMergeDoesNotDoubleApply() throws Exception {
+        int count = 100;
+        // build an ORC data-evolution table with a column-merge layout (f0+f1 | f2)
+        Schema schema = schemaDefault();
+        Map<String, String> orcOptions = new HashMap<>(schema.options());
+        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        Schema orcSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        orcOptions,
+                        schema.comment());
+        catalog.createTable(identifier(), orcSchema, true);
+        FileStoreTable table = getTableDefault();
+        writeColumnMerge(table, count);
+
+        // f0 = 0..99 ; RowRange [10, 19] -> f0 = 10..19 (must NOT be empty)
+        List<Integer> actual = readRowRange(table, RowRange.of(10L, 19L));
+        assertThat(actual).isEqualTo(intRange(10, 19));
+    }
+
+    /**
+     * Writes {@code count} rows split across two column files (f0+f1, then f2) — a column merge.
+     */
+    private void writeColumnMerge(FileStoreTable table, int count) throws Exception {
+        Schema schema = schemaDefault();
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+        long rowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
+    }
+
     /** Reads the f0 column of a slice via {@code TableRead::createReader(Split, RowRange)}. */
     private List<Integer> readRowRange(FileStoreTable table, RowRange rowRange) throws Exception {
         return readRowRange(table, rowRange, null, false);

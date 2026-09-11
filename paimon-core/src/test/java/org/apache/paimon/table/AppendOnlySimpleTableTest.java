@@ -2925,6 +2925,29 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     /**
+     * Regression: a split mixing formats after an append table changes from parquet to orc. The
+     * range pushdown check must cover every file: if only the first (parquet) file is checked,
+     * canPushdown is true, the outer RangeSkipReader is disabled, and the orc file (which cannot
+     * push down) returns its whole file — leaking rows beyond the range. With the all-files check,
+     * canPushdown is false and the single outer RangeSkipReader slices the concatenated stream.
+     *
+     * <p>file0 (parquet): a = 0..4 ; file1 (orc): a = 5..9 ; RowRange [3, 6] -> a = 3,4,5,6.
+     */
+    @Test
+    public void testAppendMixedFormatRowRangeSlicesConcatenatedStream() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        writeAppendRows(table, 0, 5);
+        // switch format to orc and write the next 5 rows into the same table (mixed-format split)
+        FileStoreTable orcTable =
+                table.copy(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "orc"));
+        writeAppendRows(orcTable, 5, 10);
+        // global effective rows: parquet file0 -> [0,4], orc file1 -> [5,9] ; RowRange [3, 6]
+        List<String> actual = readAppendRowRange(table, RowRange.of(3L, 6L), null, false);
+        assertThat(actual).containsExactly("0|3|30", "0|4|40", "0|5|50", "0|6|60");
+    }
+
+    /**
      * Reads the "pt|a|b" projection of a slice via {@code TableRead::createReader(Split,
      * RowRange)}.
      */
