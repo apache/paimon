@@ -36,6 +36,8 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -55,7 +57,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -369,39 +370,47 @@ class MosaicRecordsReaderTest {
         assertThat(allocator.closeCount()).isEqualTo(1);
     }
 
-    @Test
-    void testPrefetchIsBoundedByEstimatedDecodedBytes() throws IOException {
+    @ParameterizedTest
+    @CsvSource({
+        "0, 1, 1",
+        "4000, 1, 1",
+        "4000, 4, 4",
+        "5000, 1, 2",
+        "9999, 1, 2",
+        "10000, 1, 3",
+        "100000, 1, 4"
+    })
+    void testPrefetchIsBoundedByEstimatedDecodedBytes(
+            long budget, int batchesToRead, int expectedReads) throws IOException {
         // One INT column: 5 bytes per row; 1,000 rows per row group is 5,000 bytes.
         assertThat(MosaicRecordsReader.estimatedRowBytes(rowType())).isEqualTo(5);
-        for (long budget : new long[] {4_000L, 100_000L}) {
-            CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
-            MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
-            CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
-            MosaicReader reader = createProjectedReader(allocator, 4);
-            when(reader.rowGroupNumRows(anyInt())).thenReturn(1000);
-            MosaicRecordsReader recordsReader =
-                    new MosaicRecordsReader(
-                            inputFileAdapter,
-                            0,
-                            rowType(),
-                            rowType(),
-                            null,
-                            new Path("file:/tmp/mosaic-reader-test"),
-                            allocator,
-                            (inputFile, fileSize, bufferAllocator) -> reader,
-                            8,
-                            budget);
-            assertThat(recordsReader.readBatch()).isNotNull();
-            if (budget < 5_000L) {
-                // Below one row group: nothing is read ahead of the batch being consumed.
-                verify(reader, times(1)).readRowGroup(anyInt(), any());
-            } else {
-                // The three remaining row groups fit the budget and are read ahead.
-                verify(reader, timeout(5_000).times(4)).readRowGroup(anyInt(), any());
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        MosaicReader reader = createProjectedReader(allocator, 4);
+        when(reader.rowGroupNumRows(anyInt())).thenReturn(1000);
+        try (MosaicRecordsReader recordsReader =
+                new MosaicRecordsReader(
+                        inputFileAdapter,
+                        0,
+                        rowType(),
+                        rowType(),
+                        null,
+                        new Path("file:/tmp/mosaic-reader-test"),
+                        allocator,
+                        (inputFile, fileSize, bufferAllocator) -> reader,
+                        8,
+                        budget)) {
+            for (int i = 0; i < batchesToRead; i++) {
+                FileRecordIterator<InternalRow> batch = recordsReader.readBatch();
+                assertThat(batch).isNotNull();
+                assertThat(batch.next().getInt(0)).isEqualTo(i);
+                batch.releaseBatch();
             }
-            recordsReader.close();
-            assertThat(allocator.closeCount()).isEqualTo(1);
         }
+        // Closing drains scheduled reads, so verification cannot race with background tasks.
+        verify(reader, times(expectedReads)).readRowGroup(anyInt(), any());
+        assertThat(allocator.closeCount()).isEqualTo(1);
     }
 
     private static void closeQuietly(
