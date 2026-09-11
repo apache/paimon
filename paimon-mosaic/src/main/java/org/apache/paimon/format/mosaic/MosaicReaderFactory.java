@@ -64,6 +64,7 @@ public class MosaicReaderFactory implements FormatReaderFactory {
                 projectedRowType,
                 predicates,
                 context.filePath(),
+                context.selection(),
                 prefetchRowGroups,
                 prefetchMaxBytes);
     }

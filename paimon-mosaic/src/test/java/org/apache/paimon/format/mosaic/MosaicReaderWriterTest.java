@@ -32,14 +32,17 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.IntVector;
@@ -244,6 +247,81 @@ class MosaicReaderWriterTest {
         assertThat(fileIter.returnedPosition()).isEqualTo(2);
 
         reader.close();
+    }
+
+    @Test
+    void testEmptySelectionSkipsAllRowGroups() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                rowType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("a")),
+                GenericRow.of(2, BinaryString.fromString("b")));
+
+        MosaicFileFormat format = createFormat();
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        LocalFileIO fileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO,
+                                path,
+                                fileIO.getFileSize(path),
+                                new RoaringBitmap32(),
+                                null))) {
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @Test
+    void testNonEmptySelectionThroughReaderFactory() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+
+        writeRows(
+                rowType,
+                path,
+                GenericRow.of(1, BinaryString.fromString("a")),
+                GenericRow.of(2, BinaryString.fromString("b")),
+                GenericRow.of(3, BinaryString.fromString("c")));
+
+        MosaicFileFormat format = createFormat();
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        LocalFileIO fileIO = new LocalFileIO();
+        RoaringBitmap32 selection = RoaringBitmap32.bitmapOf(1);
+        FileRecordReader<InternalRow> mosaicReader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
+        try (DataFileRecordReader reader =
+                new DataFileRecordReader(
+                        rowType,
+                        mosaicReader,
+                        false,
+                        false,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        0,
+                        Collections.emptyMap(),
+                        selection,
+                        path)) {
+            FileRecordIterator<InternalRow> batch =
+                    (FileRecordIterator<InternalRow>) reader.readBatch();
+            assertThat(batch).isNotNull();
+            InternalRow row = batch.next();
+            assertThat(row).isNotNull();
+            assertThat(row.getInt(0)).isEqualTo(2);
+            assertThat(row.getString(1).toString()).isEqualTo("b");
+            assertThat(batch.returnedPosition()).isEqualTo(1);
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
     }
 
     @Test
