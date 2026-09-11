@@ -130,7 +130,7 @@ class ManifestSchemaTest(unittest.TestCase):
         expected_fields = [
             "_VERSION", "_FILE_NAME", "_FILE_SIZE", "_NUM_ADDED_FILES",
             "_NUM_DELETED_FILES", "_PARTITION_STATS", "_SCHEMA_ID",
-            "_MIN_ROW_ID", "_MAX_ROW_ID",
+            "_MIN_ROW_ID", "_MAX_ROW_ID", "_EXTRA_FILES",
         ]
 
         for field_name in expected_fields:
@@ -146,6 +146,9 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(field_map["_SCHEMA_ID"]["type"], "long")
         self.assertEqual(field_map["_MIN_ROW_ID"]["type"], ["null", "long"])
         self.assertEqual(field_map["_MAX_ROW_ID"]["type"], ["null", "long"])
+        self.assertEqual(field_map["_EXTRA_FILES"]["type"],
+                         ["null", {"type": "array", "items": "string"}])
+        self.assertIsNone(field_map["_EXTRA_FILES"]["default"])
         self.assertIsNone(
             field_map["_MIN_ROW_ID"].get("default"),
             "_MIN_ROW_ID should have default None for backward compatibility",
@@ -232,3 +235,8 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(meta.schema_id, 0)
         self.assertIsNone(meta.min_row_id)
         self.assertIsNone(meta.max_row_id)
+        self.assertIsNone(meta.extra_files)
+
+        buffer.seek(0)
+        resolved_record = next(fastavro.reader(buffer, reader_schema=MANIFEST_FILE_META_SCHEMA))
+        self.assertIsNone(resolved_record["_EXTRA_FILES"])

@@ -22,7 +22,9 @@ import sys
 import tempfile
 import threading
 import unittest
+from io import BytesIO
 
+import fastavro
 import pyarrow as pa
 
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
@@ -464,6 +466,44 @@ class ManifestListManagerTest(_ManifestManagerSetup):
             partition_stats=SimpleStats.empty_stats(), schema_id=0,
         )
         manager.write(name, [meta])
+
+    def test_extra_files_round_trip(self):
+        manager = self._make_manager()
+        expected_extra_files = [None, [], ["extra-1", "extra-2"]]
+        metas = []
+        for i, extra_files in enumerate(expected_extra_files):
+            meta = ManifestFileMeta(
+                file_name=f"manifest-{i}.avro", file_size=1024,
+                num_added_files=1, num_deleted_files=0,
+                partition_stats=SimpleStats.empty_stats(), schema_id=0,
+            )
+            self.assertIsNone(meta.extra_files)
+            meta.extra_files = extra_files
+            metas.append(meta)
+
+        name = "manifest-list-extra-files"
+        manager.write(name, metas)
+        actual = manager.read(name)
+        self.assertEqual([meta.file_name for meta in actual],
+                         [meta.file_name for meta in metas])
+        self.assertEqual([meta.extra_files for meta in actual], expected_extra_files)
+
+        with manager.file_io.new_input_stream(f"{manager.manifest_path}/{name}") as stream:
+            avro_bytes = stream.read()
+        reader = fastavro.reader(BytesIO(avro_bytes))
+        records = list(reader)
+        self.assertEqual([record["_VERSION"] for record in records], [2, 2, 2])
+        self.assertEqual([record["_EXTRA_FILES"] for record in records], expected_extra_files)
+
+        legacy_schema = reader.writer_schema
+        legacy_schema["fields"] = [
+            field for field in legacy_schema["fields"] if field["name"] != "_EXTRA_FILES"
+        ]
+        legacy_records = list(fastavro.reader(BytesIO(avro_bytes), reader_schema=legacy_schema))
+        self.assertEqual([record["_FILE_NAME"] for record in legacy_records],
+                         [meta.file_name for meta in metas])
+        for record in legacy_records:
+            self.assertNotIn("_EXTRA_FILES", record)
 
     def _make_snapshot(self, base_manifest_list, delta_manifest_list="delta-manifest-list"):
         from pypaimon.snapshot.snapshot import Snapshot

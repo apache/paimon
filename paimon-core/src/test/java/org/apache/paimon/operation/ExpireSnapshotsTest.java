@@ -60,6 +60,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -404,10 +406,15 @@ public class ExpireSnapshotsTest {
 
     private Snapshot snapshotWithManifestLists(
             String deltaManifestList, String changelogManifestList) {
+        return snapshotWithManifestLists(null, deltaManifestList, changelogManifestList);
+    }
+
+    private Snapshot snapshotWithManifestLists(
+            String baseManifestList, String deltaManifestList, String changelogManifestList) {
         return new Snapshot(
                 0,
                 0L,
-                null,
+                baseManifestList,
                 null,
                 deltaManifestList,
                 null,
@@ -427,6 +434,111 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 null);
+    }
+
+    @Test
+    public void testCleanUnusedManifestExtraFiles() throws Exception {
+        ManifestFileMeta base = manifestWithExtraFiles("base", null);
+        ManifestFileMeta empty = manifestWithExtraFiles("empty", Collections.emptyList());
+        ManifestFileMeta delta =
+                manifestWithExtraFiles("delta", Arrays.asList("delta-extra-1", "delta-extra-2"));
+        ManifestFileMeta changelog =
+                manifestWithExtraFiles("changelog", Collections.singletonList("changelog-extra"));
+        Snapshot snapshot =
+                snapshotWithManifestLists(
+                        writeManifestList(base, empty),
+                        writeManifestList(delta),
+                        writeManifestList(changelog));
+
+        store.newSnapshotDeletion().cleanUnusedManifests(snapshot, new HashSet<>());
+
+        for (String name :
+                Arrays.asList(
+                        "base",
+                        "empty",
+                        "delta",
+                        "changelog",
+                        "delta-extra-1",
+                        "delta-extra-2",
+                        "changelog-extra",
+                        snapshot.baseManifestList(),
+                        snapshot.deltaManifestList(),
+                        snapshot.changelogManifestList())) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(name)))
+                    .as(name)
+                    .isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "tag", "changelog"})
+    public void testCleanManifestExtraFilesFollowsManifestRetention(String cleaner)
+            throws Exception {
+        ManifestFileMeta expired =
+                manifestWithExtraFiles("expired", Collections.singletonList("expired-extra"));
+        ManifestFileMeta retained =
+                manifestWithExtraFiles("retained", Collections.singletonList("retained-extra"));
+        Snapshot expiredSnapshot =
+                snapshotWithManifestLists(
+                        writeManifestList(), writeManifestList(expired, retained), null);
+        Snapshot retainedSnapshot =
+                snapshotWithManifestLists(writeManifestList(), writeManifestList(retained), null);
+
+        SnapshotDeletion snapshotDeletion = store.newSnapshotDeletion();
+        List<Snapshot> skippingSnapshots = Collections.singletonList(retainedSnapshot);
+        if ("changelog".equals(cleaner)) {
+            ChangelogDeletion deletion = store.newChangelogDeletion();
+            deletion.cleanUnusedManifestList(
+                    expiredSnapshot.deltaManifestList(),
+                    deletion.manifestSkippingSet(skippingSnapshots));
+        } else {
+            FileDeletionBase<Snapshot> deletion =
+                    "tag".equals(cleaner) ? store.newTagDeletion() : snapshotDeletion;
+            deletion.cleanUnusedManifests(
+                    expiredSnapshot, deletion.manifestSkippingSet(skippingSnapshots));
+        }
+
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("expired"))).isFalse();
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("expired-extra")))
+                .isFalse();
+        for (String name : Arrays.asList("retained", "retained-extra")) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(name)))
+                    .as(name)
+                    .isTrue();
+        }
+
+        snapshotDeletion.cleanUnusedManifests(retainedSnapshot, new HashSet<>());
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("retained"))).isFalse();
+        assertThat(fileIO.exists(store.pathFactory().toManifestFilePath("retained-extra")))
+                .isFalse();
+    }
+
+    private ManifestFileMeta manifestWithExtraFiles(String fileName, List<String> extraFiles)
+            throws IOException {
+        fileIO.writeFile(store.pathFactory().toManifestFilePath(fileName), "manifest", true);
+        if (extraFiles != null) {
+            for (String extraFile : extraFiles) {
+                fileIO.writeFile(store.pathFactory().toManifestFilePath(extraFile), "extra", true);
+            }
+        }
+        return new ManifestFileMeta(
+                fileName,
+                0L,
+                0L,
+                0L,
+                SimpleStats.EMPTY_STATS,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                extraFiles);
+    }
+
+    private String writeManifestList(ManifestFileMeta... manifests) {
+        return store.manifestListFactory().create().write(Arrays.asList(manifests)).getKey();
     }
 
     @Test
