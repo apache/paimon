@@ -294,7 +294,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     @Nullable
     private RowGroupBatch nextRowGroup() throws IOException {
         if (pending.isEmpty()) {
-            fillPrefetchQueue(Math.max(1, prefetchDepth));
+            fillPrefetchQueue(Math.max(1, prefetchDepth), true);
         }
         RowGroupBatch head = pending.peek();
         if (head == null) {
@@ -310,13 +310,13 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         currentVsr = vsr;
         if (prefetchDepth > 0) {
             // currentVsr is owned by this reader, so a failure here leaves nothing unreleased.
-            fillPrefetchQueue(prefetchDepth);
+            fillPrefetchQueue(prefetchDepth, false);
         }
         return head;
     }
 
     /** Schedules matching row groups until {@code wanted} are queued or the byte budget is used. */
-    private void fillPrefetchQueue(int wanted) {
+    private void fillPrefetchQueue(int wanted, boolean readOnDemand) {
         while (pending.size() < wanted && nextRowGroupToSchedule < numRowGroups) {
             int index = nextRowGroupToSchedule;
             int numRows = reader.rowGroupNumRows(index);
@@ -327,8 +327,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                 continue;
             }
             long bytes = numRows * estimatedRowBytes;
-            // The first queued row group is always read; the rest must fit the decoded budget.
-            if (!pending.isEmpty() && pendingBytes + bytes > prefetchMaxBytes) {
+            // Only an on-demand read may exceed the decoded budget to make progress.
+            if ((!readOnDemand || !pending.isEmpty()) && pendingBytes + bytes > prefetchMaxBytes) {
                 return;
             }
             nextRowGroupToSchedule++;
