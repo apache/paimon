@@ -32,6 +32,7 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -55,6 +56,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -340,6 +342,116 @@ class MosaicReaderWriterTest {
         assertThat(reached).isTrue();
     }
 
+    @Test
+    void testPrefetchedReadMatchesSequentialRead() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+        int numRows = 20_000;
+        GenericRow[] rows = new GenericRow[numRows];
+        for (int i = 0; i < numRows; i++) {
+            rows[i] = GenericRow.of(i, BinaryString.fromString("value_" + i + "_padding"));
+        }
+        // A tiny row group size produces many row groups, so prefetching is exercised.
+        Options writeOptions = new Options();
+        writeOptions.set(MosaicFileFormat.STATS_COLUMNS, "f0");
+        writeRows(rowType, path, writeOptions, MemorySize.ofKibiBytes(32), rows);
+
+        List<Long> sequentialPositions = new ArrayList<>();
+        List<InternalRow> sequential =
+                readAllWithPrefetch(rowType, path, null, 0, sequentialPositions);
+        assertThat(sequential).hasSize(numRows);
+
+        List<Long> prefetchedPositions = new ArrayList<>();
+        List<InternalRow> prefetched =
+                readAllWithPrefetch(rowType, path, null, 3, prefetchedPositions);
+        assertThat(prefetched).hasSize(numRows);
+        assertThat(prefetchedPositions).isEqualTo(sequentialPositions);
+        for (int i = 0; i < numRows; i++) {
+            assertThat(prefetched.get(i).getInt(0)).isEqualTo(sequential.get(i).getInt(0));
+            assertThat(prefetched.get(i).getString(1)).isEqualTo(sequential.get(i).getString(1));
+        }
+
+        // Row groups skipped by the predicate must still advance the returned position.
+        Predicate predicate = new PredicateBuilder(rowType).greaterOrEqual(0, numRows - 1000);
+        List<Long> filteredPositions = new ArrayList<>();
+        List<InternalRow> filtered =
+                readAllWithPrefetch(
+                        rowType, path, Collections.singletonList(predicate), 3, filteredPositions);
+        assertThat(filtered).isNotEmpty();
+        assertThat(filtered.size()).isLessThan(numRows);
+        assertThat(filteredPositions.get(0)).isEqualTo((long) filtered.get(0).getInt(0));
+        assertThat(filteredPositions.get(filteredPositions.size() - 1))
+                .isEqualTo((long) numRows - 1);
+    }
+
+    @Test
+    void testClosingReaderWithPendingPrefetchReleasesResources() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.STRING());
+        Path path = newPath();
+        GenericRow[] rows = new GenericRow[20_000];
+        for (int i = 0; i < rows.length; i++) {
+            rows[i] = GenericRow.of(i, BinaryString.fromString("value_" + i + "_padding"));
+        }
+        writeRows(rowType, path, new Options(), MemorySize.ofKibiBytes(32), rows);
+
+        FormatReaderFactory readerFactory = createReaderFactory(rowType, null, 4);
+        LocalFileIO fileIO = new LocalFileIO();
+        RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
+        // Consume one batch only; the prefetched row groups are still in flight or buffered.
+        assertThat(reader.readBatch()).isNotNull();
+        // Closing must wait for and release them (an Arrow allocator leak would throw here).
+        assertThatCode(reader::close).doesNotThrowAnyException();
+    }
+
+    private void writeRows(
+            RowType rowType, Path path, Options options, MemorySize blockSize, GenericRow... rows)
+            throws IOException {
+        MosaicFileFormat format =
+                new MosaicFileFormat(
+                        new FileFormatFactory.FormatContext(
+                                options, 1024, 1024, MemorySize.VALUE_128_MB, 1, blockSize));
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
+        LocalFileIO fileIO = new LocalFileIO();
+        FormatWriter writer = writerFactory.create(fileIO.newOutputStream(path, false), "zstd");
+        for (GenericRow row : rows) {
+            writer.addElement(row);
+        }
+        writer.close();
+    }
+
+    private List<InternalRow> readAllWithPrefetch(
+            RowType rowType,
+            Path path,
+            List<Predicate> predicates,
+            int prefetchRowGroups,
+            List<Long> positions)
+            throws IOException {
+        FormatReaderFactory readerFactory =
+                createReaderFactory(rowType, predicates, prefetchRowGroups);
+        LocalFileIO fileIO = new LocalFileIO();
+        RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        List<InternalRow> result = new ArrayList<>();
+        RecordReader.RecordIterator<InternalRow> batch;
+        while ((batch = reader.readBatch()) != null) {
+            FileRecordIterator<InternalRow> fileIterator = (FileRecordIterator<InternalRow>) batch;
+            InternalRow row;
+            while ((row = fileIterator.next()) != null) {
+                positions.add(fileIterator.returnedPosition());
+                result.add(serializer.copy(row));
+            }
+            batch.releaseBatch();
+        }
+        reader.close();
+        return result;
+    }
+
     private Path newPath() {
         return new Path(tempDir.toUri().toString(), UUID.randomUUID() + ".mosaic");
     }
@@ -377,6 +489,16 @@ class MosaicReaderWriterTest {
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         reader.close();
         return result;
+    }
+
+    private static FormatReaderFactory createReaderFactory(
+            RowType rowType, List<Predicate> predicates, int prefetchRowGroups) {
+        return new MosaicReaderFactory(
+                rowType,
+                rowType,
+                predicates,
+                prefetchRowGroups,
+                MosaicFileFormat.READ_PREFETCH_MAX_BYTES.defaultValue().getBytes());
     }
 
     private static MosaicFileFormat createFormat() {

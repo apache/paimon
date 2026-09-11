@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.ArrayType;
@@ -75,6 +76,28 @@ public class MosaicFileFormat extends FileFormat {
                     .noDefaultValue()
                     .withDescription("Number of column buckets for parallel IO.");
 
+    public static final ConfigOption<Integer> READ_PREFETCH_ROW_GROUPS =
+            ConfigOptions.key("mosaic.read.prefetch-row-groups")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "Number of row groups a reader opens ahead of the one being consumed. "
+                                    + "Opening a row group issues several dependent range reads, "
+                                    + "so prefetching overlaps that latency with decoding. Each "
+                                    + "row group ahead keeps its decoded batch in memory and uses "
+                                    + "its own input stream, see 'mosaic.read.prefetch-max-bytes'. "
+                                    + "0 disables prefetching.");
+
+    public static final ConfigOption<MemorySize> READ_PREFETCH_MAX_BYTES =
+            ConfigOptions.key("mosaic.read.prefetch-max-bytes")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(64))
+                    .withDescription(
+                            "Upper bound on the estimated decoded size of the row groups a reader "
+                                    + "keeps ahead, from their row counts and the projected column "
+                                    + "types. Wide projections or large row groups therefore lower "
+                                    + "the effective 'mosaic.read.prefetch-row-groups'.");
+
     static {
         System.setProperty("arrow.enable_unsafe_memory_access", "true");
     }
@@ -91,7 +114,12 @@ public class MosaicFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> predicates) {
-        return new MosaicReaderFactory(dataSchemaRowType, projectedRowType, predicates);
+        return new MosaicReaderFactory(
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                formatContext.options().get(READ_PREFETCH_ROW_GROUPS),
+                formatContext.options().get(READ_PREFETCH_MAX_BYTES).getBytes());
     }
 
     @Override
