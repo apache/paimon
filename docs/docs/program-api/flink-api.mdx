@@ -1,6 +1,6 @@
 ---
 title: "Flink API"
-sidebar_position: 2
+sidebar_position: 6
 ---
 
 import Stable from '@site/src/components/Stable';
@@ -27,11 +27,19 @@ under the License.
 
 # Flink API
 
-:::info
+Use the Flink builders to connect a `DataStream` to a Paimon table. The sink integrates writer
+routing, checkpoints, and commits with Flink. Use `RichCdcSinkBuilder` when incoming records also
+carry schema changes.
 
-If possible, recommend using Flink SQL or Spark SQL, or simply use SQL APIs in programs.
+| Input or task | API |
+| --- | --- |
+| Flink `Row` values with a known schema | `FlinkSinkBuilder.forRow` |
+| Flink internal `RowData` values | `FlinkSinkBuilder.forRowData` |
+| Read a table as a `DataStream<Row>` | `FlinkSourceBuilder.buildForRow` |
+| Ingest typed CDC records with schema evolution | `RichCdcSinkBuilder` |
 
-:::
+For SQL transformations, you can also convert between DataStream and the Table API.
+See [DataStream API Integration](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/data_stream_api/).
 
 ## Dependency
 
@@ -64,14 +72,21 @@ Or download the jar file:
 
 </Unstable>
 
-Please choose your Flink version.
+Match the Paimon artifact and Flink dependencies to the Flink version you run. See
+[Flink installation](../flink/installation) for connector and Hadoop runtime setup.
 
-Paimon relies on Hadoop environment, you should add hadoop classpath or bundled jar.
+## Prepare a table
 
-Not only DataStream API, you can also read or write to Paimon tables by the conversion between DataStream and Table in Flink.
-See [DataStream API Integration](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/data_stream_api/).
+The read and write examples use `my_db.my_table` from the [Java API setup](java-api#create-table),
+with columns `f0 STRING` and `f1 INT`, primary key `f0`, and two fixed buckets. Use the same warehouse
+in each example. In a cluster, choose a [filesystem](../maintenance/filesystems) accessible to all
+workers instead of the local path shown here.
 
-## Write to Table 
+## Write to Table
+
+Declare the input's field names and types in the same order as the Paimon schema. The example
+updates Alice's value from 12 to 100. Enable checkpointing for an unbounded streaming source so
+that the sink can publish data as checkpoints complete.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
@@ -92,10 +107,9 @@ import org.apache.flink.types.RowKind;
 public class WriteToTable {
 
     public static void writeTo() throws Exception {
-        // create environments of both APIs
+        // Create the Flink execution environment.
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
-        // env.enableCheckpointing(60_000);
+        env.enableCheckpointing(60_000);
 
         // create a changelog DataStream
         DataStream<Row> input =
@@ -106,33 +120,34 @@ public class WriteToTable {
                                 Row.ofKind(RowKind.UPDATE_AFTER, "Alice", 100))
                         .returns(
                                 Types.ROW_NAMED(
-                                        new String[] {"name", "age"}, Types.STRING, Types.INT));
+                                        new String[] {"f0", "f1"}, Types.STRING, Types.INT));
 
         // get table from catalog
         Options catalogOptions = new Options();
-        catalogOptions.set("warehouse", "/path/to/warehouse");
-        Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        Table table = catalog.getTable(Identifier.create("my_db", "T"));
+        catalogOptions.set("warehouse", "file:///tmp/paimon-api-warehouse");
+        try (Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions)) {
+            Table table = catalog.getTable(Identifier.create("my_db", "my_table"));
 
-        DataType inputType =
-                DataTypes.ROW(
-                        DataTypes.FIELD("name", DataTypes.STRING()),
-                        DataTypes.FIELD("age", DataTypes.INT()));
-        FlinkSinkBuilder builder = new FlinkSinkBuilder(table).forRow(input, inputType);
+            DataType inputType =
+                    DataTypes.ROW(
+                            DataTypes.FIELD("f0", DataTypes.STRING()),
+                            DataTypes.FIELD("f1", DataTypes.INT()));
+            FlinkSinkBuilder builder = new FlinkSinkBuilder(table).forRow(input, inputType);
 
-        // set sink parallelism
-        // builder.parallelism(_your_parallelism)
-
-        // set overwrite mode
-        // builder.overwrite(...)
-
-        builder.build();
-        env.execute();
+            builder.build();
+            env.execute();
+        }
     }
 }
 ```
 
+Use `builder.parallelism(...)` to set sink parallelism. Select `builder.overwrite()` only for an
+intentional overwrite; see [write semantics](../flink/sql-write).
+
 ## Read from Table
+
+This example performs a bounded read of the current table state. Use `sourceBounded(false)` for a
+continuous source and choose the appropriate [streaming read mode](../flink/sql-query).
 
 ```java
 import org.apache.paimon.catalog.Catalog;
@@ -145,55 +160,66 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 
 public class ReadFromTable {
 
     public static void readFrom() throws Exception {
-        // create environments of both APIs
+        // Create the Flink execution environment.
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         // get table from catalog
         Options catalogOptions = new Options();
-        catalogOptions.set("warehouse", "/path/to/warehouse");
-        Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        Table table = catalog.getTable(Identifier.create("my_db", "T"));
+        catalogOptions.set("warehouse", "file:///tmp/paimon-api-warehouse");
+        try (Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions)) {
+            Table table = catalog.getTable(Identifier.create("my_db", "my_table"));
 
-        // table = table.copy(Collections.singletonMap("scan.file-creation-time-millis", "..."));
-        
-        FlinkSourceBuilder builder = new FlinkSourceBuilder(table).env(env);
-        
-        // builder.sourceBounded(true);
-        // builder.projection(...);
-        // builder.predicate(...);
-        // builder.limit(...);
-        // builder.sourceParallelism(...);
+            FlinkSourceBuilder builder = new FlinkSourceBuilder(table)
+                    .env(env)
+                    .sourceBounded(true);
 
-        DataStream<Row> dataStream = builder.buildForRow();
+            DataStream<Row> dataStream = builder.buildForRow();
 
-        // use this datastream
-        dataStream.executeAndCollect().forEachRemaining(System.out::println);
-
-        // prints:
-        // +I[Bob, 12]
-        // +I[Alice, 12]
-        // -U[Alice, 12]
-        // +U[Alice, 14]
+            try (CloseableIterator<Row> rows = dataStream.executeAndCollect()) {
+                rows.forEachRemaining(System.out::println);
+            }
+        }
     }
 }
 ```
 
-## Cdc ingestion Table
+After running the write example against the fresh sample table, the bounded result contains
+Alice with value 100 and Bob with value 5. Output order is not guaranteed. A continuous read's
+row kinds depend on the table's [changelog configuration](../primary-key-table/changelog-producer).
 
-Paimon supports ingest data into Paimon tables with schema evolution.
-- You can use Java API to write cdc records into Paimon Tables.
-- You can write records to Paimon's partial-update table with adding columns dynamically.
+Use `projection`, `predicate`, `limit`, and `sourceParallelism` on the source builder to customize
+the scan. Predicate field indexes refer to the table schema.
 
-Here is an example to use `RichCdcSinkBuilder` API:
+## CDC ingestion with schema evolution {#cdc-ingestion-table}
+
+`RichCdcRecord` carries field names, types, and string-encoded values. `RichCdcSinkBuilder` uses the
+catalog loader to apply schema changes and write the records. This also supports adding columns
+to a [partial-update table](../primary-key-table/merge-engine/partial-update).
+
+Create this separate table first, using a Flink SQL catalog pointing to the same warehouse:
+
+```sql
+CREATE DATABASE IF NOT EXISTS my_db;
+CREATE TABLE my_db.cdc_orders (
+    order_id BIGINT,
+    price DOUBLE,
+    PRIMARY KEY (order_id) NOT ENFORCED
+) WITH ('bucket' = '2');
+```
+
+The second record below introduces `dt`. Supply a serializable `CatalogLoader` so runtime operators
+can access the same catalog and evolve the schema.
 
 ```java
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
-import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.sink.cdc.RichCdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcSinkBuilder;
 import org.apache.paimon.options.Options;
@@ -209,8 +235,7 @@ public class WriteCdcToTable {
 
     public static void writeTo() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
-        // env.enableCheckpointing(60_000);
+        env.enableCheckpointing(60_000);
 
         DataStream<RichCdcRecord> dataStream =
                 env.fromElements(
@@ -225,20 +250,22 @@ public class WriteCdcToTable {
                                 .field("dt", DataTypes.TIMESTAMP(), "2023-06-12 20:21:12")
                                 .build());
 
-        Identifier identifier = Identifier.create("my_db", "T");
+        Identifier identifier = Identifier.create("my_db", "cdc_orders");
         Options catalogOptions = new Options();
-        catalogOptions.set("warehouse", "/path/to/warehouse");
+        catalogOptions.set("warehouse", "file:///tmp/paimon-api-warehouse");
         CatalogLoader catalogLoader =
                 () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        Table table = catalogLoader.load().getTable(identifier);
+        try (Catalog catalog = catalogLoader.load()) {
+            Table table = catalog.getTable(identifier);
 
-        new RichCdcSinkBuilder(table)
-                .forRichCdcRecord(dataStream)
-                .identifier(identifier)
-                .catalogLoader(catalogLoader)
-                .build();
+            new RichCdcSinkBuilder(table)
+                    .forRichCdcRecord(dataStream)
+                    .identifier(identifier)
+                    .catalogLoader(catalogLoader)
+                    .build();
 
-        env.execute();
+            env.execute();
+        }
     }
 }
 ```

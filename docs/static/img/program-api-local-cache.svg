@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="586" viewBox="0 0 960 586" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Local blocks reduce repeated storage reads</title>
+<desc id="desc">Eligible immutable file reads check the local memory or disk cache. Hits return a cached block. Misses fetch and cache a block from storage. Non-whitelisted files and mutable hints bypass the cache.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="584" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Local blocks reduce repeated storage reads</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Enable caching on the catalog and choose which file types to cache.</text>
+<rect x="28" y="116" width="238" height="104" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="147.0" y="149" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">File read</text>
+<text x="147.0" y="177" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Check file type</text>
+<text x="147.0" y="202" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">and mutable hints</text>
+<rect x="365" y="116" width="257" height="104" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="493.5" y="149" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Local block cache</text>
+<text x="493.5" y="177" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Memory or disk</text>
+<text x="493.5" y="202" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Bounded by max-size</text>
+<rect x="720" y="116" width="212" height="104" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="826.0" y="149" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Storage</text>
+<text x="826.0" y="177" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">S3 / OSS / HDFS</text>
+<text x="826.0" y="202" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">or filesystem</text>
+<path d="M 266 165 H 365" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="315" y="142" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Eligible</text>
+<path d="M 622 165 H 720" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="671" y="142" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Miss</text>
+<path d="M 824 220 V 265 H 560 V 220" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="744" y="292" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Fetch block and cache it</text>
+<text x="28" y="332" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Other file types, LATEST and</text>
+<text x="28" y="357" font-size="17" fill="#526277" font-weight="400" text-anchor="start">EARLIEST read storage directly.</text>
+<rect x="365" y="390" width="257" height="80" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="493.5" y="423" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Return bytes</text>
+<text x="493.5" y="451" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Hit: reuse cached block</text>
+<path d="M 493 220 V 390" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="517" font-size="18" fill="#172b4d" font-weight="700" text-anchor="start">Default whitelist: meta,global-index. Add data explicitly to cache data files.</text>
+<text x="28" y="548" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Block hits avoid content downloads; file-status and other metadata calls can still occur.</text>
+</g>
+</svg>

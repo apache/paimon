@@ -1,6 +1,6 @@
 ---
 title: "Catalog API"
-sidebar_position: 4
+sidebar_position: 2
 ---
 
 <!--
@@ -24,314 +24,208 @@ under the License.
 
 # Catalog API
 
-## Create Database
+Use `Catalog` to manage databases and tables, and to load a `Table` for reading or writing.
+Catalog configuration and table options have different scopes: configure the warehouse and metastore
+on the catalog; put storage and read/write behavior in the table schema's options.
 
-You can use the catalog to create databases. The created databases are persistence in the file system.
+## Set up the examples
 
-```java
-import org.apache.paimon.catalog.Catalog;
-
-public class CreateDatabase {
-
-    public static void main(String[] args) {
-        try {
-            Catalog catalog = CreateCatalog.createFilesystemCatalog();
-            catalog.createDatabase("my_db", false);
-        } catch (Catalog.DatabaseAlreadyExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Determine Whether Database Exists
-
-You can use the catalog to determine whether the database exists
-
-```java
-import org.apache.paimon.catalog.Catalog;
-
-public class DatabaseExists {
-
-    public static void main(String[] args) {
-        Catalog catalog = CreateCatalog.createFilesystemCatalog();
-        boolean exists = catalog.databaseExists("my_db");
-    }
-}
-```
-
-## List Databases
-
-You can use the catalog to list databases.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-
-import java.util.List;
-
-public class ListDatabases {
-
-    public static void main(String[] args) {
-        Catalog catalog = CreateCatalog.createFilesystemCatalog();
-        List<String> databases = catalog.listDatabases();
-    }
-}
-```
-
-## Drop Database
-
-You can use the catalog to drop database.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-
-public class DropDatabase {
-
-    public static void main(String[] args) {
-        try {
-            Catalog catalog = CreateCatalog.createFilesystemCatalog();
-            catalog.dropDatabase("my_db", false, true);
-        } catch (Catalog.DatabaseNotEmptyException e) {
-            // do something
-        } catch (Catalog.DatabaseNotExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Alter Database
-
-You can use the catalog to alter database's properties.(ps: only support hive and jdbc catalog)
-
-```java
-import java.util.ArrayList;
-import org.apache.paimon.catalog.Catalog;
-
-public class AlterDatabase {
-
-    public static void main(String[] args) {
-        try {
-            Catalog catalog = CreateCatalog.createHiveCatalog();
-            List<DatabaseChange> changes = new ArrayList<>();
-            changes.add(DatabaseChange.setProperty("k1", "v1"));
-            changes.add(DatabaseChange.removeProperty("k2"));
-            catalog.alterDatabase("my_db", changes, true);
-        } catch (Catalog.DatabaseNotExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Determine Whether Table Exists
-
-You can use the catalog to determine whether the table exists
+Add the [Java dependency](java-api#dependency) and save the
+[`CreateCatalog` helper](java-api#create-catalog). The snippets below are method-body fragments.
+Place the operations you want to run inside this catalog scope:
 
 ```java
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-
-public class TableExists {
-
-    public static void main(String[] args) {
-        Identifier identifier = Identifier.create("my_db", "my_table");
-        Catalog catalog = CreateCatalog.createFilesystemCatalog();
-        boolean exists = catalog.tableExists(identifier);
-    }
-}
-```
-
-## List Tables
-
-You can use the catalog to list tables.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-
-import java.util.List;
-
-public class ListTables {
-
-    public static void main(String[] args) {
-        try {
-            Catalog catalog = CreateCatalog.createFilesystemCatalog();
-            List<String> tables = catalog.listTables("my_db");
-        } catch (Catalog.DatabaseNotExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Drop Table
-
-You can use the catalog to drop table.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-
-public class DropTable {
-
-    public static void main(String[] args) {
-        Identifier identifier = Identifier.create("my_db", "my_table");
-        try {
-            Catalog catalog = CreateCatalog.createFilesystemCatalog();
-            catalog.dropTable(identifier, false);
-        } catch (Catalog.TableNotExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Rename Table
-
-You can use the catalog to rename a table.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-
-public class RenameTable {
-
-    public static void main(String[] args) {
-        Identifier fromTableIdentifier = Identifier.create("my_db", "my_table");
-        Identifier toTableIdentifier = Identifier.create("my_db", "test_table");
-        try {
-            Catalog catalog = CreateCatalog.createFilesystemCatalog();
-            catalog.renameTable(fromTableIdentifier, toTableIdentifier, false);
-        } catch (Catalog.TableAlreadyExistException e) {
-            // do something
-        } catch (Catalog.TableNotExistException e) {
-            // do something
-        }
-    }
-}
-```
-
-## Alter Table
-
-You can use the catalog to alter a table, but you need to pay attention to the following points.
-
-- Column %s cannot specify NOT NULL in the %s table.
-- Cannot update partition column type in the table.
-- Cannot change nullability of primary key.
-- If the type of the column is nested row type, update the column type is not supported.
-- Update column to nested row type is not supported.
-
-```java
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
-import com.google.common.collect.Lists;
-
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 
-public class AlterTable {
+public class CatalogExample {
 
-    public static void main(String[] args) {
-        Identifier identifier = Identifier.create("my_db", "my_table");
-
-        Map<String, String> options = new HashMap<>();
-        options.put("bucket", "4");
-
-        Catalog catalog = CreateCatalog.createFilesystemCatalog();
-        catalog.createDatabase("my_db", false);
-
-        try {
-            catalog.createTable(
-                    identifier,
-                    new Schema(
-                            Lists.newArrayList(
-                                    new DataField(0, "col1", DataTypes.STRING(), "field1"),
-                                    new DataField(1, "col2", DataTypes.STRING(), "field2"),
-                                    new DataField(2, "col3", DataTypes.STRING(), "field3"),
-                                    new DataField(3, "col4", DataTypes.BIGINT(), "field4"),
-                                    new DataField(
-                                            4,
-                                            "col5",
-                                            DataTypes.ROW(
-                                                    new DataField(
-                                                            5, "f1", DataTypes.STRING(), "f1"),
-                                                    new DataField(
-                                                            6, "f2", DataTypes.STRING(), "f2"),
-                                                    new DataField(
-                                                            7, "f3", DataTypes.STRING(), "f3")),
-                                            "field5"),
-                                    new DataField(8, "col6", DataTypes.STRING(), "field6")),
-                            Lists.newArrayList("col1"), // partition keys
-                            Lists.newArrayList("col1", "col2"), // primary key
-                            options,
-                            "table comment"),
-                    false);
-        } catch (Catalog.TableAlreadyExistException e) {
-            // do something
-        } catch (Catalog.DatabaseNotExistException e) {
-            // do something
-        }
-
-        // add option
-        SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
-        // add column
-        SchemaChange addColumn = SchemaChange.addColumn("col1_after", DataTypes.STRING());
-        // add a column after col1
-        SchemaChange.Move after = SchemaChange.Move.after("col1_after", "col1");
-        SchemaChange addColumnAfterField =
-                SchemaChange.addColumn("col7", DataTypes.STRING(), "", after);
-        // rename column
-        SchemaChange renameColumn = SchemaChange.renameColumn("col3", "col3_new_name");
-        // drop column
-        SchemaChange dropColumn = SchemaChange.dropColumn("col6");
-        // update column comment
-        SchemaChange updateColumnComment =
-                SchemaChange.updateColumnComment(new String[]{"col4"}, "col4 field");
-        // update nested column comment
-        SchemaChange updateNestedColumnComment =
-                SchemaChange.updateColumnComment(new String[]{"col5", "f1"}, "col5 f1 field");
-        // update column type
-        SchemaChange updateColumnType = SchemaChange.updateColumnType("col4", DataTypes.DOUBLE());
-        // update column position, you need to pass in a parameter of type Move
-        SchemaChange updateColumnPosition =
-                SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
-        // update column nullability
-        SchemaChange updateColumnNullability =
-                SchemaChange.updateColumnNullability(new String[]{"col4"}, false);
-        // update nested column nullability
-        SchemaChange updateNestedColumnNullability =
-                SchemaChange.updateColumnNullability(new String[]{"col5", "f2"}, false);
-
-        SchemaChange[] schemaChanges =
-                new SchemaChange[]{
-                        addOption,
-                        removeOption,
-                        addColumn,
-                        addColumnAfterField,
-                        renameColumn,
-                        dropColumn,
-                        updateColumnComment,
-                        updateNestedColumnComment,
-                        updateColumnType,
-                        updateColumnPosition,
-                        updateColumnNullability,
-                        updateNestedColumnNullability
-                };
-        try {
-            catalog.alterTable(identifier, Arrays.asList(schemaChanges), false);
-        } catch (Catalog.TableNotExistException e) {
-            // do something
-        } catch (Catalog.ColumnAlreadyExistException e) {
-            // do something
-        } catch (Catalog.ColumnNotExistException e) {
-            // do something
+    public static void main(String[] args) throws Exception {
+        try (Catalog catalog = CreateCatalog.createFilesystemCatalog()) {
+            // Insert the relevant snippets here.
         }
     }
 }
+```
+
+The `ignoreIfExists` and `ignoreIfNotExists` flags handle an existing or missing object, respectively.
+They do not suppress other validation errors. Use `false` when an unexpected catalog state should
+fail the operation. The examples propagate exceptions; applications can handle the corresponding
+`Catalog.*Exception` at their error-handling boundary.
+
+## Manage databases
+
+### Create Database
+
+```java
+catalog.createDatabase("my_db", false);
+```
+
+### Determine Whether Database Exists
+
+```java
+boolean exists = catalog.databaseExists("my_db");
+```
+
+### List Databases
+
+```java
+List<String> databases = catalog.listDatabases();
+```
+
+### Alter Database
+
+Use `PropertyChange` for database properties. Hive, JDBC, and REST catalogs support this operation;
+the filesystem catalog does not. Run this fragment with a suitable catalog, such as one created
+with `CreateCatalog.createHiveCatalog()`, and an existing database.
+
+```java
+List<PropertyChange> changes = Arrays.asList(
+        PropertyChange.setProperty("owner", "analytics"),
+        PropertyChange.removeProperty("obsolete-property"));
+catalog.alterDatabase("my_db", changes, false);
+```
+
+## Manage tables
+
+### Create Table
+
+This is the same schema used by the Java reading and writing examples. Create `my_db` first.
+For partitioned tables with fixed buckets, include partition columns in the primary key.
+Tables that update a key across partitions require a different layout; see
+[cross-partition upserts](../primary-key-table/data-distribution#cross-partitions-upsert).
+
+```java
+Identifier identifier = Identifier.create("my_db", "my_table");
+Schema schema = Schema.newBuilder()
+        .column("f0", DataTypes.STRING().notNull())
+        .column("f1", DataTypes.INT())
+        .primaryKey("f0")
+        .option("bucket", "2")
+        .build();
+catalog.createTable(identifier, schema, false);
+```
+
+### Get Table
+
+```java
+Table table = catalog.getTable(Identifier.create("my_db", "my_table"));
+```
+
+Use the returned table with [Java Reads](java-reading) or [Java Writes](java-writing).
+
+### Determine Whether Table Exists
+
+```java
+boolean exists = catalog.tableExists(Identifier.create("my_db", "my_table"));
+```
+
+### List Tables
+
+```java
+List<String> tables = catalog.listTables("my_db");
+```
+
+### Rename Table
+
+```java
+catalog.renameTable(
+        Identifier.create("my_db", "my_table"),
+        Identifier.create("my_db", "renamed_table"),
+        false);
+```
+
+Subsequent operations must use the new identifier.
+
+## Alter Table
+
+Pass one `SchemaChange` or an ordered list of changes to `catalog.alterTable`. The following example
+uses a separate table so that schema changes do not invalidate the Java read/write walkthrough.
+
+### Create a table for schema changes
+
+```java
+Identifier alterIdentifier = Identifier.create("my_db", "schema_example");
+Schema alterSchema = Schema.newBuilder()
+        .column("id", DataTypes.STRING().notNull())
+        .column("region", DataTypes.STRING().notNull())
+        .column("amount", DataTypes.INT().notNull())
+        .column("description", DataTypes.STRING())
+        .column("obsolete", DataTypes.STRING())
+        .column("details", DataTypes.ROW(
+                new DataField(0, "city", DataTypes.STRING().notNull())))
+        .primaryKey("id", "region")
+        .partitionKeys("region")
+        .option("bucket", "2")
+        .option("snapshot.num-retained.max", "20")
+        .build();
+catalog.createTable(alterIdentifier, alterSchema, false);
+```
+
+### Apply schema and option changes
+
+```java
+List<SchemaChange> changes = Arrays.asList(
+        SchemaChange.setOption("snapshot.time-retained", "2h"),
+        SchemaChange.removeOption("snapshot.num-retained.max"),
+        SchemaChange.addColumn("note", DataTypes.STRING(), "Optional note",
+                SchemaChange.Move.after("note", "description")),
+        SchemaChange.renameColumn("description", "description_text"),
+        SchemaChange.dropColumn("obsolete"),
+        SchemaChange.updateColumnComment(new String[] {"amount"}, "Order amount"),
+        SchemaChange.updateColumnComment(new String[] {"details", "city"}, "City name"),
+        SchemaChange.updateColumnType("amount", DataTypes.BIGINT()),
+        SchemaChange.updateColumnPosition(SchemaChange.Move.first("amount")),
+        SchemaChange.updateColumnNullability(new String[] {"amount"}, true),
+        SchemaChange.updateColumnNullability(new String[] {"details", "city"}, true));
+catalog.alterTable(alterIdentifier, changes, false);
+
+// Load the updated schema before building new readers or writers.
+Table updatedTable = catalog.getTable(alterIdentifier);
+```
+
+### Schema constraints
+
+- Newly added columns must be nullable.
+- Primary-key and partition-column types cannot be changed. Primary-key nullability cannot be changed.
+- The example widens `INT` to `BIGINT` and relaxes `NOT NULL`. Tightening a nullable column to
+  `NOT NULL` is disabled by default through `alter-column-null-to-not-null.disabled`.
+- Nested field operations use a field path, for example `new String[] {"details", "city"}`.
+  Supported type changes depend on the source and target types; replacing an entire row type is
+  different from changing one nested field.
+
+See [schema evolution](../flink/sql-alter) for supported changes and their constraints.
+
+## Remove objects
+
+Drop operations remove catalog objects and can remove their stored data. Run these separately from
+the read/write walkthrough, using the identifier that currently exists.
+
+### Drop Table
+
+```java
+catalog.dropTable(Identifier.create("my_db", "renamed_table"), false);
+```
+
+### Drop Database
+
+Use `cascade=false` to reject dropping a nonempty database:
+
+```java
+catalog.dropDatabase("my_db", false, false);
+```
+
+Use `cascade=true` only when you intend to remove the database and its tables:
+
+```java
+catalog.dropDatabase("my_db", false, true);
 ```

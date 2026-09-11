@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="598" viewBox="0 0 960 598" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Prepare files, then publish a commit</title>
+<desc id="desc">For streaming commit N, workers write and prepare messages with N. A coordinator commits all messages with N and the same commit user. A recovery path restores saved messages and filters already committed IDs.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="596" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Prepare files, then publish a commit</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Streaming example: one application identity, one matching ID for each commit.</text>
+<rect x="28" y="111" width="277" height="110" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="166.5" y="144" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Worker writers</text>
+<text x="166.5" y="172" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">write(row)</text>
+<text x="166.5" y="197" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">prepareCommit(false, N)</text>
+<rect x="350" y="111" width="242" height="110" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="471.0" y="144" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Prepared messages</text>
+<text x="471.0" y="172" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Collect from all writers</text>
+<text x="471.0" y="197" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Keep commit ID N</text>
+<rect x="637" y="111" width="295" height="110" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="784.5" y="144" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Coordinator</text>
+<text x="784.5" y="172" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">commit(N, messages)</text>
+<text x="784.5" y="197" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Publish snapshot changes</text>
+<path d="M 305 166 H 350" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 592 166 H 637" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="270" width="904" height="64" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="480" y="308" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Use the same commitUser and commitIdentifier for prepare and commit.</text>
+<path d="M 471 221 V 270" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<rect x="28" y="386" width="418" height="111" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="237.0" y="419" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Recover an uncertain commit</text>
+<text x="237.0" y="447" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Restore saved user, IDs, messages</text>
+<text x="237.0" y="472" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">and associated input progress</text>
+<rect x="514" y="386" width="418" height="111" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="723.0" y="419" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Retry saved messages</text>
+<text x="723.0" y="447" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">filterAndCommit(pending)</text>
+<text x="723.0" y="472" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Skip IDs already committed</text>
+<path d="M 446 441 H 514" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="28" y="545" font-size="19" fill="#172b4d" font-weight="700" text-anchor="start">Advance the ID for new work after reconciling pending commits.</text>
+<text x="28" y="574" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Batch writes follow prepare → commit once, without an application-supplied commit ID.</text>
+</g>
+</svg>
