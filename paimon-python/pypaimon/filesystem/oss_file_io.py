@@ -52,32 +52,11 @@ class OssFileIO(PyArrowFileIO):
                 "OSS atomic writes require oss2. Install pypaimon[oss] or pypaimon[jindo]."
             ) from error
 
-        access_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
-        secret_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
-        token = self.properties.get(OssOptions.OSS_SECURITY_TOKEN)
-        endpoint = self.properties.get(OssOptions.OSS_ENDPOINT)
-        if not access_key or not secret_key or not endpoint:
-            raise ValueError(
-                "OSS atomic writes require fs.oss.accessKeyId, fs.oss.accessKeySecret "
-                "and fs.oss.endpoint; pass fs.oss.securityToken for STS credentials.")
-        if '://' not in endpoint:
-            endpoint = 'https://' + endpoint
-        region = (self.properties.get(OssOptions.OSS_REGION) or '').strip()
-        if not region:
-            match = re.fullmatch(
-                r'oss-(?!accelerate(?:[.-]))([a-z0-9-]+?)(?:-internal)?\.aliyuncs\.com',
-                urlparse(endpoint).hostname or '')
-            region = match.group(1) if match else None
-        if not region:
-            raise ValueError("Set fs.oss.region for OSS V4 signing when the endpoint is not regional")
-        headers = self._sse_headers()
-        headers['x-oss-forbid-overwrite'] = 'true'
-        auth = (oss2.StsAuth(access_key, secret_key, token, auth_version='v4')
-                if token else oss2.AuthV4(access_key, secret_key))
-
         session = oss2.Session()
         try:
-            bucket = oss2.Bucket(auth, endpoint, self._oss_bucket, session=session, region=region)
+            bucket = self._create_oss_bucket(session)
+            headers = self._sse_headers()
+            headers['x-oss-forbid-overwrite'] = 'true'
             try:
                 versioning = bucket.get_bucket_versioning().status
             except oss2.exceptions.ServerError as error:
@@ -101,6 +80,33 @@ class OssFileIO(PyArrowFileIO):
             raise OSError("Failed to atomically write oss://{}/{}".format(self._oss_bucket, key)) from error
         finally:
             session.session.close()
+
+    def _create_oss_bucket(self, session):
+        """Build the metadata client with one V4 credential path for both AK and STS."""
+        import oss2
+        from oss2.credentials import StaticCredentialsProvider
+
+        access_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
+        secret_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
+        token = self.properties.get(OssOptions.OSS_SECURITY_TOKEN)
+        endpoint = self.properties.get(OssOptions.OSS_ENDPOINT)
+        if not access_key or not secret_key or not endpoint:
+            raise ValueError(
+                "OSS atomic writes require fs.oss.accessKeyId, fs.oss.accessKeySecret "
+                "and fs.oss.endpoint; pass fs.oss.securityToken for STS credentials.")
+        if '://' not in endpoint:
+            endpoint = 'https://' + endpoint
+        region = (self.properties.get(OssOptions.OSS_REGION) or '').strip()
+        if not region:
+            match = re.fullmatch(
+                r'oss-(?!accelerate(?:[.-]))([a-z0-9-]+?)(?:-internal)?\.aliyuncs\.com',
+                urlparse(endpoint).hostname or '')
+            region = match.group(1) if match else None
+        if not region:
+            raise ValueError("Set fs.oss.region for OSS V4 signing when the endpoint is not regional")
+        provider = StaticCredentialsProvider(access_key, secret_key, token)
+        auth = oss2.ProviderAuthV4(provider)
+        return oss2.Bucket(auth, endpoint, self._oss_bucket, session=session, region=region)
 
     def _sse_headers(self):
         """Match Java OSSFileIO's SSE resolution, including the native option fallback."""
