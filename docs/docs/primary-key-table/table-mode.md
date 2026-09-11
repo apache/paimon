@@ -24,93 +24,105 @@ under the License.
 
 # Table Mode
 
-![](/img/lsm-inside-bucket.png)
+A table mode determines **where the work of resolving row versions happens**. It does not change
+the logical result defined by the [merge engine](./merge-engine/). The modes below use table
+options to control compaction and deletion vectors; there is no separate `table-mode` option.
 
-The file structure of the primary key table is roughly shown in the above figure. The table or partition contains
-multiple buckets, and each bucket is a separate LSM tree structure that contains multiple files.
+## Choose a Mode
 
-The writing process of LSM is roughly as follows: Flink checkpoint flush L0 files, and trigger a compaction as needed
-to merge the data. According to the different processing ways during writing, there are three modes:
+| Mode | Configuration | Read path | Main cost |
+| --- | --- | --- | --- |
+| Merge On Read (MOR) | Default | Merge overlapping sorted runs | Read CPU and memory grow with overlapping versions |
+| Copy On Write (COW) | `full-compaction.delta-commits = 1` | Read the fully compacted result | Frequent full compaction increases write amplification |
+| Merge On Write (MOW) | `deletion-vectors.enabled = true` | Read files and skip invalid row positions | Writers look up previous rows and maintain deletion vectors |
 
-1. MOR (Merge On Read): Default mode, only minor compactions are performed, and merging are required for reading.
-2. COW (Copy On Write): Using `'full-compaction.delta-commits' = '1'`, full compaction will be synchronized, which
-   means the merge is completed on write.
-3. MOW (Merge On Write): Using `'deletion-vectors.enabled' = 'true'`, in writing phase, LSM will be queried to generate
-   the deletion vector file for the data file, which directly filters out unnecessary lines during reading.
+For a typical `deduplicate` table with frequent analytical reads, consider MOW. MOR can suit
+workloads that favor write throughput. COW can suit workloads that can afford to fully compact
+each commit. Evaluate update rate, read latency, and compaction resources before choosing.
 
-The Merge On Write mode is recommended for general primary key tables (merge-engine is default `deduplicate`).
+![MOR merges versions on read; COW rewrites them during full compaction; MOW masks obsolete rows with deletion vectors.](/img/primary-key-read-write-modes.svg)
 
 ## Merge On Read
 
-MOR is the default mode of primary key table.
+MOR is the default. Writes create sorted files, and compaction reduces the number of runs over
+time. Compaction can include full compactions; MOR does not mean that only minor compactions run.
 
-![](/img/mor.png)
+Readers merge overlapping key ranges before returning logical rows. Those ranges must be read
+together, which constrains parallelism and makes bucket sizing important. See
+[Data Distribution](./data-distribution) for bucket assignment and sizing.
 
-When the mode is MOR, it is necessary to merge all files for reading, as all files are ordered and undergo multi way
-merging, which includes a comparison calculation of the primary key.
-
-There is an obvious issue here, where a single LSM tree can only have a single thread to read, so the read parallelism
-is limited. If the amount of data in the bucket is too large, it can lead to poor read performance. So in order to read
-performance, it is recommended to analyze the query requirements table and set the data volume in the bucket to be
-between 200MB and 1GB. But if the bucket is too small, there will be a lot of small file reads and writes, causing
-pressure on the file system.
-
-In addition, due to the merging process, Filter based data skipping cannot be performed on non primary key columns, 
-otherwise new data will be filtered out, resulting in incorrect old data.
-
-- Write performance: very good.
-- Read performance: not so good.
+Filters on mutable non-key columns generally cannot be applied before merging. For example,
+if an old row has `status = 'open'` and its replacement has `status = 'closed'`, filtering files
+for `status = 'open'` too early could discard the replacement and incorrectly return the old row.
+The reader must resolve overlapping versions first. Where files can be read without merging,
+Paimon can apply non-key filters earlier.
 
 ## Copy On Write
+
+In Flink SQL:
 
 ```sql
 ALTER TABLE orders SET ('full-compaction.delta-commits' = '1');
 ```
 
-Set `full-compaction.delta-commits` to 1, which means that every write will be fully merged, and all data will be merged
-to the highest level. When reading, merging is not necessary at this time, and the reading performance is the highest.
-But every write requires full merging, and write amplification is very severe.
+This requests synchronous full compaction for modified buckets after each commit; in a Flink
+streaming write, the interval is counted in checkpoints. It does not compact after every individual input row.
+The resulting fully compacted files can be read without merging overlapping versions.
 
-![](/img/cow.png)
-
-- Write performance: very bad.
-- Read performance: very good.
+Repeated full compaction can rewrite a large amount of unchanged data. Use it when the read
+benefit justifies the write amplification. The `lookup` changelog producer is incompatible with
+`full-compaction.delta-commits`; see [Changelog Producer](./changelog-producer#full-compaction).
 
 ## Merge On Write
 
+Enable deletion vectors when creating the table. For example, in Flink SQL:
+
 ```sql
-ALTER TABLE orders SET ('deletion-vectors.enabled' = 'true');
+CREATE TABLE orders_mow (
+    order_id BIGINT,
+    amount DECIMAL(12, 2),
+    PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+    'bucket' = '4',
+    'deletion-vectors.enabled' = 'true'
+);
 ```
 
-Thanks to Paimon's LSM structure, it has the ability to be queried by primary key. We can generate deletion vectors
-files when writing, representing which data in the file has been deleted. This directly filters out unnecessary rows
-during reading, which is equivalent to merging and does not affect reading performance.
+Changing this option on an existing table is blocked by default. A migration requires explicit
+`deletion-vectors.modifiable` configuration and full compaction to avoid exposing duplicate rows;
+setting the enable flag alone is not a complete migration procedure.
 
-![](/img/mow.png)
+During lookup compaction, Paimon finds earlier versions and records their physical row positions
+in deletion vectors. Readers skip those positions while scanning data files, so they can read
+files independently without merging overlapping key versions. Applying the deletion vectors
+still has a cost, but avoids the MOR merge work.
 
-A simple example just like:
+The example below uses `deduplicate`: an update replaces key `7`, while a delete removes key `9`.
+The old data file is retained, with both obsolete positions marked in its deletion vector.
 
-![](/img/mow-example.png)
+![An update to key 7 and a delete of key 9 mark two old file positions; readers see the new value of key 7 and the unchanged key 11.](/img/primary-key-deletion-vector-update.svg)
 
-Updates data by deleting old record first and then adding new one.
+:::info Data visibility
 
-- Write performance: good.
-- Read performance: good.
+By default, batch reads skip Level-0 files until lookup compaction publishes them. Writers wait
+for this compaction by default. Asynchronous compaction or a dedicated compaction job can delay
+visibility; see [Asynchronous Compaction](./compaction#asynchronous-compaction).
 
-:::info
-
-Visibility guarantee: Tables in deletion vectors mode, the files with level 0 will only be visible after compaction.
-So by default, compaction is synchronous, and if asynchronous is turned on, there may be delays in the data.
+For batch scans, `deletion-vectors.merge-on-read = true` includes uncompacted data by merging it
+at read time, with additional read cost. It does not change streaming changelog behavior.
 
 :::
 
+Check the requirements of specialized features before combining them. In particular,
+[First Row](./merge-engine/first-row), [PK Clustering Override](./pk-clustering-override), and
+[Primary-Key Indexes](./global-index#requirements) have their own deletion-vector constraints.
+
 ## MOR Read Optimized
 
-If you don't want to use Deletion Vectors mode, you want to query fast enough in MOR mode, but can only find
-older data, you can also:
+A MOR table can also provide a faster view of older, fully compacted data:
 
-1. Configure 'compaction.optimization-interval' when writing data.
-2. Query from [read-optimized system table](../concepts/system-tables#read-optimized-table). Reading from
-   results of optimized files avoids merging records with the same key, thus improving reading performance.
+1. Configure `compaction.optimization-interval` to schedule optimization full compactions.
+2. Query the [read-optimized system table](../concepts/system-tables#read-optimized-table).
 
-You can flexibly balance query performance and data latency when reading.
+This view reads the optimized result without merging subsequent updates. Its freshness depends
+on completed optimization compactions. Use the regular table when a query must include newer data.

@@ -42,8 +42,12 @@ public class JindoMultiPartUpload
     private final Path workingDirectory;
 
     public JindoMultiPartUpload(JindoHadoopSystem fs, Path filePath) {
-        this.workingDirectory = fs.getWorkingDirectory();
-        this.mpuStore = fs.getMpuStore(filePath);
+        this(fs.getMpuStore(filePath), fs.getWorkingDirectory());
+    }
+
+    JindoMultiPartUpload(JindoMpuStore mpuStore, Path workingDirectory) {
+        this.workingDirectory = workingDirectory;
+        this.mpuStore = mpuStore;
     }
 
     @Override

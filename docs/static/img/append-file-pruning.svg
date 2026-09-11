@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="583" viewBox="0 0 900 583" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">File statistics prune more files after clustering</title>
+<desc id="desc">Before clustering, files A, B, and C contain values 10,120,310; 50,150,340; and 80,190,390. All three min/max ranges overlap the filter 100 through 200. After sorting the same nine values, file D contains 10,50,80 and file F contains 310,340,390, so both can be skipped. Only file E, containing 120,150,190, must be read.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="581" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Clustering makes file ranges more selective</text>
+<text x="28" y="74" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Same nine product IDs · predicate: product_id BETWEEN 100 AND 200</text>
+<text x="28" y="117" font-size="19" fill="#93600b" font-weight="700" text-anchor="start">BEFORE · read all three candidate files</text>
+<rect x="28" y="136" width="270" height="136" rx="8" fill="#fff8ea" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="46" y="165" font-size="20" fill="#93600b" font-weight="700" text-anchor="start">File A</text>
+<text x="46" y="197" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">10, 120, 310</text>
+<text x="46" y="231" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 10–310</text>
+<text x="46" y="255" font-size="17" fill="#93600b" font-weight="700" text-anchor="start">READ · range overlaps</text>
+<rect x="315" y="136" width="270" height="136" rx="8" fill="#fff8ea" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="333" y="165" font-size="20" fill="#93600b" font-weight="700" text-anchor="start">File B</text>
+<text x="333" y="197" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">50, 150, 340</text>
+<text x="333" y="231" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 50–340</text>
+<text x="333" y="255" font-size="17" fill="#93600b" font-weight="700" text-anchor="start">READ · range overlaps</text>
+<rect x="602" y="136" width="270" height="136" rx="8" fill="#fff8ea" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="620" y="165" font-size="20" fill="#93600b" font-weight="700" text-anchor="start">File C</text>
+<text x="620" y="197" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">80, 190, 390</text>
+<text x="620" y="231" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 80–390</text>
+<text x="620" y="255" font-size="17" fill="#93600b" font-weight="700" text-anchor="start">READ · range overlaps</text>
+<path d="M 450 283 V 328" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="468" y="310" font-size="18" fill="#526277" font-weight="400" text-anchor="start">cluster by product_id</text>
+<text x="28" y="363" font-size="19" fill="#087f6e" font-weight="700" text-anchor="start">AFTER · read one candidate file</text>
+<rect x="28" y="382" width="270" height="136" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="411" font-size="20" fill="#526277" font-weight="700" text-anchor="start">File D</text>
+<text x="46" y="443" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">10, 50, 80</text>
+<text x="46" y="477" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 10–80</text>
+<text x="46" y="501" font-size="17" fill="#526277" font-weight="700" text-anchor="start">SKIP · range outside filter</text>
+<rect x="315" y="382" width="270" height="136" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="333" y="411" font-size="20" fill="#087f6e" font-weight="700" text-anchor="start">File E</text>
+<text x="333" y="443" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">120, 150, 190</text>
+<text x="333" y="477" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 120–190</text>
+<text x="333" y="501" font-size="17" fill="#087f6e" font-weight="700" text-anchor="start">READ · range overlaps</text>
+<rect x="602" y="382" width="270" height="136" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="620" y="411" font-size="20" fill="#526277" font-weight="700" text-anchor="start">File F</text>
+<text x="620" y="443" font-size="20" fill="#172b4d" font-weight="400" text-anchor="start">310, 340, 390</text>
+<text x="620" y="477" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Min/max: 310–390</text>
+<text x="620" y="501" font-size="17" fill="#526277" font-weight="700" text-anchor="start">SKIP · range outside filter</text>
+<text x="28" y="557" font-size="18" fill="#526277" font-weight="400" text-anchor="start">The reader still evaluates the predicate on rows in the selected files.</text>
+</g>
+</svg>

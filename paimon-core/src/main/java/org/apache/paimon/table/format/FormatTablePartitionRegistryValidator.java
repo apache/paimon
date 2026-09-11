@@ -33,6 +33,7 @@ public final class FormatTablePartitionRegistryValidator {
 
     private FormatTablePartitionRegistryValidator() {}
 
+    /** Validates each partition and rejects a registry whose partitions claim each other's data. */
     public static void validatePartitionLocations(
             List<Partition> partitions,
             List<String> partitionKeys,
@@ -40,6 +41,47 @@ public final class FormatTablePartitionRegistryValidator {
             String tableName,
             boolean onlyValueInPath,
             @Nullable CatalogContext catalogContext) {
+        validate(
+                partitions,
+                partitionKeys,
+                tablePath,
+                tableName,
+                onlyValueInPath,
+                catalogContext,
+                true);
+    }
+
+    /**
+     * Validates every partition on its own: a complete spec, and a location that parses and stays
+     * out of the table directory. Partitions are not compared to each other, which is what an
+     * operation needs when it only has to know where each partition lives rather than whether the
+     * registry as a whole is consistent.
+     */
+    public static void validateEachPartitionLocation(
+            List<Partition> partitions,
+            List<String> partitionKeys,
+            Path tablePath,
+            String tableName,
+            boolean onlyValueInPath,
+            @Nullable CatalogContext catalogContext) {
+        validate(
+                partitions,
+                partitionKeys,
+                tablePath,
+                tableName,
+                onlyValueInPath,
+                catalogContext,
+                false);
+    }
+
+    private static void validate(
+            List<Partition> partitions,
+            List<String> partitionKeys,
+            Path tablePath,
+            String tableName,
+            boolean onlyValueInPath,
+            @Nullable CatalogContext catalogContext,
+            boolean rejectPartitionsClaimingEachOther) {
         FormatTablePartitionPathResolver resolver =
                 new FormatTablePartitionPathResolver(
                         tablePath, tableName, onlyValueInPath, catalogContext);
@@ -61,7 +103,9 @@ public final class FormatTablePartitionRegistryValidator {
                     resolver.resolve(
                             orderedSpec,
                             FormatTablePartitionPathResolver.customLocation(partition));
-            resolver.validateAndRecord(orderedSpec, resolved);
+            if (rejectPartitionsClaimingEachOther) {
+                resolver.validateAndRecord(orderedSpec, resolved);
+            }
         }
     }
 }

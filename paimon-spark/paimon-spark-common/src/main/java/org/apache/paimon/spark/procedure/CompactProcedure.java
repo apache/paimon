@@ -98,6 +98,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -106,7 +107,9 @@ import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
 import static org.apache.paimon.CoreOptions.createCommitUser;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.spark.utils.SparkProcedureUtils.readParallelism;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -665,6 +668,7 @@ public class CompactProcedure extends BaseProcedure {
             return;
         }
         AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
+        Set<String> completedNormalFiles = new HashSet<>();
         Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
                 planningSnapshot -> {
                     DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
@@ -685,11 +689,31 @@ public class CompactProcedure extends BaseProcedure {
                                                 false,
                                                 planningSnapshot,
                                                 candidateFilesPerBatch);
+                        coordinator.withCompletedNormalFiles(completedNormalFiles);
                         coordinatorRef.set(coordinator);
                     }
                     return filterIdlePartitions(
                             coordinator.plan(), table, partitionPredicate, partitionIdleTime);
                 };
+        Consumer<List<CommitMessage>> commitObserver = null;
+        if (table.coreOptions().dataEvolutionCompactionSplitLargeFiles()) {
+            commitObserver =
+                    messages -> {
+                        // Output sizes can still trigger splitting or small-file merging.
+                        // Skip bins containing only this invocation's completed normal outputs.
+                        for (CommitMessage message : messages) {
+                            for (DataFileMeta file :
+                                    ((CommitMessageImpl) message)
+                                            .compactIncrement()
+                                            .compactAfter()) {
+                                if (!isBlobFile(file.fileName())
+                                        && !isVectorStoreFile(file.fileName())) {
+                                    completedNormalFiles.add(file.fileName());
+                                }
+                            }
+                        }
+                    };
+        }
         DataEvolutionRewriteExecutor.execute(
                 table,
                 snapshot,
@@ -699,7 +723,8 @@ public class CompactProcedure extends BaseProcedure {
                 commitConfigurer,
                 relation == null
                         ? null
-                        : new DataEvolutionCompactMergeConflictRewriter(table, relation)::rewrite);
+                        : new DataEvolutionCompactMergeConflictRewriter(table, relation)::rewrite,
+                commitObserver);
     }
 
     private static List<DataEvolutionCompactTask> filterIdlePartitions(

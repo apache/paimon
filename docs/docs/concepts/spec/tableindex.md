@@ -22,32 +22,48 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Table index
+# Table Index
 
-Table Index files is in the `index` directory.
+Table index files normally live in the `index` directory and are referenced through an
+[index manifest](./manifest#index-manifest). Configured external paths or
+`index-file-in-data-file-dir` can change their location. These indexes differ from
+[per-file column indexes](./fileindex).
+
+This page specifies dynamic-bucket hash indexes and deletion vectors. For global query indexes,
+see [Global Index](../../primary-key-table/global-index) and the
+[index manifest metadata](./manifest#index-manifest). To inspect the index files of a table, query
+the [`table_indexes` system table](../system-tables#table-indexes-table).
 
 ## Dynamic Bucket Index
 
-Dynamic bucket index is used to store the correspondence between the hash value of the primary-key and the bucket.
+A dynamic-bucket index tracks the primary-key hashes assigned to a bucket. Each index file stores
+a sequence of 4-byte, big-endian hash values; the index manifest identifies the partition and
+bucket to which the file belongs.
 
-Its structure is very simple, only storing hash values in the file:
-
-HASH_VALUE | HASH_VALUE | HASH_VALUE | HASH_VALUE | ...
-
-HASH_VALUE is the hash value of the primary-key. 4 bytes, BIG_ENDIAN.
+```text
+hash_0 (4 bytes) | hash_1 (4 bytes) | hash_2 (4 bytes) | ...
+```
 
 ## Deletion Vectors
 
-Deletion file is used to store the deleted records position for each data file. Each bucket has one deletion file for
-primary key table.
+A deletion vector records deleted row positions in a data file. A deletion file stores zero or
+more serialized deletion vectors. The index manifest metadata maps each data file to its
+vector's offset, length, and cardinality; the binary payload itself does not contain file names.
 
-![](/img/deletion-file.png)
+Bucketed primary-key tables maintain deletion files per bucket when deletion vectors are enabled.
+Other write paths can group vectors into files according to the configured target size.
+
+[![A deletion file contains a version byte followed by payload-size, bitmap-payload, and CRC32 blocks. The payload has distinct 32-bit and 64-bit bitmap encodings.](/img/concepts-deletion-vectors.svg)](/img/concepts-deletion-vectors.svg)
 
 The deletion file is a binary file, and the format is as follows:
 
 - First, record version by a byte. Current version is 1.
-- Then, record <size of serialized bin, serialized bin, checksum of serialized bin> in sequence.
-- Size and checksum are BIG_ENDIAN Integer.
+- Then, repeat `payload size | serialized payload | CRC32 checksum` for each vector.
+- Payload size and checksum are 4-byte BIG_ENDIAN integers. The payload includes its magic number.
+
+The payload-size field above is distinct from the vector length recorded in index metadata.
+In the current format, the metadata length for a 32-bit vector counts only the payload; for a
+64-bit vector it also counts the 4-byte size field and the 4-byte checksum.
 
 For each serialized bin, its serialization format is determined by `deletion-vectors.bitmap64`. 
 Paimon will use a 32-bit bitmap to store deleted records by default, but if `deletion-vectors.bitmap64` is set to true, a 64-bit bitmap will be used.

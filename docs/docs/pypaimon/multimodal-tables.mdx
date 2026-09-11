@@ -1,0 +1,341 @@
+---
+title: "Multimodal Tables"
+description: "Create and modify tables through `pypaimon.multimodal`."
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Multimodal Tables
+
+Create and modify tables through `pypaimon.multimodal`. Work through Connect, Create, and Add in order to obtain the `conn` and `docs` objects used below. The creation tabs are alternatives; later examples state when a different schema is needed.
+
+A multimodal connection wraps a Paimon catalog and a default database. Its table
+API manages scalar, text, vector, and BLOB data on data-evolution tables without
+primary keys. Each `add`, `overwrite`, `update`, or `delete` call handles its own
+commit; use the [Python API](./python-api) for explicit writer and commit control.
+
+Creating a multimodal table enables `row-tracking.enabled`,
+`data-evolution.enabled`, `deletion-vectors.enabled`, and
+`blob-as-descriptor` by default. Global index scans use full fallback coverage
+through `global-index.search-mode` set to `FULL`. Data files use Paimon's
+default Parquet format, and vector columns are stored in dedicated Parquet
+files through `vector.file.format` set to `parquet`. These defaults require no
+file-format extra:
+
+```shell
+pip install pypaimon
+```
+
+Vortex remains available as an optional format when explicitly configured.
+
+
+## Connect
+
+`connect` creates a multimodal connection from Paimon catalog options. The
+`options` argument is forwarded to `CatalogFactory.create`.
+
+<Tabs groupId="pypaimon-multimodal-connect">
+
+<TabItem value="filesystem" label="Filesystem catalog" default>
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "warehouse": "file:///tmp/warehouse",
+    },
+)
+```
+
+</TabItem>
+
+<TabItem value="rest" label="REST catalog">
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "metastore": "rest",
+        "uri": "http://localhost:8080",
+        "warehouse": "catalog_name",
+        # Optional authentication and storage options go here.
+        # "token.provider": "...",
+    },
+)
+```
+
+REST catalog options use the same keys as the lower-level PyPaimon catalog API.
+See [REST](../concepts/rest/) for server-side catalog configuration.
+
+</TabItem>
+
+</Tabs>
+
+Table names without a database are resolved against the connection's default
+database. Fully-qualified names such as `"analytics.docs"` are also accepted.
+Use `get_table` to open an existing multimodal table. The table must be a
+data-evolution table without primary keys.
+
+```python
+docs = conn.get_table("docs")
+```
+
+## Create
+
+<Tabs groupId="pypaimon-multimodal-create-table">
+
+<TabItem value="schema" label="Create from schema" default>
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("image", pa.large_binary()),
+        pa.field("category", pa.string()),
+    ]),
+    ignore_if_exists=True,
+)
+```
+
+</TabItem>
+
+<TabItem value="data" label="Create from data">
+
+```python
+docs = conn.create_table(
+    "docs",
+    data=[
+        {
+            "id": 1,
+            "content": "Apache Paimon supports mutable lakehouse tables.",
+            "category": "lake",
+        }
+    ],
+)
+```
+
+</TabItem>
+
+<TabItem value="partitioned" label="Create partitioned table">
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs_by_day",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("category", pa.string()),
+        pa.field("dt", pa.string()),
+    ]),
+    partitioned=["dt"],
+    options={
+        "snapshot.time-retained": "7 d",
+    },
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+Partition keys can be specified with `partitioned`, and table options can be
+specified with `options`. The multimodal API accepts `pyarrow.Schema` objects;
+it does not accept field dictionaries or `pypaimon.Schema`. Use Arrow fixed-size
+list types for vector columns, and Arrow binary or large-binary types for blob
+columns. When creating from data, pass an explicit schema if you need exact
+vector or blob types.
+
+## Add
+
+`add` accepts `pyarrow.Table`, `pyarrow.RecordBatch`, a list of dictionaries, a
+dictionary of arrays, or a pandas DataFrame. Input columns are aligned and cast
+to the Paimon table schema before writing. For a BLOB column, list, dictionary,
+and pandas inputs may also contain `Blob` or `BlobDescriptor` objects. A
+descriptor-backed `Blob` is copied through its stream; it is not first loaded
+into Python memory.
+
+```python
+docs.add([
+    {
+        "id": 2,
+        "content": "Paimon stores mutable lakehouse tables.",
+        "embedding": [0.4, 0.5, 0.6],
+        "category": "lake",
+    }
+])
+```
+
+## Overwrite
+
+`overwrite` accepts the same input formats as `add` and replaces existing data
+using Paimon's batch overwrite semantics. On an unpartitioned table it replaces
+the whole table. On a partitioned table it follows the table's
+`dynamic-partition-overwrite` option; with the default dynamic mode, only
+partitions present in the input data are replaced.
+
+```python
+docs.overwrite([
+    {
+        "id": 3,
+        "content": "Fresh replacement text",
+        "embedding": [0.7, 0.8, 0.9],
+        "category": "docs",
+    }
+])
+```
+
+The static overwrite example below uses a separate partitioned table and disables
+dynamic partition overwrite when creating it. Pass the partition to replace:
+
+```python
+docs_by_day = conn.create_table(
+    "docs_static_overwrite",
+    schema=pa.schema([
+        ("id", pa.int64()),
+        ("content", pa.string()),
+        ("category", pa.string()),
+        ("dt", pa.string()),
+    ]),
+    partitioned=["dt"],
+    options={"dynamic-partition-overwrite": "false"},
+)
+docs_by_day.overwrite(
+    [
+        {
+            "id": 4,
+            "content": "Only this day is replaced.",
+            "category": "docs",
+            "dt": "2024-01-01",
+        }
+    ],
+    partition={"dt": "2024-01-01"},
+)
+```
+
+## Update
+
+`update` modifies rows matched by a SQL-like predicate.
+
+```python
+docs.update(
+    where="id = 2",
+    values={"category": "docs"},
+)
+```
+
+On a frame table, updating ordinary columns leaves the configured
+`video-frame-field` untouched. Replacing that field requires the specialized
+`replace_video()` API described in [Video Frame Storage](./video#update-frame-rows-and-replace-a-video).
+
+## Delete
+
+`delete` removes rows matched by a SQL-like predicate. It uses the same
+predicate syntax as `scan().where(...)` and `update(...)`. Multimodal tables
+enable deletion vectors by default; on partitioned tables, a predicate that
+references only partition columns uses the partition drop path.
+
+```python
+docs.delete(where="id = 2")
+```
+
+## Merge
+
+Use `merge` for idempotent ingestion and matched-row deletes. The builder
+delegates to Paimon's local `MERGE INTO` implementation.
+
+`execute` takes the source rows for the merge. It accepts the same input formats
+as `add`, including `pyarrow.Table`, `pyarrow.RecordBatch`, a list of
+dictionaries, a dictionary of arrays, or a pandas DataFrame. A list of
+dictionaries is convenient for small batches. `when_matched_update()` updates
+the columns present in the source data and leaves omitted target columns
+unchanged. `when_matched_delete()` deletes matched rows.
+`when_not_matched_insert()` inserts the columns present in the source data and
+fills omitted target columns with null.
+
+```python
+from pypaimon.multimodal import source_col
+
+docs.merge("id") \
+    .when_matched_update(
+        where="source.category != target.category",
+    ) \
+    .when_not_matched_insert() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+        }
+    ])
+```
+
+Use `when_matched_delete()` for matched rows that should be removed:
+
+```python
+docs.merge("id") \
+    .when_matched_delete(where="source.deleted = TRUE") \
+    .when_matched_update() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+            "deleted": True,
+        }
+    ])
+```
+
+Clause predicates use `where` for update and delete clauses. Refer to source
+rows with `source.<column>` and target rows with `target.<column>`. Merge clause
+predicates require Python 3.10 or newer and
+`pip install 'pypaimon[datafusion]'`.
+
+When source and target key names differ, pass a mapping from target column to
+source column:
+
+```python
+docs.merge({"id": "doc_id"}) \
+    .when_matched_update({"category": source_col("new_category")}) \
+    .when_not_matched_insert({
+        "id": source_col("doc_id"),
+        "content": source_col("content"),
+        "category": source_col("new_category"),
+    }) \
+    .execute([
+        {"doc_id": 3, "content": "New doc", "new_category": "search"},
+    ])
+```

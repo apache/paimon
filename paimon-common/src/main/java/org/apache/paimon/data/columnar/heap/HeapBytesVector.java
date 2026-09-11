@@ -74,8 +74,6 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         }
 
         // We don't reset buffer to avoid unnecessary copy.
-        Arrays.fill(buffer, (byte) 0);
-
         this.bytesAppended = 0;
     }
 

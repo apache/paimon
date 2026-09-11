@@ -21,11 +21,16 @@ package org.apache.paimon.jindo;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Pair;
 
+import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.model.ObjectMetadata;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -120,6 +125,47 @@ public class JindoFileIOTest {
 
         fileIO.close();
         verify(client).shutdown();
+    }
+
+    @Test
+    public void testFallbackToRenamingWhenMultipartUploadUnsupported() throws Exception {
+        JindoHadoopSystem fs = mock(JindoHadoopSystem.class);
+        org.apache.hadoop.fs.Path hadoopPath = mock(org.apache.hadoop.fs.Path.class);
+        when(fs.exists(any())).thenReturn(false);
+        when(fs.getMpuStore(any())).thenReturn(null);
+        when(fs.create(any(), eq(false))).thenReturn(mock(FSDataOutputStream.class));
+
+        JindoFileIO fileIO = new TestingJindoFileIO(fs, hadoopPath);
+        TwoPhaseOutputStream stream =
+                fileIO.newTwoPhaseOutputStream(
+                        new Path("oss://bucket.cn-hangzhou.oss-dls.aliyuncs.com/table/file"),
+                        false);
+
+        assertThat(stream).isInstanceOf(RenamingTwoPhaseOutputStream.class);
+        stream.close();
+        verify(fs).getMpuStore(hadoopPath);
+    }
+
+    private static class TestingJindoFileIO extends JindoFileIO {
+
+        private final JindoHadoopSystem fs;
+        private final org.apache.hadoop.fs.Path hadoopPath;
+
+        private TestingJindoFileIO(JindoHadoopSystem fs, org.apache.hadoop.fs.Path hadoopPath) {
+            this.fs = fs;
+            this.hadoopPath = hadoopPath;
+        }
+
+        @Override
+        protected org.apache.hadoop.fs.Path path(Path path) {
+            return hadoopPath;
+        }
+
+        @Override
+        protected Pair<JindoHadoopSystem, String> getFileSystemPair(
+                org.apache.hadoop.fs.Path path, boolean enableCache) {
+            return Pair.of(fs, "dls");
+        }
     }
 
     private static String sha256Hex(byte[] bytes) throws Exception {

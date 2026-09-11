@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="642" viewBox="0 0 900 642" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Containment has a direction</title>
+<desc id="desc">Each candidate is checked separately against normal ranges 0 to 5 and 6 to 9. Normal 0 to 5 is valid; normal 0 to 3 is invalid. Dedicated 2 to 4 and 0 to 5 are valid. Dedicated 4 to 7 and 0 to 9 are invalid because they span normal ranges.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="640" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Containment has a direction</text>
+<text x="28" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Each candidate below is a separate alternative against the same normal ranges.</text>
+<text x="322" y="117" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Row ID</text>
+<text x="360.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">0</text>
+<text x="405.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">1</text>
+<text x="450.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">2</text>
+<text x="495.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">3</text>
+<text x="540.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">4</text>
+<text x="585.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">5</text>
+<text x="630.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">6</text>
+<text x="675.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">7</text>
+<text x="720.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">8</text>
+<text x="765.5" y="117" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">9</text>
+<line x1="338" y1="127" x2="338" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="383" y1="127" x2="383" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="428" y1="127" x2="428" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="473" y1="127" x2="473" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="518" y1="127" x2="518" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="563" y1="127" x2="563" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="608" y1="127" x2="608" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="653" y1="127" x2="653" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="698" y1="127" x2="698" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="743" y1="127" x2="743" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="788" y1="127" x2="788" y2="548" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<rect x="340" y="132" width="266" height="35" rx="5" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="473.0" y="156.5" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">Normal [0, 5]</text>
+<rect x="610" y="132" width="176" height="35" rx="5" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="698.0" y="156.5" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">Normal [6, 9]</text>
+<line x1="608" y1="126" x2="608" y2="552" stroke="#b42332" stroke-width="2" stroke-dasharray="6 5"/>
+<text x="28" y="157" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Existing normal files</text>
+<text x="28" y="227" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Normal: full range</text>
+<rect x="340" y="204" width="266" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="473.0" y="228.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">[0, 5]</text>
+<text x="804" y="227" font-size="16" font-weight="700" text-anchor="start" fill="#10705d">VALID</text>
+<text x="28" y="287" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Normal: only a subset</text>
+<rect x="340" y="264" width="176" height="35" rx="5" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="428.0" y="288.5" font-size="18" font-weight="700" text-anchor="middle" fill="#b42332">[0, 3]</text>
+<text x="804" y="287" font-size="16" font-weight="700" text-anchor="start" fill="#b42332">INVALID</text>
+<text x="28" y="347" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Dedicated: contained</text>
+<rect x="430" y="324" width="131" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="495.5" y="348.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">[2, 4]</text>
+<text x="804" y="347" font-size="16" font-weight="700" text-anchor="start" fill="#10705d">VALID</text>
+<text x="28" y="407" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Dedicated: equal</text>
+<rect x="340" y="384" width="266" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="473.0" y="408.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">[0, 5]</text>
+<text x="804" y="407" font-size="16" font-weight="700" text-anchor="start" fill="#10705d">VALID</text>
+<text x="28" y="467" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Dedicated: crosses boundary</text>
+<rect x="520" y="444" width="176" height="35" rx="5" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="608.0" y="468.5" font-size="18" font-weight="700" text-anchor="middle" fill="#b42332">[4, 7]</text>
+<text x="804" y="467" font-size="16" font-weight="700" text-anchor="start" fill="#b42332">INVALID</text>
+<text x="28" y="527" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Dedicated: covers both</text>
+<rect x="340" y="504" width="446" height="35" rx="5" fill="#fff0f1" stroke="#b42332" stroke-width="1.5"/>
+<text x="563.0" y="528.5" font-size="18" font-weight="700" text-anchor="middle" fill="#b42332">[0, 9]</text>
+<text x="804" y="527" font-size="16" font-weight="700" text-anchor="start" fill="#b42332">INVALID</text>
+<rect x="28" y="577" width="844" height="45" rx="8" fill="#fff0f1" stroke="#fff0f1" stroke-width="1.5"/>
+<text x="44" y="604" font-size="18" font-weight="400" text-anchor="start" fill="#b42332">A dedicated range must fit inside ONE normal range, not the union of two.</text>
+</g>
+</svg>

@@ -45,9 +45,10 @@ class BlobFileWriter:
 
     def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None,
                  copy_buffer_size: int = BlobFormatWriter.BUFFER_SIZE,
-                 video: bool = False):
+                 video: bool = False, uri_reader_factory=None):
         self.file_io = file_io
         self.file_path = file_path
+        self._uri_reader_factory = uri_reader_factory
         self._blob_consumer = blob_consumer
         if video:
             if blob_consumer is not None:
@@ -122,7 +123,8 @@ class BlobFileWriter:
         if isinstance(col_data, bytes):
             if BlobDescriptorSerde.is_descriptor(col_data):
                 descriptor = BlobDescriptorSerde.deserialize(col_data)
-                uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
+                factory = self._uri_reader_factory or self.file_io.uri_reader_factory
+                uri_reader = factory.create(descriptor.uri)
                 return Blob.from_descriptor(uri_reader, descriptor)
             return BlobData(col_data)
 

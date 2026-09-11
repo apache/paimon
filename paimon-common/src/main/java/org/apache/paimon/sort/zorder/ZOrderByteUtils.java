@@ -108,8 +108,10 @@ public class ZOrderByteUtils {
      */
     public static ByteBuffer floatToOrderedBytes(float val, ByteBuffer reuse) {
         ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        // Widening to double is exact and order-preserving, so the double bit pattern can
+        // carry the float: flip the sign bit, and invert the rest for negatives.
         long lval = Double.doubleToLongBits(val);
-        lval ^= ((lval >> (Integer.SIZE - 1)) | Long.MIN_VALUE);
+        lval ^= ((lval >> (Long.SIZE - 1)) | Long.MIN_VALUE);
         bytes.putLong(lval);
         return bytes;
     }
@@ -120,7 +122,7 @@ public class ZOrderByteUtils {
     public static ByteBuffer doubleToOrderedBytes(double val, ByteBuffer reuse) {
         ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         long lval = Double.doubleToLongBits(val);
-        lval ^= ((lval >> (Integer.SIZE - 1)) | Long.MIN_VALUE);
+        lval ^= ((lval >> (Long.SIZE - 1)) | Long.MIN_VALUE);
         bytes.putLong(lval);
         return bytes;
     }

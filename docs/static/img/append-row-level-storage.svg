@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="633" viewBox="0 0 900 633" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Copy on write and deletion vectors produce the same visible delete result</title>
+<desc id="desc">Original file F1 has values A, B, C, and D at positions 0, 1, 2, and 3. Deleting B with copy on write creates file F2 with A, C, and D and replaces the current reference to F1. With deletion vectors, F1 stays unchanged and a separate vector marks position 1 deleted. Both current reads return A, C, and D. Older snapshots can still reference replaced files.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="631" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Deleting one row: two physical layouts</text>
+<text x="28" y="74" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Delete value B · regular append table · current snapshot shown below</text>
+<rect x="28" y="96" width="844" height="99" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="48" y="132" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">Original file F1</text>
+<text x="48" y="167" font-size="17" fill="#526277" font-weight="400" text-anchor="start">File positions:</text>
+<rect x="289" y="110" width="110" height="42" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="344" y="139" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">A</text>
+<text x="344" y="179" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">0</text>
+<rect x="429" y="110" width="110" height="42" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="484" y="139" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">B</text>
+<text x="484" y="179" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">1</text>
+<rect x="569" y="110" width="110" height="42" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="624" y="139" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">C</text>
+<text x="624" y="179" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">2</text>
+<rect x="709" y="110" width="110" height="42" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="764" y="139" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">D</text>
+<text x="764" y="179" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">3</text>
+<path d="M 242 195 V 222" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 666 195 V 222" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="231" width="410" height="256" rx="8" fill="#f8faff" stroke="#d7dfeb" stroke-width="1.5"/>
+<rect x="462" y="231" width="410" height="256" rx="8" fill="#f0faf7" stroke="#b8dcd2" stroke-width="1.5"/>
+<text x="48" y="265" font-size="23" fill="#2463b4" font-weight="700" text-anchor="start">Copy on write</text>
+<text x="482" y="265" font-size="23" fill="#087f6e" font-weight="700" text-anchor="start">Deletion vectors</text>
+<text x="48" y="298" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Write replacement file F2</text>
+<text x="482" y="298" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Keep data file F1 unchanged</text>
+<rect x="48" y="316" width="108" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="102" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">A</text>
+<rect x="171" y="316" width="108" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="225" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">C</text>
+<rect x="294" y="316" width="108" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="348" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">D</text>
+<rect x="482" y="316" width="82" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="523" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">A</text>
+<rect x="577" y="316" width="82" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="618" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">B</text>
+<rect x="672" y="316" width="82" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="713" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">C</text>
+<rect x="767" y="316" width="82" height="50" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="808" y="348" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">D</text>
+<text x="48" y="409" font-size="18" fill="#526277" font-weight="400" text-anchor="start">The current snapshot references F2</text>
+<text x="48" y="438" font-size="18" fill="#526277" font-weight="400" text-anchor="start">in place of F1.</text>
+<rect x="482" y="387" width="370" height="59" rx="8" fill="#fff0f1" stroke="#c97581" stroke-width="1.5"/>
+<text x="667" y="423" font-size="19" fill="#a32b3a" font-weight="700" text-anchor="middle">Deletion vector: F1, position 1</text>
+<text x="482" y="469" font-size="17" fill="#526277" font-weight="400" text-anchor="start">The reader excludes the marked position.</text>
+<rect x="28" y="510" width="844" height="65" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="450" y="551" font-size="23" fill="#087f6e" font-weight="700" text-anchor="middle">Visible result in both cases: A, C, D</text>
+<text x="28" y="608" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Replaced files can remain referenced by older snapshots until expiration.</text>
+</g>
+</svg>

@@ -29,6 +29,22 @@ under the License.
 
 # Dedicated Compaction
 
+Use this guide to run compaction separately from writers. For compaction behavior and tuning, see
+[Compaction](../primary-key-table/compaction). To inspect compaction activity, see
+[Compaction Metrics](./metrics#compaction-metrics).
+
+Start with the job scope, then choose any target filters or special compaction strategy. Each section describes
+its supported table types, execution modes, and engine commands.
+
+| Task | Guide |
+| --- | --- |
+| Compact one table | [Dedicated Compaction Job](#dedicated-compaction-job) |
+| Compact tables across databases | [Database Compaction Job](#database-compaction-job) |
+| Select buckets in a fixed-bucket table | [Compact Specified Buckets](#compact-specified-buckets) |
+| Compact partitions that have been idle | [Historical Partition Compact](#historical-partition-compact) |
+| Avoid compacting expired partitions | [Skip Expired Partitions](#skip-expired-partitions-in-compaction-job) |
+| Sort data during compaction to improve queries | [Sort Compact](#sort-compact) |
+
 Paimon's snapshot management supports writing with multiple writers.
 
 :::info

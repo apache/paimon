@@ -24,6 +24,10 @@ under the License.
 
 # Write Performance
 
+Start with [Metrics](./metrics#choose-metrics-for-a-task) to identify the operation to investigate, then use the
+relevant tuning guidance below. For running compaction separately from writers, see
+[Dedicated Compaction](./dedicated-compaction).
+
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
 1. Flink Configuration (`'flink-conf.yaml'/'config.yaml'` or `SET` in SQL): Increase the checkpoint interval
@@ -31,7 +35,7 @@ Paimon's write performance is closely related to checkpoint, so if you need grea
    (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.
 3. Enable `write-buffer-spillable`.
-4. Rescale bucket number if you are using Fixed-Bucket mode.
+4. [Rescale bucket number](./rescale-bucket) if you are using Fixed-Bucket mode.
 
 Option `'changelog-producer' = 'lookup' or 'full-compaction'`, and option `'full-compaction.delta-commits'` have a
 large impact on write performance, if it is a snapshot / full synchronization phase you can unset these options and

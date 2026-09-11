@@ -155,7 +155,7 @@ The `.video` column yields serialized `VideoFrameDescriptor` values whose
 embedded frame ordinals keep frame mapping out of the normal data file. Use
 `pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
 physical video ranges and cache decoder sessions per worker. See
-[Multimodal API: Video Frame Storage](multimodal-api#video-frame-storage)
+[Multimodal API: Video Frame Storage](video#video-frame-storage)
 for the write path and a complete decoder example.
 ## Contiguous Windows
 

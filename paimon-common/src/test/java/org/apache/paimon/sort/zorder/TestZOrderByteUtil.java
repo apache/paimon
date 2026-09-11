@@ -95,6 +95,82 @@ public class TestZOrderByteUtil {
     }
 
     /**
+     * Ordered-bytes transforms must preserve value order across negatives for floats and doubles.
+     */
+    @Test
+    public void testFloatDoubleNegativeOrdering() {
+        float[] floats = {
+            -Float.MAX_VALUE,
+            -2.5f,
+            -1f,
+            -Float.MIN_VALUE,
+            0f,
+            Float.MIN_VALUE,
+            1f,
+            2.5f,
+            Float.MAX_VALUE
+        };
+        long prevF =
+                ZOrderByteUtils.floatToOrderedBytes(floats[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < floats.length; i++) {
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(floats[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevF, cur)).isLessThan(0);
+            prevF = cur;
+        }
+
+        double[] doubles = {
+            -Double.MAX_VALUE,
+            -2.5d,
+            -1d,
+            -Double.MIN_VALUE,
+            0d,
+            Double.MIN_VALUE,
+            1d,
+            2.5d,
+            Double.MAX_VALUE
+        };
+        long prevD =
+                ZOrderByteUtils.doubleToOrderedBytes(doubles[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < doubles.length; i++) {
+            long cur =
+                    ZOrderByteUtils.doubleToOrderedBytes(doubles[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevD, cur)).isLessThan(0);
+            prevD = cur;
+        }
+
+        // Dense walk of adjacent negative bit patterns: value strictly decreases, so
+        // the transformed unsigned value must strictly decrease too. The old shift-31
+        // flip inverts order for a fraction of adjacent negative pairs.
+        for (int i = 1; i < 1000; i++) {
+            int bits = 0xC0400000 + i; // starting at -3.0f, descending values
+            long prev =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits - 1), ByteBuffer.allocate(8))
+                            .getLong(0);
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits), ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+        }
+        for (int i = 0; i < 1000; i++) {
+            long bits = 0xC004000000000000L + i; // just below -2.5d, descending values
+            double v = Double.longBitsToDouble(bits);
+            long cur = ZOrderByteUtils.doubleToOrderedBytes(v, ByteBuffer.allocate(8)).getLong(0);
+            if (i > 0) {
+                long prev =
+                        ZOrderByteUtils.doubleToOrderedBytes(
+                                        Double.longBitsToDouble(bits - 1), ByteBuffer.allocate(8))
+                                .getLong(0);
+                assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+            }
+        }
+    }
+
+    /**
      * Compares the result of a string based interleaving algorithm implemented above versus the
      * binary bit-shifting algorithm used in ZOrderByteUtils. Either both algorithms are identically
      * wrong or are both identically correct.

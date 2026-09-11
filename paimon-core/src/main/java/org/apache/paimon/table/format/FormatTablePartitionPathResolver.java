@@ -80,12 +80,8 @@ public final class FormatTablePartitionPathResolver {
     }
 
     Path resolve(LinkedHashMap<String, String> spec, @Nullable String customLocation) {
-        Path defaultPath =
-                new Path(
-                        tablePath,
-                        PartitionPathUtils.generatePartitionPathUtil(spec, onlyValueInPath));
         if (customLocation == null) {
-            return defaultPath;
+            return defaultPartitionPath(tablePath, spec, onlyValueInPath);
         }
 
         try {
@@ -94,6 +90,39 @@ public final class FormatTablePartitionPathResolver {
         } catch (IllegalArgumentException e) {
             throw invalidLocation(spec, e);
         }
+    }
+
+    /** Where a partition lives when it carries no location of its own. */
+    public static Path defaultPartitionPath(
+            Path tablePath, LinkedHashMap<String, String> spec, boolean onlyValueInPath) {
+        return new Path(
+                tablePath, PartitionPathUtils.generatePartitionPathUtil(spec, onlyValueInPath));
+    }
+
+    /**
+     * Whether a requested location names the partition's own default directory. That is how a
+     * request asks for a partition to go back to it, so both sides are compared after
+     * canonicalization and do not have to spell the same directory the same way. A location that
+     * does not parse is not the default one; the caller rejects it on its own terms.
+     */
+    public static boolean isDefaultPartitionPath(
+            Path tablePath,
+            LinkedHashMap<String, String> spec,
+            boolean onlyValueInPath,
+            String requestedLocation,
+            @Nullable CatalogContext catalogContext) {
+        Path requested;
+        try {
+            PartitionPathUtils.validatePartitionSpecForPath(spec, onlyValueInPath);
+            requested = canonicalizeLocation(requestedLocation, catalogContext);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return ResolvedPath.of(requested, catalogContext)
+                .equals(
+                        ResolvedPath.of(
+                                defaultPartitionPath(tablePath, spec, onlyValueInPath),
+                                catalogContext));
     }
 
     /** Resolves a custom location using the catalog's Hadoop filesystem identity. */
@@ -155,18 +184,44 @@ public final class FormatTablePartitionPathResolver {
         return false;
     }
 
-    /** Canonicalizes a custom location using the catalog's Hadoop configuration when present. */
+    /**
+     * Canonicalizes a custom location and requires it to name a place a partition may own: a scheme
+     * that addresses storage the way that storage is addressed.
+     */
     public static Path canonicalizeCustomLocation(
+            String location, @Nullable CatalogContext catalogContext) {
+        // A location someone typed must not smuggle a traversal through an escape, so it is read
+        // once decoded and canonicalized from what it decodes to.
+        validateDecodedLocation(location);
+        String decoded = decodePercentOnce(location);
+        if (decoded.contains("%")) {
+            throw new IllegalArgumentException("Invalid custom partition location.");
+        }
+        Path canonical = canonicalizeLocation(decoded, catalogContext);
+        URI uri = canonical.toUri();
+        String scheme = uri.getScheme();
+        String authority = uri.getAuthority();
+        if ((scheme.equals("file") && authority != null && !authority.isEmpty())
+                || (!scheme.equals("file")
+                        && !scheme.equals("hdfs")
+                        && (authority == null || authority.isEmpty()))) {
+            throw new IllegalArgumentException("Invalid custom partition location.");
+        }
+        return canonical;
+    }
+
+    /**
+     * Canonicalizes any location the catalog carries, including a table's own directory: its scheme
+     * may address storage without an authority, and a partition directory keeps the escapes that
+     * make its name one name, so {@code dt=a%2Fb} is not the two levels {@code dt=a} and {@code b}.
+     * Callers that know the table judge whether the result is a place a partition may own.
+     */
+    public static Path canonicalizeLocation(
             String location, @Nullable CatalogContext catalogContext) {
         try {
             validateDecodedLocation(location);
-            String decoded = decodePercentOnce(location);
-            if (decoded.contains("%")) {
-                throw new IllegalArgumentException("Invalid custom partition location.");
-            }
-            validateDecodedLocation(decoded);
 
-            Path path = new Path(decoded);
+            Path path = new Path(location);
             URI uri = path.toUri();
             String scheme = uri.getScheme();
             String authority = uri.getAuthority();
@@ -181,12 +236,6 @@ public final class FormatTablePartitionPathResolver {
             }
 
             scheme = scheme.toLowerCase(Locale.ROOT);
-            if ((scheme.equals("file") && authority != null && !authority.isEmpty())
-                    || (!scheme.equals("file")
-                            && !scheme.equals("hdfs")
-                            && (authority == null || authority.isEmpty()))) {
-                throw new IllegalArgumentException("Invalid custom partition location.");
-            }
             authority =
                     authority == null || authority.isEmpty()
                             ? null

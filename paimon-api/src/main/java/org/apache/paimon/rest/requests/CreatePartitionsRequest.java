@@ -40,7 +40,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * <p>Statistics ride along optionally, matched to {@code partitionSpecs} by {@link
  * PartitionStatistics#spec()} rather than by position, so they may cover only some of them. Both
- * statistics fields are absent unless the client reports.
+ * statistics fields are absent unless the client reports. Partition options align with {@code
+ * partitionSpecs} by position; naming the partition's own default directory in {@code path} asks
+ * the catalog to put it back there, which needs replacement statistics for that partition.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreatePartitionsRequest implements RESTRequest {
@@ -148,7 +150,10 @@ public class CreatePartitionsRequest implements RESTRequest {
         return replaceStatistics;
     }
 
-    /** Options aligned with partition specs; a null list omits the field. */
+    /**
+     * Options aligned with partition specs; a {@code path} naming the partition's default directory
+     * returns it there. A null list omits the field.
+     */
     @JsonGetter(FIELD_PARTITION_OPTIONS)
     @Nullable
     public List<Map<String, String>> getPartitionOptions() {

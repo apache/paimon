@@ -181,7 +181,13 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         if (iterator instanceof ColumnarRowIterator) {
             ColumnarRowIterator sourceIterator = (ColumnarRowIterator) iterator;
             iterator = sourceIterator.mapping(partitionInfo, indexMapping);
-            if (rowTrackingEnabled && !systemFields.isEmpty()) {
+            boolean assignRowTracking =
+                    rowTrackingEnabled
+                            && (systemFields.containsKey(SpecialFields.SEQUENCE_NUMBER.name())
+                                    || (firstRowId != null
+                                            && systemFields.containsKey(
+                                                    SpecialFields.ROW_ID.name())));
+            if (assignRowTracking) {
                 if (iterator == sourceIterator) {
                     // Copy to a ColumnVector[] because cloning a subtype array preserves its
                     // runtime type and cannot accept row-tracking wrapper vectors.

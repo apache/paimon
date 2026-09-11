@@ -24,41 +24,80 @@ under the License.
 
 # Concurrency Control
 
-Paimon supports optimistic concurrency for multiple concurrent write jobs.
+Paimon uses optimistic concurrency control. Writers prepare new files independently, then
+validate and publish their changes against the latest committed snapshot. Readers continue to
+use committed snapshots while writers prepare their work.
 
-Each job writes data at its own pace and generates a new snapshot based on the current snapshot by applying incremental
-files (deleting or adding files) at the time of committing.
+## Commit Flow
 
-There may be two types of commit failures here:
-1. Snapshot conflict: the snapshot id has been preempted, the table has generated a new snapshot from another job. OK, let's commit again.
-2. Files conflict: The file that this job wants to delete has been deleted by another jobs. At this point, the job can only fail. (For streaming jobs, it will fail and restart, intentionally failover once)
+1. Write new data files and prepare file additions and deletions.
+2. Read the latest snapshot and validate the proposed changes against its file set.
+3. Prepare the new snapshot and publish it atomically through the configured commit mechanism.
+4. If another writer publishes first, retry against the new latest snapshot. If the changes
+   conflict with the table state, reject the commit.
+
+A file becomes visible through a committed snapshot, not merely because it exists in storage.
+Compaction's file deletions are logical: older snapshots can still reference the replaced files
+until [snapshot expiration](../maintenance/manage-snapshots#expire-snapshots) removes them.
+
+| Conflict | Example | Outcome |
+| --- | --- | --- |
+| Snapshot conflict | Two writers try to publish snapshot `N + 1`. | The losing writer retries against the latest state, subject to the retry limits. |
+| File conflict | Two compactors replace the same input file. | The stale file changes are rejected; the job must recover or recompute them. |
 
 ## Snapshot conflict
 
-Paimon's snapshot ID is unique, so as long as the job writes its snapshot file to the file system, it is considered successful.
+Suppose two writers both start from snapshot `N`. Writer A publishes `N + 1` first. Writer B
+cannot publish a second snapshot with that ID, so it reloads the latest state, revalidates its
+changes, and attempts `N + 2`. If those changes are still compatible, both writers' changes
+become part of the table history.
 
-![](/img/snapshot-conflict.png)
+[![Writer A publishes snapshot N plus 1. Writer B loses the same snapshot ID, reloads and validates, then publishes N plus 2 if its changes are compatible.](/img/concepts-snapshot-conflict.svg)](/img/concepts-snapshot-conflict.svg)
 
-Paimon uses the file system's renaming mechanism to commit snapshots, which is secure for HDFS as it ensures
-transactional and atomic renaming.
+### Atomic Publication
 
-But for object storage such as OSS and S3, their `'RENAME'` does not have atomic semantic. We need to configure Hive or
-jdbc metastore and enable `'lock.enabled'` option for the catalog. Otherwise, there may be a chance of losing the snapshot.
+The commit mechanism depends on the catalog and storage:
+
+- **Catalog-managed snapshots:** when a catalog supports snapshot version management, Paimon
+  delegates publication to the catalog. The REST Catalog provides this path through its snapshot
+  commit API; the server must implement the corresponding contract.
+- **Filesystem-managed snapshots:** Paimon uses the atomic-write operation provided by its
+  filesystem implementation. The default implementation writes a temporary file and renames it;
+  HDFS supports atomic rename. Some storage implementations provide atomic conditional creation
+  instead, such as Paimon's OSS implementation. If the selected implementation cannot publish
+  atomically without overwriting an existing snapshot, configure a suitable shared lock, such as
+  a Hive or JDBC catalog lock with `lock.enabled = true`. Do not assume an object store's rename
+  operation has HDFS semantics.
+
+All writers of the same table must use a compatible commit mechanism and shared locking
+configuration. See [Catalog](./catalog) when choosing the metadata backend.
 
 ## Files conflict
 
-When Paimon commits a file deletion (which is only a logical deletion), it checks for conflicts with the latest snapshot.
-If there are conflicts (which means the file has been logically deleted), it can no longer continue on this commit node,
-so it can only intentionally trigger a failover to restart, and the job will retrieve the latest status from the filesystem
-in the hope of resolving this conflict.
+A writer validates file-level changes as well as the snapshot ID. For example, if two compactors
+both replace files A and B, only one replacement can be committed. After the first succeeds,
+the second still asks to delete files that are no longer live and must be rejected.
 
-![](/img/files-conflict.png)
+[![Two compactors replace the same input files. The first replacement commits; the second is rejected because its input files are no longer live.](/img/concepts-files-conflict.svg)](/img/concepts-files-conflict.svg)
 
-Paimon will ensure that there is no data loss or duplication here, but if two streaming jobs are writing at the same
-time and there are conflicts, you will see that they are constantly restarting, which is not a good thing.
+File validation also checks other table invariants. For example, primary-key tables using the
+standard LSM layout reject overlapping key ranges within the same partition, bucket, and level
+above level 0. Retrying an unchanged snapshot ID alone cannot fix incompatible file changes.
 
-The essence of conflict lies in deleting files (logically), and deleting files is born from compaction, so as long as
-we close the compaction of the writing job (Set 'write-only' to true) and start a separate job to do the compaction work,
-everything is very good.
+In a streaming job, a failed commit can trigger recovery and a restart. Repeated conflicts can
+therefore cause repeated restarts even though the commit validation protects the table state.
 
-See [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) for more info.
+## Plan Concurrent Writers
+
+- Prefer independent partitions where the workload allows it, for example streaming into the
+  current partition while a batch job overwrites a historical partition.
+- When multiple writers target the same files, consider moving compaction into a
+  [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job).
+  Set `write-only = true` for the ingestion writers and let the dedicated job perform compaction
+  and snapshot expiration.
+- Check the concurrency restrictions of the selected [bucket mode](../primary-key-table/data-distribution)
+  and table features before running multiple writers against the same partition.
+
+Dedicated compaction reduces conflicts caused by writers independently rewriting the same files.
+It does not remove snapshot publication races or make every combination of writes, overwrites,
+and table features compatible.

@@ -148,6 +148,58 @@ public class DataFileRecordReaderTest {
         reader.close();
     }
 
+    @Test
+    public void testStoredRowIdPreservesSpecializedIdentityIterator() throws Exception {
+        HeapLongVector dataVector = new HeapLongVector(1);
+        dataVector.setLong(0, 42L);
+        HeapLongVector rowIdVector = new HeapLongVector(1);
+        rowIdVector.setLong(0, 123L);
+        VectorizedColumnBatch batch =
+                new VectorizedColumnBatch(new ColumnVector[] {dataVector, rowIdVector});
+        batch.setNumRows(1);
+        int[] recycleCount = {0};
+        ColumnarRowIterator specializedIterator =
+                new ColumnarRowIterator(
+                        new Path("test"), new ColumnarRow(batch), () -> recycleCount[0]++) {};
+        specializedIterator.reset(0);
+
+        FileRecordReader<InternalRow> delegate =
+                new FileRecordReader<InternalRow>() {
+                    @Override
+                    public FileRecordIterator<InternalRow> readBatch() {
+                        return specializedIterator;
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+        DataFileRecordReader reader =
+                new DataFileRecordReader(
+                        SpecialFields.rowTypeWithRowId(RowType.of(DataTypes.BIGINT())),
+                        delegate,
+                        false,
+                        false,
+                        new int[] {0, 1},
+                        null,
+                        null,
+                        true,
+                        null,
+                        7L,
+                        Collections.singletonMap(SpecialFields.ROW_ID.name(), 1),
+                        null,
+                        new Path("test"));
+
+        FileRecordIterator<InternalRow> iterator = reader.readBatch();
+        assertThat(iterator).isSameAs(specializedIterator);
+        InternalRow row = iterator.next();
+        assertThat(row.getLong(0)).isEqualTo(42L);
+        assertThat(row.getLong(1)).isEqualTo(123L);
+
+        iterator.releaseBatch();
+        assertThat(recycleCount[0]).isEqualTo(1);
+        reader.close();
+    }
+
     private static DataFileRecordReader createRowTrackingReader(
             RowType rowType,
             ReusingColumnarReader delegate,

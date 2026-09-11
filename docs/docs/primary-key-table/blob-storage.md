@@ -29,13 +29,18 @@ Unlike the positional BLOB files used by append tables, managed BLOB payloads ha
 sorting, deduplication, and compaction can therefore reorder or remove rows without rewriting the surviving payload
 bytes.
 
-This mode stores:
+Three pieces of storage work together:
 
-- a serialized `BlobDescriptor` for each scalar value, non-null array element, or non-null map value;
-- the payload in an immutable `.managed.blob` pack; and
-- one `.blobref` sidecar for every data file, containing the exact managed packs referenced by that file.
+| Piece | Contents | Lifecycle |
+| --- | --- | --- |
+| Data file | A `BlobDescriptor` for each non-null scalar, array element, or map value | Rows and descriptors are merged by the table's merge engine |
+| `.managed.blob` pack | Immutable payload bytes, potentially shared by several rows and files | Surviving descriptors continue to reference the same bytes |
+| `.blobref` sidecar | Exact set of managed packs referenced by one data file | Owned by that data file and replaced with compacted output |
 
 For general BLOB concepts and read options, see [BLOB Storage](../multimodal-table/blob).
+Before adopting managed storage, check [Requirements and Limitations](#requirements-and-limitations)
+and [Garbage Collection](#garbage-collection). The sections below cover table creation, merge-engine
+behavior, and the payload lifecycle.
 
 The append-only `video-frame-field` mode is deliberately separate from primary-key managed BLOB
 storage. It writes self-contained `.video` packs containing complete encoded videos and embedded
@@ -48,7 +53,7 @@ Use `blob-field` to mark scalar, array, or map fields whose payloads should be s
 `blob-descriptor-field` and `blob-view-field` are inline forms: their serialized descriptor or view metadata stays in
 the normal data file and is not materialized into a managed BLOB file.
 
-The following example accepts both a scalar value and an ordered array of values:
+The following Flink SQL example accepts scalar, array, and map values:
 
 ```sql
 CREATE TABLE media (
@@ -74,6 +79,8 @@ Reads return the payload bytes by default; the existing `blob-as-descriptor` rea
 A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
 reference sidecars.
 
+### Copy Payloads from Another Table
+
 When descriptor-backed BLOBs are copied to another table, the target normally rebuilds a `FileIO` from its catalog
 context. For a managed `blob-field`, this is a copy flow: the target writes the payload into its own BLOB storage and
 does not retain the source descriptor. If the source table uses table-scoped credentials, configure
@@ -92,6 +99,8 @@ accessed with static configuration; `source-table` is for table-scoped `FileIO` 
 The source table must belong to the same catalog. A branch suffix is supported. Target tables without a catalog loader,
 including external tables in REST catalogs, are not supported. When this option is set, it takes precedence over other
 `blob-descriptor.*` options; remove it before switching back to descriptor-specific filesystem configuration.
+
+### Arrays, Maps, and Pack Size
 
 `ARRAY<BLOB>` is externalized element by element. Every non-null `Blob` element is copied into managed storage, while
 array order, a null array, and null elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses
@@ -234,6 +243,11 @@ rules are applied. An update later discarded by partial-update or sequence rules
 payload pack. A delete record does not write a new payload. The merge engine determines the logical final row during
 reads and compaction. Each data file's `.blobref` sidecar records managed packs referenced by non-retract key-values in
 that file, which may include intermediate partial-update payloads before compaction.
+
+The example below uses `deduplicate`. A newer descriptor for key `7` replaces its old descriptor;
+the payload for unchanged key `11` remains shared with the input files.
+
+![Compaction replaces input data files and their reference sidecars while reusing the managed BLOB packs for surviving rows.](/img/primary-key-blob-lifecycle.svg)
 
 Compaction preserves descriptors for surviving values and creates new `.blobref` sidecars from the compacted output.
 It does not copy the referenced payload bytes into new `.managed.blob` packs. This keeps ordinary compaction cost
