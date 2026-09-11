@@ -127,6 +127,12 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     /** Minimum part size for multipart upload-copy, OSS requires every non-tail part >= 5MB. */
     private static final long CROSS_BUCKET_COPY_PART_SIZE = 8L * 1024 * 1024;
 
+    /** Maximum number of parts OSS allows in a single multipart upload. */
+    private static final long CROSS_BUCKET_COPY_MAX_PART_COUNT = 10_000;
+
+    /** Maximum size of a single OSS upload-part-copy, in bytes (5 GiB). */
+    private static final long CROSS_BUCKET_COPY_MAX_PART_SIZE = 5L * 1024 * 1024 * 1024;
+
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
                 {
@@ -492,11 +498,16 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
         List<PartETag> partETags = new ArrayList<>();
         try {
-            long partSize = CROSS_BUCKET_COPY_PART_SIZE;
+            long partSize =
+                    optimalPartSize(
+                            contentLength,
+                            CROSS_BUCKET_COPY_PART_SIZE,
+                            CROSS_BUCKET_COPY_MAX_PART_SIZE,
+                            CROSS_BUCKET_COPY_MAX_PART_COUNT);
             long remaining = contentLength;
             long offset = 0;
             int partNumber = 1;
-            // OSS requires every non-tail part to be >= 100KB; a single tail part may be smaller.
+            // OSS requires every non-tail part to be >= 5 MiB; a single tail part may be smaller.
             while (remaining > 0) {
                 long size = Math.min(partSize, remaining);
                 UploadPartCopyRequest partRequest =
@@ -535,6 +546,46 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                             + dstKey,
                     e);
         }
+    }
+
+    /**
+     * Pick a multipart copy part size that keeps {@code contentLength} within the service's {@code
+     * maxPartCount} limit, clamped to {@code [minPartSize, maxPartSize]}.
+     *
+     * <p>The default {@code minPartSize} (8 MiB) suffices for ordinary objects, but a fixed part
+     * size makes any object larger than {@code minPartSize * maxPartCount} (~78 GiB) overflow the
+     * 10,000-part cap and fail mid-copy. When that would happen, the part size is raised so the
+     * resulting part count stays at or below {@code maxPartCount}, rounded up to keep parts aligned
+     * and never producing more than {@code maxPartCount} parts.
+     */
+    static long optimalPartSize(
+            long contentLength, long minPartSize, long maxPartSize, long maxPartCount) {
+        checkArgument(minPartSize > 0, "minPartSize must be positive");
+        checkArgument(maxPartSize >= minPartSize, "maxPartSize must be >= minPartSize");
+        checkArgument(maxPartCount > 0, "maxPartCount must be positive");
+        if (contentLength <= 0) {
+            return minPartSize;
+        }
+        long partSize = minPartSize;
+        // ceil(contentLength / maxPartCount) is the smallest part size that fits the cap.
+        long required = divideRoundingUp(contentLength, maxPartCount);
+        if (required > partSize) {
+            // Round up to minPartSize so every part stays a clean multiple of the minimum and
+            // non-tail parts never drop below OSS's lower bound.
+            partSize = divideRoundingUp(required, minPartSize) * minPartSize;
+        }
+        if (partSize > maxPartSize) {
+            // The object is too large to copy within the part-count and per-part-size limits of
+            // a single multipart upload; clamp to the max and let OSS reject the oversized upload
+            // rather than silently sending too many parts.
+            partSize = maxPartSize;
+        }
+        return partSize;
+    }
+
+    /** Returns {@code ceil(dividend / divisor)} for non-negative {@code dividend}. */
+    private static long divideRoundingUp(long dividend, long divisor) {
+        return (dividend + divisor - 1) / divisor;
     }
 
     /**

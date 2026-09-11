@@ -71,6 +71,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -964,5 +965,113 @@ public class OSSFileIOTest {
         verify(client).initiateMultipartUpload(any(InitiateMultipartUploadRequest.class));
         verify(client).uploadPartCopy(any(UploadPartCopyRequest.class));
         verify(client).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+    }
+
+    // ------------------------------------------------------------------------
+    //  Multipart copy part sizing
+    // ------------------------------------------------------------------------
+
+    /** The default 8 MiB part size must not overflow OSS's 10,000-part limit for large objects. */
+    @Test
+    public void testOptimalPartSizeStaysWithinPartCount() {
+        long minPartSize = 8L * 1024 * 1024;
+        long maxPartSize = 5L * 1024 * 1024 * 1024;
+        long maxPartCount = 10_000;
+
+        // A small object keeps the default 8 MiB part size.
+        assertThat(OSSFileIO.optimalPartSize(1, minPartSize, maxPartSize, maxPartCount))
+                .isEqualTo(minPartSize);
+        assertThat(
+                        OSSFileIO.optimalPartSize(
+                                minPartSize * maxPartCount, minPartSize, maxPartSize, maxPartCount))
+                .isEqualTo(minPartSize);
+
+        // Exactly at the threshold (8 MiB * 10,000) the default part size still fits: 10,000 parts.
+        long threshold = minPartSize * maxPartCount;
+        assertThat(partCount(threshold, optimal(threshold))).isLessThanOrEqualTo(maxPartCount);
+
+        // One byte over the threshold forces a larger part size so the count stays <= 10,000.
+        long over = threshold + 1;
+        long overPartSize = optimal(over);
+        assertThat(overPartSize).isGreaterThan(minPartSize);
+        assertThat(partCount(over, overPartSize)).isLessThanOrEqualTo(maxPartCount);
+
+        // Every part but the optional tail is a clean multiple of 8 MiB (the minimum).
+        assertThat(overPartSize % minPartSize).isZero();
+
+        // A pathological object near the absolute limit is clamped to the 5 GiB max part size.
+        long huge = maxPartSize * maxPartCount + 1;
+        assertThat(optimal(huge)).isEqualTo(maxPartSize);
+    }
+
+    /**
+     * A multipart copy of an object just past the 10,000-part threshold must use a larger part size
+     * and never request part number 10,001.
+     */
+    @Test
+    public void testCrossBucketRenameMultipartCopySizesPartsForLargeObject() throws Exception {
+        long minPartSize = 8L * 1024 * 1024;
+        long maxPartCount = 10_000;
+        // One byte past the 8 MiB * 10,000 threshold: would need 10,001 parts at 8 MiB.
+        long contentLength = minPartSize * maxPartCount + 1;
+
+        OSSClient client = mock(OSSClient.class);
+        when(client.copyObject(any(CopyObjectRequest.class)))
+                .thenThrow(
+                        new OSSException("msg", "RequestError", "req", "host", null, null, "PUT"));
+        InitiateMultipartUploadResult init = new InitiateMultipartUploadResult();
+        init.setUploadId("upload-id");
+        when(client.initiateMultipartUpload(any(InitiateMultipartUploadRequest.class)))
+                .thenReturn(init);
+        ObjectMetadata srcMeta = new ObjectMetadata();
+        srcMeta.setContentLength(contentLength);
+        when(client.getObjectMetadata("src-bucket", "dir/file.txt")).thenReturn(srcMeta);
+        when(client.uploadPartCopy(any(UploadPartCopyRequest.class)))
+                .thenAnswer(
+                        invocation -> {
+                            UploadPartCopyRequest request = invocation.getArgument(0);
+                            com.aliyun.oss.model.UploadPartCopyResult result =
+                                    new com.aliyun.oss.model.UploadPartCopyResult();
+                            result.setPartNumber(request.getPartNumber());
+                            result.setETag("etag-" + request.getPartNumber());
+                            return result;
+                        });
+
+        Path src = new Path("oss://src-bucket/dir/file.txt");
+        Path dst = new Path("oss://dst-bucket/dir/file.txt");
+
+        RenameTestOSSFileIO fileIO = new RenameTestOSSFileIO(client);
+        fileIO.statuses.put(src, status(src, contentLength, false));
+        fileIO.statuses.put(dst.getParent(), status(dst.getParent(), 0, true));
+
+        boolean renamed = fileIO.rename(src, dst);
+
+        assertThat(renamed).isTrue();
+        ArgumentCaptor<UploadPartCopyRequest> captor =
+                ArgumentCaptor.forClass(UploadPartCopyRequest.class);
+        verify(client, atMost((int) maxPartCount)).uploadPartCopy(captor.capture());
+        // No part number exceeds the 10,000 cap.
+        for (UploadPartCopyRequest request : captor.getAllValues()) {
+            assertThat(request.getPartNumber()).isBetween(1, (int) maxPartCount);
+        }
+        // Every non-tail part is a multiple of the 8 MiB minimum and at least 5 MiB.
+        List<UploadPartCopyRequest> parts = captor.getAllValues();
+        for (int i = 0; i < parts.size() - 1; i++) {
+            assertThat(parts.get(i).getPartSize()).isGreaterThanOrEqualTo(5L * 1024 * 1024);
+            assertThat(parts.get(i).getPartSize() % minPartSize).isZero();
+        }
+        // Parts together cover exactly the object length.
+        long copied =
+                captor.getAllValues().stream().mapToLong(UploadPartCopyRequest::getPartSize).sum();
+        assertThat(copied).isEqualTo(contentLength);
+    }
+
+    private static long optimal(long contentLength) {
+        return OSSFileIO.optimalPartSize(
+                contentLength, 8L * 1024 * 1024, 5L * 1024 * 1024 * 1024, 10_000);
+    }
+
+    private static long partCount(long contentLength, long partSize) {
+        return (contentLength + partSize - 1) / partSize;
     }
 }
