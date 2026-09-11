@@ -86,6 +86,7 @@ class SplitProviderTest(unittest.TestCase):
         self.assertIs(provider.splits(), splits)  # cached
         self.assertIsNotNone(provider.read_type())
         self.assertIsNone(provider.predicate())
+        self.assertFalse(provider.include_row_kind())
 
     def test_catalog_provider_propagates_projection(self):
         """``projection`` reaches ``ReadBuilder.with_projection`` (visible via read_type)."""
@@ -281,6 +282,11 @@ class SplitProviderTest(unittest.TestCase):
         self.assertIs(provider.splits(), splits)
         self.assertIs(provider.read_type(), read_type)
         self.assertIsNone(provider.predicate())
+
+        self.assertFalse(provider.include_row_kind())
+        provider = PreResolvedSplitProvider(
+            table, splits, read_type, include_row_kind=True)
+        self.assertTrue(provider.include_row_kind())
 
 
 if __name__ == '__main__':
