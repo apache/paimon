@@ -58,6 +58,10 @@ skip manifests before opening them.
 | `_MIN_BUCKET`, `_MAX_BUCKET` | INT, nullable | Bucket bounds in the manifest. |
 | `_MIN_LEVEL`, `_MAX_LEVEL` | INT, nullable | Data-file level bounds in the manifest. |
 | `_MIN_ROW_ID`, `_MAX_ROW_ID` | BIGINT, nullable | Row-ID bounds when available. |
+| `_EXTRA_FILES` | ARRAY of STRING, nullable | Names of additional files in the manifest directory; defaults to null. |
+
+Each extra file belongs exclusively to one manifest. It is retained and cleaned up together with
+that manifest during snapshot, tag, or changelog deletion.
 
 ## Manifest
 

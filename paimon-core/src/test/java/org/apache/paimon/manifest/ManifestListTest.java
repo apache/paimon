@@ -35,6 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
@@ -57,6 +59,9 @@ public class ManifestListTest {
         String manifestListName = manifestList.write(metas).getKey();
         List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(metas);
+        for (int i = 0; i < metas.size(); i++) {
+            assertThat(actualMetas.get(i).extraFiles()).isEqualTo(metas.get(i).extraFiles());
+        }
     }
 
     @RepeatedTest(10)
@@ -96,6 +101,7 @@ public class ManifestListTest {
         ManifestList manifestList = createManifestList(tempDir.toString());
         List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
+        assertThat(actualMetas).allSatisfy(meta -> assertThat(meta.extraFiles()).isNull());
     }
 
     @Test
@@ -107,6 +113,7 @@ public class ManifestListTest {
         ManifestList legacyManifestList = createLegacyManifestListPaimon10();
         List<ManifestFileMeta> actualMetas = legacyManifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
+        assertThat(actualMetas).allSatisfy(meta -> assertThat(meta.extraFiles()).isNull());
     }
 
     private ManifestList createLegacyManifestListPaimon10() {
@@ -156,7 +163,28 @@ public class ManifestListTest {
             for (int j = random.nextInt(10) + 1; j > 0; j--) {
                 entries.add(gen.next());
             }
-            metas.add(gen.createManifestFileMeta(entries));
+            ManifestFileMeta meta = gen.createManifestFileMeta(entries);
+            List<String> extraFiles =
+                    i % 3 == 0
+                            ? null
+                            : i % 3 == 1
+                                    ? Collections.emptyList()
+                                    : Arrays.asList("extra-" + i + "-1", "extra-" + i + "-2");
+            metas.add(
+                    new ManifestFileMeta(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            meta.numAddedFiles(),
+                            meta.numDeletedFiles(),
+                            meta.partitionStats(),
+                            meta.schemaId(),
+                            meta.minBucket(),
+                            meta.maxBucket(),
+                            meta.minLevel(),
+                            meta.maxLevel(),
+                            meta.minRowId(),
+                            meta.maxRowId(),
+                            extraFiles));
         }
         return metas;
     }
