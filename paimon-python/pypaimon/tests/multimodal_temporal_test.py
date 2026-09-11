@@ -186,6 +186,28 @@ class MultimodalTemporalTest(unittest.TestCase):
             row["value"] for row in rows
         ])
 
+    def test_linear_interpolation_preserves_an_exact_infinite_float(self):
+        anchors = self._table("linear_exact_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_exact_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        states.add([{
+            "episode_id": 1, "event_time": 10, "value": float("inf")
+        }])
+
+        row = pmm.interpolate_linear(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(float("inf"), row["value"])
+
     def test_linear_interpolation_requires_both_neighbors_in_tolerance(self):
         anchors = self._table("linear_tolerance_anchors", {
             "episode_id": pa.int32(),

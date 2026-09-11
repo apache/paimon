@@ -532,6 +532,7 @@ def _interpolate_array(before, after, weights):
     start = pc.cast(before, pa.float64())
     end = pc.cast(after, pa.float64())
     result = pc.add(start, pc.multiply(pc.subtract(end, start), weights))
+    result = pc.if_else(pc.equal(weights, 0.0), start, result)
     if result.type != output_type:
         result = pc.cast(result, output_type)
     return result
