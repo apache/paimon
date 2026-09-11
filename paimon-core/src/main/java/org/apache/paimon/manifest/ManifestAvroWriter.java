@@ -68,6 +68,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
     private final String compression;
     private final PathFactory pathFactory;
     private final long targetFileSize;
+    private final ManifestRowIdIndex.Settings rowIdIndexSettings;
 
     private final List<ManifestFileMeta> results = new ArrayList<>();
     private final List<Path> completedPaths = new ArrayList<>();
@@ -83,7 +84,8 @@ public final class ManifestAvroWriter implements AutoCloseable {
             ObjectSerializer<ManifestEntry> serializer,
             String compression,
             PathFactory pathFactory,
-            long targetFileSize) {
+            long targetFileSize,
+            ManifestRowIdIndex.Settings rowIdIndexSettings) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
@@ -92,6 +94,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         this.compression = compression;
         this.pathFactory = pathFactory;
         this.targetFileSize = targetFileSize;
+        this.rowIdIndexSettings = rowIdIndexSettings;
     }
 
     public void write(ManifestEntry entry) throws IOException {
@@ -218,6 +221,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
         currentWriter.close();
         ManifestFileMeta result = currentWriter.result();
         completedPaths.add(currentWriter.path);
+        if (currentWriter.sidecarCreated) {
+            completedPaths.add(ManifestRowIdIndex.path(currentWriter.path));
+        }
         results.add(result);
         currentWriter = null;
     }
@@ -403,6 +409,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private @Nullable RowIdStats rowIdStats = new RowIdStats();
         private boolean closed;
         private boolean aborted;
+        private boolean sidecarCreated;
 
         private FileWriter(Path path) {
             this.path = path;
@@ -477,7 +484,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             maxLevel = Math.max(maxLevel, entry.level());
             if (rowIdStats != null) {
                 Long firstRowId = entry.file().firstRowId();
-                if (firstRowId == null) {
+                if (!validRowIdRange(firstRowId, entry.file().rowCount())) {
                     rowIdStats = null;
                 } else {
                     rowIdStats.collect(firstRowId, entry.file().rowCount());
@@ -503,7 +510,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             minLevel = Math.min(minLevel, entry.level);
             maxLevel = Math.max(maxLevel, entry.level);
             if (rowIdStats != null) {
-                if (!entry.hasRowId) {
+                if (!entry.hasRowId || !validRowIdRange(entry.firstRowId, entry.rowCount)) {
                     rowIdStats = null;
                 } else {
                     rowIdStats.collect(entry.firstRowId, entry.rowCount);
@@ -668,6 +675,14 @@ public final class ManifestAvroWriter implements AutoCloseable {
                             ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
                 }
             }
+            if (sidecarCreated) {
+                try {
+                    fileIO.deleteQuietly(ManifestRowIdIndex.path(path));
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+            }
             return primaryFailure;
         }
 
@@ -682,11 +697,33 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 outputBytes = out.getPos();
                 out.close();
                 out = null;
+                writeRowIdIndex();
             } catch (IOException | RuntimeException | Error failure) {
                 abortCollecting(failure, true);
                 throw failure;
             } finally {
                 closed = true;
+            }
+        }
+
+        private void writeRowIdIndex() throws IOException {
+            if (!rowIdIndexSettings.write) {
+                return;
+            }
+            byte[] bytes =
+                    ManifestRowIdIndex.build(
+                            fileIO,
+                            path,
+                            outputBytes,
+                            Math.addExact(numAddedFiles, numDeletedFiles),
+                            rowIdIndexSettings);
+            if (bytes != null) {
+                // Publish result() only after both immutable objects have closed. No rename.
+                try (PositionOutputStream indexOut =
+                        fileIO.newOutputStream(ManifestRowIdIndex.path(path), false)) {
+                    sidecarCreated = true;
+                    indexOut.write(bytes);
+                }
             }
         }
 
@@ -709,8 +746,13 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     levelStatsKnown ? minLevel : null,
                     levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
-                    rowIdStats == null ? null : rowIdStats.maxRowId);
+                    rowIdStats == null ? null : rowIdStats.maxRowId,
+                    sidecarCreated ? ManifestRowIdIndex.path(path).getName() : null);
         }
+    }
+
+    private static boolean validRowIdRange(@Nullable Long first, long count) {
+        return first != null && first >= 0 && count > 0 && count - 1 <= Long.MAX_VALUE - first;
     }
 
     private static class RowIdStats {

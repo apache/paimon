@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestIndexTestUtils;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -739,6 +740,62 @@ public class ExpireSnapshotsTest {
         assertThat(snapshotDeletion.maxActiveManifestPlans()).isGreaterThan(1);
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
         store.assertCleaned();
+    }
+
+    @Test
+    void testSidecarsFollowSnapshotAndTagRetention() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 2);
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(8, allData, snapshotPositions);
+        int latest = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Set<Path> manifests = new HashSet<>();
+        for (int i = 1; i <= latest; i++) {
+            rewriteSnapshotTime(i, 0);
+            ManifestIndexTestUtils.registerIndexReferences(store, i);
+            snapshotManager.invalidateCache();
+            store.manifestListFactory()
+                    .create()
+                    .readDataManifests(snapshotManager.snapshot(i))
+                    .forEach(
+                            meta ->
+                                    manifests.add(
+                                            store.pathFactory()
+                                                    .toManifestFilePath(meta.fileName())));
+        }
+        store.newTagManager()
+                .createTag(
+                        snapshotManager.snapshot(3),
+                        "keep-sidecars",
+                        store.options().tagDefaultTimeRetained(),
+                        Collections.emptyList(),
+                        false);
+        ExpireSnapshotsImpl expire =
+                (ExpireSnapshotsImpl) store.newExpire(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+        expire.expire();
+        boolean reclaimed = false;
+        for (Path manifest : manifests) {
+            boolean retained = fileIO.exists(manifest);
+            assertThat(
+                            fileIO.exists(
+                                    new Path(
+                                            manifest.getParent(),
+                                            "index-for-" + manifest.getName())))
+                    .isEqualTo(retained);
+            reclaimed |= !retained;
+        }
+        assertThat(reclaimed).isTrue();
+        for (ManifestFileMeta meta :
+                store.manifestListFactory()
+                        .create()
+                        .readDataManifests(
+                                store.newTagManager()
+                                        .getOrThrow("keep-sidecars")
+                                        .trimToSnapshot())) {
+            assertThat(fileIO.exists(store.pathFactory().toManifestFilePath(meta.indexFileName())))
+                    .isTrue();
+        }
     }
 
     @Test

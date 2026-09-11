@@ -19,6 +19,10 @@ from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import Callable, List, Optional
 
+from pypaimon.manifest.row_id_index import (
+    Settings, SUFFIX, Query, build_from_entries, read_index, read_selected_bytes,
+)
+
 import fastavro
 
 from datetime import datetime
@@ -57,13 +61,25 @@ class ManifestFileManager:
                               early_entry_filter: Optional[Callable[[int, int], bool]] = None,
                               early_record_filter: Optional[Callable[[dict], bool]] = None,
                               partition_filter=None,
+                              row_ranges=None,
                               ) -> List[ManifestEntry]:
 
-        def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
-            return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
-                             early_entry_filter=early_entry_filter,
-                             early_record_filter=early_record_filter,
-                             partition_filter=partition_filter)
+        settings = Settings.from_options(self.table.options)
+        query = Query(row_ranges) if settings.read and row_ranges is not None else None
+
+        def _process_single_manifest(manifest_file: ManifestFileMeta):
+            path = f"{self.manifest_path}/{manifest_file.file_name}"
+            selected = None
+            if query is not None and manifest_file.index_file_name is not None:
+                selected = read_index(self.file_io, path, manifest_file, query, settings)
+                if selected is not None and not selected.blocks:
+                    return []
+            return self.read(
+                manifest_file.file_name, manifest_entry_filter, drop_stats,
+                early_entry_filter=early_entry_filter,
+                early_record_filter=early_record_filter,
+                partition_filter=partition_filter,
+                selected_blocks=selected)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -97,6 +113,7 @@ class ManifestFileManager:
              early_entry_filter: Optional[Callable[[int, int], bool]] = None,
              early_record_filter: Optional[Callable[[dict], bool]] = None,
              partition_filter=None,
+             selected_blocks=None,
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
@@ -110,8 +127,11 @@ class ManifestFileManager:
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
-        with self.file_io.new_input_stream(manifest_file_path) as input_stream:
-            avro_bytes = input_stream.read()
+        if selected_blocks is not None:
+            avro_bytes = read_selected_bytes(self.file_io, manifest_file_path, selected_blocks)
+        else:
+            with self.file_io.new_input_stream(manifest_file_path) as input_stream:
+                avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
         reader = fastavro.reader(buffer)
 
@@ -244,7 +264,7 @@ class ManifestFileManager:
         fastavro.writer(
             buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries),
             codec=self._codec)
-        self._flush(file_name, buf.getvalue())
+        return self._flush(file_name, buf.getvalue(), entries)
 
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
@@ -268,10 +288,9 @@ class ManifestFileManager:
                     writer.flush()
                     avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
-                    self._flush(file_name, avro_bytes)
-                    written_files.append(file_name)
-                    result.append(self._build_meta(
-                        file_name, entries[chunk_start:i + 1], len(avro_bytes)))
+                    meta = self._flush(file_name, avro_bytes, entries[chunk_start:i + 1])
+                    written_files.append(meta)
+                    result.append(meta)
                     chunk_start = i + 1
                     buf = BytesIO()
                     writer = Writer(
@@ -282,13 +301,12 @@ class ManifestFileManager:
                 writer.flush()
                 avro_bytes = buf.getvalue()
                 file_name = f"{name_prefix}-{len(result)}"
-                self._flush(file_name, avro_bytes)
-                written_files.append(file_name)
-                result.append(self._build_meta(
-                    file_name, entries[chunk_start:], len(avro_bytes)))
-        except Exception:
-            for fname in written_files:
-                self.file_io.delete_quietly(f"{self.manifest_path}/{fname}")
+                meta = self._flush(file_name, avro_bytes, entries[chunk_start:])
+                written_files.append(meta)
+                result.append(meta)
+        except BaseException:
+            for meta in written_files:
+                self.delete(meta)
             raise
         return result
 
@@ -335,17 +353,36 @@ class ManifestFileManager:
     def _to_avro_records(self, entries: List[ManifestEntry]) -> List[dict]:
         return [self._to_avro_record(e) for e in entries]
 
-    def _flush(self, file_name: str, avro_bytes: bytes):
+    def delete(self, manifest: ManifestFileMeta):
+        self.file_io.delete_quietly(f"{self.manifest_path}/{manifest.file_name}")
+        if manifest.index_file_name is not None:
+            self.file_io.delete_quietly(f"{self.manifest_path}/{manifest.index_file_name}")
+
+    def _flush(self, file_name: str, avro_bytes: bytes, entries) -> ManifestFileMeta:
         manifest_path = f"{self.manifest_path}/{file_name}"
+        index_file_name = None
         try:
             with self.file_io.new_output_stream(manifest_path) as output_stream:
                 output_stream.write(avro_bytes)
-        except Exception as e:
+            settings = Settings.from_options(self.table.options)
+            if settings.write:
+                data = build_from_entries(avro_bytes, entries, file_name, settings)
+                if data is not None:
+                    index_file_name = file_name + SUFFIX
+                    with self.file_io.new_output_stream(f"{self.manifest_path}/{index_file_name}") as output_stream:
+                        output_stream.write(data)
+            # Publish the reference only after both objects close successfully.
+            return self._build_meta(file_name, entries, len(avro_bytes), index_file_name)
+        except BaseException as e:
             self.file_io.delete_quietly(manifest_path)
+            if index_file_name is not None:
+                self.file_io.delete_quietly(f"{self.manifest_path}/{index_file_name}")
+            if not isinstance(e, Exception) or isinstance(e, InterruptedError):
+                raise
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
 
     def _build_meta(self, file_name: str, entries: List[ManifestEntry],
-                    file_size: int = None) -> ManifestFileMeta:
+                    file_size: int = None, index_file_name: Optional[str] = None) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
@@ -370,7 +407,9 @@ class ManifestFileManager:
         min_row_id = None
         max_row_id = None
         for entry in entries:
-            if entry.file.first_row_id is None:
+            if (entry.file.first_row_id is None or entry.file.first_row_id < 0
+                    or entry.file.row_count <= 0
+                    or entry.file.row_count - 1 > (1 << 63) - 1 - entry.file.first_row_id):
                 min_row_id = None
                 max_row_id = None
                 break
@@ -402,4 +441,5 @@ class ManifestFileManager:
             schema_id=schema_id,
             min_row_id=min_row_id,
             max_row_id=max_row_id,
+            index_file_name=index_file_name,
         )

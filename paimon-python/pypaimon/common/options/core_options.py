@@ -297,6 +297,30 @@ class CoreOptions:
         .with_description("The parallelism for scanning manifest files.")
     )
 
+    MANIFEST_ROW_ID_INDEX_WRITE: ConfigOption[bool] = (
+        ConfigOptions.key("manifest.row-id-index.write")
+        .boolean_type()
+        .default_value(False)
+    )
+
+    MANIFEST_ROW_ID_INDEX_READ: ConfigOption[bool] = (
+        ConfigOptions.key("manifest.row-id-index.read")
+        .boolean_type()
+        .default_value(False)
+    )
+
+    MANIFEST_ROW_ID_INDEX_MAX_RANGES: ConfigOption[int] = (
+        ConfigOptions.key("manifest.row-id-index.max-ranges")
+        .int_type()
+        .default_value(131072)
+    )
+
+    MANIFEST_ROW_ID_INDEX_MAX_BYTES: ConfigOption[int] = (
+        ConfigOptions.key("manifest.row-id-index.max-bytes")
+        .int_type()
+        .default_value(8388608)
+    )
+
     MANIFEST_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("manifest.compression")
         .string_type()

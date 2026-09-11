@@ -31,7 +31,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestIndexTestUtils;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.ManifestRowIdIndex;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.ReaderSupplier;
@@ -151,6 +154,39 @@ public class LocalOrphanFilesCleanTest {
     @Test
     public void testNormallyRemoving() throws Throwable {
         normallyRemoving(tablePath);
+    }
+
+    @Test
+    void testOrphanCleanupProtectsReferencedSidecars() throws Exception {
+        commit(Collections.singletonList(TestPojo.next()));
+        ManifestIndexTestUtils.registerIndexReferences(
+                table.store(), table.snapshotManager().latestSnapshotId());
+        table.snapshotManager().invalidateCache();
+        table.createTag("sidecar-tag", table.snapshotManager().latestSnapshotId());
+        List<Path> sidecars = new ArrayList<>();
+        List<Path> unreferenced = new ArrayList<>();
+        for (ManifestFileMeta meta :
+                table.store()
+                        .manifestListFactory()
+                        .create()
+                        .readDataManifests(table.snapshotManager().latestSnapshot())) {
+            Path sidecar = new Path(manifestDir, meta.indexFileName());
+            sidecars.add(sidecar);
+            Path guessed = new Path(manifestDir, meta.fileName() + ManifestRowIdIndex.SUFFIX);
+            fileIO.newOutputStream(guessed, false).close();
+            unreferenced.add(guessed);
+        }
+        Path orphan = new Path(manifestDir, "manifest-orphan" + ManifestRowIdIndex.SUFFIX);
+        fileIO.newOutputStream(orphan, false).close();
+        new LocalOrphanFilesClean(table, System.currentTimeMillis() + 2000).clean();
+        assertThat(fileIO.exists(orphan)).isFalse();
+        assertThat(sidecars).isNotEmpty();
+        for (Path sidecar : sidecars) {
+            assertThat(fileIO.exists(sidecar)).isTrue();
+        }
+        for (Path guessed : unreferenced) {
+            assertThat(fileIO.exists(guessed)).isFalse();
+        }
     }
 
     @Test

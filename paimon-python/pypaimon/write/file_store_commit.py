@@ -1140,8 +1140,7 @@ class FileStoreCommit:
             if ml_name:
                 try:
                     for meta in self.manifest_list_manager.read(ml_name):
-                        self.table.file_io.delete_quietly(
-                            f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+                        self.manifest_file_manager.delete(meta)
                 except Exception:
                     pass
                 self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
@@ -1160,8 +1159,7 @@ class FileStoreCommit:
         if base_manifest_list:
             self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
         for meta in merge_new_files:
-            self.table.file_io.delete_quietly(
-                f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+            self.manifest_file_manager.delete(meta)
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""

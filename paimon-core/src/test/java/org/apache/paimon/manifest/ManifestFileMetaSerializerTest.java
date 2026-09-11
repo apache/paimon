@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.manifest.ManifestIndexTestUtils.withIndexFileName;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFileMetaSerializer}. */
@@ -38,6 +40,34 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
     @Test
     void testFormatIdentifier() {
         assertThat(new ManifestFileMetaSerializer().toRow(object()).getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    void testIndexReferenceRoundTripAndEquality() throws Exception {
+        ManifestFileMeta meta = object();
+        ManifestFileMeta indexed = withIndexFileName(meta, "independent-index");
+        ManifestFileMetaSerializer serializer = new ManifestFileMetaSerializer();
+        assertThat(serializer.fromRow(serializer.toRow(indexed))).isEqualTo(indexed);
+        assertThat(serializer.deserializeFromBytes(serializer.serializeToBytes(indexed)))
+                .isEqualTo(indexed);
+        assertThat(indexed).isNotEqualTo(meta);
+        assertThat(indexed.hashCode())
+                .isEqualTo(withIndexFileName(meta, "independent-index").hashCode());
+        assertThat(indexed.toString()).contains("independent-index");
+        assertThat(serializer.fromRow(serializer.toRow(meta)).indexFileName()).isNull();
+    }
+
+    @Test
+    void testOldRowWithoutIndexField() {
+        ManifestFileMeta meta = object();
+        ManifestFileMetaSerializer serializer = new ManifestFileMetaSerializer();
+        GenericRow current = (GenericRow) serializer.toRow(meta);
+        GenericRow legacy = new GenericRow(current.getFieldCount() - 1);
+        for (int i = 0; i < legacy.getFieldCount(); i++) {
+            legacy.setField(i, current.getField(i));
+        }
+        assertThat(serializer.fromRow(legacy)).isEqualTo(meta);
+        assertThat(serializer.fromRow(legacy).indexFileName()).isNull();
     }
 
     @Override

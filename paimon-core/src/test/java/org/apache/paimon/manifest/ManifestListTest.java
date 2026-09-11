@@ -156,7 +156,11 @@ public class ManifestListTest {
             for (int j = random.nextInt(10) + 1; j > 0; j--) {
                 entries.add(gen.next());
             }
-            metas.add(gen.createManifestFileMeta(entries));
+            ManifestFileMeta meta = gen.createManifestFileMeta(entries);
+            metas.add(
+                    i % 2 == 0
+                            ? ManifestIndexTestUtils.withIndexFileName(meta, "index-" + i)
+                            : meta);
         }
         return metas;
     }

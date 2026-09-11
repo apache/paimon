@@ -510,6 +510,34 @@ public class CoreOptions implements Serializable {
                                     + "in the previous file. This must not exceed "
                                     + "'variant.shredding.minFieldCardinalityRatio'.");
 
+    public static final ConfigOption<Boolean> MANIFEST_ROW_ID_INDEX_WRITE =
+            key("manifest.row-id-index.write")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Write complete row-id block indexes for newly created manifests.");
+
+    public static final ConfigOption<Boolean> MANIFEST_ROW_ID_INDEX_READ =
+            key("manifest.row-id-index.read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Read optional row-id sidecars after coarse manifest pruning. Missing or invalid indexes fall back to manifest reads.");
+
+    public static final ConfigOption<Integer> MANIFEST_ROW_ID_INDEX_MAX_RANGES =
+            key("manifest.row-id-index.max-ranges")
+                    .intType()
+                    .defaultValue(131072)
+                    .withDescription(
+                            "Maximum disjoint row-id intervals across all Avro blocks in a manifest. Exceeding the limit disables the entire index. Range: 1 to 1048576.");
+
+    public static final ConfigOption<Integer> MANIFEST_ROW_ID_INDEX_MAX_BYTES =
+            key("manifest.row-id-index.max-bytes")
+                    .intType()
+                    .defaultValue(8388608)
+                    .withDescription(
+                            "Maximum serialized row-id sidecar bytes, including header and checksum. Exceeding the limit disables the entire index. Range: 128 to 67108864.");
+
     public static final ConfigOption<String> MANIFEST_COMPRESSION =
             key("manifest.compression")
                     .stringType()

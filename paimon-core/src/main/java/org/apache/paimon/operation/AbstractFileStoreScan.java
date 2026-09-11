@@ -29,6 +29,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestRowIdIndex;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
@@ -496,13 +497,17 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
 
+        ManifestFile manifestFile = manifestFileFactory.create();
+        ManifestRowIdIndex.Selection selected = manifestFile.selectBlocks(manifest, rowRangeIndex);
+        if (selected != null && selected.blocks().isEmpty()) {
+            return Collections.emptyList();
+        }
         Filter<InternalRow> entryRowFilter = createEntryRowFilter();
         Function<ManifestEntry, T> finalConverter =
                 dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
         List<T> entries =
-                manifestFileFactory
-                        .create()
+                manifestFile
                         .withCacheMetrics(
                                 scanMetrics != null ? scanMetrics.getCacheMetrics() : null)
                         .read(
@@ -516,7 +521,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
                                                 && filterByStats(entry),
-                                finalConverter);
+                                finalConverter,
+                                selected);
         LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
         return entries;
     }

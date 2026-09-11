@@ -57,7 +57,11 @@ public class ManifestFileMeta {
                             new DataField(8, "_MIN_LEVEL", new IntType(true)),
                             new DataField(9, "_MAX_LEVEL", new IntType(true)),
                             new DataField(10, "_MIN_ROW_ID", new BigIntType(true)),
-                            new DataField(11, "_MAX_ROW_ID", new BigIntType(true))));
+                            new DataField(11, "_MAX_ROW_ID", new BigIntType(true)),
+                            new DataField(
+                                    12,
+                                    "_INDEX_FILE_NAME",
+                                    new VarCharType(true, Integer.MAX_VALUE))));
 
     private final String fileName;
     private final long fileSize;
@@ -71,6 +75,7 @@ public class ManifestFileMeta {
     private final @Nullable Integer maxLevel;
     private final @Nullable Long minRowId;
     private final @Nullable Long maxRowId;
+    private final @Nullable String indexFileName;
 
     public ManifestFileMeta(
             String fileName,
@@ -85,6 +90,36 @@ public class ManifestFileMeta {
             @Nullable Integer maxLevel,
             @Nullable Long minRowId,
             @Nullable Long maxRowId) {
+        this(
+                fileName,
+                fileSize,
+                numAddedFiles,
+                numDeletedFiles,
+                partitionStats,
+                schemaId,
+                minBucket,
+                maxBucket,
+                minLevel,
+                maxLevel,
+                minRowId,
+                maxRowId,
+                null);
+    }
+
+    public ManifestFileMeta(
+            String fileName,
+            long fileSize,
+            long numAddedFiles,
+            long numDeletedFiles,
+            SimpleStats partitionStats,
+            long schemaId,
+            @Nullable Integer minBucket,
+            @Nullable Integer maxBucket,
+            @Nullable Integer minLevel,
+            @Nullable Integer maxLevel,
+            @Nullable Long minRowId,
+            @Nullable Long maxRowId,
+            @Nullable String indexFileName) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -97,6 +132,7 @@ public class ManifestFileMeta {
         this.maxLevel = maxLevel;
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
+        this.indexFileName = indexFileName;
     }
 
     public String fileName() {
@@ -147,6 +183,11 @@ public class ManifestFileMeta {
         return maxRowId;
     }
 
+    /** Name of the published sidecar in the manifest directory; null means no index. */
+    public @Nullable String indexFileName() {
+        return indexFileName;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -164,7 +205,8 @@ public class ManifestFileMeta {
                 && Objects.equals(minLevel, that.minLevel)
                 && Objects.equals(maxLevel, that.maxLevel)
                 && Objects.equals(minRowId, that.minRowId)
-                && Objects.equals(maxRowId, that.maxRowId);
+                && Objects.equals(maxRowId, that.maxRowId)
+                && Objects.equals(indexFileName, that.indexFileName);
     }
 
     @Override
@@ -181,13 +223,14 @@ public class ManifestFileMeta {
                 minLevel,
                 maxLevel,
                 minRowId,
-                maxRowId);
+                maxRowId,
+                indexFileName);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s}",
+                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s, %s}",
                 fileName,
                 fileSize,
                 numAddedFiles,
@@ -199,7 +242,8 @@ public class ManifestFileMeta {
                 minLevel,
                 maxLevel,
                 minRowId,
-                maxRowId);
+                maxRowId,
+                indexFileName);
     }
 
     // ----------------------- Serialization -----------------------------

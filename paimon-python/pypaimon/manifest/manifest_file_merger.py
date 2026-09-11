@@ -93,8 +93,4 @@ class ManifestFileMerger:
 
     def _delete_manifests(self, manifests: List[ManifestFileMeta]):
         for manifest in manifests:
-            manifest_path = "{}/{}".format(
-                self.manifest_file_manager.manifest_path,
-                manifest.file_name,
-            )
-            self.manifest_file_manager.file_io.delete_quietly(manifest_path)
+            self.manifest_file_manager.delete(manifest)

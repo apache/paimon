@@ -33,6 +33,7 @@ class ManifestFileMeta:
 
     min_row_id: Optional[int] = None
     max_row_id: Optional[int] = None
+    index_file_name: Optional[str] = None
 
 MANIFEST_FILE_META_SCHEMA = {
     "type": "record",
@@ -47,5 +48,6 @@ MANIFEST_FILE_META_SCHEMA = {
         {"name": "_SCHEMA_ID", "type": "long"},
         {"name": "_MIN_ROW_ID", "type": ["null", "long"], "default": None},
         {"name": "_MAX_ROW_ID", "type": ["null", "long"], "default": None},
+        {"name": "_INDEX_FILE_NAME", "type": ["null", "string"], "default": None},
     ]
 }

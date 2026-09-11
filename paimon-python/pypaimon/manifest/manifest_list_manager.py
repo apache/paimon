@@ -98,6 +98,7 @@ class ManifestListManager:
                 schema_id=record['_SCHEMA_ID'],
                 min_row_id=record.get('_MIN_ROW_ID'),
                 max_row_id=record.get('_MAX_ROW_ID'),
+                index_file_name=record.get('_INDEX_FILE_NAME'),
             )
             manifest_files.append(manifest_file_meta)
 
@@ -120,6 +121,7 @@ class ManifestListManager:
                 "_SCHEMA_ID": meta.schema_id,
                 "_MIN_ROW_ID": meta.min_row_id,
                 "_MAX_ROW_ID": meta.max_row_id,
+                "_INDEX_FILE_NAME": meta.index_file_name,
             }
             avro_records.append(avro_record)
 

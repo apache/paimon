@@ -204,14 +204,15 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
-                fileIO,
-                schemaManager,
-                partitionType,
-                FileFormat.manifestFormat(options),
-                options.manifestCompression(),
-                pathFactory(),
-                options.manifestTargetSize().getBytes(),
-                readManifestCache);
+                        fileIO,
+                        schemaManager,
+                        partitionType,
+                        FileFormat.manifestFormat(options),
+                        options.manifestCompression(),
+                        pathFactory(),
+                        options.manifestTargetSize().getBytes(),
+                        readManifestCache)
+                .withRowIdIndexOptions(options.toConfiguration());
     }
 
     @Override
