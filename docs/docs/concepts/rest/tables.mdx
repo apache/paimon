@@ -27,24 +27,25 @@ under the License.
 
 # Tables
 
-Paimon supports tables:
+The REST Catalog can expose three table categories. Choose one based on how the underlying data
+is organized and the capabilities implemented by your catalog service.
 
-1. paimon table: Paimon Data Table with or without Primary key
-2. format-table: file format table refers to a directory that contains multiple files of the same format, where
-   operations on this table allow for reading or writing to these files, compatible with Hive tables.
-3. object table: provides metadata indexes for unstructured data objects in the specified Object Storage directory.
+| Category | Data model | Guide |
+| --- | --- | --- |
+| Paimon Table | Snapshot-managed data, with or without a primary key. | [Primary-key table](#primary-key-table), [Append table](#append-table) |
+| Format Table | Files in a common format, including Hive-compatible tables. | [Format Table](#format-table) |
+| Object Table | Metadata for unstructured objects in a storage directory. | [Object Table](#object-table) |
 
 ## Paimon Table
 
 ### Primary Key Table
 
-See [Paimon with Primary key](../../primary-key-table/).
+A primary-key table merges records with the same primary key according to its configured merge
+engine. It supports streaming updates and changelog reads. See
+[Primary Key Table](../../primary-key-table/) for bucket modes, merge engines, and changelog
+configuration.
 
-Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by
-sorting the primary key within each bucket, allowing streaming update and streaming changelog read.
-
-The definition of primary key is similar to that of standard SQL, as it ensures that there is only one data entry for
-the same primary key during batch queries.
+The following examples create a table with eight buckets:
 
 <Tabs groupId="primary-table">
 
@@ -55,8 +56,8 @@ CREATE TABLE my_table (
     a INT PRIMARY KEY NOT ENFORCED,
     b STRING
 ) WITH (
-    'bucket'='8'
-)
+    'bucket' = '8'
+);
 ```
 
 </TabItem>
@@ -70,7 +71,7 @@ CREATE TABLE my_table (
 ) TBLPROPERTIES (
     'primary-key' = 'a',
     'bucket' = '8'
-)
+);
 ```
 
 </TabItem>
@@ -79,33 +80,36 @@ CREATE TABLE my_table (
 
 ### Append Table
 
-See [Append Table](../../append-table/).
-
-If a table does not have a primary key defined, it is an append table. Compared to the primary key table, it does not
-have the ability to directly receive changelogs. It cannot be directly updated with data through streaming upsert. It 
-can only receive incoming data from append data.
-
-However, it also supports batch sql: DELETE, UPDATE, and MERGE-INTO.
+A table without a primary key is an append table. Streaming writes append records rather than
+applying primary-key upserts. Batch `DELETE`, `UPDATE`, and `MERGE INTO` operations are available
+where supported by the compute engine. See [Append Table](../../append-table/) for write and
+read behavior.
 
 ```sql
 CREATE TABLE my_table (
     a INT,
     b STRING
-)
+);
 ```
 
 ## Format Table
 
-The Hive tables inside the metastore will be mapped to Paimon's Format Table for computing engines (Spark, Hive, Flink)
-to read and write.
+A Format Table describes files in a common format, including compatible Hive tables exposed
+through the catalog. It lets engines read existing files and add new files without using Paimon's
+snapshot-managed table layout.
 
-Format table refers to a directory that contains multiple files of the same format, where operations on this table
-allow for reading or writing to these files, facilitating the retrieval of existing data and the addition of new files.
+Common formats include CSV, Parquet, ORC, JSON, and text. Mosaic is also available with the
+corresponding format module. Format availability depends on the modules and table implementation
+used by the engine.
 
-Partitioned file format table just like the standard hive format. Partitions are discovered and inferred based on
-directory structure.
+By default, partition discovery follows the directory layout. REST internal Format Tables can
+instead use `metastore.partitioned-table = true` to read registered partitions from the catalog;
+unregistered directories are then excluded from scans. This mode uses the Paimon implementation
+and cannot be combined with `format-table.implementation = engine`. See
+[partition API compatibility](./rest-api#partition-compatibility) for partition options and
+custom locations.
 
-Currently only support `CSV`, `Parquet`, `ORC`, `JSON` formats.
+The following examples assume that a REST Catalog and database are already selected:
 
 <Tabs groupId="format-table">
 
@@ -116,10 +120,10 @@ CREATE TABLE my_csv_table (
     a INT,
     b STRING
 ) WITH (
-    'type'='format-table',
-    'file.format'='csv',
-    'csv.field-delimiter'=','
-)
+    'type' = 'format-table',
+    'file.format' = 'csv',
+    'csv.field-delimiter' = ','
+);
 ```
 
 </TabItem>
@@ -130,7 +134,7 @@ CREATE TABLE my_csv_table (
 CREATE TABLE my_csv_table (
     a INT,
     b STRING
-) USING csv OPTIONS ('csv.field-delimiter' ',')
+) USING csv OPTIONS ('csv.field-delimiter' ',');
 ```
 
 </TabItem>
@@ -142,9 +146,9 @@ CREATE TABLE my_parquet_table (
     a INT,
     b STRING
 ) WITH (
-    'type'='format-table',
-    'file.format'='parquet'
-)
+    'type' = 'format-table',
+    'file.format' = 'parquet'
+);
 ```
 
 </TabItem>
@@ -155,7 +159,7 @@ CREATE TABLE my_parquet_table (
 CREATE TABLE my_parquet_table (
     a INT,
     b STRING
-) USING parquet
+) USING parquet;
 ```
 
 </TabItem>
@@ -167,9 +171,9 @@ CREATE TABLE my_json_table (
     a INT,
     b STRING
 ) WITH (
-    'type'='format-table',
-    'file.format'='json'
-)
+    'type' = 'format-table',
+    'file.format' = 'json'
+);
 ```
 
 </TabItem>
@@ -180,7 +184,7 @@ CREATE TABLE my_json_table (
 CREATE TABLE my_json_table (
     a INT,
     b STRING
-) USING json
+) USING json;
 ```
 
 </TabItem>
@@ -189,15 +193,11 @@ CREATE TABLE my_json_table (
 
 ## Object Table
 
-Object Table is a virtual table for unstructured data objects in the specified object storage directory. Users can:
+An Object Table exposes metadata for unstructured files in a storage directory. Use SQL to query
+the file list and [PVFS](./pvfs) to access file contents through a REST Catalog.
 
-1. Use the virtual file system (Under development) to read and write files.
-2. Or use the SQL computing engine to read it as a structured file list.
-
-The object table is managed by Catalog and can also have access permissions. Now, only REST Catalog supports Object
-Table.
-
-To Create an object table:
+REST, Hive, and JDBC catalogs support Object Tables. The available permissions and storage
+credentials depend on the catalog service. Create an Object Table without declaring user columns:
 
 <Tabs groupId="create-object-table">
 
@@ -222,6 +222,3 @@ CREATE TABLE `my_object_table` TBLPROPERTIES (
 </TabItem>
 
 </Tabs>
-
-We recommend using [pvfs](./pvfs). to access files in the object table, access to the files
-through the permission system of Paimon REST Catalog.

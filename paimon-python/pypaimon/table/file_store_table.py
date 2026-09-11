@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
 from pypaimon.common.file_io import FileIO
@@ -527,8 +527,11 @@ class FileStoreTable(Table):
 
         new_table_schema = self.table_schema.copy(new_options=new_options)
 
+        # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
+        applied_options = {**getattr(self, '_applied_dynamic_options', {}), **options}
+
         if resolve_time_travel:
-            time_travel_schema = self._try_time_travel(Options(new_options))
+            time_travel_schema = self._try_time_travel(Options(new_options), set(applied_options))
             if time_travel_schema is not None:
                 new_table_schema = time_travel_schema
 
@@ -549,12 +552,10 @@ class FileStoreTable(Table):
 
         new_table = FileStoreTable(self.file_io, new_identifier, self.table_path,
                                    new_table_schema, catalog_env)
-        # Cumulative copy() overrides (removals kept as None) vs the on-disk schema.
-        new_table._applied_dynamic_options = {
-            **getattr(self, '_applied_dynamic_options', {}), **options}
+        new_table._applied_dynamic_options = applied_options
         return new_table
 
-    def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
+    def _try_time_travel(self, options: Options, dynamic_option_keys: Set[str]) -> Optional[TableSchema]:
         """
         Try to resolve time travel options and return the corresponding schema.
 
@@ -573,9 +574,33 @@ class FileStoreTable(Table):
             )
             if snapshot is None:
                 return None
-            return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())
+            historical_schema = self.schema_manager.get_schema(snapshot.schema_id)
+            return historical_schema.copy(new_options=self._exclude_current_schema_field_options(
+                historical_schema, options, dynamic_option_keys))
         except Exception:
             return None
+
+    @staticmethod
+    def _exclude_current_schema_field_options(
+            historical_schema: TableSchema, options: Options, dynamic_option_keys: Set[str]) -> dict:
+        # Keep scan and runtime options, but restore column declarations to match historical fields.
+        historical_options = dict(options.to_map())
+        for key in (
+                CoreOptions.VECTOR_FIELD.key(),
+                CoreOptions.BLOB_FIELD.key(),
+                CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                CoreOptions.BLOB_VIEW_FIELD.key(),
+                # Restore the legacy key verbatim, not as a canonical descriptor option:
+                # Python intentionally ignores it when choosing the read layout.
+                'blob.stored-descriptor-fields'):
+            if key in dynamic_option_keys:
+                # Preserve explicit overrides and removals, including those from earlier copies.
+                continue
+            if key in historical_schema.options:
+                historical_options[key] = historical_schema.options[key]
+            else:
+                historical_options.pop(key, None)
+        return historical_options
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse

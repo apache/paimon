@@ -1,4 +1,3 @@
-{{ $ref := ref . "maintenance/configurations.md" }}
 <table class="configuration table table-bordered">
     <thead>
     <tr>
@@ -17,9 +16,9 @@
     </tr>
     <tr>
         <td><h5>truncate(column,width)</h5></td>
-        <td>Truncate column by width. Output type is the same with column. If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely `value.substring(0, width)`.
-             If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm `v - (((v % W) + W) % W)`. The `redundant` compute part is to keep the result always positive.
-             If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let `scaled_W = decimal(W, scale(v))`, then return `v - (v % scaled_W)`.</td>
+        <td>Truncate column by width. Output type is the same with column. If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely <code>value.substring(0, width)</code>.
+             If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm <code>v - (((v % W) + W) % W)</code>. The <code>redundant</code> compute part is to keep the result always positive.
+             If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let <code>scaled_W = decimal(W, scale(v))</code>, then return <code>v - (v % scaled_W)</code>.</td>
     </tr>
     <tr>
         <td><h5>cast(value,dataType)</h5></td>

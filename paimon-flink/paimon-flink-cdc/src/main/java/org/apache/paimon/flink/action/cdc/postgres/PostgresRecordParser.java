@@ -352,8 +352,7 @@ public class PostgresRecordParser
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            String refName = computedColumn.fieldReference();
-            resultMap.put(computedColumn.columnName(), computedColumn.eval(resultMap.get(refName)));
+            resultMap.put(computedColumn.columnName(), computedColumn.evalFromRecord(resultMap));
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

@@ -424,6 +424,76 @@ public class VortexPredicateConverterTest {
         assertEquals(2_000_000L, rows.get(0).getTimestamp(0, 0).getMillisecond());
     }
 
+    @Test
+    public void testTimestampSecondsUnrepresentableLiteralNotPushed(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        // The literal carries millisecond precision while the column is stored in seconds. No
+        // rounding direction answers every operator, so the leaf is not pushed and the reader
+        // returns every row for the engine to filter. Rounding down to 1s used to drop the
+        // 1000ms row from "< 1500ms" and the 1000ms row from "!= 1500ms".
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        GenericRow[] data = {
+            GenericRow.of(Timestamp.fromEpochMillis(1_000L)),
+            GenericRow.of(Timestamp.fromEpochMillis(2_000L)),
+            GenericRow.of(Timestamp.fromEpochMillis(3_000L))
+        };
+
+        assertEquals(
+                3,
+                roundTrip(
+                                tempDir,
+                                tsRowType,
+                                data,
+                                Collections.singletonList(
+                                        tsBuilder.lessThan(0, Timestamp.fromEpochMillis(1_500L))))
+                        .size());
+        assertEquals(
+                3,
+                roundTrip(
+                                tempDir,
+                                tsRowType,
+                                data,
+                                Collections.singletonList(
+                                        tsBuilder.notEqual(0, Timestamp.fromEpochMillis(1_500L))))
+                        .size());
+    }
+
+    @Test
+    public void testTimestampSecondsPreEpochLiteralNotPushed(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        // integer division truncates toward zero, so -500ms became -0s and dropped the epoch row
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(0)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(0L))},
+                        Collections.singletonList(
+                                tsBuilder.greaterThan(0, Timestamp.fromEpochMillis(-500L))));
+        assertEquals(1, rows.size());
+        assertEquals(0L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
+    @Test
+    public void testTimestampMillisSubMillisecondLiteralNotPushed(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        // a TIMESTAMP(3) column is stored in milliseconds, so the sub millisecond part of the
+        // literal was silently discarded and the 1500ms row was dropped
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(3)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        List<InternalRow> rows =
+                roundTrip(
+                        tempDir,
+                        tsRowType,
+                        new GenericRow[] {GenericRow.of(Timestamp.fromEpochMillis(1_500L))},
+                        Collections.singletonList(
+                                tsBuilder.lessThan(0, Timestamp.fromMicros(1_500_500L))));
+        assertEquals(1, rows.size());
+        assertEquals(1_500L, rows.get(0).getTimestamp(0, 0).getMillisecond());
+    }
+
     private List<InternalRow> roundTrip(
             java.nio.file.Path tempDir,
             RowType rowType,

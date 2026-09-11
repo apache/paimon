@@ -291,6 +291,27 @@ public class PaimonShreddingUtilsTest {
                                         })));
     }
 
+    @Test
+    public void testAssembleDecimalWithScaleAbovePrecision() {
+        // the unshredded leg extracts through VariantGet, which used to build an invalid
+        // DecimalType for a value below 0.1 or one whose trailing zeros were stripped off
+        GenericVariant v = GenericVariant.fromJson("{\"round\": 100.00, \"small\": 0.05}");
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(RowType.of()));
+        FieldToExtract[] fieldsToExtract = {
+            buildFieldsToExtract(DataTypes.STRING(), "$.round", castArgs, variantSchema),
+            buildFieldsToExtract(DataTypes.STRING(), "$.small", castArgs, variantSchema)
+        };
+
+        assertThat(
+                        assembleVariantStruct(
+                                castShredded(v, variantSchema), variantSchema, fieldsToExtract))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("100"), BinaryString.fromString("0.05")));
+    }
+
     private static void assertVariantStructEquals(
             RowType shreddedType, RowType allTypes, GenericVariant v, GenericRow expected) {
         VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);

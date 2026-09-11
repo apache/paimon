@@ -334,6 +334,11 @@ public class BTreeIndexReader implements Closeable {
                 () -> {
                     RoaringNavigableMap64 result = new RoaringNavigableMap64();
                     for (Object literal : literals) {
+                        // SQL IN treats NULL as never matching; skip it instead of
+                        // failing to serialize a null key.
+                        if (literal == null) {
+                            continue;
+                        }
                         result.or(rangeQuery(literal, literal, true, true));
                     }
                     return result;

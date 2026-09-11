@@ -1108,6 +1108,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to enable block-aware ordinary manifest merging. When disabled, ordinary manifest compaction uses the legacy full-entry merger.</td>
         </tr>
         <tr>
+            <td><h5>manifest.merge.skip-on-write-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip automatic manifest merging during commit when write-only is true. This also skips automatic manifest sort rewrite. Explicit manifest compaction is not affected.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.target-file-size</h5></td>
             <td style="word-wrap: break-word;">8 mb</td>
             <td>MemorySize</td>
@@ -1991,7 +1997,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>write-only</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs. Automatic manifest merging is also skipped when manifest.merge.skip-on-write-only is true.</td>
         </tr>
         <tr>
             <td><h5>write.batch-memory</h5></td>

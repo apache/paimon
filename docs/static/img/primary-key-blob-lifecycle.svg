@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="589" viewBox="0 0 960 589" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Compaction reuses managed BLOB payloads</title>
+<desc id="desc">Input file A references payload packs P and Q for keys 7 and 11. A newer file B replaces key 7 with a descriptor to R. Deduplicate compaction writes file C and sidecar C referencing Q and R; the managed payload packs are not rewritten. P may still be needed by retained snapshots, and managed BLOB garbage collection is not implemented.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="587" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Compaction reuses managed BLOB payloads</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Deduplicate example: key 7 is updated; key 11 stays unchanged. P, Q, R name payload packs.</text>
+<rect x="28" y="109" width="382" height="212" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="140" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Input data files</text>
+<text x="44" y="170" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A: key 7 → P, key 11 → Q</text>
+<text x="44" y="195" font-size="18" font-weight="400" text-anchor="start" fill="#526277">B: key 7 → R (newer row)</text>
+<text x="44" y="220" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="44" y="245" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A.blobref = {P, Q}</text>
+<text x="44" y="270" font-size="18" font-weight="400" text-anchor="start" fill="#526277">B.blobref = {R}</text>
+<path d="M 420 215 L 540 215" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="480" y="193" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">Compact</text>
+<rect x="550" y="109" width="382" height="212" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="566" y="140" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Compacted data file</text>
+<text x="566" y="170" font-size="18" font-weight="400" text-anchor="start" fill="#526277">C: key 7 → R, key 11 → Q</text>
+<text x="566" y="195" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Descriptors survive the merge</text>
+<text x="566" y="220" font-size="18" font-weight="400" text-anchor="start" fill="#526277"></text>
+<text x="566" y="245" font-size="18" font-weight="400" text-anchor="start" fill="#526277">C.blobref = {Q, R}</text>
+<text x="566" y="270" font-size="18" font-weight="400" text-anchor="start" fill="#526277">New sidecar, same payloads</text>
+<text x="28" y="359" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">Existing managed payload packs · bytes are not rewritten</text>
+<rect x="28" y="377" width="284" height="114" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="44" y="408" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">P · old key 7 payload</text>
+<text x="44" y="438" font-size="18" font-weight="400" text-anchor="start" fill="#526277">May still serve</text>
+<text x="44" y="463" font-size="18" font-weight="400" text-anchor="start" fill="#526277">retained snapshots</text>
+<rect x="338" y="377" width="284" height="114" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="354" y="408" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Q · key 11 payload</text>
+<text x="354" y="438" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Still referenced</text>
+<text x="354" y="463" font-size="18" font-weight="400" text-anchor="start" fill="#526277">by compacted file C</text>
+<rect x="648" y="377" width="284" height="114" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="664" y="408" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">R · new key 7 payload</text>
+<text x="664" y="438" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Still referenced</text>
+<text x="664" y="463" font-size="18" font-weight="400" text-anchor="start" fill="#526277">by compacted file C</text>
+<text x="28" y="534" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Data-file retention owns .blobref sidecars; shared payload packs have a separate lifecycle.</text>
+<text x="28" y="560" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Managed BLOB garbage collection is not implemented; orphan-file cleaning preserves packs.</text>
+</g>
+</svg>

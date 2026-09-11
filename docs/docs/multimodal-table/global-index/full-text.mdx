@@ -38,11 +38,20 @@ itself is a JSON string accepted by `paimon-full-text-index`.
 Full-text indexes are scored by the native engine and can be used directly, or
 combined with vector routes in [Hybrid Search](./hybrid-search).
 
+For table prerequisites, see [Global Index](../global-index#prerequisites).
+For refresh, coverage modes, and shared build options, see
+[Manage Global Indexes](./manage-indexes).
+
 ## Build Full-Text Index
 
 Build full-text indexes on `STRING`, `CHAR`, or `VARCHAR` columns. Null values
 are skipped by the native text index, while row-id coverage is still tracked by
 Paimon.
+
+Start with the populated [shared example table](../global-index#prerequisites).
+Choose one tokenizer before the initial build: the SQL and Python calls below
+show alternative configurations. Repeating a build with different options does
+not retokenize rows already covered by the index.
 
 <Tabs groupId="fulltext-build">
 
@@ -151,50 +160,10 @@ Tokenizer settings are stored in the global index file metadata. Existing index
 files keep the tokenizer options they were built with, even if later index
 builds use different options.
 
-## Drop Full-Text Index
-
-<Tabs groupId="fulltext-drop">
-
-<TabItem value="sql" label="SQL">
-
-```sql
-CALL sys.drop_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'full-text'
-);
-```
-
-</TabItem>
-
-<TabItem value="python-sdk" label="Python SDK">
-
-```python
-table = catalog.get_table("db.my_table")
-
-dropped_files = table.drop_global_index(
-    "content",
-    index_type="full-text",
-)
-print(dropped_files)
-```
-
-You can also restrict the drop to selected partitions, or count matched files
-without committing:
-
-```python
-matched_files = table.drop_global_index(
-    "content",
-    index_type="full-text",
-    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
-    dry_run=True,
-)
-print(matched_files)
-```
-
-</TabItem>
-
-</Tabs>
+To change tokenization for already indexed rows, [drop the index](#drop-full-text-index)
+and build it again with the new options. Use the same partition scope for both
+operations if changing only selected partitions. Coordinate the rebuild with
+queries that rely on complete coverage; `fast` searches only indexed ranges.
 
 ## Full-Text Search
 
@@ -215,7 +184,8 @@ FROM full_text_search(
     'content',
     '{"match":{"query":"paimon lake format"}}',
     10
-);
+)
+ORDER BY __paimon_search_score DESC, id;
 
 -- Require all query terms.
 SELECT id, content, __paimon_search_score
@@ -224,7 +194,8 @@ FROM full_text_search(
     'content',
     '{"match":{"query":"paimon lake format","operator":"And"}}',
     10
-);
+)
+ORDER BY __paimon_search_score DESC, id;
 
 -- Phrase query. The index must be built with full-text.with-position=true.
 SELECT id, content, __paimon_search_score
@@ -233,7 +204,8 @@ FROM full_text_search(
     'content',
     '{"match_phrase":{"query":"paimon lake"}}',
     10
-);
+)
+ORDER BY __paimon_search_score DESC, id;
 ```
 
 Spark exposes the score as the `__paimon_search_score` metadata column.
@@ -410,6 +382,51 @@ Use `boost` to down-rank rows that also match a negative query.
 | `negative` | Yes | N/A | Query used to down-rank matching rows. |
 | `negative_boost` | No | `0.5` | Positive multiplier applied to rows that also match `negative`. |
 
+## Drop Full-Text Index
+
+<Tabs groupId="fulltext-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'full-text'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index(
+    "content",
+    index_type="full-text",
+)
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "content",
+    index_type="full-text",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
+
 ## Notes
 
 - The table column is supplied by `full_text_search(..., column, query, limit)`,
@@ -419,5 +436,7 @@ Use `boost` to down-rank rows that also match a negative query.
   Paimon table column through the Paimon API instead.
 - The query string must be valid JSON understood by the native full-text reader.
   Invalid query syntax fails during search.
-- `limit` must be positive. Full-text results are returned in score order and
-  can be merged with vector results by hybrid search rankers.
+- `limit` must be positive. Full-text search selects top-K scored matches, which
+  can be combined with vector results by hybrid search rankers. A subsequent
+  table scan does not guarantee score order. Use explicit SQL ordering or access
+  scores by row ID; see [Read Scored Results](./manage-indexes#read-scored-results).

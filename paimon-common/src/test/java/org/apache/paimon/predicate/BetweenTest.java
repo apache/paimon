@@ -18,6 +18,7 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
@@ -45,6 +46,44 @@ class BetweenTest {
 
         assertThat(compoundResult.children().get(1)).isEqualTo(lte);
         assertThat(compoundResult.children().get(0)).isEqualTo(isNotNull);
+    }
+
+    @Test
+    public void testNullLiteralBoundsDoNotCrash() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        // x <= NULL AND x >= 1: Flink pushdown keeps null literals; optimize()
+        // previously crashed comparing null (Unsupported type / NPE).
+        Predicate lteNull = builder.lessOrEqual(0, null);
+        Predicate gte = builder.greaterOrEqual(0, 1);
+        Predicate and = PredicateBuilder.and(Arrays.asList(lteNull, gte));
+        assertThat(and).isNotNull();
+
+        // Two <= bounds where one is null: keeps the null-bearing predicate.
+        Predicate lte10 = builder.lessOrEqual(0, 10);
+        Predicate andNulls = PredicateBuilder.and(Arrays.asList(lteNull, lte10, gte));
+        assertThat(andNulls).isNotNull();
+
+        // Two >= bounds where one is null.
+        Predicate gteNull = builder.greaterOrEqual(0, null);
+        Predicate andGteNulls =
+                PredicateBuilder.and(Arrays.asList(gteNull, builder.greaterOrEqual(0, 5), lte10));
+        assertThat(andGteNulls).isNotNull();
+
+        // Two BETWEENs where one has a null bound stay unmerged: dropping the
+        // null-bound BETWEEN would wrongly match rows 1..4.
+        Predicate betweenNull = builder.between(0, null, 5);
+        Predicate between = builder.between(0, 1, 4);
+        Predicate andBetweens = PredicateBuilder.and(Arrays.asList(betweenNull, between));
+        assertThat(andBetweens).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) andBetweens;
+        assertThat(compound.function()).isInstanceOf(And.class);
+        assertThat(compound.children()).hasSize(2);
+
+        // The null-bearing predicate retained by the merge still evaluates to false.
+        Predicate merged = PredicateBuilder.and(Arrays.asList(lteNull, gte));
+        GenericRow row = new GenericRow(1);
+        row.setField(0, 3);
+        assertThat(merged.test(row)).isFalse();
     }
 
     @Test

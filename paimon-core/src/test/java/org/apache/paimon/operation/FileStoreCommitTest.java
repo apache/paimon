@@ -1336,9 +1336,71 @@ public class FileStoreCommitTest {
                 .isEqualTo(store.toKvMap(Collections.singletonList(original)));
     }
 
-    @Test
-    public void testManifestCompact() throws Exception {
-        TestFileStore store = createStore(false);
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,default",
+        "false,true,default",
+        "true,false,default",
+        "true,true,default",
+        "false,false,true",
+        "false,true,true",
+        "true,false,true",
+        "true,true,true",
+        "false,false,false",
+        "false,true,false",
+        "true,false,false",
+        "true,true,false"
+    })
+    public void testCommitManifestMerge(
+            boolean sortEnabled, boolean writeOnly, String skipOnWriteOnly) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "2");
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), String.valueOf(sortEnabled));
+        options.put(CoreOptions.WRITE_ONLY.key(), String.valueOf(writeOnly));
+        if (!"default".equals(skipOnWriteOnly)) {
+            options.put(CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(), skipOnWriteOnly);
+        }
+        TestFileStore store = createStore(false, options);
+        // Override the randomized manifest size in TestFileStore to keep both files under budget.
+        store.options().toConfiguration().set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "8 mb");
+        List<KeyValue> expected = new ArrayList<>();
+        List<ManifestFileMeta> previousManifests = Collections.emptyList();
+        for (int i = 0; i < 3; i++) {
+            KeyValue kv = gen.nextInsert("20211110", 8, (long) i, null, "value-" + i);
+            expected.add(kv);
+            Snapshot snapshot =
+                    store.commitData(Collections.singletonList(kv), gen::getPartition, value -> 0)
+                            .get(0);
+            if (i == 1) {
+                previousManifests =
+                        store.manifestListFactory().create().readDataManifests(snapshot);
+            }
+        }
+
+        Snapshot latest = store.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> baseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(latest.baseManifestList(), latest.baseManifestListSize());
+        if (writeOnly && "true".equals(skipOnWriteOnly)) {
+            assertThat(baseManifests).hasSize(2).containsExactlyElementsOf(previousManifests);
+        } else {
+            assertThat(baseManifests).hasSize(1);
+            assertThat(baseManifests.get(0).numAddedFiles()).isEqualTo(2);
+        }
+        assertThat(store.toKvMap(store.readKvsFromSnapshot(latest.id())))
+                .isEqualTo(store.toKvMap(expected));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,false", "false,false", "true,true", "false,true"})
+    public void testManifestCompact(boolean skipOnWriteOnly, boolean writeOnly) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.MANIFEST_MERGE_SKIP_ON_WRITE_ONLY.key(),
+                String.valueOf(skipOnWriteOnly));
+        options.put(CoreOptions.WRITE_ONLY.key(), String.valueOf(writeOnly));
+        TestFileStore store = createStore(false, options);
 
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));

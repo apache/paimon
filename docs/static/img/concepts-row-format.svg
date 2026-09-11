@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 638" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Row format: blocks, offsets, and footer</title>
+<desc id="desc">The file index selects blocks; each decompressed block has its own row-offset array.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1040" height="638" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Row format: blocks, offsets, and footer</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">The file index selects blocks; each decompressed block has its own row-offset array.</text>
+<rect x="32" y="119" width="330" height="399" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="52" y="154" font-size="23" font-weight="700" text-anchor="start" fill="#172b4d">.row file</text>
+<rect x="52" y="189" width="290" height="107" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="70" y="220" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Compressed blocks</text>
+<text x="70" y="249" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Block 0 · Block 1 · …</text>
+<text x="70" y="276" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Independent ZSTD frames</text>
+<rect x="52" y="330" width="290" height="72" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="70" y="361" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Block index</text>
+<text x="70" y="390" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Sizes and starting row numbers</text>
+<rect x="52" y="435" width="290" height="63" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="70" y="466" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Footer · 32 bytes</text>
+<rect x="426" y="119" width="582" height="399" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="446" y="154" font-size="23" font-weight="700" text-anchor="start" fill="#10705d">One block after decompression</text>
+<rect x="446" y="189" width="542" height="81" rx="10" fill="#ffffff" stroke="#10705d" stroke-width="1.5"/>
+<text x="464" y="220" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Serialized rows</text>
+<text x="464" y="249" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Row 0 | Row 1 | … | Row N − 1</text>
+<rect x="446" y="313" width="542" height="81" rx="10" fill="#ffffff" stroke="#10705d" stroke-width="1.5"/>
+<text x="464" y="344" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Row-offset array</text>
+<text x="464" y="373" font-size="18" font-weight="400" text-anchor="start" fill="#526277">N × int32 LE; each offset is relative to the block start</text>
+<rect x="446" y="431" width="542" height="63" rx="10" fill="#ffffff" stroke="#10705d" stroke-width="1.5"/>
+<text x="464" y="462" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Row count N · int32 LE</text>
+<path d="M 362 236 H 426" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="446" y="293" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Rows have variable byte lengths.</text>
+<text x="446" y="418" font-size="17" font-weight="400" text-anchor="start" fill="#526277">The count locates the offset array at the end of the block.</text>
+<rect x="32" y="552" width="976" height="58" rx="10" fill="#f5f8fc" stroke="#cfd9e6" stroke-width="1.5"/>
+<text x="520" y="578" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">Read footer → decode block index → select and read blocks → decompress → locate rows</text>
+<text x="520" y="600" font-size="17" font-weight="400" text-anchor="middle" fill="#526277">Constant-time offset lookup applies inside a decompressed block.</text>
+</g>
+</svg>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="506" viewBox="0 0 960 506" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Connect to metadata and storage</title>
+<desc id="desc">An engine first resolves a table using a catalog backend. It then reads the table metadata and data files from shared storage. A filesystem catalog resolves metadata directly from the warehouse.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker>
+</defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="504" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#526277" font-weight="700">Connect to metadata and storage</text>
+<text x="28" y="77" font-size="18" fill="#526277">A working catalog connection is only one part of a successful query.</text>
+<rect x="28" y="162" width="268" height="164" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="46" y="195" font-size="21" fill="#2463b4" font-weight="700">Engine + connector</text>
+<text x="46" y="227" font-size="18" fill="#526277">Local SQL catalog name</text>
+<text x="46" y="253" font-size="18" fill="#526277">Engine-specific properties</text>
+<text x="46" y="279" font-size="18" fill="#526277">Query execution</text>
+<rect x="474" y="118" width="458" height="132" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="492" y="151" font-size="21" fill="#7051a3" font-weight="700">Catalog backend</text>
+<text x="492" y="183" font-size="18" fill="#526277">Resolve a database and table</text>
+<text x="492" y="209" font-size="18" fill="#526277">Hive metastore / REST / filesystem</text>
+<rect x="474" y="316" width="458" height="132" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="492" y="349" font-size="21" fill="#10705d" font-weight="700">Warehouse storage</text>
+<text x="492" y="381" font-size="18" fill="#526277">Paimon snapshots, manifests, and data files</text>
+<text x="492" y="407" font-size="18" fill="#526277">HDFS or object storage</text>
+<path d="M 300 203 H 372 V 184 H 470" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="312" y="159" font-size="16" fill="#526277">1. Resolve table</text>
+<path d="M 300 281 H 372 V 382 H 470" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="311" y="411" font-size="16" fill="#526277">2. Read files</text>
+<text x="491" y="278" font-size="15" fill="#526277">Filesystem catalogs resolve metadata in the warehouse.</text>
+<text x="28" y="483" font-size="18" fill="#526277">Configure both access paths on the engine processes that use them.</text>
+</g>
+</svg>

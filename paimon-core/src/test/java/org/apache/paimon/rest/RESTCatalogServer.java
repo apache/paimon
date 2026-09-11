@@ -2213,7 +2213,7 @@ public class RESTCatalogServer {
                     throw new Catalog.TableNotExistException(tableIdentifier);
                 }
                 List<Partition> storedPartitions =
-                        new ArrayList<>(
+                        RESTCatalogPartitionSupport.copyPartitions(
                                 tablePartitionsStore.getOrDefault(
                                         tableName, Collections.emptyList()));
                 Set<Map<String, String>> existingSpecs =
@@ -2237,6 +2237,15 @@ public class RESTCatalogServer {
                         return mockResponse(response, 409);
                     }
                 }
+                boolean formatTable = isFormatTable(tableMetadata.schema().toSchema());
+                Set<Map<String, String>> returningToDefault =
+                        RESTCatalogPartitionSupport.takeReturnsToDefault(
+                                request,
+                                requestedOptions,
+                                storedPartitions,
+                                tableMetadata,
+                                tableName,
+                                catalogContext);
                 Optional<Map<String, String>> conflictingLocation =
                         RESTCatalogPartitionSupport.conflictingLocation(
                                 storedPartitions, request.getPartitionSpecs(), requestedOptions);
@@ -2261,10 +2270,13 @@ public class RESTCatalogServer {
                         existed.add(spec);
                     }
                 }
-                if (isFormatTable(tableMetadata.schema().toSchema())) {
-                    RESTCatalogPartitionSupport.validateFormatTablePartitionLocations(
-                            storedPartitions, tableMetadata, tableName, catalogContext);
-                }
+                RESTCatalogPartitionSupport.settlePartitionLocations(
+                        storedPartitions,
+                        returningToDefault,
+                        formatTable,
+                        tableMetadata,
+                        tableName,
+                        catalogContext);
                 applyPartitionStatistics(
                         storedPartitions,
                         request.getPartitionStatistics(),

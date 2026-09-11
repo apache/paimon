@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="540" viewBox="0 0 900 540" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Two recovery positions</title>
+<desc id="desc">A Spark checkpoint restores micro-batch progress. Without that checkpoint, an existing Paimon Consumer starts from a conservative snapshot position and may replay data. Without either, startup options apply. Partial delta snapshots remain protected, and an incomplete initial full snapshot has no Consumer fence.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="538" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Two recovery positions</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Checkpoints record micro-batch progress; Consumers protect a conservative snapshot position</text>
+<rect x="300" y="105" width="300" height="60" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="450" y="143" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Restart a streaming query</text>
+<path d="M 380 165 V 189 H 225 V 225" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 520 165 V 189 H 675 V 225" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="225" y="182" font-size="18" fill="#2463b4" font-weight="700" text-anchor="middle">Checkpoint available</text>
+<text x="675" y="182" font-size="18" fill="#087f6e" font-weight="700" text-anchor="middle">New checkpoint</text>
+<rect x="28" y="234" width="394" height="93" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="225" y="268" font-size="23" fill="#2463b4" font-weight="700" text-anchor="middle">Restore Spark progress</text>
+<text x="225" y="299" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Use saved micro-batch offsets</text>
+<rect x="478" y="234" width="394" height="93" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="675" y="268" font-size="23" fill="#087f6e" font-weight="700" text-anchor="middle">Read Paimon Consumer</text>
+<text x="675" y="299" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">If present and progress is not ignored</text>
+<path d="M 675 327 V 357" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="478" y="366" width="394" height="79" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="675" y="398" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Resume at a snapshot boundary</text>
+<text x="675" y="427" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Conservative replay is possible</text>
+<rect x="28" y="366" width="394" height="79" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="225" y="398" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">No saved position?</text>
+<text x="225" y="427" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Apply the configured startup scan mode</text>
+<text x="28" y="480" font-size="18" fill="#526277" font-weight="400" text-anchor="start">A partial delta snapshot stays protected until its final split is committed.</text>
+<text x="28" y="509" font-size="17" fill="#526277" font-weight="400" text-anchor="start">An incomplete initial full scan has no Consumer fence: size snapshot retention for that scan.</text>
+</g>
+</svg>

@@ -27,6 +27,18 @@ under the License.
 
 # SQL Write
 
+Choose the operation by how it changes the table. Select a Paimon catalog before running these
+examples; see [SQL DDL](./sql-ddl).
+
+| Task | Operation | Requirements |
+| --- | --- | --- |
+| Append records or apply changes | [`INSERT INTO`](#insert-into) | Batch or streaming; enable checkpoints for streaming commits. |
+| Replace table or partition contents | [`INSERT OVERWRITE`](#overwriting-the-whole-table) | Check static versus dynamic partition behavior. |
+| Empty a table | [Truncate](#truncate-tables) | `TRUNCATE TABLE` requires Flink 1.18+; older versions use an empty overwrite. |
+| Update existing rows | [`UPDATE`](#updating-tables) | Flink 1.17+, batch mode, and a supported primary-key merge engine. |
+| Delete matching rows | [`DELETE`](#deleting-from-table) | Flink 1.17+, batch mode, and a supported table mode. |
+| Merge another table | [Merge procedure](./procedures/table-operations#merge_into) or [action](./action-jars#merging-into-table) | Check the merge operation's table and changelog restrictions. |
+
 ## Syntax
 
 ```sql
@@ -42,81 +54,133 @@ For more information, please check the syntax document:
 Use `INSERT INTO` to apply records and changes to tables.
 
 ```sql
-INSERT INTO my_table SELECT ...
+CREATE TABLE order_totals (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    amount BIGINT
+);
+
+SET 'execution.runtime-mode' = 'batch';
+INSERT INTO order_totals VALUES (1, 100), (2, 200);
+
+-- With the default deduplicate merge engine, replace order 1's amount.
+INSERT INTO order_totals VALUES (1, 150);
 ```
 
-`INSERT INTO` supports both batch and streaming mode. In Streaming mode, by default, it will also perform compaction, 
-snapshot expiration, and even partition expiration in Flink Sink (if it is configured).
+`INSERT INTO` supports both batch and streaming mode. Before submitting a streaming writer, enable checkpointing:
+
+```sql
+SET 'execution.runtime-mode' = 'streaming';
+SET 'execution.checkpointing.interval' = '10 s';
+```
+
+Data becomes visible through committed snapshots. See [Runtime Configuration](./configuration#checkpointing).
+The streaming sink also performs configured maintenance, including compaction, snapshot
+expiration, and partition expiration.
 
 For multiple jobs to write the same table, you can refer to [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) for more info.
 
 ### Clustering
 
-In Paimon, clustering is a feature that allows you to cluster data in your [Append Table](../append-table/)
-based on the values of certain columns during the write process. This organization of data can significantly enhance the efficiency of downstream
-tasks when reading the data, as it enables faster and more targeted data retrieval. This feature is only supported for [Append Table](../append-table/)(bucket = -1)
-and batch execution mode.
-
-To utilize clustering, you can specify the columns you want to cluster when creating or writing to a table. Here's a simple example of how to enable clustering:
+Clustering groups append-table rows by selected columns to improve data skipping. This write
+path requires **batch mode** and a bucket-unaware append table (`bucket = -1`).
 
 ```sql
-CREATE TABLE my_table (
+SET 'execution.runtime-mode' = 'batch';
+
+CREATE TABLE clustered_events (
     a STRING,
     b STRING,
-    c STRING,
+    c STRING
 ) WITH (
-  'sink.clustering.by-columns' = 'a,b',
+    'bucket' = '-1',
+    'clustering.columns' = 'a,b'
 );
+
+INSERT INTO clustered_events VALUES ('a', 'x', 'first'), ('b', 'y', 'second');
 ```
 
-You can also use SQL hints to dynamically set clustering options:
+Set `clustering.columns` in an `OPTIONS` hint to apply clustering to one write:
 
 ```sql
-INSERT INTO my_table /*+ OPTIONS('sink.clustering.by-columns' = 'a,b') */
-SELECT * FROM source;
+INSERT INTO clustered_events /*+ OPTIONS('clustering.columns' = 'a,b') */
+SELECT * FROM source_events;
 ```
 
-The data is clustered using an automatically chosen strategy (such as ORDER, ZORDER, or HILBERT), but you can manually specify the clustering strategy
-by setting the `sink.clustering.strategy`. Clustering relies on sampling and sorting. If the clustering process takes too much time, you can decrease
-the total sample number by setting the `sink.clustering.sample-factor` or disable the sorting step by setting the `sink.clustering.sort-in-cluster` to false.
+The default strategy is chosen automatically. Set `clustering.strategy` to choose `order`,
+`zorder`, or `hilbert`. The older `sink.clustering.by-columns` and `sink.clustering.strategy`
+keys remain supported aliases. To reduce sampling or sorting work, tune
+`sink.clustering.sample-factor` or `sink.clustering.sort-in-cluster`.
 
-You can refer to [FlinkConnectorOptions](../maintenance/configurations#flinkconnectoroptions) for more info about the configurations above.
+See [Append-table Query Performance](../append-table/query-performance) and
+[FlinkConnectorOptions](../maintenance/configurations#flinkconnectoroptions) for tuning details.
 
 ## Overwriting the Whole Table
 
-For unpartitioned tables, Paimon supports overwriting the whole table.
-(or for partitioned table which disables `dynamic-partition-overwrite` option).
-
-Use `INSERT OVERWRITE` to overwrite the whole unpartitioned table.
+Use `INSERT OVERWRITE` to replace the contents of an unpartitioned table. For example, continuing
+with `order_totals` from [INSERT INTO](#insert-into):
 
 ```sql
-INSERT OVERWRITE my_table SELECT ...
+SET 'execution.runtime-mode' = 'batch';
+
+INSERT OVERWRITE order_totals VALUES (1, 300);
+SELECT * FROM order_totals;
+-- The table now contains only order 1 with amount 300.
+```
+
+For a partitioned table, choose the overwrite scope explicitly. The examples below use:
+
+```sql
+CREATE TABLE daily_orders (
+    order_id BIGINT,
+    amount BIGINT,
+    dt STRING
+) PARTITIONED BY (dt);
+
+INSERT INTO daily_orders VALUES
+    (1, 100, '2026-09-01'),
+    (2, 200, '2026-09-02');
 ```
 
 ### Overwriting a Partition
 
-For partitioned tables, Paimon supports overwriting a partition.
-
-Use `INSERT OVERWRITE` to overwrite a partition.
+Provide a partition specification and omit its fixed fields from the incoming row:
 
 ```sql
-INSERT OVERWRITE my_table PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
+INSERT OVERWRITE daily_orders PARTITION (dt = '2026-09-02')
+SELECT CAST(3 AS BIGINT), CAST(300 AS BIGINT);
 ```
+
+With this nonempty input, the September 2 partition is replaced and September 1 is retained.
+To clear a partition with empty input, use the static overwrite option described under
+[Purging Partitions](#purging-partitions).
 
 ### Dynamic Overwrite
 
-Flink's default overwrite mode is dynamic partition overwrite (that means Paimon only deletes the partitions
-appear in the overwritten data). You can configure `dynamic-partition-overwrite` to change it to static overwritten.
+For partitioned tables, dynamic overwrite is enabled by default. It replaces only partitions
+represented in the incoming data. Static overwrite replaces the selected partition scope, or
+the whole table if no partition specification is given.
+
+![With incoming rows for September 2 only, dynamic overwrite keeps September 1 while static whole-table overwrite removes it.](/img/flink-overwrite-scope.svg)
+
+| Configuration | Partitions replaced | Empty input |
+| --- | --- | --- |
+| Dynamic (default) | Partitions present in the incoming data. | No data is deleted, even with a `PARTITION (...)` clause. |
+| Static, with `PARTITION (...)` | Partitions matching the specification. | Clears that partition scope. |
+| Static, without `PARTITION (...)` | The whole table. | Clears the whole table. |
+
+These are alternative operations on the initial `daily_orders` data:
 
 ```sql
--- MyTable is a Partitioned Table
+-- Dynamic: replace September 2; retain September 1.
+INSERT OVERWRITE daily_orders VALUES (3, 300, '2026-09-02');
 
--- Dynamic overwrite
-INSERT OVERWRITE my_table SELECT ...
-
--- Static overwrite (Overwrite whole table)
-INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite' = 'false') */ SELECT ...
+-- Static, without a partition specification: replace the whole table.
+INSERT OVERWRITE daily_orders /*+ OPTIONS('dynamic-partition-overwrite' = 'false') */
+VALUES (3, 300, '2026-09-02');
 ```
+
+Streaming readers ignore overwrite commits by default. See [Read Overwrite](./sql-query#read-overwrite)
+before using overwrites in a table consumed by streaming jobs.
 
 ## Truncate tables
 
@@ -151,15 +215,13 @@ has, so truncating empties those and leaves an unregistered directory alone. Fli
 
 ## Purging Partitions
 
-Currently, Paimon supports two ways to purge partitions.
-
-1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
-
-2. Method #1 does not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop_partition job through `flink run`.
+Use an empty `INSERT OVERWRITE` to clear the rows in selected partitions, as shown below.
+To drop one or more partitions, use [ALTER TABLE DROP PARTITION](./sql-alter#dropping-partitions).
+For command-line submission, see the [drop_partition action](./action-jars#drop-partition).
 
 ```sql
 -- Syntax
-INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */
 PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM my_table WHERE false;
 
 -- The following SQL is an example:
@@ -171,11 +233,11 @@ CREATE TABLE my_table (
 ) PARTITIONED BY (k0, k1);
 
 -- you can use
-INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */
 PARTITION (k0 = 0) SELECT k1, v FROM my_table WHERE false;
 
 -- or
-INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */
 PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 ```
 
@@ -191,7 +253,11 @@ Important table properties setting:
 
 :::
 
-Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
+`UPDATE` requires Flink 1.17+ and batch mode. Set the runtime mode before submitting it:
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+```
 
 ```sql
 -- Syntax
@@ -204,8 +270,8 @@ CREATE TABLE my_table (
 	b INT,
 	c INT,
 	PRIMARY KEY (a) NOT ENFORCED
-) WITH ( 
-	'merge-engine' = 'deduplicate' 
+) WITH (
+	'merge-engine' = 'deduplicate'
 );
 
 -- you can use
@@ -230,6 +296,8 @@ Important table properties setting:
 :::
 
 ```sql
+SET 'execution.runtime-mode' = 'batch';
+
 -- Syntax
 DELETE FROM table_identifier WHERE conditions;
 
@@ -241,8 +309,8 @@ CREATE TABLE my_table (
     rate BIGINT,
     dt String,
     PRIMARY KEY (id, dt) NOT ENFORCED
-) PARTITIONED BY (dt) WITH ( 
-    'merge-engine' = 'deduplicate' 
+) PARTITIONED BY (dt) WITH (
+    'merge-engine' = 'deduplicate'
 );
 
 -- you can use
@@ -255,73 +323,82 @@ DELETE FROM my_table WHERE currency = 'UNKNOWN';
 
 ## Partition Mark Done
 
-For partitioned tables, each partition may need to be scheduled to trigger downstream batch computation. Therefore,
-it is necessary to choose this timing to indicate that it is ready for scheduling and to minimize the amount of data
-drift during scheduling. We call this process: "Partition Mark Done".
+A partition can signal that it is ready for downstream batch processing after its time window
+has ended and it has been idle for the configured duration. This is a scheduling signal; late
+records may still arrive.
 
-Example to mark done:
+### Configure the Completion Signal
+
+This example creates a `_SUCCESS` file for a completed daily partition:
+
 ```sql
-CREATE TABLE my_partitioned_table (
-    f0 INT,
-    f1 INT,
-    f2 INT,
-    ...
+CREATE TABLE daily_events (
+    event_id BIGINT,
+    payload STRING,
     dt STRING
 ) PARTITIONED BY (dt) WITH (
-    'partition.timestamp-formatter'='yyyyMMdd',
-    'partition.timestamp-pattern'='$dt',
-    'partition.time-interval'='1 d',
-    'partition.idle-time-to-done'='15 m',
-    'partition.mark-done-action'='done-partition'
+    'partition.timestamp-formatter' = 'yyyyMMdd',
+    'partition.timestamp-pattern' = '$dt',
+    'partition.time-interval' = '1 d',
+    'partition.idle-time-to-done' = '15 m',
+    'partition.mark-done-action' = 'success-file'
 );
 ```
 
-You can also customize a PartitionMarkDoneAction to mark the partition completed.
-- partition.mark-done-action: custom
-- partition.mark-done-action.custom.class: The partition mark done class for implement PartitionMarkDoneAction interface (e.g. org.apache.paimon.CustomPartitionMarkDoneAction).
+The timestamp pattern identifies the partition's time window; the idle time controls how long
+to wait without new data. The `_SUCCESS` JSON contains `creationTime` and `modificationTime`,
+which can help identify later changes.
 
-Define a class CustomPartitionMarkDoneAction to implement the PartitionMarkDoneAction interface.
-```java
-package org.apache.paimon;
+| Action | Result | Requirements |
+| --- | --- | --- |
+| `success-file` (default) | Write `_SUCCESS` in the partition directory. | Filesystem access to the table. |
+| `done-partition` | Add a completion partition such as `dt=20240501.done`. | A catalog with partition modification support and `metastore.partitioned-table = true`. |
+| `http-report` | Send an HTTP report to a configured endpoint. | Configure the URL and optional parameters below. |
+| `custom` | Invoke a user-defined Java action. | Make the implementation available to the Flink job. |
 
-public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
-    
-    @Override
-    public void markDone(String partition) {
-        // do something.
-    }
+For an explicit operation, see [mark_partition_done](./procedures/table-operations#mark_partition_done).
 
-    @Override
-    public void close() {}
-}
-```
+### Report over HTTP
 
-Paimon also support http-report partition mark done action, this action will report the partition to the remote http server.
-- partition.mark-done-action: http-report
-- partition.mark-done-action.http.url : Action will report the partition to the remote http server.
-- partition.mark-done-action.http.params : Http client request params in the request body json.
+Configure `partition.mark-done-action = http-report`, set `partition.mark-done-action.http.url`,
+and optionally set `partition.mark-done-action.http.params`. The action sends a JSON request:
 
-Http Post request body :
 ```json
 {
     "table": "table fullName",
     "path": "table location path",
     "partition": "mark done partition",
-    "params" : "custom params"
+    "params": "custom params"
 }
 ```
-Http Response body :
+
+The endpoint returns:
+
 ```json
 {
     "result": "success"
 }
 ```
 
-1. Firstly, you need to define the time parser of the partition and the time interval between partitions in order to
-   determine when the partition can be properly marked done.
-2. Secondly, you need to define idle-time, which determines how long it takes for the partition to have no new data,
-   and then it will be marked as done.
-3. Thirdly, by default, partition mark done will create _SUCCESS file, the content of _SUCCESS file is a json, contains
-   `creationTime` and `modificationTime`, they can help you understand if there is any delayed data. You can also
-   configure other actions, like `'done-partition'`, for example, partition `'dt=20240501'` with produce
-   `'dt=20240501.done'` done partition.
+### Implement a Custom Action
+
+Set `partition.mark-done-action = custom` and
+`partition.mark-done-action.custom.class = org.apache.paimon.CustomPartitionMarkDoneAction`.
+Package the implementation in a jar available to the job:
+
+```java
+package org.apache.paimon;
+
+import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+
+public class CustomPartitionMarkDoneAction implements PartitionMarkDoneAction {
+
+    @Override
+    public void markDone(String partition) {
+        // Notify the downstream scheduler.
+    }
+
+    @Override
+    public void close() {}
+}
+```

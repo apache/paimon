@@ -30,7 +30,7 @@ PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
 FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
 UNKNOWN_COMMIT_ID = "UNKNOWN"
 
-VERSION = "2.1.dev"
+VERSION = "2.2.dev"
 
 
 def _repository_root():
@@ -94,7 +94,7 @@ class PaimonSdist(sdist):
 
 def get_dev_version():
     """Generate dev version with commit date.
-    Format: 2.1.devYYYYMMDD (e.g. 2.1.dev20260415)
+    Format: 2.2.devYYYYMMDD (e.g. 2.2.dev20260911)
     Uses the commit date (author date) for reproducibility.
     """
     base = VERSION.rstrip(".")

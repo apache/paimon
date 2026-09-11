@@ -24,7 +24,16 @@ under the License.
 
 # SQL Functions
 
-This section introduce all available Paimon Spark functions.
+Use built-in functions for partitions and blob descriptors, or define functions in a REST
+catalog. Configure the [catalog and extensions](./quick-start#setup) first.
+
+| Task | Function or guide |
+| --- | --- |
+| Find the latest nonempty top-level partition | [`max_pt`](#max_pt) |
+| Reference an external blob | [`path_to_descriptor`](#path_to_descriptor) |
+| Inspect blob metadata | [`descriptor_to_string`](#descriptor_to_string) |
+| Create a temporary OSS download URL | [`descriptor_to_presigned_url`](#descriptor_to_presigned_url) |
+| Define reusable logic | [User-defined functions](#user-defined-function) |
 
 ## Built-in Function
 
@@ -46,7 +55,7 @@ It would throw exception when:
 ```sql
 SELECT sys.max_pt('t');
 -- 20250101
- 
+
 SELECT * FROM t where pt = sys.max_pt('t');
 -- a, 20250101
 ```
@@ -126,24 +135,30 @@ FROM image_table;
 Repeated short-term calls for the same descriptor reuse the materialized object and issue a fresh
 URL. Treat the URL as a bearer credential: send it immediately to the consumer and never log or
 persist it. Direct model `image_url` use is supported only for image formats verified with that
-model; PDF is not covered. See [Blob Storage](../multimodal-table/blob#presigned-urls-for-oss-blobs)
+model; PDF is not covered. See [Blob Storage](../multimodal-table/blob-references#presigned-urls-for-oss-blobs)
 for Java and Flink examples, caching behavior, and current limitations.
 
 ## User-defined Function
 
-Paimon Spark supports three types of user-defined functions: lambda functions, file-based functions, and SQL functions.
+Paimon-managed function definitions require a REST catalog. Choose a definition format:
 
-This feature currently only supports the REST catalog.
+| Definition | Use it for | Requirement |
+| --- | --- | --- |
+| [Java lambda](#lambda-function) | A small Java expression stored in the catalog | Register metadata and a Spark definition with procedures. |
+| [JAR implementation](#file-function) | Existing Spark or Hive UDF/UDAF classes | Spark 3.4+ and the implementation JAR. |
+| [SQL body](#sql-function) | Reusable scalar SQL logic | Spark 4.0+. |
+
+The examples assume the REST catalog and its `default` database are selected.
 
 ### Lambda Function
 
-Empowering users to define functions using Java lambda expressions, enabling inline, concise, and functional-style operations.
+Define the function signature, then attach a Java lambda as its Spark implementation.
 
 **Example**
 
 ```sql
 -- Create Function
-CALL sys.create_function(`function` => 'my_db.area_func',
+CALL sys.create_function(`function` => 'default.area_func',
   `inputParams` => '[{"id": 0, "name":"length", "type":"INT"}, {"id": 1, "name":"width", "type":"INT"}]',
   `returnParams` => '[{"id": 0, "name":"area", "type":"BIGINT"}]',
   `deterministic` => true,
@@ -152,41 +167,47 @@ CALL sys.create_function(`function` => 'my_db.area_func',
 );
 
 -- Alter Function
-CALL sys.alter_function(`function` => 'my_db.area_func',
+CALL sys.alter_function(`function` => 'default.area_func',
   `change` => '{"action" : "addDefinition", "name" : "spark", "definition" : {"type" : "lambda", "definition" : "(Integer length, Integer width) -> { return (long) length * width; }", "language": "JAVA" } }'
 );
 
 -- Drop Function
-CALL sys.drop_function(`function` => 'my_db.area_func');
+CALL sys.drop_function(`function` => 'default.area_func');
 ```
 
 ### File Function
 
-Users can define functions within a file, providing flexibility and modular support for function definition, only supports jar files now.
+Register a Spark or Hive UDF/UDAF implementation packaged in a JAR.
 
 Currently, supports Spark or Hive implementations of UDFs and UDAFs, see [Spark UDFs](https://spark.apache.org/docs/latest/sql-ref-functions.html#udfs-user-defined-functions)
 
 This feature requires Spark 3.4 or higher.
 
-**Example**
+Replace the class name and JAR path with your implementation. Permanent and temporary
+functions use different names here so that the examples can coexist:
 
 ```sql
--- Create Function or Temporary Function (Temporary function should not specify database name)
-CREATE [TEMPORARY] FUNCTION <mydb>.simple_udf
-AS 'com.example.SimpleUdf' 
-USING JAR '/tmp/SimpleUdf.jar' [, JAR '/tmp/SimpleUdfR.jar'];
-
--- Create or Replace Temporary Function (Temporary function should not specify database name)
-CREATE OR REPLACE [TEMPORARY] FUNCTION <mydb>.simple_udf 
+-- Persistent function in the current REST catalog.
+CREATE FUNCTION default.simple_udf
 AS 'com.example.SimpleUdf'
-USING JAR '/tmp/SimpleUdf.jar';
-       
--- Describe Function
-DESCRIBE FUNCTION [EXTENDED] <mydb>.simple_udf;
+USING JAR '/path/to/SimpleUdf.jar';
 
--- Drop Function
-DROP [TEMPORARY] FUNCTION <mydb>.simple_udf;
+-- Session-scoped function: no database prefix on its name.
+CREATE TEMPORARY FUNCTION temporary_udf
+AS 'com.example.SimpleUdf'
+USING JAR '/path/to/SimpleUdf.jar';
+
+CREATE OR REPLACE TEMPORARY FUNCTION temporary_udf
+AS 'com.example.SimpleUdf'
+USING JAR '/path/to/SimpleUdf.jar';
+
+DESCRIBE FUNCTION EXTENDED default.simple_udf;
+DROP FUNCTION default.simple_udf;
+DROP TEMPORARY FUNCTION temporary_udf;
 ```
+
+To attach more than one JAR, separate resources with commas:
+`USING JAR '/path/to/udf.jar', JAR '/path/to/dependency.jar'`.
 
 ### SQL Function
 
@@ -202,7 +223,10 @@ CREATE FUNCTION area(width DOUBLE, height DOUBLE)
 RETURNS DOUBLE
 RETURN width * height;
 
--- Create Function (query body)
+SELECT area(3.0, 4.0);
+-- 12.0
+
+-- Query body: assumes emp has columns salary and dept_id.
 CREATE FUNCTION dept_total(d INT) RETURNS INT
 RETURN SELECT SUM(salary) FROM emp WHERE dept_id = d;
 
@@ -214,7 +238,7 @@ CREATE OR REPLACE FUNCTION inc(x INT) RETURNS INT RETURN x + 100;
 CREATE FUNCTION IF NOT EXISTS inc(x INT) RETURNS INT RETURN x + 1;
 
 -- Describe / Show / Drop Function
-DESCRIBE FUNCTION [EXTENDED] area;
+DESCRIBE FUNCTION EXTENDED area;
 SHOW USER FUNCTIONS;
-DROP FUNCTION [IF EXISTS] area;
+DROP FUNCTION IF EXISTS area;
 ```

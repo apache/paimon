@@ -24,11 +24,11 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BinaryStringUtils;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import java.util.TimeZone;
-
-import static org.apache.paimon.types.VarCharType.STRING_TYPE;
 
 /** {@link DataTypeFamily#TIMESTAMP} to {@link DataTypeFamily#CHARACTER_STRING} cast rule. */
 class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString> {
@@ -39,7 +39,7 @@ class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString
         super(
                 CastRulePredicate.builder()
                         .input(DataTypeFamily.TIMESTAMP)
-                        .target(STRING_TYPE)
+                        .target(DataTypeFamily.CHARACTER_STRING)
                         .build());
     }
 
@@ -50,7 +50,14 @@ class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString
                 inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                         ? TimeZone.getDefault()
                         : DateTimeUtils.UTC_ZONE;
-        return value ->
-                BinaryString.fromString(DateTimeUtils.formatTimestamp(value, timeZone, precision));
+        boolean padOrTrim =
+                targetType.is(DataTypeRoot.CHAR)
+                        || DataTypeChecks.getLength(targetType) != VarCharType.MAX_LENGTH;
+        return value -> {
+            BinaryString result =
+                    BinaryString.fromString(
+                            DateTimeUtils.formatTimestamp(value, timeZone, precision));
+            return padOrTrim ? BinaryStringUtils.toCharacterString(result, targetType) : result;
+        };
     }
 }

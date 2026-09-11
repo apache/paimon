@@ -1,0 +1,284 @@
+---
+title: "Catalogs and Tables"
+description: "Connect to a catalog, create a database, and define or evolve a table schema."
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Catalogs and Tables
+
+Connect to a catalog, create a database, and define or evolve a table schema. Run the [quick start](./quick-start) first for a complete local example. Catalog options use string keys and string values.
+
+## Create Catalog
+
+A catalog locates tables and manages their metadata. Choose one of the following
+catalogs to create the `catalog` object used in the rest of this page.
+
+<Tabs groupId="create-catalog">
+
+<TabItem value="filesystem" label="Filesystem">
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+    'warehouse': 'file:///path/to/warehouse'
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+For an S3 warehouse, pass S3 authentication options with the filesystem catalog options:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 's3://bucket/path/to/warehouse',
+    's3.endpoint': 'https://s3.amazonaws.com',
+    's3.access-key': 'xxx',
+    's3.secret-key': 'yyy',
+    # Optional. Required for temporary credentials.
+    's3.session-token': 'zzz',
+    # Optional. Useful for S3 compatible stores such as MinIO.
+    's3.path-style-access': 'true',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+For an HDFS warehouse with Kerberos authentication:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    # Keytab mode: automatic kinit
+    'security.kerberos.login.principal': 'user@YOUR.REALM',
+    'security.kerberos.login.keytab': '/path/to/user.keytab',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+If you have already run `kinit` externally, you can omit `principal` and `keytab`.
+PyPaimon will automatically pick up the ticket from `KRB5CCNAME` environment variable
+or the default `/tmp/krb5cc_<uid>`:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    # Ticket cache mode: uses existing Kerberos ticket
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+To disable ticket cache auto-detection and force SIMPLE authentication, set:
+
+```python
+catalog_options = {
+    'warehouse': 'hdfs://namenode:8020/path/to/warehouse',
+    'security.kerberos.login.use-ticket-cache': 'false',
+}
+```
+
+</TabItem>
+
+<TabItem value="jdbc-catalog" label="JDBC">
+
+PyPaimon keeps the catalog type `jdbc` for compatibility with Paimon catalog options,
+but connects with native Python DB-API drivers instead of JVM JDBC drivers.
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+  'metastore': 'jdbc',
+  'warehouse': 'file:///path/to/warehouse',
+  'uri': 'jdbc:sqlite:/path/to/catalog.db',
+  # Optional. Defaults to 'jdbc'.
+  'catalog-key': 'jdbc',
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+For MySQL or PostgreSQL, install the corresponding Python DB-API driver and use the same Paimon
+JDBC catalog options:
+
+```python
+catalog_options = {
+  'metastore': 'jdbc',
+  'warehouse': 's3://bucket/path/to/warehouse',
+  'uri': 'jdbc:mysql://<host>:<port>/<databaseName>',
+  'jdbc.user': '...',
+  'jdbc.password': '...',
+  'catalog-key': 'jdbc',
+}
+```
+
+Unlike Flink or Spark, PyPaimon does not use JVM JDBC drivers or load JDBC connector jars.
+It keeps the `metastore='jdbc'` and `jdbc:` URI format for compatibility with Paimon's
+JDBC catalog configuration, but the database connection is created through native Python DB-API
+drivers such as `pymysql`, `mysql-connector-python`, `psycopg2`, or `psycopg`.
+
+</TabItem>
+
+<TabItem value="rest-catalog" label="REST">
+
+The sample code is as follows. The detailed meaning of option can be found in [REST](../concepts/rest/).
+
+```python
+from pypaimon import CatalogFactory
+
+# Note that keys and values are all string
+catalog_options = {
+  'metastore': 'rest',
+  'warehouse': 'xxx',
+  'uri': 'xxx',
+  'token.provider': 'xxx'
+}
+catalog = CatalogFactory.create(catalog_options)
+```
+
+</TabItem>
+
+</Tabs>
+
+PyPaimon supports filesystem, JDBC, and REST catalogs. See [Catalog](../concepts/catalog).
+
+Use this catalog for the database and table operations below.
+
+## Create Database
+
+Tables belong to a database. Create the database before creating its tables.
+
+```python
+catalog.create_database(
+    name='database_name',
+    ignore_if_exists=True,  # To raise error if the database exists, set False
+    properties={'key': 'value'}  # optional database properties
+)
+```
+
+## Create Table
+
+Table schema contains fields definition, partition keys, primary keys, table options and comment.
+The field definition is described by `pyarrow.Schema`. All arguments except fields definition are optional.
+
+Generally, there are two ways to build `pyarrow.Schema`.
+
+First, you can use `pyarrow.schema` method directly, for example:
+
+```python
+import pyarrow as pa
+
+from pypaimon import Schema
+
+pa_schema = pa.schema([
+    ('dt', pa.string()),
+    ('hh', pa.string()),
+    ('pk', pa.int64()),
+    ('value', pa.string())
+])
+
+schema = Schema.from_pyarrow_schema(
+    pa_schema=pa_schema,
+    partition_keys=['dt', 'hh'],
+    primary_keys=['dt', 'hh', 'pk'],
+    options={'bucket': '2'},
+    comment='my test table')
+```
+
+See [Data Types](./data-types) for all supported `pyarrow-to-paimon` data types mapping.
+
+Second, if you have some Pandas data, the `pa_schema` can be extracted from `DataFrame`:
+
+```python
+import pandas as pd
+import pyarrow as pa
+
+from pypaimon import Schema
+
+# Example DataFrame data
+data = {
+    'dt': ['2024-01-01', '2024-01-01', '2024-01-02'],
+    'hh': ['12', '15', '20'],
+    'pk': [1, 2, 3],
+    'value': ['a', 'b', 'c'],
+}
+dataframe = pd.DataFrame(data)
+
+# Get Paimon Schema
+record_batch = pa.RecordBatch.from_pandas(dataframe)
+schema = Schema.from_pyarrow_schema(
+    pa_schema=record_batch.schema,
+    partition_keys=['dt', 'hh'],
+    primary_keys=['dt', 'hh', 'pk'],
+    options={'bucket': '2'},
+    comment='my test table'
+)
+```
+
+After building table schema, you can create corresponding table:
+
+```python
+schema = ...
+catalog.create_table(
+    identifier='database_name.table_name',
+    schema=schema,
+    ignore_if_exists=True  # To raise error if the table exists, set False
+)
+
+# Get Table
+table = catalog.get_table('database_name.table_name')
+```
+
+## Alter Table
+
+Alter a table with a list of schema changes. Use `SchemaChange` from `pypaimon.schema.schema_change` and types from `pypaimon.schema.data_types` (e.g. `AtomicType`).
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.data_types import AtomicType
+
+# Add column(s)
+catalog.alter_table(
+    'database_name.table_name',
+    [
+        SchemaChange.add_column('new_col', AtomicType('STRING')),
+        SchemaChange.add_column('score', AtomicType('DOUBLE'), comment='optional'),
+    ],
+    ignore_if_not_exists=False
+)
+
+# Drop column
+catalog.alter_table(
+    'database_name.table_name',
+    [SchemaChange.drop_column('col_name')],
+    ignore_if_not_exists=False
+)
+```
+
+Other supported changes: `SchemaChange.rename_column`, `update_column_type`, `update_column_comment`, `set_option`, `remove_option`, `update_comment`.

@@ -1,5 +1,5 @@
 ---
-title: "Blob Storage"
+title: "BLOB Storage"
 sidebar_position: 7
 ---
 <!--
@@ -21,12 +21,14 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Blob Storage in pypaimon
+# BLOB Storage
 
 For Paimon's Blob storage concepts (storage modes, table options, SQL usage,
 Java API), see [Blob Storage](../multimodal-table/blob).
 
 This page covers the Python API for reading and writing BLOB columns.
+
+![A descriptor keeps a BLOB payload lazy until FileIO reads its byte range.](../../static/img/pypaimon/blob-reads.svg)
 
 ## Creating a Table
 
@@ -64,16 +66,18 @@ to dedicated `.blob` files automatically.
 table = catalog.get_table('my_db.image_table')
 write_builder = table.new_batch_write_builder()
 writer = write_builder.new_write()
-
-with open('cat.jpg', 'rb') as f1, open('dog.jpg', 'rb') as f2:
-    writer.write_arrow(pa.Table.from_pydict({
-        'id': [1, 2],
-        'name': ['cat', 'dog'],
-        'image': [f1.read(), f2.read()],
-    }, schema=pa_schema))
-
-write_builder.new_commit().commit(writer.prepare_commit())
-writer.close()
+commit = write_builder.new_commit()
+try:
+    with open('cat.jpg', 'rb') as f1, open('dog.jpg', 'rb') as f2:
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['cat', 'dog'],
+            'image': [f1.read(), f2.read()],
+        }, schema=pa_schema))
+    commit.commit(writer.prepare_commit())
+finally:
+    writer.close()
+    commit.close()
 ```
 
 For frame tables, configure `video-frame-field`. The high-level multimodal
@@ -82,7 +86,7 @@ API creates `VideoFrameDescriptor` values, packs multiple complete videos in
 `add_video` / `add_videos` / `replace_video` for physical video writes.
 Ordinary frame-column updates and all reads continue to use the existing table
 and BLOB APIs. See
-[Video Frame Storage](./multimodal-api#video-frame-storage).
+[Video Frame Storage](./video#video-frame-storage).
 
 ## Reading Blob Data
 
@@ -178,5 +182,5 @@ The factory auto-dispatches based on the bytes content (`BLOBDESC`,
   SQL/Java API
 - [Data Evolution](./data-evolution) — required for
   blob tables
-- [Multimodal video frames](./multimodal-api#video-frame-storage) —
+- [Multimodal video frames](./video#video-frame-storage) —
   `.video` pack writing and PyTorch DataLoader decoding

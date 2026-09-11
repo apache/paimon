@@ -1,0 +1,161 @@
+---
+title: "Streaming Writes and Small Files"
+sidebar_position: 4
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Streaming Writes and Small Files
+
+A small file can be newly written data, a file waiting for compaction, or an old file retained for
+history. First identify which kind is growing. Then tune the stage responsible for it.
+
+## Follow a Streaming Write
+
+For a typical Flink primary-key sink, the flow is:
+
+![Flink writers buffer and flush records, prepare committables at checkpoints, and publish snapshots after successful checkpoint completion; compaction results and expiration have separate roles.](/img/learn-paimon-streaming-commit.svg)
+
+1. **Buffer and flush.** Writers buffer records and create data files as buffers fill or when a
+   checkpoint requires a flush. Files on storage are not queryable merely because they exist.
+2. **Prepare a commit.** Writers send pending file changes, including available compaction
+   results, to the commit path. Flink coordinates publication with successful checkpoint completion.
+3. **Publish snapshots.** A commit records the files in manifests and publishes snapshot metadata.
+   Append and compaction changes can be committed separately; empty input, available compaction
+   work, and configuration affect the number of snapshots.
+4. **Maintain files.** Compaction publishes replacements or metadata changes. Snapshot expiration
+   later reclaims eligible historical files. With `write-only`, arrange dedicated maintenance.
+
+Do not estimate checkpoint success from snapshot count alone. Use Flink checkpoint metrics and
+the table's `$snapshots` metadata together. For tables using lookup compaction or postpone buckets,
+a committed write can also require compaction before the data is visible to the intended reader;
+see [Primary-Key Compaction](../primary-key-table/compaction).
+
+## Diagnose Before Tuning
+
+Inspect the current snapshot using Flink SQL, replacing `my_table` with your table name:
+
+```sql
+SELECT `partition`, bucket,
+       COUNT(*) AS file_count,
+       SUM(file_size_in_bytes) AS total_bytes,
+       AVG(file_size_in_bytes) AS average_file_bytes
+FROM `my_table$files`
+GROUP BY `partition`, bucket;
+
+SELECT snapshot_id, commit_kind, commit_time
+FROM `my_table$snapshots`
+ORDER BY snapshot_id DESC;
+```
+
+`$files` describes data files referenced by the selected snapshot. A filesystem or object-store
+listing also includes metadata, changelogs, retained history, and possibly orphan files. Compare
+like-for-like counts. See [System Tables](../concepts/system-tables) for manifests, consumers, and tags.
+
+| Observation | Investigate | First action |
+| --- | --- | --- |
+| Many small live files in every active bucket | Checkpoint interval, input per bucket, and buffer pressure | Measure bytes arriving per checkpoint before changing settings. |
+| Increasing overlapping runs in a few buckets | Compaction progress, skew, CPU, memory, and I/O | Restore compaction throughput or rebalance the workload. |
+| Few live files, many old data files on storage | Snapshot retention, tags, consumer progress, and expiration execution | Check which references protect the files. |
+| Small changelog files dominate | Changelog producer and checkpoint/bucket fan-out | Evaluate `precommit-compact` for changelog consolidation. |
+| Inactive partitions retain many live files | Whether maintenance still selects those partitions | Use a dedicated batch compaction for the intended scope. |
+| Unreferenced files remain after failed jobs | Uncommitted writer output | Use the documented orphan cleanup with an appropriate age threshold. |
+
+## Control File Creation
+
+### Checkpoint Interval
+
+Short intervals improve commit freshness but leave less time to accumulate data in each active
+partition and bucket. Estimate the incoming volume per interval, then account for compression,
+record merging, and multiple writers or flushes.
+
+![The same input is divided among partitions and buckets before each checkpoint; more active destinations or shorter intervals reduce the data available per output file.](/img/learn-paimon-small-files.svg)
+
+A longer interval can increase file sizes, but also increases visibility latency and changes
+recovery behavior. Measure checkpoint duration and your freshness requirement before changing it.
+Increasing `target-file-size` alone cannot make a low-volume checkpoint produce a full-sized file.
+
+### Writer Memory and Spill
+
+For primary-key writes, `write-buffer-size` influences how much data can be buffered before
+flushing or spilling. More memory can reduce premature flushes, but the task must have memory
+for its other operators and compaction too.
+
+`write-buffer-spillable` defaults to `true`. Primary-key write buffers spill locally when an
+`IOManager` is available; Flink supplies one. Without it, the buffer remains in memory. Spilling
+adds local disk I/O and does not remove checkpoint flushing. See
+[Write Performance](../maintenance/write-performance) for the relevant writer options.
+
+### Partitions and Buckets
+
+Every active partition and bucket divides the available input. Overly fine partitions or too
+many fixed buckets can create small files even when the total table is large. Empty buckets do
+not necessarily create files; focus on the destinations receiving records.
+
+Choose partition keys for pruning and lifecycle needs, then size buckets for the actual
+per-partition workload. See [Data Distribution](../primary-key-table/data-distribution) and
+[Rescale Bucket](../maintenance/rescale-bucket) before changing an existing layout.
+
+## Control the Live File Set
+
+### Primary-Key Tables
+
+A sorted run contains one or more files. `num-sorted-run.compaction-trigger` is a trigger for
+compaction, not a minimum file count per bucket. Runs and files are different units, and both
+counts vary as writers and compaction make progress.
+
+Inspect overlapping runs, file sizes, and compaction duration. Triggering compaction more often
+can reduce read-side merging but increase write amplification. See
+[Primary-Key Compaction](../primary-key-table/compaction) and
+[Sorted Runs](../primary-key-table/#sorted-runs).
+
+### Append Tables
+
+Append compaction combines small files. In an ordered bucketed append table, it must preserve
+append order within each partition and bucket; it cannot freely merge arbitrary files across
+that layout. See [Dedicated Compaction](../maintenance/dedicated-compaction) and
+[Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
+
+Use [Dedicated Compaction](../maintenance/dedicated-compaction) for cold partitions or when
+writer-side compaction is disabled. `full-compaction.delta-commits` applies to the Flink writer's
+compaction cycle; it is not a background scheduler that revisits every idle partition. Check
+compatibility with the table's changelog producer before adding it.
+
+## Reclaim Historical Files
+
+Compaction reduces the live file set; it can temporarily increase physical storage because old
+snapshots still need the inputs. Shortening retention does not reduce files that remain live.
+
+Check the required time-travel and recovery window, snapshot count bounds, tags, tracked consumer
+progress, and expiration limits. For cleanup procedures, use
+[Snapshot Expiration](../maintenance/manage-snapshots#expire-snapshots) and
+[Orphan Files](../maintenance/manage-snapshots#remove-orphan-files). Do not infer that a file is orphaned
+solely because it is absent from the latest `$files` result.
+
+Small files add file-open, request, scheduling, and metadata overhead. On HDFS they also increase
+NameNode metadata pressure; they do not each consume a full block's worth of data storage merely
+because the configured block size is larger than the file.
+
+## Verify the Improvement
+
+Compare the same workload before and after the change: live file counts and size distribution,
+compaction backlog, checkpoint duration, reader freshness, and query latency. Track physical
+storage separately over the retention window. A reduction in one count is useful only if the
+required read and write behavior is still met.

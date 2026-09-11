@@ -26,10 +26,13 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
 
 /** Utility methods for {@link ComputedColumn}, such as build. */
 public class ComputedColumnUtils {
@@ -39,13 +42,21 @@ public class ComputedColumnUtils {
         return buildComputedColumns(computedColumnArgs, physicFields, true);
     }
 
-    /** The caseSensitive only affects check. We don't change field names at building phase. */
+    /**
+     * Column names and expression arguments are kept as given. When the catalog is
+     * case-insensitive, names are only case-converted where they are matched: in the dependency
+     * sort, in the type lookup of referenced fields and in the lookup of the referenced field in
+     * source records.
+     */
     public static List<ComputedColumn> buildComputedColumns(
             List<String> computedColumnArgs, List<DataField> physicFields, boolean caseSensitive) {
         Map<String, DataType> typeMapping =
                 physicFields.stream()
                         .collect(
-                                Collectors.toMap(DataField::name, DataField::type, (v1, v2) -> v2));
+                                Collectors.toMap(
+                                        field -> toLowerCaseIfNeed(field.name(), caseSensitive),
+                                        DataField::type,
+                                        (v1, v2) -> v2));
 
         // sort computed column args by dependencies
         LinkedHashMap<String, Tuple2<String, String[]>> sortedArgs =
@@ -58,11 +69,12 @@ public class ComputedColumnUtils {
             String[] args = columnArg.getValue().f1;
 
             Expression expr = Expression.create(typeMapping, caseSensitive, exprName, args);
-            ComputedColumn cmpColumn = new ComputedColumn(columnName, expr);
-            computedColumns.add(new ComputedColumn(columnName, expr));
+            ComputedColumn cmpColumn = new ComputedColumn(columnName, expr, caseSensitive);
+            computedColumns.add(cmpColumn);
 
-            // remember the column type for later reference by other computed columns
-            typeMapping.put(columnName, cmpColumn.columnType());
+            // remember the column type for later reference by other computed columns, in the form
+            // ReferencedField looks it up
+            typeMapping.put(toLowerCaseIfNeed(columnName, caseSensitive), cmpColumn.columnType());
         }
 
         return computedColumns;
@@ -70,14 +82,12 @@ public class ComputedColumnUtils {
 
     private static LinkedHashMap<String, Tuple2<String, String[]>> sortComputedColumnArgs(
             List<String> computedColumnArgs, boolean caseSensitive) {
-        List<String> argList =
-                computedColumnArgs.stream()
-                        .map(x -> caseSensitive ? x : x.toUpperCase())
-                        .collect(Collectors.toList());
-
+        // Only the keys used for the dependency sort are case-converted. Names and arguments stay
+        // as typed: literals such as the date_format pattern must reach the expression unchanged.
         LinkedHashMap<String, Tuple2<String, String[]>> eqMap = new LinkedHashMap<>();
         LinkedHashMap<String, String> refMap = new LinkedHashMap<>();
-        for (String arg : argList) {
+        Map<String, String> originalNames = new HashMap<>();
+        for (String arg : computedColumnArgs) {
             String[] kv = arg.split("=");
             if (kv.length != 2) {
                 throw new IllegalArgumentException(
@@ -85,6 +95,7 @@ public class ComputedColumnUtils {
                                 "Invalid computed column argument: %s. Please use format 'column-name=expr-name(args, ...)'.",
                                 arg));
             }
+            String columnName = kv[0].trim();
             String expression = kv[1].trim();
             // parse expression
             int left = expression.indexOf('(');
@@ -97,9 +108,11 @@ public class ComputedColumnUtils {
             String exprName = expression.substring(0, left);
             String[] args = expression.substring(left + 1, right).split(",");
 
+            String sortName = toLowerCaseIfNeed(columnName, caseSensitive);
+            eqMap.put(columnName, Tuple2.of(exprName, args));
             // args[0] may be empty string, eg. "cal_col=now()"
-            eqMap.put(kv[0].trim(), Tuple2.of(exprName, args));
-            refMap.put(kv[0].trim(), args[0].trim());
+            refMap.put(sortName, toLowerCaseIfNeed(args[0].trim(), caseSensitive));
+            originalNames.put(sortName, columnName);
         }
 
         List<String> sortedKeys = DfsSort.sortKeys(refMap);
@@ -107,7 +120,8 @@ public class ComputedColumnUtils {
         LinkedHashMap<String, Tuple2<String, String[]>> sortedMap =
                 new LinkedHashMap<>(refMap.size());
         for (String key : sortedKeys) {
-            sortedMap.put(key, eqMap.get(key));
+            String columnName = originalNames.get(key);
+            sortedMap.put(columnName, eqMap.get(columnName));
         }
         return sortedMap;
     }
