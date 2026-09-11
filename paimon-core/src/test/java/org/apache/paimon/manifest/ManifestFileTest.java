@@ -31,6 +31,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -40,6 +41,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.SegmentsCache;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -47,6 +50,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -1224,6 +1229,11 @@ public class ManifestFileTest {
     }
 
     private ManifestFile createManifestFile(String pathStr, long suggestedFileSize) {
+        return createManifestFile(pathStr, suggestedFileSize, null);
+    }
+
+    private ManifestFile createManifestFile(
+            String pathStr, long suggestedFileSize, @Nullable SegmentsCache<Path> cache) {
         Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
@@ -1251,8 +1261,54 @@ public class ManifestFileTest {
                         "zstd",
                         pathFactory,
                         suggestedFileSize,
-                        null)
+                        cache)
                 .create();
+    }
+
+    @Test
+    void testBucketFilterPushedDownWhenManifestExceedsCacheElementSize() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        Set<Integer> buckets =
+                entries.stream().map(ManifestEntry::bucket).collect(Collectors.toSet());
+        assertThat(buckets.size()).isGreaterThan(1);
+
+        // A manifest above the cache element size limit is read uncached; the bucket filter must
+        // still reach the Avro reader instead of being applied after decoding every entry.
+        SegmentsCache<Path> tinyElementCache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(8), 1L);
+        ManifestFile manifestFile =
+                createManifestFile(tempDir.toString(), Long.MAX_VALUE, tinyElementCache);
+        List<ManifestFileMeta> metas = manifestFile.write(entries);
+        assertThat(metas).hasSize(1);
+        ManifestFileMeta meta = metas.get(0);
+
+        for (int bucket : buckets) {
+            BucketFilter bucketFilter = BucketFilter.create(false, bucket, null, null);
+            List<ManifestEntry> actual =
+                    manifestFile.read(
+                            meta.fileName(),
+                            meta.fileSize(),
+                            null,
+                            bucketFilter,
+                            Filter.alwaysTrue(),
+                            Filter.alwaysTrue());
+            List<ManifestEntry> expected =
+                    entries.stream()
+                            .filter(entry -> entry.bucket() == bucket)
+                            .collect(Collectors.toList());
+            assertThat(actual).isEqualTo(expected);
+        }
+
+        // Without any pushdown filter every entry must still be returned.
+        assertThat(
+                        manifestFile.read(
+                                meta.fileName(),
+                                meta.fileSize(),
+                                null,
+                                null,
+                                Filter.alwaysTrue(),
+                                Filter.alwaysTrue()))
+                .isEqualTo(entries);
     }
 
     private ManifestFileMeta writeSingleManifest(
