@@ -525,11 +525,16 @@ def _linear_weight(target, before, after, data_type):
         denominator = after - before
         return numerator / denominator, numerator, denominator
     if pa.types.is_floating(data_type):
-        scale = max(abs(target), abs(before), abs(after))
-        if scale:
-            target, before, after = (
-                target / scale, before / scale, after / scale)
-    weight = float(target - before) / (after - before)
+        numerator = target - before
+        denominator = after - before
+        if math.isfinite(numerator) and math.isfinite(denominator):
+            weight = numerator / denominator
+        else:
+            scale = max(abs(target), abs(before), abs(after))
+            weight = ((target / scale - before / scale)
+                      / (after / scale - before / scale))
+    else:
+        weight = float(target - before) / (after - before)
     numerator, denominator = weight.as_integer_ratio()
     return weight, numerator, denominator
 
