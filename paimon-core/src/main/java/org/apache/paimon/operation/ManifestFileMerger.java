@@ -79,7 +79,7 @@ public class ManifestFileMerger {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newFilesForAbort) {
                 try {
-                    manifestFile.delete(manifest.fileName());
+                    manifestFile.delete(manifest);
                 } catch (Throwable cleanupFailure) {
                     primaryFailure =
                             ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);

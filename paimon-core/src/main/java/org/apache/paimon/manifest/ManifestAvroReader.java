@@ -70,6 +70,19 @@ public final class ManifestAvroReader implements AutoCloseable {
         }
     }
 
+    @Nullable
+    public byte[] headerBytes() {
+        return blockReader.headerBytes();
+    }
+
+    public long blockOffset() {
+        return blockReader.blockOffset();
+    }
+
+    public long blockLength() {
+        return blockReader.blockLength();
+    }
+
     /** Returns whether another raw Avro block is available. */
     public boolean hasNext() throws IOException {
         return blockReader.hasNextBlock();

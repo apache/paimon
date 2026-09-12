@@ -597,6 +597,7 @@ class FileScanner:
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
             partition_filter=partition_filter,
+            row_ranges=row_ranges,
         )
 
     def _build_early_bucket_filter(self):

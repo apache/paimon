@@ -28,13 +28,19 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
+import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.operation.commit.CommitCleaner;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -42,6 +48,9 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SegmentsCache;
 
 import org.junit.jupiter.api.RepeatedTest;
@@ -63,13 +72,18 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
+import static org.apache.paimon.manifest.ManifestIndexTestUtils.withExtraFiles;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link ManifestFile}. */
 public class ManifestFileTest {
@@ -1224,16 +1238,449 @@ public class ManifestFileTest {
         return -1;
     }
 
+    @Test
+    void testRowIdSidecarRollingRawRewriteAndDelete() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_READ, true);
+        ManifestFile manifests = createManifestFile(tempDir.toString(), 1, options);
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 2200; i++) {
+            ManifestEntry source = gen.next();
+            entries.add(
+                    ManifestEntry.create(
+                            i % 2 == 0 ? FileKind.ADD : FileKind.DELETE,
+                            source.partition(),
+                            source.bucket(),
+                            source.totalBuckets(),
+                            source.file().newFirstRowId(i * 100000000L)));
+        }
+        List<ManifestFileMeta> metas = manifests.write(entries);
+        assertThat(metas.size()).isGreaterThan(1);
+
+        for (ManifestFileMeta meta : metas) {
+            assertThat(ManifestRowIdIndex.fileName(meta))
+                    .isEqualTo(meta.fileName() + ManifestRowIdIndex.SUFFIX);
+            List<ManifestEntry> actual = manifests.read(meta.fileName());
+            for (ManifestEntry entry :
+                    Arrays.asList(actual.get(0), actual.get(actual.size() - 1))) {
+                assertThat(
+                                manifests.mayContainRowIds(
+                                        meta,
+                                        RowRangeIndex.create(
+                                                Collections.singletonList(
+                                                        new Range(
+                                                                entry.file().firstRowId(),
+                                                                entry.file().firstRowId())))))
+                        .isTrue();
+            }
+            long gap = actual.get(0).file().firstRowId() + actual.get(0).file().rowCount();
+            assertThat(
+                            manifests.mayContainRowIds(
+                                    meta,
+                                    RowRangeIndex.create(
+                                            Collections.singletonList(new Range(gap, gap)))))
+                    .isFalse();
+            assertThat(
+                            java.nio.file.Files.exists(
+                                    tempDir.resolve("manifest")
+                                            .resolve(meta.fileName() + ManifestRowIdIndex.SUFFIX)))
+                    .isTrue();
+        }
+        ManifestFileMeta source = metas.get(0);
+        ManifestAvroWriter rewrite = manifests.createAvroWriter();
+        try (ManifestAvroReader reader =
+                manifests.scanAvroBlocks(source.fileName(), source.fileSize())) {
+            rewrite.writeEncodedManifest(reader, source);
+        }
+        rewrite.close();
+        ManifestFileMeta rewritten = rewrite.result().get(0);
+        assertThat(ManifestRowIdIndex.fileName(rewritten))
+                .isEqualTo(rewritten.fileName() + ManifestRowIdIndex.SUFFIX);
+        assertThat(manifests.read(rewritten.fileName()))
+                .isEqualTo(manifests.read(source.fileName()));
+        long outside = metas.get(metas.size() - 1).maxRowId();
+        assertThat(
+                        manifests.mayContainRowIds(
+                                rewritten,
+                                RowRangeIndex.create(
+                                        Collections.singletonList(new Range(outside, outside)))))
+                .isFalse();
+        rewrite.abort();
+        assertThat(
+                        java.nio.file.Files.exists(
+                                tempDir.resolve("manifest")
+                                        .resolve(rewritten.fileName() + ManifestRowIdIndex.SUFFIX)))
+                .isFalse();
+        for (ManifestFileMeta meta : metas) {
+            manifests.delete(meta);
+            assertThat(
+                            java.nio.file.Files.exists(
+                                    tempDir.resolve("manifest")
+                                            .resolve(meta.fileName() + ManifestRowIdIndex.SUFFIX)))
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void testReadsOnlySelectedBlocksAndPreservesPhysicalOrdinals() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_READ, true);
+        RecordingFileIO fileIO = new RecordingFileIO();
+        ManifestFile.Factory factory =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, fileIO);
+        ManifestFile manifests = factory.create();
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 4000; i++) {
+            ManifestEntry entry = gen.next();
+            entries.add(
+                    ManifestEntry.create(
+                            FileKind.ADD,
+                            entry.partition(),
+                            entry.bucket(),
+                            entry.totalBuckets(),
+                            entry.file().newFirstRowId(i * 1000000L)));
+        }
+        ManifestFileMeta meta = manifests.write(entries).get(0);
+        RowRangeIndex query =
+                RowRangeIndex.create(
+                        Arrays.asList(
+                                new Range(1000000000L, 1000000000L),
+                                new Range(3000000000L, 3000000000L)));
+
+        ManifestRowIdIndex.Selection selected = manifests.selectBlocks(meta, query);
+        assertThat(selected.blocks()).hasSize(2);
+
+        fileIO.reset();
+        List<ManifestEntry> actual =
+                factory.create()
+                        .read(
+                                meta.fileName(),
+                                meta.fileSize(),
+                                null,
+                                null,
+                                row -> true,
+                                entry -> true,
+                                java.util.function.Function.identity(),
+                                selected);
+        List<ManifestEntry> expected = new ArrayList<>();
+        for (ManifestRowIdIndex.Block block : selected.blocks()) {
+            expected.addAll(
+                    entries.subList(
+                            (int) block.firstRecord,
+                            (int) (block.firstRecord + block.recordCount)));
+        }
+        assertThat(actual).containsExactlyElementsOf(expected);
+        assertThat(actual).contains(entries.get(1000), entries.get(3000));
+        assertThat(fileIO.bytes.get()).isLessThan(meta.fileSize() / 4);
+        assertThat(fileIO.seeks)
+                .containsExactlyElementsOf(
+                        selected.blocks().stream()
+                                .map(block -> block.offset)
+                                .collect(Collectors.toList()));
+        assertThat(fileIO.opened)
+                .containsExactly(new Path(tempDir.toString(), "manifest/" + meta.fileName()));
+        // Block selections cannot populate the ordinary full-manifest read cache.
+        assertThat(manifests.read(meta.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
+    void testScannerPreservesDeletesAndColumnGroups() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_READ, true);
+        RecordingFileIO fileIO = new RecordingFileIO();
+        ManifestFile.Factory factory =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, fileIO);
+        ManifestFile manifests = factory.create();
+        ManifestEntry entry = gen.next();
+        ManifestEntry add =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        entry.file().newFirstRowId(100L));
+        ManifestEntry delete =
+                ManifestEntry.create(
+                        FileKind.DELETE,
+                        entry.partition(),
+                        entry.bucket(),
+                        entry.totalBuckets(),
+                        add.file());
+        ManifestEntry other = gen.next();
+        ManifestEntry live =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        other.partition(),
+                        other.bucket(),
+                        other.totalBuckets(),
+                        other.file().newFirstRowId(100L));
+        List<ManifestFileMeta> metas = new ArrayList<>();
+        metas.addAll(manifests.write(Arrays.asList(add, live)));
+        metas.addAll(manifests.write(Collections.singletonList(delete)));
+        metas.addAll(
+                manifests.write(
+                        Collections.singletonList(
+                                ManifestEntry.create(
+                                        FileKind.ADD,
+                                        entry.partition(),
+                                        entry.bucket(),
+                                        entry.totalBuckets(),
+                                        entry.file().newFirstRowId(0L)))));
+        AppendOnlyFileStoreScan scan =
+                new AppendOnlyFileStoreScan(
+                        mock(ManifestsReader.class),
+                        null,
+                        null,
+                        null,
+                        mock(TableSchema.class),
+                        factory,
+                        2,
+                        false,
+                        false,
+                        false);
+        scan.withRowRanges(Collections.singletonList(new Range(100, 100)));
+        fileIO.reset();
+        List<ManifestEntry> result = new ArrayList<>();
+        scan.readManifestEntries(metas, false).forEachRemaining(result::add);
+        assertThat(result).containsExactly(live);
+        assertThat(
+                        fileIO.opened.stream()
+                                .filter(path -> !path.getName().endsWith(ManifestRowIdIndex.SUFFIX))
+                                .map(Path::getName))
+                .containsExactlyInAnyOrder(metas.get(0).fileName(), metas.get(1).fileName());
+    }
+
+    @Test
+    void testSidecarWriteFailureAbortsAllRollingOutputs() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        AtomicInteger indexes = new AtomicInteger();
+        FileIO failing =
+                new LocalFileIO() {
+                    @Override
+                    public PositionOutputStream newOutputStream(Path path, boolean overwrite)
+                            throws IOException {
+                        if (path.getName().endsWith(ManifestRowIdIndex.SUFFIX)
+                                && indexes.incrementAndGet() == 2) {
+                            throw new IOException("sidecar write failed");
+                        }
+                        return super.newOutputStream(path, overwrite);
+                    }
+                };
+        ManifestFile manifests =
+                createManifestFileFactory(tempDir.toString(), 1, options, failing).create();
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 2200; i++) {
+            ManifestEntry entry = gen.next();
+            entries.add(
+                    ManifestEntry.create(
+                            FileKind.ADD,
+                            entry.partition(),
+                            entry.bucket(),
+                            entry.totalBuckets(),
+                            entry.file().newFirstRowId(0L)));
+        }
+        assertThatThrownBy(() -> manifests.write(entries))
+                .hasRootCauseMessage("sidecar write failed");
+        try (java.util.stream.Stream<java.nio.file.Path> files =
+                java.nio.file.Files.list(tempDir.resolve("manifest"))) {
+            assertThat(files).isEmpty();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Test
+    void testUnknownRowIdDisablesIndexAndNoQueryDoesNotReadSidecar() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_READ, true);
+        RecordingFileIO fileIO = new RecordingFileIO();
+        ManifestFile manifests =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, fileIO)
+                        .create();
+        ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
+        assertThat(ManifestRowIdIndex.fileName(meta)).isNull();
+        assertThat(
+                        java.nio.file.Files.exists(
+                                tempDir.resolve("manifest")
+                                        .resolve(meta.fileName() + ManifestRowIdIndex.SUFFIX)))
+                .isFalse();
+
+        fileIO.reset();
+        assertThat(manifests.mayContainRowIds(meta, null)).isTrue();
+        assertThat(fileIO.opened).isEmpty();
+    }
+
+    @Test
+    void testExplicitIndexReferenceAndNullDoesNotProbe() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_WRITE, true);
+        options.set(CoreOptions.MANIFEST_ROW_ID_INDEX_READ, true);
+        RecordingFileIO io = new RecordingFileIO();
+        ManifestFile manifests =
+                createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, io).create();
+        ManifestEntry original = gen.next();
+        ManifestEntry entry =
+                ManifestEntry.create(
+                        FileKind.ADD,
+                        original.partition(),
+                        original.bucket(),
+                        original.totalBuckets(),
+                        original.file().newFirstRowId(100L));
+        ManifestFileMeta written = manifests.write(Collections.singletonList(entry)).get(0);
+        assertThat(ManifestRowIdIndex.fileName(written)).isNotNull();
+        RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(0, 0)));
+        io.reset();
+        for (List<String> extraFiles :
+                Arrays.asList(
+                        null,
+                        Collections.<String>emptyList(),
+                        Collections.singletonList("other-partition-index"))) {
+            ManifestFileMeta unindexed = withExtraFiles(written, extraFiles);
+            assertThat(manifests.selectBlocks(unindexed, query)).isNull();
+            assertThat(io.opened).isEmpty();
+        }
+        // An existing suffix-named object must not be inferred as a reference.
+        assertThat(
+                        java.nio.file.Files.exists(
+                                tempDir.resolve("manifest")
+                                        .resolve(ManifestRowIdIndex.fileName(written))))
+                .isTrue();
+        String explicitName = "custom-index-name" + ManifestRowIdIndex.SUFFIX;
+        java.nio.file.Files.move(
+                tempDir.resolve("manifest").resolve(ManifestRowIdIndex.fileName(written)),
+                tempDir.resolve("manifest").resolve(explicitName));
+        String otherName = "other-partition-index";
+        java.nio.file.Path otherPath = tempDir.resolve("manifest").resolve(otherName);
+        java.nio.file.Files.write(otherPath, new byte[] {1, 2, 3});
+        ManifestFileMeta indexed = withExtraFiles(written, Arrays.asList(otherName, explicitName));
+        assertThat(manifests.selectBlocks(indexed, query).blocks()).isEmpty();
+        assertThat(io.opened)
+                .containsExactly(new Path(tempDir.toString(), "manifest/" + explicitName));
+        manifests.delete(indexed);
+        assertThat(java.nio.file.Files.exists(otherPath)).isFalse();
+        assertThat(java.nio.file.Files.exists(tempDir.resolve("manifest").resolve(explicitName)))
+                .isFalse();
+        assertThat(
+                        java.nio.file.Files.exists(
+                                tempDir.resolve("manifest").resolve(written.fileName())))
+                .isFalse();
+    }
+
+    @Test
+    void testCommitCleanerDeletesExplicitIndexReferences() throws Exception {
+        ManifestFile manifests = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestList lists = mock(ManifestList.class);
+        CommitCleaner cleaner = new CommitCleaner(lists, manifests, mock(IndexManifestFile.class));
+        for (int mode = 0; mode < 2; mode++) {
+            ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
+            String indexName = "commit-index-" + mode + ManifestRowIdIndex.SUFFIX;
+            Path indexPath = new Path(tempDir.toString(), "manifest/" + indexName);
+            LocalFileIO.create().newOutputStream(indexPath, false).close();
+            String otherName = "commit-other-" + mode;
+            Path otherPath = new Path(tempDir.toString(), "manifest/" + otherName);
+            LocalFileIO.create().newOutputStream(otherPath, false).close();
+            ManifestFileMeta indexed = withExtraFiles(meta, Arrays.asList(otherName, indexName));
+            if (mode == 0) {
+                when(lists.read("delta-list")).thenReturn(Collections.singletonList(indexed));
+                cleaner.cleanUpReuseTmpManifests(Pair.of("delta-list", 1L), null, null, null);
+            } else {
+                cleaner.cleanUpNoReuseTmpManifests(
+                        null, Collections.emptyList(), Collections.singletonList(indexed));
+            }
+            assertThat(LocalFileIO.create().exists(indexPath)).isFalse();
+            assertThat(LocalFileIO.create().exists(otherPath)).isFalse();
+            assertThat(
+                            java.nio.file.Files.exists(
+                                    tempDir.resolve("manifest").resolve(meta.fileName())))
+                    .isFalse();
+        }
+    }
+
+    /** Observes actual file access without adding counters to production readers. */
+    private static final class RecordingFileIO extends LocalFileIO {
+        private final List<Path> opened = Collections.synchronizedList(new ArrayList<>());
+        private final List<Long> seeks = Collections.synchronizedList(new ArrayList<>());
+        private final AtomicLong bytes = new AtomicLong();
+
+        private void reset() {
+            opened.clear();
+            seeks.clear();
+            bytes.set(0);
+        }
+
+        @Override
+        public SeekableInputStream newInputStream(Path path) throws IOException {
+            opened.add(path);
+            return new SeekableInputStreamWrapper(super.newInputStream(path)) {
+                @Override
+                public void seek(long desired) throws IOException {
+                    seeks.add(desired);
+                    super.seek(desired);
+                }
+
+                @Override
+                public int read() throws IOException {
+                    int value = super.read();
+                    if (value >= 0) {
+                        bytes.incrementAndGet();
+                    }
+                    return value;
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) throws IOException {
+                    int n = super.read(buffer, offset, length);
+                    if (n > 0) {
+                        bytes.addAndGet(n);
+                    }
+                    return n;
+                }
+            };
+        }
+    }
+
     private ManifestFile createManifestFile(String pathStr) {
         return createManifestFile(pathStr, ThreadLocalRandom.current().nextInt(8192) + 1024);
     }
 
     private ManifestFile createManifestFile(String pathStr, long suggestedFileSize) {
-        return createManifestFile(pathStr, suggestedFileSize, null);
+        return createManifestFile(pathStr, suggestedFileSize, new Options());
     }
 
     private ManifestFile createManifestFile(
             String pathStr, long suggestedFileSize, @Nullable SegmentsCache<Path> cache) {
+        return createManifestFileFactory(
+                        pathStr,
+                        suggestedFileSize,
+                        new Options(),
+                        FileIOFinder.find(new Path(pathStr)),
+                        cache)
+                .create();
+    }
+
+    private ManifestFile createManifestFile(
+            String pathStr, long suggestedFileSize, Options options) {
+        return createManifestFileFactory(
+                        pathStr, suggestedFileSize, options, FileIOFinder.find(new Path(pathStr)))
+                .create();
+    }
+
+    private ManifestFile.Factory createManifestFileFactory(
+            String pathStr, long suggestedFileSize, Options options, FileIO fileIO) {
+        return createManifestFileFactory(pathStr, suggestedFileSize, options, fileIO, null);
+    }
+
+    private ManifestFile.Factory createManifestFileFactory(
+            String pathStr,
+            long suggestedFileSize,
+            Options options,
+            FileIO fileIO,
+            @Nullable SegmentsCache<Path> cache) {
         Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
@@ -1252,7 +1699,6 @@ public class ManifestFileTest {
                         null,
                         false,
                         null);
-        FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(
                         fileIO,
                         new FileSystemSchemaManager(fileIO, path),
@@ -1262,7 +1708,7 @@ public class ManifestFileTest {
                         pathFactory,
                         suggestedFileSize,
                         cache)
-                .create();
+                .withRowIdIndexOptions(options);
     }
 
     @Test

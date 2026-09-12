@@ -54,6 +54,19 @@ public final class AvroBlockReader implements Closeable {
         }
     }
 
+    @Nullable
+    public byte[] headerBytes() {
+        return reader.headerBytes();
+    }
+
+    public long blockOffset() {
+        return reader.blockOffset();
+    }
+
+    public long blockLength() {
+        return reader.blockLength();
+    }
+
     /** Creates a record decoder from the writer schema stored in the Avro file header. */
     public AvroRecordDecoder createRecordDecoder() {
         return new AvroRecordDecoder(reader.getSchema());

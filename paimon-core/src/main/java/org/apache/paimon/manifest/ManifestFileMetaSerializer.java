@@ -95,6 +95,8 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
                 row.isNullAt(9) ? null : row.getInt(9),
                 row.isNullAt(10) ? null : row.getLong(10),
                 row.isNullAt(11) ? null : row.getLong(11),
-                row.isNullAt(12) ? null : fromStringArrayData(row.getArray(12)));
+                row.getFieldCount() <= 12 || row.isNullAt(12)
+                        ? null
+                        : fromStringArrayData(row.getArray(12)));
     }
 }

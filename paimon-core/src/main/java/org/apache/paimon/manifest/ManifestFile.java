@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry.Projection;
 import org.apache.paimon.operation.metrics.CacheMetrics;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -36,6 +37,7 @@ import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SegmentsCache;
 
 import javax.annotation.Nullable;
@@ -59,6 +61,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final AvroFileFormat avroFileFormat;
     private final long suggestedFileSize;
+    private final ManifestRowIdIndex.Settings rowIdIndexSettings;
 
     private ManifestFile(
             FileIO fileIO,
@@ -69,7 +72,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             String compression,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<Path> cache) {
+            @Nullable SegmentsCache<Path> cache,
+            ManifestRowIdIndex.Settings rowIdIndexSettings) {
         super(
                 fileIO,
                 serializer,
@@ -85,6 +89,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         this.partitionType = partitionType;
         this.avroFileFormat = avroFileFormat;
         this.suggestedFileSize = suggestedFileSize;
+        this.rowIdIndexSettings = rowIdIndexSettings;
     }
 
     @Override
@@ -136,9 +141,33 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             Filter<InternalRow> readFilter,
             Filter<ManifestEntry> readTFilter,
             Function<ManifestEntry, T> convertor) {
+        return read(
+                fileName,
+                fileSize,
+                partitionFilter,
+                bucketFilter,
+                readFilter,
+                readTFilter,
+                convertor,
+                null);
+    }
+
+    public <T> List<T> read(
+            String fileName,
+            @Nullable Long fileSize,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            Filter<InternalRow> readFilter,
+            Filter<ManifestEntry> readTFilter,
+            Function<ManifestEntry, T> convertor,
+            @Nullable ManifestRowIdIndex.Selection selected) {
+        if (selected != null && selected.blocks().isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
         try {
             Path path = pathFactory.toPath(fileName);
-            if (cache != null) {
+            // A partial manifest must never enter the cache under the full manifest's key.
+            if (cache != null && selected == null) {
                 ManifestEntryFilters filters =
                         new ManifestEntryFilters(
                                 partitionFilter, bucketFilter, readFilter, readTFilter);
@@ -151,7 +180,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                             path,
                             ManifestEntry.MANIFEST_ROW_TYPE,
                             partitionFilter,
-                            bucketFilter);
+                            bucketFilter,
+                            selected);
             return readFromIterator(iterator, serializer, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -205,8 +235,21 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable BucketFilter bucketFilter)
             throws IOException {
+        return createManifestIterator(
+                fileIO, path, projectedType, partitionFilter, bucketFilter, null);
+    }
+
+    private static CloseableIterator<InternalRow> createManifestIterator(
+            FileIO fileIO,
+            Path path,
+            RowType projectedType,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter,
+            @Nullable ManifestRowIdIndex.Selection selected)
+            throws IOException {
         try {
-            ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+            ManifestAvroReader reader =
+                    new ManifestAvroReader(ManifestRowIdIndex.openManifest(fileIO, path, selected));
             return reader.read(projectedType, partitionFilter, bucketFilter);
         } catch (IOException e) {
             FileUtils.checkExists(fileIO, path);
@@ -301,7 +344,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 serializer,
                 compression,
                 pathFactory,
-                suggestedFileSize);
+                suggestedFileSize,
+                rowIdIndexSettings);
     }
 
     /** Creates an Avro manifest writer for one explicit path. */
@@ -314,7 +358,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 serializer,
                 compression,
                 singlePathFactory(manifestPath),
-                Long.MAX_VALUE);
+                Long.MAX_VALUE,
+                rowIdIndexSettings);
     }
 
     private PathFactory singlePathFactory(Path manifestPath) {
@@ -339,6 +384,32 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         };
     }
 
+    @Nullable
+    public ManifestRowIdIndex.Selection selectBlocks(
+            ManifestFileMeta manifest, @Nullable RowRangeIndex query) {
+        return !rowIdIndexSettings.read || query == null
+                ? null
+                : ManifestRowIdIndex.read(
+                        fileIO,
+                        pathFactory.toPath(manifest.fileName()),
+                        manifest,
+                        query,
+                        rowIdIndexSettings);
+    }
+
+    public boolean mayContainRowIds(ManifestFileMeta manifest, @Nullable RowRangeIndex query) {
+        ManifestRowIdIndex.Selection selected = selectBlocks(manifest, query);
+        return selected == null || !selected.blocks().isEmpty();
+    }
+
+    /** Deletes an unreferenced manifest and its explicitly referenced extra files. */
+    public void delete(ManifestFileMeta manifest) {
+        delete(manifest.fileName());
+        if (manifest.extraFiles() != null) {
+            manifest.extraFiles().forEach(this::delete);
+        }
+    }
+
     /** Creator of {@link ManifestFile}. */
     public static class Factory {
 
@@ -349,6 +420,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final String compression;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
+        private ManifestRowIdIndex.Settings rowIdIndexSettings =
+                new ManifestRowIdIndex.Settings(new Options());
         @Nullable private final SegmentsCache<Path> cache;
 
         public Factory(
@@ -370,6 +443,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.cache = cache;
         }
 
+        public Factory withRowIdIndexOptions(Options options) {
+            rowIdIndexSettings = new ManifestRowIdIndex.Settings(options);
+            return this;
+        }
+
         public boolean isCacheEnabled() {
             return cache != null;
         }
@@ -384,7 +462,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     compression,
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache);
+                    cache,
+                    rowIdIndexSettings);
         }
     }
 }
