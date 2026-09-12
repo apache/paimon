@@ -1337,7 +1337,7 @@ class _PyAVVideoDecoder:
         raise IndexError("Video frame index %d is out of range." % index)
 
     def _seek(self, index):
-        anchor = min(index, len(self._timestamps) - 1)
+        anchor = max(0, min(index, len(self._timestamps) - 1) - 1)
         timestamp = self._timestamps[anchor]
         self._container.seek(
             round(timestamp / self._stream.time_base),

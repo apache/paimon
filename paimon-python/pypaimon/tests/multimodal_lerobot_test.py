@@ -163,7 +163,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 assert not any_frame
                 assert stream is self.stream
                 self.seeks.append(offset)
-                self.position = offset // 10 * 10
+                # Model a B-frame seek that starts after an exact target PTS.
+                self.position = 3 if offset == 1 else offset // 10 * 10
 
             def close(self):
                 pass
@@ -180,8 +181,9 @@ class LeRobotValidationTest(unittest.TestCase):
 
             decoder[5]
             decoder[90]
-            self.assertEqual(127, container.decoded)
-            self.assertEqual([5, 90], container.seeks)
+            decoder[1]
+            self.assertEqual(139, container.decoded)
+            self.assertEqual([4, 89, 0], container.seeks)
         finally:
             decoder.close()
 
