@@ -1290,6 +1290,7 @@ class _PyAVVideoDecoder:
         self._stream = self._container.streams.video[0]
         self._next_index = 0
         self._timestamps = []
+        self._keyframes = []
         self._cache = OrderedDict()
         self._frames = iter(self._container.decode(self._stream))
 
@@ -1322,6 +1323,8 @@ class _PyAVVideoDecoder:
                 elif self._next_index == len(self._timestamps):
                     frame_index = self._next_index
                     self._timestamps.append(timestamp)
+                    if frame.key_frame:
+                        self._keyframes.append(frame_index)
                 else:
                     continue
                 self._next_index = frame_index + 1
@@ -1337,7 +1340,8 @@ class _PyAVVideoDecoder:
         raise IndexError("Video frame index %d is out of range." % index)
 
     def _seek(self, index):
-        anchor = max(0, min(index, len(self._timestamps) - 1) - 1)
+        position = bisect.bisect_right(self._keyframes, index)
+        anchor = self._keyframes[position - 1] if position else 0
         timestamp = self._timestamps[anchor]
         self._container.seek(
             round(timestamp / self._stream.time_base),

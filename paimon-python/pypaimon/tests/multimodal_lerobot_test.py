@@ -136,6 +136,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
             def __init__(self, pts):
                 self.pts = pts
+                self.key_frame = pts % 10 == 0
 
             def to_ndarray(self, format):
                 assert format == "rgb24"
@@ -163,8 +164,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 assert not any_frame
                 assert stream is self.stream
                 self.seeks.append(offset)
-                # Model a B-frame seek that starts after an exact target PTS.
-                self.position = 3 if offset == 1 else offset // 10 * 10
+                self.position = offset
 
             def close(self):
                 pass
@@ -181,9 +181,45 @@ class LeRobotValidationTest(unittest.TestCase):
 
             decoder[5]
             decoder[90]
-            decoder[1]
-            self.assertEqual(139, container.decoded)
-            self.assertEqual([4, 89, 0], container.seeks)
+            decoder[8]
+            self.assertEqual(136, container.decoded)
+            self.assertEqual([0, 90, 0], container.seeks)
+        finally:
+            decoder.close()
+
+    @unittest.skipIf(av is None, "PyAV is not installed")
+    def test_pyav_decoder_seeks_before_b_frames(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width = 16
+            stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 12
+            stream.codec_context.max_b_frames = 2
+            for index in range(70):
+                image = np.full(
+                    (16, 16, 3), index + 24, dtype=np.uint8)
+                frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+                frame.pts = index
+                frame.time_base = Fraction(1, 30)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        payload = output.getvalue()
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [
+                np.array(frame.to_ndarray(format="rgb24"), copy=True)
+                for frame in container.decode(video=0)
+            ]
+
+        decoder = _PyAVVideoDecoder(io.BytesIO(payload))
+        try:
+            for index in (69, 20, 35, 1, 68):
+                actual = decoder[index].permute(1, 2, 0).numpy()
+                np.testing.assert_array_equal(expected[index], actual)
         finally:
             decoder.close()
 
