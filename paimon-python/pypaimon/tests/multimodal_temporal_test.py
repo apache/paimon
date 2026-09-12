@@ -17,6 +17,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -256,6 +257,153 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(vector, result.schema.field("state").type)
         self.assertEqual([5.0, 15.0], result.to_list()[0]["state"])
 
+    def test_linear_interpolation_accepts_bigint_payloads(self):
+        anchors = self._table("linear_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": (1 << 53) + 1},
+            {"episode_id": 1, "event_time": 10,
+             "value": (1 << 53) + 3},
+        ])
+
+        row = pmm.interpolate_by(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(float((1 << 53) + 2), row["value"])
+
+    def test_linear_interpolation_scales_extreme_float_time_axis(self):
+        anchors = self._table("linear_extreme_time_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_extreme_time_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 0.0}])
+        states.add([
+            {"episode_id": 1, "event_time": -sys.float_info.max,
+             "value": 0.0},
+            {"episode_id": 1, "event_time": sys.float_info.max,
+             "value": 10.0},
+        ])
+
+        row = pmm.interpolate_by(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_handles_extreme_float_payloads(self):
+        anchors = self._table("linear_extreme_value_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_extreme_value_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+            "infinite": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": -sys.float_info.max, "infinite": float("inf")},
+            {"episode_id": 1, "event_time": 10,
+             "value": sys.float_info.max, "infinite": float("inf")},
+        ])
+
+        row = pmm.interpolate_by(
+            anchors.scan(), states.scan().select(["value", "infinite"]),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+        self.assertEqual(float("inf"), row["infinite"])
+
+    def test_linear_interpolation_uses_effective_masked_payload_type(self):
+        anchors = self._table("linear_masked_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_masked_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": "0"},
+            {"episode_id": 1, "event_time": 10, "value": "10"},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "STRING",
+                },
+                "type": "DOUBLE",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        row = pmm.interpolate_by(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_rejects_masked_non_numeric_payload(self):
+        anchors = self._table("linear_invalid_mask_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_invalid_mask_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0},
+            {"episode_id": 1, "event_time": 10, "value": 10},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "INT",
+                },
+                "type": "STRING",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        aligned = pmm.interpolate_by(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        )
+        with self.assertRaisesRegex(TypeError, "requires numeric"):
+            aligned.to_arrow()
+
     def test_linear_interpolation_rejects_non_numeric_payloads(self):
         anchors = self._table("linear_invalid_anchors", {
             "episode_id": pa.int32(),
@@ -271,7 +419,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             pmm.interpolate_by(
                 anchors.scan(), labels.scan().select("label"),
                 on="event_time", by="episode_id",
-            )
+            ).to_arrow()
 
     def test_linear_interpolation_can_follow_an_asof_join(self):
         anchors = self._table("linear_chain_anchors", {

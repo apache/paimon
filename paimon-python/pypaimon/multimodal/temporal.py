@@ -252,7 +252,10 @@ class AsOfJoin:
                 else source_fetchers[position].schema
             )
             for name in source.payload_schema.names:
-                field = source.output_field(payload_schema.field(name))
+                field = source.output_field(
+                    payload_schema.field(name),
+                    effective=source_fetchers is not None,
+                )
                 output_name = field.name
                 if output_name in names:
                     output_name += source.suffix
@@ -368,7 +371,7 @@ class _AsOfJoinRight:
         return self._row_ids[index].as_py()
 
     @staticmethod
-    def output_field(field):
+    def output_field(field, effective=True):
         return field
 
     def build_arrays(self, anchor_rows, fetcher):
@@ -398,13 +401,17 @@ class _LinearInterpolationRight(_AsOfJoinRight):
         super().__init__(
             label, query, anchor_on, by, "nearest", tolerance,
             right_on, suffix)
-        for field in self.payload_schema:
-            self.output_field(field)
 
     @staticmethod
-    def output_field(field):
+    def output_field(field, effective=True):
+        try:
+            output_type = _linear_output_type(field.type)
+        except TypeError:
+            if effective:
+                raise
+            output_type = field.type
         return pa.field(
-            field.name, _linear_output_type(field.type), nullable=True,
+            field.name, output_type, nullable=True,
             metadata=field.metadata)
 
     def match(self, anchor_row):
@@ -431,7 +438,8 @@ class _LinearInterpolationRight(_AsOfJoinRight):
                 and max(target - before_time, after_time - target)
                 > self._tolerance_key):
             return None
-        weight = float(target - before_time) / (after_time - before_time)
+        weight = _linear_weight(
+            target, before_time, after_time, self.time_type)
         return (
             self._row_ids[before].as_py(),
             self._row_ids[after].as_py(),
@@ -509,6 +517,15 @@ def _linear_output_type(data_type):
         "columns; got %s." % data_type)
 
 
+def _linear_weight(target, before, after, data_type):
+    if pa.types.is_floating(data_type):
+        scale = max(abs(target), abs(before), abs(after))
+        if scale:
+            target, before, after = (
+                target / scale, before / scale, after / scale)
+    return float(target - before) / (after - before)
+
+
 def _interpolate_array(before, after, weights):
     if isinstance(before, pa.ChunkedArray):
         before = before.combine_chunks()
@@ -527,11 +544,16 @@ def _interpolate_array(before, after, weights):
             repeated,
         )
         mask = pc.or_(before.is_null(), after.is_null())
-        return pa.FixedSizeListArray.from_arrays(values, size, mask=mask)
+        result = pa.FixedSizeListArray.from_arrays(values, size)
+        return pc.if_else(mask, pa.scalar(None, type=result.type), result)
 
-    start = pc.cast(before, pa.float64())
-    end = pc.cast(after, pa.float64())
-    result = pc.add(start, pc.multiply(pc.subtract(end, start), weights))
+    start = pc.cast(before, pa.float64(), safe=False)
+    end = pc.cast(after, pa.float64(), safe=False)
+    result = pc.add(
+        pc.multiply(start, pc.subtract(1.0, weights)),
+        pc.multiply(end, weights),
+    )
+    result = pc.if_else(pc.equal(start, end), start, result)
     result = pc.if_else(pc.equal(weights, 0.0), start, result)
     if result.type != output_type:
         result = pc.cast(result, output_type)
