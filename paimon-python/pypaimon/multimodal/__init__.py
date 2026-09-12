@@ -42,6 +42,11 @@ from pypaimon.multimodal.table import (
     text_route,
     vector_route,
 )
+from pypaimon.multimodal.temporal import (
+    TemporalAlignment,
+    interpolate,
+    join_asof,
+)
 from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
 from pypaimon.table.data_evolution_merge_into import (
@@ -67,10 +72,13 @@ __all__ = [
     "RosbagSource",
     "RosbagStagingConfig",
     "TextRoute",
+    "TemporalAlignment",
     "VectorRoute",
     "VideoFrameCollator",
     "VideoFrameDescriptor",
     "connect",
+    "interpolate",
+    "join_asof",
     "lit",
     "source_col",
     "target_col",

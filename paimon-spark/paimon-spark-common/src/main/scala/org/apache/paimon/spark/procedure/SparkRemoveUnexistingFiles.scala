@@ -27,7 +27,6 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, CommitMessageSerializer}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
@@ -44,10 +43,10 @@ case class SparkRemoveUnexistingFiles(
   extends SQLConfHelper
   with Logging {
 
-  private def buildRDD(): RDD[String] = {
+  private def execute(): Array[String] = {
     val binaryPartitions = table.newScan().listPartitions()
     if (binaryPartitions.isEmpty) {
-      return spark.sparkContext.emptyRDD[String]
+      return Array.empty[String]
     }
 
     val realParallelism = Math.min(binaryPartitions.size(), parallelism)
@@ -86,25 +85,30 @@ case class SparkRemoveUnexistingFiles(
       .repartition(1)
       .cache()
 
-    if (!dryRun) {
-      pathAndMessage.foreachPartition {
-        iter =>
-          {
-            val serializer = new CommitMessageSerializer()
-            val messages = new util.ArrayList[CommitMessage]()
-            iter.foreach {
-              case (_, bytes) => messages.add(serializer.deserialize(serializer.getVersion, bytes))
+    try {
+      if (!dryRun) {
+        pathAndMessage.foreachPartition {
+          iter =>
+            {
+              val serializer = new CommitMessageSerializer()
+              val messages = new util.ArrayList[CommitMessage]()
+              iter.foreach {
+                case (_, bytes) =>
+                  messages.add(serializer.deserialize(serializer.getVersion, bytes))
+              }
+              val commit = table.newCommit(UUID.randomUUID().toString)
+              try {
+                commit.commit(messages)
+              } finally {
+                commit.close()
+              }
             }
-            val commit = table.newCommit(UUID.randomUUID().toString)
-            commit.commit(Long.MaxValue, messages)
-          }
+        }
       }
+      pathAndMessage.flatMap { case (paths, _) => paths }.collect()
+    } finally {
+      pathAndMessage.unpersist()
     }
-
-    pathAndMessage.mapPartitions(
-      iter => {
-        iter.flatMap { case (paths, _) => paths }
-      })
   }
 }
 
@@ -129,6 +133,6 @@ object SparkRemoveUnexistingFiles extends SQLConfHelper {
       table.isInstanceOf[FileStoreTable],
       s"Only FileStoreTable supports remove-unexsiting-files action. The table type is '${table.getClass.getName}'.")
     val fileStoreTable = table.asInstanceOf[FileStoreTable]
-    SparkRemoveUnexistingFiles(fileStoreTable, dryRun, parallelism, spark).buildRDD().collect()
+    SparkRemoveUnexistingFiles(fileStoreTable, dryRun, parallelism, spark).execute()
   }
 }

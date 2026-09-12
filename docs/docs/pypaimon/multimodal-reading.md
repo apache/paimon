@@ -50,6 +50,58 @@ with docs.scan().where("category = 'lake'").to_arrow_batch_reader() as reader:
         consume(batch)
 ```
 
+### As-of joins
+
+`join_asof` preserves each left row and matches at most one right row in the
+same `by` group. Chain calls to align multiple streams lazily.
+
+```python
+from datetime import timedelta
+from pypaimon.multimodal import join_asof
+
+aligned = join_asof(
+    actions.scan().select(["episode_id", "event_time", "action"]),
+    images.scan().where("camera = 'left'").select("image"),
+    on="event_time",
+    by="episode_id",
+    direction="nearest",
+    tolerance=timedelta(milliseconds=20),
+).join_asof(
+    topics.scan().where("topic = '/robot/state'").select("value"),
+    direction="backward",
+    tolerance=timedelta(milliseconds=50),
+)
+
+for batch in aligned.to_arrow_batch_reader(batch_size=128):
+    train(batch)
+```
+
+`direction` is `backward`, `forward`, or `nearest`; tolerance is inclusive and
+zero means exact. Nearest ties use the earlier time. For duplicate timestamps,
+backward uses the last row and forward uses the first. Nearest uses the last
+row for an exact match; otherwise it uses the backward or forward candidate's
+rule. Misses return null.
+
+Keys must be non-null with matching types. Use `right_on` for a different right
+timestamp and `suffix` for conflicts. Select the right timestamp to compute the
+match delta.
+
+Inputs are snapshot-pinned (`resolved_snapshots`). Left rows stream, right join
+keys stay in memory, and BLOBs remain descriptors.
+
+Use `interpolate(left, right, ...)` directly or chain `aligned.interpolate(...)`.
+It supports integer or floating-point scalars and fixed-size lists. Exact
+timestamps use the exact right row; otherwise it requires surrounding rows
+in the same `by` group and never extrapolates. When set, `tolerance` must
+include both surrounding rows.
+
+```python
+states_at_steps = aligned.interpolate(
+    states.scan().select(["joint_position", "velocity"]),
+    tolerance=timedelta(milliseconds=50),
+)
+```
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered

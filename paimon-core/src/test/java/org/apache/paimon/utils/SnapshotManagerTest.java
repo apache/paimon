@@ -121,6 +121,25 @@ public class SnapshotManagerTest {
         Mockito.verify(fileIO, Mockito.times(3)).exists(Mockito.any(Path.class));
     }
 
+    @Test
+    public void testSnapshotExistsRestoresInterruptedStatus() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class)))
+                .thenThrow(new IOException("Temporary failure"));
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> snapshotManager.snapshotExists(2))
+                    .hasMessageContaining("Interrupted while checking whether snapshot #2 exists")
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            Mockito.verify(fileIO).exists(Mockito.any(Path.class));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {
