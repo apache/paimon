@@ -23,6 +23,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
+import numpy as np
 import pyarrow as pa
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
@@ -287,7 +288,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         ).to_list()[0]
         self.assertEqual(2.5, right_closed["value"])
 
-    def test_window_join_keeps_float_bounds_exact_for_integer_time(self):
+    def test_window_join_keeps_numeric_bounds_exact_for_integer_time(self):
         anchors = self._table("window_integer_bound_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -298,23 +299,77 @@ class MultimodalTemporalTest(unittest.TestCase):
             "value": pa.int32(),
         })
         timestamp = 1_700_000_000_000_000_001
-        anchors.add([{"episode_id": 1, "event_time": timestamp}])
-        samples.add([
-            {"episode_id": 1, "event_time": timestamp - 1, "value": 1},
-            {"episode_id": 1, "event_time": timestamp, "value": 2},
-            {"episode_id": 1, "event_time": timestamp + 1, "value": 3},
-        ])
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1], "event_time": [timestamp],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1, 1],
+            "event_time": [timestamp - 1, timestamp, timestamp + 1],
+            "value": [1, 2, 3],
+        }))
 
-        for width in (0.0, 0.125):
-            with self.subTest(width=width):
+        for preceding, following in (
+                (0.0, 0.0), (0.125, 0.125),
+                (np.int64(0), 0), (0, np.int64(0)),
+                (np.int64(0), np.int64(0))):
+            with self.subTest(preceding=preceding, following=following):
                 row = pmm.join_window(
                     anchors.scan(), samples.scan().select("value"),
                     on="event_time", by="episode_id",
-                    preceding=width, following=width,
-                    aggregations={"matches": ("value", "count")},
+                    preceding=preceding, following=following,
+                    aggregations={
+                        "matches": ("value", "count"),
+                        "first_value": ("value", "first"),
+                    },
                 ).to_list()[0]
 
                 self.assertEqual(1, row["matches"])
+                self.assertEqual(2, row["first_value"])
+
+    def test_window_join_clips_bounds_to_integer_time_range(self):
+        anchors = self._table("window_range_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_range_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        minimum, maximum = -(1 << 63), (1 << 63) - 1
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 2], "event_time": [minimum, maximum],
+        }))
+        times = {1: [minimum, minimum + 1], 2: [maximum - 1, maximum]}
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1, 2, 2],
+            "event_time": times[1] + times[2],
+            "value": [1, 2, 3, 4],
+        }))
+
+        for preceding, following in ((0, 0), (0, 1), (1, 0), (1, 1)):
+            for closed in ("both", "left", "right", "neither"):
+                with self.subTest(
+                        preceding=preceding, following=following,
+                        closed=closed):
+                    rows = pmm.join_window(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        preceding=preceding, following=following,
+                        closed=closed,
+                        aggregations={"matches": ("value", "count")},
+                    ).to_list()
+                    for row in rows:
+                        left = row["event_time"] - preceding
+                        right = row["event_time"] + following
+                        expected = sum(
+                            (time >= left if closed in ("both", "left")
+                             else time > left)
+                            and (time <= right if closed in ("both", "right")
+                                 else time < right)
+                            for time in times[row["episode_id"]]
+                        )
+                        self.assertEqual(expected, row["matches"])
 
     def test_window_join_prunes_unaggregated_right_columns(self):
         anchors = self._table("window_projection_anchors", {

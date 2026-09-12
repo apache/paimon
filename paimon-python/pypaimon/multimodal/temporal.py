@@ -586,7 +586,8 @@ class _WindowJoinRight(_AsOfJoinRight):
         start, end = bounds
         left = target - self._preceding_key
         right = target + self._following_key
-        if pa.types.is_integer(self.time_type):
+        if (pa.types.is_integer(self.time_type)
+                or pa.types.is_timestamp(self.time_type)):
             first_key = (
                 math.ceil(left)
                 if self.closed in ("both", "left")
@@ -597,6 +598,9 @@ class _WindowJoinRight(_AsOfJoinRight):
                 if self.closed in ("both", "right")
                 else math.ceil(right) - 1
             )
+            # Avoid comparing NumPy keys with out-of-range Python integers.
+            first_key = max(first_key, _python_scalar(self._time_keys[start]))
+            last_key = min(last_key, _python_scalar(self._time_keys[end - 1]))
             if first_key > last_key:
                 return []
             first = bisect_left(
@@ -728,6 +732,8 @@ def _window_bound_key(name, value, data_type):
     if isinstance(value, bool) or not isinstance(value, (Real, timedelta)):
         raise TypeError(
             "%s must be numeric or datetime.timedelta." % name)
+    if isinstance(value, Integral):
+        value = int(value)
     if (isinstance(value, Real) and not isinstance(value, Integral)
             and not math.isfinite(value)):
         raise ValueError("%s must be finite." % name)
