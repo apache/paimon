@@ -27,6 +27,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.mergetree.compact.CompactRewriterFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -132,6 +133,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
         write.withBlobConsumer(blobConsumer);
+        return this;
+    }
+
+    @Override
+    public TableWriteImpl<T> withCompactRewriterFactory(CompactRewriterFactory factory) {
+        write.withCompactRewriterFactory(factory);
         return this;
     }
 

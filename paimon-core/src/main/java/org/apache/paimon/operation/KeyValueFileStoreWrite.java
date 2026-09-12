@@ -37,6 +37,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.MergeTreeWriter;
+import org.apache.paimon.mergetree.compact.CompactRewriterFactory;
 import org.apache.paimon.mergetree.compact.KvCompactionManagerFactory;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -178,6 +179,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     || SequenceSnapshotProperties.maxSequenceNumber(latestSnapshot).isPresent();
         }
         return ignorePreviousFiles;
+    }
+
+    @Override
+    public KeyValueFileStoreWrite withCompactRewriterFactory(CompactRewriterFactory factory) {
+        compactManagerFactory.withCompactRewriterFactory(factory);
+        return this;
     }
 
     @Override
