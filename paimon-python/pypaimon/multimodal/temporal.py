@@ -52,8 +52,29 @@ _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE = 64 * 1024 * 1024
 
 
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
-              right_on=None, suffix="_right") -> "AsOfJoin":
+              right_on=None, suffix="_right") -> "TemporalAlignment":
     """Join each left row with at most one time-aligned right row."""
+    return TemporalAlignment(left, on=on, by=by).join_asof(
+        right,
+        direction=direction,
+        tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
+
+
+def interpolate(left, right, *, on, by, tolerance=None,
+                right_on=None, suffix="_right") -> "TemporalAlignment":
+    """Linearly interpolate numeric right values at each left timestamp."""
+    return TemporalAlignment(left, on=on, by=by).interpolate(
+        right,
+        tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
+
+
+def _normalize_temporal_keys(on, by):
     if not isinstance(on, str) or not on:
         raise ValueError("on must be a non-empty column name.")
     if isinstance(by, str):
@@ -66,23 +87,18 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
                 "by must be a column name or sequence.") from error
     if not by:
         raise ValueError(
-            "join_asof requires at least one grouping column in by.")
+            "Temporal alignment requires a grouping column in by.")
     if (any(not isinstance(name, str) or not name for name in by)
             or len(set(by)) != len(by)):
         raise ValueError("by must contain unique, non-empty column names.")
-    return AsOfJoin(left, on, by).join_asof(
-        right,
-        direction=direction,
-        tolerance=tolerance,
-        right_on=right_on,
-        suffix=suffix,
-    )
+    return on, by
 
 
-class AsOfJoin:
-    """Lazy, chainable result of :func:`join_asof`."""
+class TemporalAlignment:
+    """Lazy, chainable alignment of table scans by time."""
 
-    def __init__(self, left, on, by):
+    def __init__(self, left, *, on, by):
+        on, by = _normalize_temporal_keys(on, by)
         self._anchor = _pin_scan_to_snapshot(_require_scan(left, "left"))
         self._on = on
         self._by = by
@@ -93,7 +109,7 @@ class AsOfJoin:
         self.schema = self._output_schema()
 
     def join_asof(self, right, *, direction="backward", tolerance=None,
-                  right_on=None, suffix="_right") -> "AsOfJoin":
+                  right_on=None, suffix="_right") -> "TemporalAlignment":
         """Append a right-side as-of join without materializing this scan."""
         position = len(self._sources) + 1
         label = "right source %d" % position
@@ -107,8 +123,25 @@ class AsOfJoin:
             right_on,
             suffix,
         )
+        return self._append(source)
 
-        result = object.__new__(AsOfJoin)
+    def interpolate(self, right, *, tolerance=None, right_on=None,
+                    suffix="_right") -> "TemporalAlignment":
+        """Append linear interpolation of numeric right-side values."""
+        position = len(self._sources) + 1
+        source = _LinearInterpolationRight(
+            "right source %d" % position,
+            right,
+            self._on,
+            self._by,
+            tolerance,
+            right_on,
+            suffix,
+        )
+        return self._append(source)
+
+    def _append(self, source):
+        result = object.__new__(TemporalAlignment)
         result._anchor = self._anchor
         result._on = self._on
         result._by = self._by
@@ -218,7 +251,10 @@ class AsOfJoin:
                 else source_fetchers[position].schema
             )
             for name in source.payload_schema.names:
-                field = payload_schema.field(name)
+                field = source.output_field(
+                    payload_schema.field(name),
+                    effective=source_fetchers is not None,
+                )
                 output_name = field.name
                 if output_name in names:
                     output_name += source.suffix
@@ -242,21 +278,7 @@ class AsOfJoin:
         arrays = [anchor[name] for name in self._anchor_schema.names]
 
         for source, fetcher in zip(self._sources, source_fetchers):
-            matches = [source.match(row) for row in anchor_rows]
-            matched_ids = [match for match in matches if match is not None]
-            unique_ids = list(dict.fromkeys(matched_ids))
-            values = fetcher.fetch(unique_ids)
-            positions = {
-                row_id: index for index, row_id in enumerate(unique_ids)
-            }
-            take = pa.array([
-                None if match is None else positions[match]
-                for match in matches
-            ], type=pa.int64())
-            for field in source.payload_schema:
-                array = pc.take(values[field.name], take)
-                array.validate()
-                arrays.append(array)
+            arrays.extend(source.build_arrays(anchor_rows, fetcher))
 
         if arrays:
             table = pa.Table.from_arrays(
@@ -347,6 +369,120 @@ class _AsOfJoinRight:
             return None
         return self._row_ids[index].as_py()
 
+    @staticmethod
+    def output_field(field, effective=True):
+        return field
+
+    def build_arrays(self, anchor_rows, fetcher):
+        matches = [self.match(row) for row in anchor_rows]
+        matched_ids = [match for match in matches if match is not None]
+        unique_ids = list(dict.fromkeys(matched_ids))
+        values = fetcher.fetch(unique_ids)
+        positions = {
+            row_id: index for index, row_id in enumerate(unique_ids)
+        }
+        take = pa.array([
+            None if match is None else positions[match]
+            for match in matches
+        ], type=pa.int64())
+        arrays = []
+        for field in self.payload_schema:
+            array = pc.take(values[field.name], take)
+            array.validate()
+            arrays.append(array)
+        return arrays
+
+
+class _LinearInterpolationRight(_AsOfJoinRight):
+
+    def __init__(self, label, query, anchor_on, by, tolerance,
+                 right_on, suffix):
+        super().__init__(
+            label, query, anchor_on, by, "nearest", tolerance,
+            right_on, suffix)
+
+    @staticmethod
+    def output_field(field, effective=True):
+        try:
+            output_type = _linear_output_type(field.type)
+        except TypeError:
+            if effective:
+                raise
+            output_type = field.type
+        return pa.field(
+            field.name, output_type, nullable=True,
+            metadata=field.metadata)
+
+    def match(self, anchor_row):
+        key = tuple(anchor_row[name] for name in self.by)
+        bounds = self._index.get(key)
+        if bounds is None:
+            return None
+        start, end = bounds
+        target = anchor_row[_TIME_KEY]
+        position = bisect_left(self._time_keys, target, start, end)
+        if position < end and self._time_keys[position] == target:
+            exact = bisect_right(
+                self._time_keys, target, position, end) - 1
+            row_id = self._row_ids[exact].as_py()
+            return row_id, row_id, 0.0, 0, 1
+        if position == start or position == end:
+            return None
+
+        before = position - 1
+        after = position
+        before_time = _python_scalar(self._time_keys[before])
+        after_time = _python_scalar(self._time_keys[after])
+        if (self._tolerance_key is not None
+                and max(target - before_time, after_time - target)
+                > self._tolerance_key):
+            return None
+        return (
+            self._row_ids[before].as_py(),
+            self._row_ids[after].as_py(),
+            *_linear_weight(target, before_time, after_time, self.time_type),
+        )
+
+    def build_arrays(self, anchor_rows, fetcher):
+        matches = [self.match(row) for row in anchor_rows]
+        matched_ids = []
+        for match in matches:
+            if match is not None:
+                matched_ids.extend(match[:2])
+        unique_ids = list(dict.fromkeys(matched_ids))
+        values = fetcher.fetch(unique_ids)
+        positions = {
+            row_id: index for index, row_id in enumerate(unique_ids)
+        }
+        before = pa.array([
+            None if match is None else positions[match[0]]
+            for match in matches
+        ], type=pa.int64())
+        after = pa.array([
+            None if match is None else positions[match[1]]
+            for match in matches
+        ], type=pa.int64())
+        weights = pa.array([
+            None if match is None else match[2]
+            for match in matches
+        ], type=pa.float64())
+        ratios = [
+            None if match is None else match[3:5]
+            for match in matches
+        ]
+
+        arrays = []
+        for field in self.payload_schema:
+            array = _interpolate_array(
+                pc.take(values[field.name], before),
+                pc.take(values[field.name], after),
+                weights,
+                ratios,
+            )
+            array.validate()
+            arrays.append(array)
+        return arrays
+
 
 def _validate_join_options(direction, tolerance, right_on, suffix):
     if direction not in ("backward", "forward", "nearest"):
@@ -370,6 +506,93 @@ def _validate_join_options(direction, tolerance, right_on, suffix):
             raise ValueError("tolerance must be non-negative.")
 
 
+def _linear_output_type(data_type):
+    if pa.types.is_integer(data_type):
+        return pa.float64()
+    if pa.types.is_floating(data_type):
+        return data_type
+    if pa.types.is_fixed_size_list(data_type):
+        return pa.list_(
+            _linear_output_type(data_type.value_type), data_type.list_size)
+    raise TypeError(
+        "Linear interpolation requires integer or floating-point scalars "
+        "or fixed-size lists; got %s." % data_type)
+
+
+def _linear_weight(target, before, after, data_type):
+    if pa.types.is_integer(data_type) or pa.types.is_timestamp(data_type):
+        numerator = target - before
+        denominator = after - before
+        return numerator / denominator, numerator, denominator
+    if pa.types.is_floating(data_type):
+        ratios = [float(value).as_integer_ratio()
+                  for value in (target, before, after)]
+        common_denominator = max(
+            denominator for unused, denominator in ratios)
+        target, before, after = [
+            numerator * (common_denominator // denominator)
+            for numerator, denominator in ratios
+        ]
+        numerator = target - before
+        denominator = after - before
+        weight = numerator / denominator
+        return weight, numerator, denominator
+    weight = float(target - before) / (after - before)
+    numerator, denominator = weight.as_integer_ratio()
+    return weight, numerator, denominator
+
+
+def _interpolate_array(before, after, weights, ratios):
+    if isinstance(before, pa.ChunkedArray):
+        before = before.combine_chunks()
+    if isinstance(after, pa.ChunkedArray):
+        after = after.combine_chunks()
+    data_type = before.type
+    output_type = _linear_output_type(data_type)
+    if pa.types.is_fixed_size_list(data_type):
+        size = data_type.list_size
+        repeated = pa.array([
+            weight for weight in weights.to_pylist() for unused in range(size)
+        ], type=pa.float64())
+        repeated_ratios = [
+            ratio for ratio in ratios for unused in range(size)
+        ]
+        values = _interpolate_array(
+            before.values.slice(before.offset * size, len(before) * size),
+            after.values.slice(after.offset * size, len(after) * size),
+            repeated,
+            repeated_ratios,
+        )
+        mask = pc.or_(before.is_null(), after.is_null())
+        result = pa.FixedSizeListArray.from_arrays(values, size)
+        return pc.if_else(mask, pa.scalar(None, type=result.type), result)
+
+    if pa.types.is_integer(data_type):
+        result = []
+        for start, end, ratio in zip(
+                before.to_pylist(), after.to_pylist(), ratios):
+            if start is None or end is None or ratio is None:
+                result.append(None)
+                continue
+            numerator, denominator = ratio
+            result.append((
+                start * (denominator - numerator) + end * numerator
+            ) / denominator)
+        return pa.array(result, type=pa.float64())
+
+    start = pc.cast(before, pa.float64())
+    end = pc.cast(after, pa.float64())
+    result = pc.add(
+        pc.multiply(start, pc.subtract(1.0, weights)),
+        pc.multiply(end, weights),
+    )
+    result = pc.if_else(pc.equal(start, end), start, result)
+    result = pc.if_else(pc.equal(weights, 0.0), start, result)
+    if result.type != output_type:
+        result = pc.cast(result, output_type)
+    return result
+
+
 def _require_scan(query, label):
     if (type(query) is not ScanQuery
             or getattr(query, "_result_factory", None) is not None):
@@ -382,12 +605,13 @@ def _pin_scan_to_snapshot(query):
     options = table.options
     if not options.row_tracking_enabled(False):
         raise ValueError(
-            "join_asof requires 'row-tracking.enabled' = 'true'.")
+            "Temporal alignment requires 'row-tracking.enabled' = 'true'.")
     if (options.scan_mode() == StartupMode.INCREMENTAL
             or options.options.contains(
                 CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)):
         raise ValueError(
-            "join_asof does not support incremental scans; inputs must "
+            "Temporal alignment does not support incremental scans; "
+            "inputs must "
             "represent a complete point-in-time snapshot.")
     # Validate the original scan configuration before replacing it with a
     # pinned snapshot. Otherwise an invalid or unsupported scan mode can be

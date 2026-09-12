@@ -17,6 +17,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -147,6 +148,369 @@ class MultimodalTemporalTest(unittest.TestCase):
             {90: 1, 110: 2},
             {row["event_time"]: row["value"] for row in rows},
         )
+
+    def test_linear_interpolation_stays_in_group_without_extrapolation(self):
+        anchors = self._table("linear_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 5},
+            {"episode_id": 1, "event_time": 10},
+            {"episode_id": 1, "event_time": 20},
+            {"episode_id": 2, "event_time": 5},
+        ])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0},
+            {"episode_id": 1, "event_time": 10, "value": 20},
+            {"episode_id": 1, "event_time": 10, "value": 30},
+            {"episode_id": 2, "event_time": 0, "value": 100},
+            {"episode_id": 2, "event_time": 10, "value": 120},
+        ])
+
+        result = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id", tolerance=5,
+        )
+        rows = sorted(
+            result.to_list(),
+            key=lambda row: (row["episode_id"], row["event_time"]),
+        )
+
+        self.assertIsInstance(result, pmm.TemporalAlignment)
+        self.assertEqual(pa.float64(), result.schema.field("value").type)
+        self.assertEqual([10.0, 30.0, None, 110.0], [
+            row["value"] for row in rows
+        ])
+
+    def test_linear_interpolation_preserves_an_exact_infinite_float(self):
+        anchors = self._table("linear_exact_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_exact_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        states.add([{
+            "episode_id": 1, "event_time": 10, "value": float("inf")
+        }])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(float("inf"), row["value"])
+
+    def test_linear_interpolation_requires_both_neighbors_in_tolerance(self):
+        anchors = self._table("linear_tolerance_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_tolerance_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 9}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0.0},
+            {"episode_id": 1, "event_time": 10, "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id", tolerance=8,
+        ).to_list()[0]
+
+        self.assertIsNone(row["value"])
+
+    def test_linear_interpolation_supports_fixed_size_numeric_lists(self):
+        vector = pa.list_(pa.float32(), 2)
+        anchors = self._table("linear_vector_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_vector_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "state": vector,
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "state": [0.0, 10.0]},
+            {"episode_id": 1, "event_time": 10, "state": [10.0, 20.0]},
+        ])
+
+        result = pmm.interpolate(
+            anchors.scan(), states.scan().select("state"),
+            on="event_time", by="episode_id",
+        )
+
+        self.assertEqual(vector, result.schema.field("state").type)
+        self.assertEqual([5.0, 15.0], result.to_list()[0]["state"])
+
+    def test_linear_interpolation_preserves_bigint_precision(self):
+        anchors = self._table("linear_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int64(),
+            "extreme": pa.int64(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 1},
+            {"episode_id": 1, "event_time": 2},
+        ])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": (1 << 53) + 1, "extreme": -(1 << 63)},
+            {"episode_id": 1, "event_time": 4,
+             "value": (1 << 53) + 3, "extreme": (1 << 63) - 1},
+        ])
+
+        rows = pmm.interpolate(
+            anchors.scan(), states.scan().select(["value", "extreme"]),
+            on="event_time", by="episode_id",
+        ).to_list()
+
+        by_time = {row["event_time"]: row for row in rows}
+        self.assertEqual(float((1 << 53) + 2), by_time[1]["value"])
+        self.assertEqual(-0.5, by_time[2]["extreme"])
+
+    def test_linear_interpolation_scales_extreme_float_time_axis(self):
+        anchors = self._table("linear_extreme_time_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_extreme_time_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 0.0}])
+        states.add([
+            {"episode_id": 1, "event_time": -sys.float_info.max,
+             "value": 0.0},
+            {"episode_id": 1, "event_time": sys.float_info.max,
+             "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_preserves_float_time_differences(self):
+        anchors = self._table("linear_nearby_time_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_nearby_time_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.float64(),
+        })
+        base = 1_700_000_000.0
+        step = 2 ** -21
+        anchors.add([{"episode_id": 1, "event_time": base + step}])
+        states.add([
+            {"episode_id": 1, "event_time": base, "value": 0.0},
+            {"episode_id": 1, "event_time": base + 2 * step,
+             "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_float_time_preserves_bigint_interpolation_precision(self):
+        anchors = self._table("linear_float_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_float_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.int64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 2.0}])
+        states.add([
+            {"episode_id": 1, "event_time": 0.0,
+             "value": -(1 << 63)},
+            {"episode_id": 1, "event_time": 3.0,
+             "value": 1 << 62},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+
+    def test_linear_interpolation_handles_extreme_float_payloads(self):
+        anchors = self._table("linear_extreme_value_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_extreme_value_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+            "infinite": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": -sys.float_info.max, "infinite": float("inf")},
+            {"episode_id": 1, "event_time": 10,
+             "value": sys.float_info.max, "infinite": float("inf")},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select(["value", "infinite"]),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+        self.assertEqual(float("inf"), row["infinite"])
+
+    def test_linear_interpolation_uses_effective_masked_payload_type(self):
+        anchors = self._table("linear_masked_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_masked_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": "0"},
+            {"episode_id": 1, "event_time": 10, "value": "10"},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "STRING",
+                },
+                "type": "DOUBLE",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_rejects_masked_non_numeric_payload(self):
+        anchors = self._table("linear_invalid_mask_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_invalid_mask_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0},
+            {"episode_id": 1, "event_time": 10, "value": 10},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "INT",
+                },
+                "type": "STRING",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        aligned = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        )
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+            aligned.to_arrow()
+
+    def test_linear_interpolation_rejects_decimal_payloads(self):
+        anchors = self._table("linear_invalid_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        decimals = self._table("linear_invalid_decimals", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.decimal128(10, 2),
+        })
+
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+            pmm.interpolate(
+                anchors.scan(), decimals.scan().select("value"),
+                on="event_time", by="episode_id",
+            ).to_arrow()
+
+    def test_linear_interpolation_can_follow_an_asof_join(self):
+        anchors = self._table("linear_chain_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        images = self._table("linear_chain_images", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "image": pa.string(),
+        })
+        states = self._table("linear_chain_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "state": pa.float32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        images.add([{"episode_id": 1, "event_time": 4, "image": "frame"}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "state": 0.0},
+            {"episode_id": 1, "event_time": 10, "state": 10.0},
+        ])
+
+        row = pmm.join_asof(
+            anchors.scan(), images.scan().select("image"),
+            on="event_time", by="episode_id",
+            direction="nearest", tolerance=2,
+        ).interpolate(
+            states.scan().select("state"), tolerance=5,
+        ).to_list()[0]
+
+        self.assertEqual("frame", row["image"])
+        self.assertEqual(5.0, row["state"])
 
     def test_alignment_can_return_matched_timestamp(self):
         anchors = self._table("timestamp_output_anchors", {
@@ -919,7 +1283,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         }])
 
         with self.assertRaisesRegex(
-                ValueError, "join_asof.*incremental"):
+                ValueError, "Temporal alignment.*incremental"):
             pmm.join_asof(
                 anchors.scan(), source.scan().select("value"),
                 on="event_time", by="episode_id",
@@ -1256,7 +1620,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                     pa.chunked_array([chunk for _ in row_ids])
                 ], schema=schema)
 
-        aligned = object.__new__(temporal.AsOfJoin)
+        aligned = object.__new__(temporal.TemporalAlignment)
         aligned._anchor_schema = schema
         aligned._sources = ()
         rows = [{temporal._ROW_ID: value} for value in range(2)]

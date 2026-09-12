@@ -89,6 +89,19 @@ match delta.
 Inputs are snapshot-pinned (`resolved_snapshots`). Left rows stream, right join
 keys stay in memory, and BLOBs remain descriptors.
 
+Use `interpolate(left, right, ...)` directly or chain `aligned.interpolate(...)`.
+It supports integer or floating-point scalars and fixed-size lists. Exact
+timestamps use the exact right row; otherwise it requires surrounding rows
+in the same `by` group and never extrapolates. When set, `tolerance` must
+include both surrounding rows.
+
+```python
+states_at_steps = aligned.interpolate(
+    states.scan().select(["joint_position", "velocity"]),
+    tolerance=timedelta(milliseconds=50),
+)
+```
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
