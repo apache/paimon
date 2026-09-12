@@ -41,6 +41,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestIndexTestUtils;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -745,23 +746,29 @@ public class ExpireSnapshotsTest {
     @Test
     void testSidecarsFollowSnapshotAndTagRetention() throws Exception {
         store.options().toConfiguration().set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 2);
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.parse("8 mb"));
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(8, allData, snapshotPositions);
         int latest = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         Set<Path> manifests = new HashSet<>();
-        for (int i = 1; i <= latest; i++) {
-            rewriteSnapshotTime(i, 0);
-            ManifestIndexTestUtils.registerIndexReferences(store, i);
+        Set<Path> retainedManifests = new HashSet<>();
+        for (int snapshotId = 1; snapshotId <= latest; snapshotId++) {
+            rewriteSnapshotTime(snapshotId, 0);
+            ManifestIndexTestUtils.registerIndexReferences(store, snapshotId);
             snapshotManager.invalidateCache();
-            store.manifestListFactory()
-                    .create()
-                    .readDataManifests(snapshotManager.snapshot(i))
-                    .forEach(
-                            meta ->
-                                    manifests.add(
-                                            store.pathFactory()
-                                                    .toManifestFilePath(meta.fileName())));
+            for (ManifestFileMeta meta :
+                    store.manifestListFactory()
+                            .create()
+                            .readDataManifests(snapshotManager.snapshot(snapshotId))) {
+                Path manifest = store.pathFactory().toManifestFilePath(meta.fileName());
+                manifests.add(manifest);
+                if (snapshotId == 3 || snapshotId == latest) {
+                    retainedManifests.add(manifest);
+                }
+            }
         }
         store.newTagManager()
                 .createTag(
@@ -770,22 +777,24 @@ public class ExpireSnapshotsTest {
                         store.options().tagDefaultTimeRetained(),
                         Collections.emptyList(),
                         false);
+        Set<Path> expiredManifests = new HashSet<>(manifests);
+        expiredManifests.removeAll(retainedManifests);
+        assertThat(expiredManifests).isNotEmpty();
         ExpireSnapshotsImpl expire =
                 (ExpireSnapshotsImpl) store.newExpire(expireAllButLatestConfig());
         expire.setCurrentTimeMillis(() -> 1000L);
         expire.expire();
-        boolean reclaimed = false;
         for (Path manifest : manifests) {
-            boolean retained = fileIO.exists(manifest);
+            boolean retained = retainedManifests.contains(manifest);
+            assertThat(fileIO.exists(manifest)).as("manifest %s", manifest).isEqualTo(retained);
             assertThat(
                             fileIO.exists(
                                     new Path(
                                             manifest.getParent(),
                                             "index-for-" + manifest.getName())))
+                    .as("sidecar for %s", manifest)
                     .isEqualTo(retained);
-            reclaimed |= !retained;
         }
-        assertThat(reclaimed).isTrue();
         for (ManifestFileMeta meta :
                 store.manifestListFactory()
                         .create()
