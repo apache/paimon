@@ -295,6 +295,51 @@ class MultimodalTemporalTest(unittest.TestCase):
         ).to_list()[0]
         self.assertEqual(2.5, right_closed["value"])
 
+    def test_window_join_prunes_unaggregated_right_columns(self):
+        anchors = self._table("window_projection_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_projection_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "payload": pa.struct([
+                pa.field("unused_nested", pa.int32()),
+                pa.field("value", pa.int32()),
+            ]),
+            "unused": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1,
+            "event_time": 10,
+            "payload": {"value": 7, "unused_nested": 8},
+            "unused": "not read",
+        }])
+        payload_reads = []
+        original = FormatPyArrowReader._read_parquet_row_group_batches
+
+        def tracked(reader, row_group, columns):
+            if columns is not None and "payload" in columns:
+                payload_reads.append(tuple(columns))
+            yield from original(reader, row_group, columns)
+
+        with mock.patch.object(
+                FormatPyArrowReader,
+                "_read_parquet_row_group_batches", tracked):
+            row = pmm.join_window(
+                anchors.scan(),
+                samples.scan().select(["payload.value", "unused"]),
+                on="event_time", by="episode_id", preceding=0,
+                aggregations={"payload_value": "mean"},
+            ).to_list()[0]
+
+        self.assertEqual(7.0, row["payload_value"])
+        self.assertTrue(payload_reads)
+        self.assertNotIn("unused", {
+            name for columns in payload_reads for name in columns
+        })
+
     def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
         anchors = self._table("window_numeric_anchors", {
             "episode_id": pa.int32(),

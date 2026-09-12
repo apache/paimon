@@ -106,9 +106,11 @@ Use `join_window(left, right, ...)` directly or chain
 `aligned.join_window(...)`. Unlike single-table `rolling().agg()`, it joins
 each left row to right rows in the same `by` group and
 `[left - preceding, left + following]` time window, then aggregates them.
-`following` defaults to zero; `closed` controls endpoints. Supported
-aggregations are `mean`, `min`, `max`, `first`, `last`, and `count`. Nulls are
-skipped; empty windows return null, except `count` returns zero.
+`following` defaults to zero. Aggregation columns must be integer or
+floating-point scalars; `closed` is `both`, `left`, `right`, or `neither` and
+refers to the interval endpoints. Supported aggregations are `mean`, `min`,
+`max`, `first`, `last`, and `count`. Nulls are skipped; empty windows return
+null, except `count` returns zero.
 
 ```python
 steps_with_imu = aligned.join_window(

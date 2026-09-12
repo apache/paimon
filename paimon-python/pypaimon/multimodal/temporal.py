@@ -543,6 +543,12 @@ class _WindowJoinRight(_AsOfJoinRight):
         self.aggregations = _normalize_aggregations(
             aggregations, self.payload_schema, self.label,
             self._SUPPORTED_AGGREGATIONS)
+        query_schema, paths = _query_schema_and_paths(self.query)
+        self.query.select([
+            ".".join(path)
+            for field, path in zip(query_schema, paths)
+            if field.name in self.aggregations
+        ])
         self.payload_schema = pa.schema([
             field for field in self.payload_schema
             if field.name in self.aggregations
