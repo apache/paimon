@@ -43,6 +43,18 @@ public interface FormatReaderFactory {
                         getClass().getName()));
     }
 
+    /**
+     * Whether this format supports row-range / row-group level skipping by consuming the {@link
+     * Context#selection()} bitmap.
+     *
+     * <p>When {@code false}, a higher layer falls back to a naive skip+limit over the read output
+     * stream to guarantee range-read correctness. Default is {@code false} for backward
+     * compatibility; parquet/orc override to {@code true}.
+     */
+    default boolean supportsRowRangeSkip() {
+        return false;
+    }
+
     /** Context for creating reader. */
     interface Context {
 

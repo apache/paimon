@@ -63,6 +63,23 @@ public class BitmapIndexResult extends LazyField<RoaringBitmap32> implements Fil
         return new BitmapIndexResult(() -> get().limit(limit));
     }
 
+    /**
+     * Intersects this selection with the physical row range {@code [startInclusive, endInclusive]}
+     * (both endpoints inclusive), used to push down a contiguous row range read (range query).
+     *
+     * <p>{@code endInclusive} may be {@link Long#MAX_VALUE} to denote "until the end of the file".
+     * Note this operates on the physical row index space; effective-row (deletion-vector-aware)
+     * mapping is handled at a higher layer.
+     */
+    public FileIndexResult range(long startInclusive, long endInclusive) {
+        // RoaringBitmap32.bitmapOfRange is half-open [min, max), so +1 for inclusive end.
+        final long max = (endInclusive == Long.MAX_VALUE) ? Long.MAX_VALUE : endInclusive + 1;
+        return new BitmapIndexResult(
+                () ->
+                        RoaringBitmap32.and(
+                                get(), RoaringBitmap32.bitmapOfRange(startInclusive, max)));
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

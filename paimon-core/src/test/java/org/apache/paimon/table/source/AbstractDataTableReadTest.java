@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -130,7 +131,7 @@ class AbstractDataTableReadTest {
         }
 
         @Override
-        public RecordReader<InternalRow> reader(Split split) {
+        public RecordReader<InternalRow> reader(Split split, RowRange rowRange) {
             return new RecordReader<InternalRow>() {
                 @Override
                 public RecordIterator<InternalRow> readBatch() {
@@ -148,7 +149,7 @@ class AbstractDataTableReadTest {
         }
 
         private void createAuthedReader(TableQueryAuthResult authResult) throws IOException {
-            createDataReader(mock(Split.class), authResult);
+            createDataReader(mock(Split.class), authResult, null);
         }
 
         private RowType appliedReadType() {

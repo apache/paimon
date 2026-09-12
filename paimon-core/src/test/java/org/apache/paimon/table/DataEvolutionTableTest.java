@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -53,6 +54,7 @@ import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -2578,6 +2580,170 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         for (ManifestEntry entry : entries) {
             assertThat(entry.file().valueStats()).isEqualTo(EMPTY_STATS);
         }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // RowRange (effective-row slice) read via the TableRead::createReader(Split, RowRange) entry
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * A full-scan range read pushes the local range down to the parquet readers of the column-merge
+     * group: each bunch returns its local slice and the merged output is exactly [start, end]. This
+     * exercises the full chain {@code TableRead -> AbstractDataTableRead -> DataEvolutionTableRead
+     * -> DataEvolutionSplitRead -> createReader(Split)} with parquet row-group skipping.
+     */
+    @Test
+    public void testRowRangeReadReturnsExactSlice() throws Exception {
+        int count = 100;
+        write(count);
+        // write() produces f0 = 0..count-1, so RowRange [10, 19] -> f0 = 10..19
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(10L, 19L));
+        assertThat(actual).isEqualTo(intRange(10, 19));
+    }
+
+    /**
+     * A range read combined with a filter: rowRange slices the *filtered* effective-row stream, so
+     * the RangeSkipReader wraps outside the executeFilter layer (AbstractDataTableRead.outerWrap).
+     * Filter f0 >= 50 keeps f0 = 50..99 (50 effective rows), RowRange [10, 19] over those selects
+     * f0 = 60..69.
+     */
+    @Test
+    public void testRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        int count = 100;
+        write(count);
+        PredicateBuilder builder = new PredicateBuilder(schemaDefault().rowType());
+        Predicate filter = builder.greaterOrEqual(0, 50);
+        // filtered stream: f0 = 50..99 ; RowRange [10, 19] -> f0 = 60..69
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(10L, 19L), filter, true);
+        assertThat(actual).isEqualTo(intRange(60, 69));
+    }
+
+    /**
+     * A range read spanning multiple files (several merge groups) is sliced in the split-global
+     * effective-row space: each file gets its own local range and files entirely outside are
+     * skipped. Writing twice creates two files of `count` rows each, so RowRange [count-5, count+5]
+     * straddles the file boundary.
+     */
+    @Test
+    public void testRowRangeAcrossMultipleFiles() throws Exception {
+        int count = 100;
+        write(count);
+        write(count);
+        // file0: f0 = 0..99 ; file1: f0 = 0..99 (each file-internal index 0..99).
+        // global effective rows: file0 -> [0, 99], file1 -> [100, 199].
+        // RowRange [95, 104] -> file0 last 5 (f0 95..99) + file1 first 5 (f0 0..4).
+        List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(95L, 104L));
+        List<Integer> expected = new ArrayList<>();
+        for (int i = 95; i < 100; i++) {
+            expected.add(i); // file0
+        }
+        for (int i = 0; i <= 4; i++) {
+            expected.add(i); // file1
+        }
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    /**
+     * Regression: a partial-column ORC read over a DataEvolution column merge. ORC cannot push a
+     * row range down (supportsRowRangeSkip() == false), so the range must be enforced exactly once
+     * by an outer RangeSkipReader, not both by a selection bitmap (ApplyBitmapIndexRecordReader)
+     * and a RangeSkipReader — the double application used to yield [] for RowRange.of(10, 19).
+     *
+     * <p>The table is stored as two ORC column files (f0+f1 in one, f2 in another) so the read goes
+     * through the column-merge / DataBunch path; the existing parquet case does not cover this
+     * branch.
+     */
+    @Test
+    public void testRowRangeOrcColumnMergeDoesNotDoubleApply() throws Exception {
+        int count = 100;
+        // build an ORC data-evolution table with a column-merge layout (f0+f1 | f2)
+        Schema schema = schemaDefault();
+        Map<String, String> orcOptions = new HashMap<>(schema.options());
+        orcOptions.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        Schema orcSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        orcOptions,
+                        schema.comment());
+        catalog.createTable(identifier(), orcSchema, true);
+        FileStoreTable table = getTableDefault();
+        writeColumnMerge(table, count);
+
+        // f0 = 0..99 ; RowRange [10, 19] -> f0 = 10..19 (must NOT be empty)
+        List<Integer> actual = readRowRange(table, RowRange.of(10L, 19L));
+        assertThat(actual).isEqualTo(intRange(10, 19));
+    }
+
+    /**
+     * Writes {@code count} rows split across two column files (f0+f1, then f2) — a column merge.
+     */
+    private void writeColumnMerge(FileStoreTable table, int count) throws Exception {
+        Schema schema = schemaDefault();
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+        long rowId = table.snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
+    }
+
+    /** Reads the f0 column of a slice via {@code TableRead::createReader(Split, RowRange)}. */
+    private List<Integer> readRowRange(FileStoreTable table, RowRange rowRange) throws Exception {
+        return readRowRange(table, rowRange, null, false);
+    }
+
+    private List<Integer> readRowRange(FileStoreTable table, RowRange rowRange, Predicate filter)
+            throws Exception {
+        return readRowRange(table, rowRange, filter, false);
+    }
+
+    private List<Integer> readRowRange(
+            FileStoreTable table, RowRange rowRange, Predicate filter, boolean filterExecute)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (filter != null) {
+            readBuilder = readBuilder.withFilter(filter);
+        }
+        TableRead read = readBuilder.newRead();
+        if (filterExecute) {
+            // executeFilter() makes the reader evaluate the filter itself, so the rowRange must be
+            // wrapped outside the filter (AbstractDataTableRead.outerWrap), not forwarded into the
+            // inner reader — verifying that wrapping, not pushdown, is used in this case.
+            read = read.executeFilter();
+        }
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<Integer> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split, rowRange)) {
+                reader.forEachRemaining(row -> result.add(row.getInt(0)));
+            }
+        }
+        return result;
+    }
+
+    private static List<Integer> intRange(int from, int toInclusive) {
+        List<Integer> list = new ArrayList<>();
+        for (int i = from; i <= toInclusive; i++) {
+            list.add(i);
+        }
+        return list;
     }
 
     private List<DataFileMeta> writeOneFullRowAndCollectNewFiles(FileStoreTable table)

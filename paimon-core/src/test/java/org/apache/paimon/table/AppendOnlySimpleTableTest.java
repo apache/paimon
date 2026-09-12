@@ -52,6 +52,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -2849,5 +2850,130 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // RowRange (effective-row slice) read via TableRead::createReader(Split, RowRange).
+    // An append table pushes the local range into parquet as a selection bitmap; orc falls back to
+    // a single outer RangeSkipReader. Rows are written in order (pt=0, a=0..N-1, b=a*10).
+    // --------------------------------------------------------------------------------------------
+
+    private void writeAppendRows(FileStoreTable table, int from, int to) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = from; i < to; i++) {
+                write.write(rowData(0, i, (long) i * 10));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+    }
+
+    /** Parquet pushdown: RowRange [2, 4] over one parquet file returns a = 2, 3, 4. */
+    @Test
+    public void testAppendParquetRowRangeReturnsExactSlice() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        writeAppendRows(table, 0, 10);
+        // a = 0..9 ; RowRange [2, 4] -> a = 2,3,4
+        List<String> actual = readAppendRowRange(table, RowRange.of(2L, 4L), null, false);
+        assertThat(actual).containsExactly("0|2|20", "0|3|30", "0|4|40");
+    }
+
+    /**
+     * ORC fallback: orc does not support row-range skipping, so the range is enforced by an outer
+     * RangeSkipReader with the real skip (not 0). RowRange [2, 4] returns a = 2, 3, 4 — guards the
+     * OrcReaderFactory supportsRowRangeSkip()=false fix.
+     */
+    @Test
+    public void testAppendOrcRowRangeFallsBackToSkipAndLimit() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC));
+        writeAppendRows(table, 0, 10);
+        List<String> actual = readAppendRowRange(table, RowRange.of(2L, 4L), null, false);
+        assertThat(actual).containsExactly("0|2|20", "0|3|30", "0|4|40");
+    }
+
+    /**
+     * A range read with executeFilter: rowRange slices the *filtered* output, so the
+     * RangeSkipReader wraps outside the filter (AbstractDataTableRead.outerWrap). Filter a >= 5
+     * keeps a = 5..9 (5 effective rows), RowRange [1, 2] -> a = 6, 7.
+     */
+    @Test
+    public void testAppendParquetRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        writeAppendRows(table, 0, 10);
+        // field "a" is index 1 ; filtered stream: a = 5..9 ; RowRange [1, 2] -> a = 6, 7
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(1, 5);
+        List<String> actual = readAppendRowRange(table, RowRange.of(1L, 2L), filter, true);
+        assertThat(actual).containsExactly("0|6|60", "0|7|70");
+    }
+
+    /**
+     * A range spanning two files (two commits, each writing 5 rows). file0: a = 0..4 ; file1: a =
+     * 5..9. RowRange [3, 6] -> file0 a = 3,4 + file1 a = 5,6.
+     */
+    @Test
+    public void testAppendParquetRowRangeAcrossMultipleFiles() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        writeAppendRows(table, 0, 5);
+        writeAppendRows(table, 5, 10);
+        // global effective rows: file0 -> [0,4], file1 -> [5,9] ; RowRange [3, 6] -> a = 3,4,5,6
+        List<String> actual = readAppendRowRange(table, RowRange.of(3L, 6L), null, false);
+        assertThat(actual).containsExactly("0|3|30", "0|4|40", "0|5|50", "0|6|60");
+    }
+
+    /**
+     * Regression: a split mixing formats after an append table changes from parquet to orc. The
+     * range pushdown check must cover every file: if only the first (parquet) file is checked,
+     * canPushdown is true, the outer RangeSkipReader is disabled, and the orc file (which cannot
+     * push down) returns its whole file — leaking rows beyond the range. With the all-files check,
+     * canPushdown is false and the single outer RangeSkipReader slices the concatenated stream.
+     *
+     * <p>file0 (parquet): a = 0..4 ; file1 (orc): a = 5..9 ; RowRange [3, 6] -> a = 3,4,5,6.
+     */
+    @Test
+    public void testAppendMixedFormatRowRangeSlicesConcatenatedStream() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        writeAppendRows(table, 0, 5);
+        // switch format to orc and write the next 5 rows into the same table (mixed-format split)
+        FileStoreTable orcTable =
+                table.copy(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "orc"));
+        writeAppendRows(orcTable, 5, 10);
+        // global effective rows: parquet file0 -> [0,4], orc file1 -> [5,9] ; RowRange [3, 6]
+        List<String> actual = readAppendRowRange(table, RowRange.of(3L, 6L), null, false);
+        assertThat(actual).containsExactly("0|3|30", "0|4|40", "0|5|50", "0|6|60");
+    }
+
+    /**
+     * Reads the "pt|a|b" projection of a slice via {@code TableRead::createReader(Split,
+     * RowRange)}.
+     */
+    private List<String> readAppendRowRange(
+            FileStoreTable table, RowRange rowRange, Predicate filter, boolean filterExecute)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 2});
+        if (filter != null) {
+            readBuilder = readBuilder.withFilter(filter);
+        }
+        TableRead read = readBuilder.newRead();
+        if (filterExecute) {
+            // executeFilter() makes the reader evaluate the filter itself, so rowRange wraps
+            // outside the filter (AbstractDataTableRead.outerWrap), not forwarded to the inner
+            // reader.
+            read = read.executeFilter();
+        }
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split, rowRange)) {
+                reader.forEachRemaining(row -> result.add(toString.apply(row)));
+            }
+        }
+        return result;
     }
 }

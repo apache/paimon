@@ -122,6 +122,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
+    public boolean supportsRowRangeSkip() {
+        // Parquet consumes the selection bitmap to skip whole row groups (filterRowGroups) and
+        // pages (offset index), enabling efficient row-range reads.
+        return true;
+    }
+
+    @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         ParquetInputFile inputFile =
