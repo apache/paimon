@@ -258,7 +258,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(vector, result.schema.field("state").type)
         self.assertEqual([5.0, 15.0], result.to_list()[0]["state"])
 
-    def test_linear_interpolation_accepts_bigint_payloads(self):
+    def test_linear_interpolation_preserves_bigint_precision(self):
         anchors = self._table("linear_bigint_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -267,21 +267,27 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
             "value": pa.int64(),
+            "extreme": pa.int64(),
         })
-        anchors.add([{"episode_id": 1, "event_time": 5}])
+        anchors.add([
+            {"episode_id": 1, "event_time": 1},
+            {"episode_id": 1, "event_time": 2},
+        ])
         states.add([
             {"episode_id": 1, "event_time": 0,
-             "value": (1 << 53) + 1},
-            {"episode_id": 1, "event_time": 10,
-             "value": (1 << 53) + 3},
+             "value": (1 << 53) + 1, "extreme": -(1 << 63)},
+            {"episode_id": 1, "event_time": 4,
+             "value": (1 << 53) + 3, "extreme": (1 << 63) - 1},
         ])
 
-        row = pmm.interpolate(
-            anchors.scan(), states.scan().select("value"),
+        rows = pmm.interpolate(
+            anchors.scan(), states.scan().select(["value", "extreme"]),
             on="event_time", by="episode_id",
-        ).to_list()[0]
+        ).to_list()
 
-        self.assertEqual(float((1 << 53) + 2), row["value"])
+        by_time = {row["event_time"]: row for row in rows}
+        self.assertEqual(float((1 << 53) + 2), by_time[1]["value"])
+        self.assertEqual(-0.5, by_time[2]["extreme"])
 
     def test_linear_interpolation_scales_extreme_float_time_axis(self):
         anchors = self._table("linear_extreme_time_anchors", {
@@ -402,23 +408,23 @@ class MultimodalTemporalTest(unittest.TestCase):
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         )
-        with self.assertRaisesRegex(TypeError, "requires numeric"):
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
             aligned.to_arrow()
 
-    def test_linear_interpolation_rejects_non_numeric_payloads(self):
+    def test_linear_interpolation_rejects_decimal_payloads(self):
         anchors = self._table("linear_invalid_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
         })
-        labels = self._table("linear_invalid_labels", {
+        decimals = self._table("linear_invalid_decimals", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
-            "label": pa.string(),
+            "value": pa.decimal128(10, 2),
         })
 
-        with self.assertRaisesRegex(TypeError, "requires numeric"):
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
             pmm.interpolate(
-                anchors.scan(), labels.scan().select("label"),
+                anchors.scan(), decimals.scan().select("value"),
                 on="event_time", by="episode_id",
             ).to_arrow()
 

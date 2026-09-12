@@ -425,7 +425,7 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             exact = bisect_right(
                 self._time_keys, target, position, end) - 1
             row_id = self._row_ids[exact].as_py()
-            return row_id, row_id, 0.0
+            return row_id, row_id, 0.0, 0, 1
         if position == start or position == end:
             return None
 
@@ -437,12 +437,10 @@ class _LinearInterpolationRight(_AsOfJoinRight):
                 and max(target - before_time, after_time - target)
                 > self._tolerance_key):
             return None
-        weight = _linear_weight(
-            target, before_time, after_time, self.time_type)
         return (
             self._row_ids[before].as_py(),
             self._row_ids[after].as_py(),
-            weight,
+            *_linear_weight(target, before_time, after_time, self.time_type),
         )
 
     def build_arrays(self, anchor_rows, fetcher):
@@ -468,6 +466,10 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             None if match is None else match[2]
             for match in matches
         ], type=pa.float64())
+        ratios = [
+            None if match is None else match[3:5]
+            for match in matches
+        ]
 
         arrays = []
         for field in self.payload_schema:
@@ -475,6 +477,7 @@ class _LinearInterpolationRight(_AsOfJoinRight):
                 pc.take(values[field.name], before),
                 pc.take(values[field.name], after),
                 weights,
+                ratios,
             )
             array.validate()
             arrays.append(array)
@@ -512,20 +515,26 @@ def _linear_output_type(data_type):
         return pa.list_(
             _linear_output_type(data_type.value_type), data_type.list_size)
     raise TypeError(
-        "Linear interpolation requires numeric scalar or fixed-size list "
-        "columns; got %s." % data_type)
+        "Linear interpolation requires integer or floating-point scalars "
+        "or fixed-size lists; got %s." % data_type)
 
 
 def _linear_weight(target, before, after, data_type):
+    if pa.types.is_integer(data_type) or pa.types.is_timestamp(data_type):
+        numerator = target - before
+        denominator = after - before
+        return numerator / denominator, numerator, denominator
     if pa.types.is_floating(data_type):
         scale = max(abs(target), abs(before), abs(after))
         if scale:
             target, before, after = (
                 target / scale, before / scale, after / scale)
-    return float(target - before) / (after - before)
+    weight = float(target - before) / (after - before)
+    numerator, denominator = weight.as_integer_ratio()
+    return weight, numerator, denominator
 
 
-def _interpolate_array(before, after, weights):
+def _interpolate_array(before, after, weights, ratios):
     if isinstance(before, pa.ChunkedArray):
         before = before.combine_chunks()
     if isinstance(after, pa.ChunkedArray):
@@ -537,17 +546,34 @@ def _interpolate_array(before, after, weights):
         repeated = pa.array([
             weight for weight in weights.to_pylist() for unused in range(size)
         ], type=pa.float64())
+        repeated_ratios = [
+            ratio for ratio in ratios for unused in range(size)
+        ]
         values = _interpolate_array(
             before.values.slice(before.offset * size, len(before) * size),
             after.values.slice(after.offset * size, len(after) * size),
             repeated,
+            repeated_ratios,
         )
         mask = pc.or_(before.is_null(), after.is_null())
         result = pa.FixedSizeListArray.from_arrays(values, size)
         return pc.if_else(mask, pa.scalar(None, type=result.type), result)
 
-    start = pc.cast(before, pa.float64(), safe=False)
-    end = pc.cast(after, pa.float64(), safe=False)
+    if pa.types.is_integer(data_type):
+        result = []
+        for start, end, ratio in zip(
+                before.to_pylist(), after.to_pylist(), ratios):
+            if start is None or end is None or ratio is None:
+                result.append(None)
+                continue
+            numerator, denominator = ratio
+            result.append((
+                start * (denominator - numerator) + end * numerator
+            ) / denominator)
+        return pa.array(result, type=pa.float64())
+
+    start = pc.cast(before, pa.float64())
+    end = pc.cast(after, pa.float64())
     result = pc.add(
         pc.multiply(start, pc.subtract(1.0, weights)),
         pc.multiply(end, weights),
