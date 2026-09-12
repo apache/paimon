@@ -3566,5 +3566,60 @@ class BatchVectorSearchTest(unittest.TestCase):
         mock.patch.stopall()
 
 
+class VectorSearchReaderCleanupTest(unittest.TestCase):
+
+    def test_reader_lifetime_for_single_and_batch_search(self):
+        from concurrent.futures import Future
+
+        from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+
+        column = _field(1, "embedding", "FLOAT")
+        read = DataEvolutionVectorRead(_StubTable([column], []), 1, column, [1.0])
+        for batch in (False, True):
+            for outcome in ("sync_error", "pending_success", "pending_error", "completed"):
+                with self.subTest(batch=batch, outcome=outcome):
+                    stream = io.BytesIO(b"index")
+                    reader = mock.Mock()
+                    reader.close.side_effect = stream.close
+                    visit = (reader.visit_batch_vector_search if batch
+                             else reader.visit_vector_search)
+                    error = ValueError("Query vector dimension mismatch")
+                    source = Future()
+                    result = [None, None] if batch else None
+                    if outcome == "sync_error":
+                        visit.side_effect = error
+                    else:
+                        visit.return_value = source
+                        if outcome == "completed":
+                            source.set_result(result)
+                    offset = OffsetGlobalIndexReader(reader, 0, 10)
+                    evaluate = read._eval_batch if batch else read._eval
+                    query = [[1.0], [2.0]] if batch else [1.0]
+                    with mock.patch.object(read, "_open_offset_reader",
+                                           return_value=(reader, offset)):
+                        if outcome == "sync_error":
+                            with self.assertRaises(ValueError) as raised:
+                                evaluate(0, 10, [object()], query, 1, None)
+                            self.assertIs(error, raised.exception)
+                        else:
+                            future = evaluate(0, 10, [object()], query, 1, None)
+                            if outcome.startswith("pending"):
+                                reader.close.assert_not_called()
+                                self.assertFalse(stream.closed)
+                                if outcome == "pending_error":
+                                    source.set_exception(error)
+                                else:
+                                    source.set_result(result)
+                            if outcome == "pending_error":
+                                with self.assertRaises(ValueError) as raised:
+                                    future.result()
+                                self.assertIs(error, raised.exception)
+                            else:
+                                self.assertEqual(result, future.result())
+                    reader.close.assert_called_once_with()
+                    self.assertTrue(stream.closed)
+
+
 if __name__ == "__main__":
     unittest.main()

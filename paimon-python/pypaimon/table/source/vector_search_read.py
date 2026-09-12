@@ -255,7 +255,11 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        future = offset_reader.visit_vector_search(vector_search)
+        try:
+            future = offset_reader.visit_vector_search(vector_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
@@ -397,7 +401,11 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        try:
+            future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
