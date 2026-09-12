@@ -474,14 +474,6 @@ case class PaimonSparkWriter(
       _ <- commitUser
     } yield identifier
 
-  /** Whether the stable commit user has already committed this identifier, or a later one. */
-  private def alreadyCommitted(identifier: Long): Boolean =
-    commitUser.exists {
-      user =>
-        val latest = table.snapshotManager().latestSnapshotOfUser(user)
-        latest.isPresent && latest.get.commitIdentifier() >= identifier
-    }
-
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
     commit(commitMessages, null)
   }
@@ -521,28 +513,21 @@ case class PaimonSparkWriter(
         case Some(identifier) =>
           // Structured Streaming replays a micro-batch with its original batch id after a failure.
           // Committing under a stable commit user lets Paimon skip a replay it already committed,
-          // instead of duplicating the whole batch.
+          // instead of duplicating the whole batch, while still retrying the commit callbacks
+          // that may have failed after the snapshot was published. Either builder was given the
+          // stable user, so its lookup of the previous commit is not bounded by strict mode.
           //
-          // This committer is closed right after the batch, so maintenance cannot be left to an
-          // executor that is about to be shut down, nor a failure to a commit that never comes.
-          tableCommit.inlineMaintenance(true)
-          if (directPostponeWriteBuilder != null) {
-            // The direct postpone committer runs in strict mode, and filterAndCommit bounds its
-            // lookup of the previous commit by the snapshot this write started from. The batch
-            // being replayed was committed before that snapshot, so look it up without the bound.
-            if (alreadyCommitted(identifier)) {
-              logInfo(s"Micro-batch $identifier is already committed, skipping the replay.")
-            } else {
-              tableCommit.commit(identifier, commitMessages.toList.asJava)
-            }
-          } else {
-            // The files being committed were written by this very batch, so there is no need to
-            // list them to prove that they still exist.
-            tableCommit
-              .checkFilesExistence(false)
-              .filterAndCommit(
-                Collections.singletonMap(Long.box(identifier), commitMessages.toList.asJava))
-          }
+          // The files being committed were written by this very batch, so there is no need to
+          // list them to prove that they still exist, nor to scan the base files they could
+          // conflict with. And this committer is closed right after the batch, so maintenance
+          // cannot be left to an executor that is about to be shut down, nor a failure to a
+          // commit that never comes.
+          tableCommit
+            .checkFilesExistence(false)
+            .checkAppendFiles(false)
+            .inlineMaintenance(true)
+            .filterAndCommit(
+              Collections.singletonMap(Long.box(identifier), commitMessages.toList.asJava))
         case None =>
           tableCommit.commit(commitMessages.toList.asJava)
       }
