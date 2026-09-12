@@ -22,6 +22,7 @@ import os
 import struct
 import sys
 import types
+import tempfile
 
 import pyarrow as pa
 
@@ -41,7 +42,7 @@ from pypaimon.globalindex.full_text.native_full_text_index_writer import (
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
-    _sample_training_vectors,
+    _iter_training_batches,
     native_options,
     train_sample_ratio,
 )
@@ -93,9 +94,26 @@ class _FakeVectorIndexTraining:
 
 class _FakeVectorIndexTrainer:
 
+    def __init__(self, options):
+        self.options = options
+        self.batches = []
+
     @classmethod
-    def train(cls, options, data):
-        return _FakeVectorIndexTraining(options, data)
+    def create(cls, options):
+        return cls(options)
+
+    def add_training_vectors(self, data):
+        self.batches.append(data.copy())
+
+    def finish_training(self):
+        import numpy as np
+        return _FakeVectorIndexTraining(self.options, np.concatenate(self.batches))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 
 class _FakeVectorIndexWriter:
@@ -1028,7 +1046,11 @@ class GlobalIndexBuildTest(
 
         import numpy as np
         vectors = np.arange(20, dtype=np.float32).reshape(10, 2)
-        sampled = _sample_training_vectors(np, vectors, 0.4)
+        with tempfile.TemporaryFile() as vector_file:
+            vectors.tofile(vector_file)
+            vector_file.flush()
+            sampled = np.concatenate(list(_iter_training_batches(
+                np, vector_file, 10, 2, 0.4, batch_size=3)))
         self.assertEqual(
             [[0.0, 1.0], [4.0, 5.0], [10.0, 11.0], [14.0, 15.0]],
             sampled.tolist(),
