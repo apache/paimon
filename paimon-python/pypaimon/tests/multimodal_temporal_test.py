@@ -172,7 +172,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 2, "event_time": 10, "value": 120},
         ])
 
-        result = pmm.interpolate_linear(
+        result = pmm.interpolate_by(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id", tolerance=5,
         )
@@ -201,7 +201,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": 1, "event_time": 10, "value": float("inf")
         }])
 
-        row = pmm.interpolate_linear(
+        row = pmm.interpolate_by(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -224,7 +224,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": 10, "value": 10.0},
         ])
 
-        row = pmm.interpolate_linear(
+        row = pmm.interpolate_by(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id", tolerance=8,
         ).to_list()[0]
@@ -248,7 +248,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": 10, "state": [10.0, 20.0]},
         ])
 
-        result = pmm.interpolate_linear(
+        result = pmm.interpolate_by(
             anchors.scan(), states.scan().select("state"),
             on="event_time", by="episode_id",
         )
@@ -268,7 +268,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         })
 
         with self.assertRaisesRegex(TypeError, "requires numeric"):
-            pmm.interpolate_linear(
+            pmm.interpolate_by(
                 anchors.scan(), labels.scan().select("label"),
                 on="event_time", by="episode_id",
             )
@@ -299,7 +299,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             anchors.scan(), images.scan().select("image"),
             on="event_time", by="episode_id",
             direction="nearest", tolerance=2,
-        ).interpolate_linear(
+        ).interpolate_by(
             states.scan().select("state"), tolerance=5,
         ).to_list()[0]
 
