@@ -302,16 +302,19 @@ class MultimodalTemporalTest(unittest.TestCase):
         samples.add([
             {"episode_id": 1, "event_time": timestamp - 1, "value": 1},
             {"episode_id": 1, "event_time": timestamp, "value": 2},
+            {"episode_id": 1, "event_time": timestamp + 1, "value": 3},
         ])
 
-        row = pmm.join_window(
-            anchors.scan(), samples.scan().select("value"),
-            on="event_time", by="episode_id",
-            preceding=0.0, following=0.0,
-            aggregations={"matches": ("value", "count")},
-        ).to_list()[0]
+        for width in (0.0, 0.125):
+            with self.subTest(width=width):
+                row = pmm.join_window(
+                    anchors.scan(), samples.scan().select("value"),
+                    on="event_time", by="episode_id",
+                    preceding=width, following=width,
+                    aggregations={"matches": ("value", "count")},
+                ).to_list()[0]
 
-        self.assertEqual(1, row["matches"])
+                self.assertEqual(1, row["matches"])
 
     def test_window_join_prunes_unaggregated_right_columns(self):
         anchors = self._table("window_projection_anchors", {

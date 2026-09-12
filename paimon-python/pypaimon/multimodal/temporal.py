@@ -586,16 +586,34 @@ class _WindowJoinRight(_AsOfJoinRight):
         start, end = bounds
         left = target - self._preceding_key
         right = target + self._following_key
-        first = (
-            bisect_left(self._time_keys, left, start, end)
-            if self.closed in ("both", "left")
-            else bisect_right(self._time_keys, left, start, end)
-        )
-        last = (
-            bisect_right(self._time_keys, right, first, end)
-            if self.closed in ("both", "right")
-            else bisect_left(self._time_keys, right, first, end)
-        )
+        if pa.types.is_integer(self.time_type):
+            first_key = (
+                math.ceil(left)
+                if self.closed in ("both", "left")
+                else math.floor(left) + 1
+            )
+            last_key = (
+                math.floor(right)
+                if self.closed in ("both", "right")
+                else math.ceil(right) - 1
+            )
+            if first_key > last_key:
+                return []
+            first = bisect_left(
+                self._time_keys, first_key, start, end)
+            last = bisect_right(
+                self._time_keys, last_key, first, end)
+        else:
+            first = (
+                bisect_left(self._time_keys, left, start, end)
+                if self.closed in ("both", "left")
+                else bisect_right(self._time_keys, left, start, end)
+            )
+            last = (
+                bisect_right(self._time_keys, right, first, end)
+                if self.closed in ("both", "right")
+                else bisect_left(self._time_keys, right, first, end)
+            )
         return [self._row_ids[index].as_py()
                 for index in range(first, last)]
 
