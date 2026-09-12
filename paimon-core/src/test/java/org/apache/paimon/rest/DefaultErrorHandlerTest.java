@@ -103,6 +103,20 @@ public class DefaultErrorHandlerTest {
         }
     }
 
+    @Test
+    public void testNullCodeDoesNotNpeAndFallsThrough() {
+        // the code is optional in the error schema, so an omitted one reaches the handler as
+        // null and must not unbox
+        RESTException exception =
+                assertThrows(
+                        RESTException.class,
+                        () ->
+                                defaultErrorHandler.accept(
+                                        new ErrorResponse(null, null, "message", (Integer) null),
+                                        DEFAULT_REQUEST_ID));
+        assertTrue(exception.getMessage().contains("message"));
+    }
+
     private ErrorResponse generateErrorResponse(int code) {
         return new ErrorResponse(null, null, "message", code);
     }
