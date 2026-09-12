@@ -22,6 +22,7 @@ import os
 import struct
 import sys
 import types
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
@@ -556,7 +557,8 @@ class GlobalIndexBuildTest(
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         vectors = pa.array(
             [[1.0, 0.0], [0.0, 1.0], None],
             type=pa.list_(pa.float32()),
@@ -610,12 +612,56 @@ class GlobalIndexBuildTest(
             table.path_factory().global_index_path_factory().to_path(
                 entry.index_file.file_name)))
 
+    def test_create_vindex_streaming_failure_cleans_resources(self):
+        from pypaimon.read.table_read import TableRead
+
+        schema = pa.schema([('embedding', pa.list_(pa.float32()))])
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
+        self._write_arrow(table, pa.table(
+            {'embedding': [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]}, schema=schema))
+        snapshot_id = table.snapshot_manager().get_latest_snapshot().id
+        original_write = VindexVectorIndexWriter.write
+        original_batches = TableRead._arrow_batch_generator
+        temp_paths = []
+        closed = []
+        generators = []
+
+        def failing_write(writer, vector, row_id):
+            original_write(writer, vector, row_id)
+            if row_id == 1:
+                temp_paths.extend([writer._row_id_temp_path, writer._vector_temp_path])
+                raise RuntimeError('injected write failure')
+
+        def tracked_batches(reader, *args):
+            def generate():
+                try:
+                    yield from original_batches(reader, *args)
+                finally:
+                    closed.append(True)
+            generator = generate()
+            generators.append(generator)
+            return generator
+
+        with patch.object(VindexVectorIndexWriter, 'write', failing_write), \
+                patch.object(TableRead, '_arrow_batch_generator', tracked_batches):
+            with self.assertRaisesRegex(RuntimeError, 'injected write failure'):
+                table.create_global_index('embedding', index_type='ivf-flat', options={
+                    'ivf-flat.dimension': '2',
+                })
+
+        self.assertEqual([True], closed)
+        self.assertEqual(2, len(temp_paths))
+        self.assertTrue(all(not os.path.exists(path) for path in temp_paths))
+        self.assertEqual(snapshot_id, table.snapshot_manager().get_latest_snapshot().id)
+
     def test_create_vindex_global_index_respects_row_count_per_shard(self):
         schema = pa.schema([
             ('id', pa.int32()),
             ('embedding', pa.list_(pa.float32())),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         vectors = pa.array(
             [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [0.2, 0.8], [0.9, 0.1]],
             type=pa.list_(pa.float32()),
@@ -774,7 +820,8 @@ class GlobalIndexBuildTest(
             ('id', pa.int32()),
             ('content', pa.string()),
         ])
-        table = self._create_table(pa_schema=schema, options=self.table_options)
+        table = self._create_table(pa_schema=schema, options=dict(
+            self.table_options, **{'read.batch-size': '1'}))
         self._write_arrow(table, pa.table(
             {
                 'id': [1, 2, 3],
@@ -1179,6 +1226,116 @@ class GlobalIndexBuildTest(
                     self.assertAlmostEqual(value, actual, places=12)
                 else:
                     self.assertEqual(value, actual)
+
+
+class GenericIndexStreamingTest(unittest.TestCase):
+
+    schema = pa.schema([
+        ('embedding', pa.list_(pa.float32())),
+        ('_ROW_ID', pa.int64()),
+    ])
+
+    def setUp(self):
+        self.builder = object.__new__(GlobalIndexBuilder)
+        self.builder._table = Mock()
+        self.builder._core_options = Mock()
+        self.builder._core_options.global_index_row_count_per_shard.return_value = 10
+        self.builder._index_columns = ['embedding']
+        self.builder._index_type = 'ivf-flat'
+        self.writer = Mock()
+        self.writer.finish.return_value = []
+        self.builder._create_generic_index_writer = Mock(return_value=self.writer)
+        self.read = Mock()
+        self.read.to_arrow.side_effect = AssertionError('Must not materialize a shard')
+        self.events = []
+
+    def _batch(self, values, row_ids):
+        return pa.RecordBatch.from_arrays([
+            pa.array(values, type=self.schema.field(0).type),
+            pa.array(row_ids, type=pa.int64()),
+        ], schema=self.schema)
+
+    def _build(self, batches):
+        def generate():
+            try:
+                for batch in batches:
+                    self.events.append('read')
+                    yield batch
+            finally:
+                self.events.append('reader closed')
+
+        # Retain the generator: cleanup must be explicit, not depend on GC.
+        self.generator = generate()
+        reader = pa.RecordBatchReader.from_batches(self.schema, self.generator)
+        self.read._new_arrow_batch_reader.return_value = reader, self.generator
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=[
+            (_FakeSplit([]), Range(10, 19)),
+        ]), patch(module + '._to_index_manifest_entries', return_value=[]):
+            return self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+    def test_batches_are_written_before_reading_the_next_batch(self):
+        written = []
+
+        def write(value, row_id):
+            self.events.append('write')
+            written.append((value, row_id))
+
+        def finish():
+            self.assertEqual('reader closed', self.events[-1])
+            return []
+
+        self.writer.write.side_effect = write
+        self.writer.finish.side_effect = finish
+        self._build([
+            self._batch([], []),
+            self._batch([[9.0], [10.0], None], [9, 10, 11]),
+            self._batch([[19.0], [20.0]], [19, 20]),
+        ])
+        self.assertEqual([([10.0], 0), (None, 1), ([19.0], 9)], written)
+        self.assertEqual([
+            'read', 'read', 'write', 'write', 'read', 'write', 'reader closed',
+        ], self.events)
+        self.writer.finish.assert_called_once()
+        self.writer.close.assert_called_once()
+        self.read.to_arrow.assert_not_called()
+
+    def test_empty_input_does_not_create_a_writer(self):
+        for batches in ([], [self._batch([], [])]):
+            with self.subTest(batches=len(batches)):
+                self.assertEqual([], self._build(batches))
+                self.builder._create_generic_index_writer.assert_not_called()
+                self.assertEqual('reader closed', self.events[-1])
+
+    def test_failures_close_reader_and_writer(self):
+        for failure in ('create', 'read', 'write', 'finish', 'null_row_id'):
+            with self.subTest(failure=failure):
+                self.setUp()
+                error = RuntimeError('injected failure')
+                if failure == 'create':
+                    self.builder._create_generic_index_writer.side_effect = error
+                elif failure in ('write', 'finish'):
+                    getattr(self.writer, failure).side_effect = error
+
+                def batches():
+                    yield self._batch([[10.0]], [10])
+                    if failure == 'read':
+                        raise error
+                    yield self._batch([[11.0]], [
+                        None if failure == 'null_row_id' else 11])
+
+                exception = ValueError if failure == 'null_row_id' else RuntimeError
+                message = '_ROW_ID is null' if failure == 'null_row_id' else 'injected failure'
+                with self.assertRaisesRegex(exception, message):
+                    self._build(batches())
+                self.assertEqual('reader closed', self.events[-1])
+                if failure == 'create':
+                    self.writer.close.assert_not_called()
+                else:
+                    self.writer.close.assert_called_once()
+                if failure != 'finish':
+                    self.writer.finish.assert_not_called()
 
 
 if __name__ == "__main__":
