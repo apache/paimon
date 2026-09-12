@@ -17,6 +17,7 @@
 import builtins
 from array import array
 from fractions import Fraction
+import importlib.util
 import io
 import json
 import pickle
@@ -1844,6 +1845,19 @@ class LeRobotValidationTest(unittest.TestCase):
 
     @unittest.skipUnless(av is not None, "PyAV is required for MP4 decoding")
     def test_imported_video_payload_can_be_decoded(self):
+        self._assert_imported_video_payload_can_be_decoded(False)
+
+    @unittest.skipUnless(
+        av is not None
+        and sys.version_info >= (3, 10)
+        and importlib.util.find_spec("datasets") is not None
+        and importlib.util.find_spec("torch") is not None,
+        "Video training reads require Python 3.10+, PyAV, datasets, and Torch",
+    )
+    def test_imported_video_payload_supports_training_reads(self):
+        self._assert_imported_video_payload_can_be_decoded(True)
+
+    def _assert_imported_video_payload_can_be_decoded(self, training_reads):
         import pandas as pd
 
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_mp4_"))
@@ -2052,6 +2066,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 [0.5, 0.6, 0.1, 0.2, 0.3],
                 atol=1e-6,
             )
+            if not training_reads:
+                return
 
             dataset = pmm.PaimonLeRobotDataset(
                 table,
