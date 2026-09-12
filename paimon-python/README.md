@@ -286,3 +286,24 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
+
+
+# Native vector index training
+
+The native vector index writer submits training vectors in bounded batches.
+`<index-type>.train.sample-ratio` (or its field-level override) still selects
+the same evenly spaced non-null vectors in the same order. Native training
+receives the final corpus size for automatic IVF sizing. This bounds Python
+training buffers; native training and index construction have their own
+memory requirements.
+
+With `pypaimon[vindex]` installed, compare complete writer builds and training
+buffer strategies using:
+
+```shell
+python -m pypaimon.benchmark.vindex_training_bench --output /tmp/training.json
+```
+
+Each variant runs in a fresh process and reports peak RSS, ingestion time,
+finish time, and an index-file checksum. The benchmark checks identical
+index bytes for each sampling ratio across all variants.

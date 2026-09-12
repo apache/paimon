@@ -106,18 +106,8 @@ class VindexVectorIndexWriter:
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)
-            vectors = np.fromfile(
-                self._vector_temp_path,
-                dtype=np.float32,
-                count=self._vector_count * self._dimension,
-            ).reshape(self._vector_count, self._dimension)
-            training_vectors = _sample_training_vectors(
-                np, vectors, self._train_sample_ratio)
-            training = VectorIndexTrainer.train(
-                self._training_options(), training_vectors)
+            training = self._train(np, VectorIndexTrainer)
             try:
-                del training_vectors
-                del vectors
                 with VectorIndexWriter(training) as writer:
                     self._add_vectors_in_batches(np, writer)
                     with self._file_io.new_output_stream(file_path) as output_stream:
@@ -131,6 +121,16 @@ class VindexVectorIndexWriter:
             self._delete_temp_files()
 
         return [ResultEntry(self.file_name, self._row_count, b"{}")]
+
+    def _train(self, np, trainer_type):
+        with open(self._vector_temp_path, "rb") as vector_file:
+            with trainer_type.create(self._training_options()) as trainer:
+                for batch in _iter_training_batches(
+                    np, vector_file, self._vector_count, self._dimension,
+                    self._train_sample_ratio, batch_size=ADD_BATCH_SIZE,
+                ):
+                    trainer.add_training_vectors(batch)
+                return trainer.finish_training()
 
     def _file_path(self) -> str:
         return "%s/%s" % (self._index_path, self.file_name)
@@ -343,16 +343,31 @@ def _is_float_type(data_type: DataType) -> bool:
     )
 
 
-def _sample_training_vectors(np, vectors, sample_ratio: float):
-    vector_count = vectors.shape[0]
+def _iter_training_batches(
+    np, vector_file, vector_count: int, dimension: int, sample_ratio: float,
+    batch_size: int = ADD_BATCH_SIZE,
+):
+    """Yield the existing evenly spaced sample using bounded reads and buffers."""
     train_count = max(1, min(vector_count, int(math.ceil(
         vector_count * sample_ratio))))
-    if train_count == vector_count:
-        return vectors
-    indexes = (
-        np.arange(train_count, dtype=np.int64) * vector_count // train_count
-    )
-    return np.ascontiguousarray(vectors[indexes])
+    position = 0
+    item_size = np.dtype(np.float32).itemsize
+    while position < train_count:
+        start = position * vector_count // train_count
+        end = min(start + batch_size, vector_count)
+        # First sample position whose source row is at or beyond this block.
+        next_position = min(train_count, (end * train_count + vector_count - 1) // vector_count)
+        vector_file.seek(start * dimension * item_size)
+        vectors = np.fromfile(
+            vector_file, dtype=np.float32, count=(end - start) * dimension,
+        ).reshape(end - start, dimension)
+        if train_count == vector_count:
+            yield vectors
+        else:
+            indexes = np.arange(position, next_position, dtype=np.int64)
+            indexes = indexes * vector_count // train_count - start
+            yield np.ascontiguousarray(vectors[indexes])
+        position = next_position
 
 
 def _materialize_vector(
