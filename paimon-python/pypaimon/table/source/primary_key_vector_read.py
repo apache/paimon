@@ -25,7 +25,7 @@ from pypaimon.table.source.primary_key_scored_result import (
 from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_read import (
-    _check_vector_dimension, _compute_score, _raw_search_metric, _to_vector_list)
+    _iter_arrow_scores, _raw_search_metric)
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
@@ -131,7 +131,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                     if key[:3] == (partition, data_split.bucket, data_file_name))
                 position_iter = iter(positions)
                 for batch in reader.to_arrow([split]).to_batches():
-                    for stored in batch.column(0).to_pylist():
+                    for score in _iter_arrow_scores(batch.column(0), self._query_vector, metric):
                         try:
                             row_position = next(position_iter)
                         except StopIteration:
@@ -144,14 +144,11 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                             raise ValueError(
                                 "Primary-key vector rerank read unexpected position %s."
                                 % (key,))
-                        if stored is None:
+                        if score is None:
                             raise ValueError(
                                 "Primary-key vector candidate %s contains a null vector."
                                 % (key,))
-                        stored = _to_vector_list(stored)
-                        _check_vector_dimension(self._query_vector, stored)
-                        yield candidate.with_score(_compute_score(
-                            self._query_vector, stored, metric))
+                        yield candidate.with_score(score)
                 try:
                     next(position_iter)
                     raise ValueError(
@@ -197,21 +194,18 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
                     if _allowed(split, data_file.file_name, position))
                 position_iter = iter(positions)
                 for batch in reader.to_arrow([read_split]).to_batches():
-                    for stored in batch.column(0).to_pylist():
+                    for score in _iter_arrow_scores(batch.column(0), self._query_vector, metric):
                         try:
                             row_position = next(position_iter)
                         except StopIteration:
                             raise ValueError(
                                 "Raw vector read returned an unexpected row.")
-                        if stored is None:
+                        if score is None:
                             continue
-                        stored = _to_vector_list(stored)
-                        _check_vector_dimension(self._query_vector, stored)
                         yield PrimaryKeySearchPosition(
                             _partition_bytes(split.data_split.partition),
                             split.data_split.bucket, data_file.file_name,
-                            row_position, _compute_score(
-                                self._query_vector, stored, metric))
+                            row_position, score)
                 try:
                     next(position_iter)
                     raise ValueError(
