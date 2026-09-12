@@ -64,11 +64,11 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
     )
 
 
-def interpolate_by(left, right, *, on, by, tolerance=None,
-                   right_on=None, suffix="_right") -> "AsOfJoin":
+def interpolate_linear(left, right, *, on, by, tolerance=None,
+                       right_on=None, suffix="_right") -> "AsOfJoin":
     """Linearly interpolate numeric right values at each left timestamp."""
     on, by = _normalize_temporal_keys(on, by)
-    return AsOfJoin(left, on, by).interpolate_by(
+    return AsOfJoin(left, on, by).interpolate_linear(
         right,
         tolerance=tolerance,
         right_on=right_on,
@@ -126,8 +126,8 @@ class AsOfJoin:
         )
         return self._append(source)
 
-    def interpolate_by(self, right, *, tolerance=None, right_on=None,
-                       suffix="_right") -> "AsOfJoin":
+    def interpolate_linear(self, right, *, tolerance=None, right_on=None,
+                           suffix="_right") -> "AsOfJoin":
         """Append linear interpolation of numeric right-side values."""
         position = len(self._sources) + 1
         source = _LinearInterpolationRight(

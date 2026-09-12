@@ -89,11 +89,11 @@ match delta.
 Inputs are snapshot-pinned (`resolved_snapshots`). Left rows stream, right join
 keys stay in memory, and BLOBs remain descriptors.
 
-Use `interpolate_by` for numeric scalars or fixed-size numeric lists. It
+Use `interpolate_linear` for numeric scalars or fixed-size numeric lists. It
 requires surrounding rows in the same group and never extrapolates.
 
 ```python
-states_at_steps = aligned.interpolate_by(
+states_at_steps = aligned.interpolate_linear(
     states.scan().select(["joint_position", "velocity"]),
     tolerance=timedelta(milliseconds=50),
 )
