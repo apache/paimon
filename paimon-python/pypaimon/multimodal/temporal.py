@@ -52,10 +52,9 @@ _TEMPORAL_ROW_GROUP_CACHE_MAX_SIZE = 64 * 1024 * 1024
 
 
 def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
-              right_on=None, suffix="_right") -> "AsOfJoin":
+              right_on=None, suffix="_right") -> "TemporalAlignment":
     """Join each left row with at most one time-aligned right row."""
-    on, by = _normalize_temporal_keys(on, by)
-    return AsOfJoin(left, on, by).join_asof(
+    return TemporalAlignment(left, on=on, by=by).join_asof(
         right,
         direction=direction,
         tolerance=tolerance,
@@ -64,11 +63,10 @@ def join_asof(left, right, *, on, by, direction="backward", tolerance=None,
     )
 
 
-def interpolate_by(left, right, *, on, by, tolerance=None,
-                   right_on=None, suffix="_right") -> "AsOfJoin":
+def interpolate(left, right, *, on, by, tolerance=None,
+                right_on=None, suffix="_right") -> "TemporalAlignment":
     """Linearly interpolate numeric right values at each left timestamp."""
-    on, by = _normalize_temporal_keys(on, by)
-    return AsOfJoin(left, on, by).interpolate_by(
+    return TemporalAlignment(left, on=on, by=by).interpolate(
         right,
         tolerance=tolerance,
         right_on=right_on,
@@ -89,17 +87,18 @@ def _normalize_temporal_keys(on, by):
                 "by must be a column name or sequence.") from error
     if not by:
         raise ValueError(
-            "join_asof requires at least one grouping column in by.")
+            "Temporal alignment requires a grouping column in by.")
     if (any(not isinstance(name, str) or not name for name in by)
             or len(set(by)) != len(by)):
         raise ValueError("by must contain unique, non-empty column names.")
     return on, by
 
 
-class AsOfJoin:
-    """Lazy, chainable result of :func:`join_asof`."""
+class TemporalAlignment:
+    """Lazy, chainable alignment of table scans by time."""
 
-    def __init__(self, left, on, by):
+    def __init__(self, left, *, on, by):
+        on, by = _normalize_temporal_keys(on, by)
         self._anchor = _pin_scan_to_snapshot(_require_scan(left, "left"))
         self._on = on
         self._by = by
@@ -110,7 +109,7 @@ class AsOfJoin:
         self.schema = self._output_schema()
 
     def join_asof(self, right, *, direction="backward", tolerance=None,
-                  right_on=None, suffix="_right") -> "AsOfJoin":
+                  right_on=None, suffix="_right") -> "TemporalAlignment":
         """Append a right-side as-of join without materializing this scan."""
         position = len(self._sources) + 1
         label = "right source %d" % position
@@ -126,8 +125,8 @@ class AsOfJoin:
         )
         return self._append(source)
 
-    def interpolate_by(self, right, *, tolerance=None, right_on=None,
-                       suffix="_right") -> "AsOfJoin":
+    def interpolate(self, right, *, tolerance=None, right_on=None,
+                    suffix="_right") -> "TemporalAlignment":
         """Append linear interpolation of numeric right-side values."""
         position = len(self._sources) + 1
         source = _LinearInterpolationRight(
@@ -142,7 +141,7 @@ class AsOfJoin:
         return self._append(source)
 
     def _append(self, source):
-        result = object.__new__(AsOfJoin)
+        result = object.__new__(TemporalAlignment)
         result._anchor = self._anchor
         result._on = self._on
         result._by = self._by
@@ -572,12 +571,13 @@ def _pin_scan_to_snapshot(query):
     options = table.options
     if not options.row_tracking_enabled(False):
         raise ValueError(
-            "join_asof requires 'row-tracking.enabled' = 'true'.")
+            "Temporal alignment requires 'row-tracking.enabled' = 'true'.")
     if (options.scan_mode() == StartupMode.INCREMENTAL
             or options.options.contains(
                 CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP)):
         raise ValueError(
-            "join_asof does not support incremental scans; inputs must "
+            "Temporal alignment does not support incremental scans; "
+            "inputs must "
             "represent a complete point-in-time snapshot.")
     # Validate the original scan configuration before replacing it with a
     # pinned snapshot. Otherwise an invalid or unsupported scan mode can be

@@ -173,7 +173,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 2, "event_time": 10, "value": 120},
         ])
 
-        result = pmm.interpolate_by(
+        result = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id", tolerance=5,
         )
@@ -182,6 +182,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             key=lambda row: (row["episode_id"], row["event_time"]),
         )
 
+        self.assertIsInstance(result, pmm.TemporalAlignment)
         self.assertEqual(pa.float64(), result.schema.field("value").type)
         self.assertEqual([10.0, 30.0, None, 110.0], [
             row["value"] for row in rows
@@ -202,7 +203,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             "episode_id": 1, "event_time": 10, "value": float("inf")
         }])
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -225,7 +226,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": 10, "value": 10.0},
         ])
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id", tolerance=8,
         ).to_list()[0]
@@ -249,7 +250,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 1, "event_time": 10, "state": [10.0, 20.0]},
         ])
 
-        result = pmm.interpolate_by(
+        result = pmm.interpolate(
             anchors.scan(), states.scan().select("state"),
             on="event_time", by="episode_id",
         )
@@ -275,7 +276,7 @@ class MultimodalTemporalTest(unittest.TestCase):
              "value": (1 << 53) + 3},
         ])
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -300,7 +301,7 @@ class MultimodalTemporalTest(unittest.TestCase):
              "value": 10.0},
         ])
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -326,7 +327,7 @@ class MultimodalTemporalTest(unittest.TestCase):
              "value": sys.float_info.max, "infinite": float("inf")},
         ])
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select(["value", "infinite"]),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -362,7 +363,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         states.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        row = pmm.interpolate_by(
+        row = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         ).to_list()[0]
@@ -397,7 +398,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         states.raw_table.catalog_environment.table_query_auth = (
             lambda options, identifier: lambda select: auth)
 
-        aligned = pmm.interpolate_by(
+        aligned = pmm.interpolate(
             anchors.scan(), states.scan().select("value"),
             on="event_time", by="episode_id",
         )
@@ -416,7 +417,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         })
 
         with self.assertRaisesRegex(TypeError, "requires numeric"):
-            pmm.interpolate_by(
+            pmm.interpolate(
                 anchors.scan(), labels.scan().select("label"),
                 on="event_time", by="episode_id",
             ).to_arrow()
@@ -447,7 +448,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             anchors.scan(), images.scan().select("image"),
             on="event_time", by="episode_id",
             direction="nearest", tolerance=2,
-        ).interpolate_by(
+        ).interpolate(
             states.scan().select("state"), tolerance=5,
         ).to_list()[0]
 
@@ -1225,7 +1226,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         }])
 
         with self.assertRaisesRegex(
-                ValueError, "join_asof.*incremental"):
+                ValueError, "Temporal alignment.*incremental"):
             pmm.join_asof(
                 anchors.scan(), source.scan().select("value"),
                 on="event_time", by="episode_id",
@@ -1562,7 +1563,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                     pa.chunked_array([chunk for _ in row_ids])
                 ], schema=schema)
 
-        aligned = object.__new__(temporal.AsOfJoin)
+        aligned = object.__new__(temporal.TemporalAlignment)
         aligned._anchor_schema = schema
         aligned._sources = ()
         rows = [{temporal._ROW_ID: value} for value in range(2)]
