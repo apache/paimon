@@ -138,7 +138,10 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
             } else if (c == '\\') {
                 escaped = true;
             } else if (c == '"') {
+                // quotes group a token across separators; the quote characters
+                // themselves are dropped rather than embedded in the token
                 inQuotes = !inQuotes;
+                continue;
             } else if (!inQuotes) {
                 if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);

@@ -976,6 +976,38 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testStringToArrayPreservesQuotedSeparator() {
+        ArrayType arrayType = new ArrayType(DataTypes.STRING());
+        compareCastResult(
+                CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType),
+                BinaryString.fromString("[\"a,b\", c]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("a,b"), BinaryString.fromString("c")
+                        }));
+
+        // an empty quoted token is dropped like in the map rule: empty-string elements
+        // are not expressible in this mini-language
+        compareCastResult(
+                CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType),
+                BinaryString.fromString("[\"\", a]"),
+                new GenericArray(new Object[] {BinaryString.fromString("a")}));
+    }
+
+    @Test
+    public void testStringToRowPreservesQuotedSeparator() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.STRING()),
+                        DataTypes.FIELD(1, "f1", DataTypes.INT()));
+        GenericRow expected = GenericRow.of(BinaryString.fromString("a,b"), 2);
+        compareCastResult(
+                CastExecutors.resolve(VarCharType.STRING_TYPE, rowType),
+                BinaryString.fromString("{\"a,b\", 2}"),
+                expected);
+    }
+
+    @Test
     public void testSplitMapEntriesWithQuotes() {
         String content = "1, \"abc\"";
         List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);
