@@ -102,3 +102,50 @@ def test_java_primary_key_full_text_index(catalog):
               .execute_local())
     rows = _read_search_result(table, result)
     assert sorted(rows.column("id").to_pylist()) == [1, 3]
+
+
+def test_java_primary_key_vector_refinement_matches_scalar(catalog):
+    from unittest import mock
+    from pypaimon.table.source import vector_search_read as scoring
+
+    _require_native("paimon_vindex")
+    table = catalog.get_table("default.test_pk_vector_golden")
+
+    def search():
+        return (table.new_vector_search_builder()
+                .with_vector_column("embedding")
+                .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                .with_option("ivf.refine_factor", "2")
+                .with_limit(2).execute_local())
+
+    with mock.patch.object(scoring, "_compute_scores", lambda *args: None):
+        expected = search()
+    with mock.patch.object(scoring, "_compute_scores", wraps=scoring._compute_scores) as fast:
+        actual = search()
+    assert actual.positions == expected.positions
+    assert actual.positions
+    assert fast.call_count > 0
+
+
+def test_java_primary_key_raw_vectors_match_scalar(catalog):
+    from dataclasses import replace
+    from unittest import mock
+    from pypaimon.table.source import vector_search_read as scoring
+    from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
+
+    table = catalog.get_table("default.test_pk_vector_golden")
+    builder = (table.new_vector_search_builder()
+               .with_vector_column("embedding")
+               .with_query_vector([1.0, 0.0, 0.0, 0.0]).with_limit(2))
+    plan = builder.new_vector_search_scan().scan()
+    raw_plan = PrimaryKeyVectorScanPlan(plan.snapshot_id, [
+        replace(split, payloads=(), uncovered_data_files=tuple(
+            file.file_name for file in split.data_split.files)) for split in plan.splits()])
+    reader = builder.new_vector_search_read()
+    with mock.patch.object(scoring, "_compute_scores", lambda *args: None):
+        expected = list(reader._raw_candidates(raw_plan))
+    with mock.patch.object(scoring, "_compute_scores", wraps=scoring._compute_scores) as fast:
+        actual = list(reader._raw_candidates(raw_plan))
+    assert actual == expected
+    assert actual
+    assert fast.call_count > 0

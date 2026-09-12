@@ -286,3 +286,27 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
+
+
+# Vector fallback scoring and refinement
+
+Raw vector fallback and refinement score regular FLOAT vectors in bounded
+blocks using NumPy. List, large-list and fixed-size-list Arrow arrays are
+supported, including slices and multiple chunks. Null or unsupported blocks
+use the scalar path. Candidate filters are applied before scoring.
+
+L2 and cosine retain scalar accumulation order. Inner product retains Python
+`sum` semantics, including its behavior on newer Python versions. Existing
+Top-K tie-breaking rules are preserved. The same scoring path is used for raw and
+refined primary-key vector results.
+
+To compare Parquet reads, conversion, scoring and Top-K with the original
+scalar implementation and a blocked-scalar ablation:
+
+```shell
+python -m pypaimon.benchmark.vector_scoring_bench --output /tmp/scoring.json
+```
+
+Each variant runs in a fresh process and reports timings, process peak RSS,
+and a checksum of result row IDs and score bits. This measures the fallback
+read-and-score path; Paimon manifest planning and ANN index search are excluded.
