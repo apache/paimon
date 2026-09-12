@@ -188,7 +188,7 @@ class MultimodalTemporalTest(unittest.TestCase):
             row["value"] for row in rows
         ])
 
-    def test_window_aggregation_stays_in_group_and_skips_nulls(self):
+    def test_window_join_stays_in_group_and_skips_nulls(self):
         anchors = self._table("window_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -221,7 +221,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                 "last_value", "valid_count")
         })])
 
-        result = pmm.aggregate_window(
+        result = pmm.join_window(
             anchors.scan(),
             samples.scan().select([
                 "average", "minimum", "maximum", "first_value",
@@ -255,7 +255,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertIsNone(rows[2]["average"])
         self.assertEqual(0, rows[2]["valid_count"])
 
-    def test_window_aggregation_supports_asymmetric_timestamp_bounds(self):
+    def test_window_join_supports_asymmetric_timestamp_bounds(self):
         anchors = self._table("window_timestamp_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.timestamp("ms"),
@@ -275,7 +275,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                                   (0, 2.0), (5, 3.0), (6, 100.0))
         ])
 
-        row = pmm.aggregate_window(
+        row = pmm.join_window(
             anchors.scan(), samples.scan().select("value"),
             on="event_time", right_on="captured_at", by="episode_id",
             preceding=timedelta(milliseconds=10),
@@ -285,7 +285,7 @@ class MultimodalTemporalTest(unittest.TestCase):
 
         self.assertEqual(2.0, row["value"])
 
-        right_closed = pmm.aggregate_window(
+        right_closed = pmm.join_window(
             anchors.scan(), samples.scan().select("value"),
             on="event_time", right_on="captured_at", by="episode_id",
             preceding=timedelta(milliseconds=10),
@@ -316,7 +316,7 @@ class MultimodalTemporalTest(unittest.TestCase):
              "float_value": sys.float_info.max},
         ])
 
-        row = pmm.aggregate_window(
+        row = pmm.join_window(
             anchors.scan(),
             samples.scan().select(["integer_value", "float_value"]),
             on="event_time", by="episode_id", preceding=1, following=1,
@@ -329,7 +329,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual(-0.5, row["integer_value"])
         self.assertEqual(sys.float_info.max, row["float_value"])
 
-    def test_window_aggregation_can_follow_an_asof_join(self):
+    def test_window_join_can_follow_an_asof_join(self):
         anchors = self._table("window_chain_anchors", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -354,7 +354,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         row = pmm.join_asof(
             anchors.scan(), images.scan().select("image"),
             on="event_time", by="episode_id", direction="nearest",
-        ).aggregate_window(
+        ).join_window(
             imu.scan().select("acceleration"),
             preceding=2,
             aggregations={"acceleration": "mean"},
@@ -363,7 +363,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertEqual("frame", row["image"])
         self.assertEqual(2.0, row["acceleration"])
 
-    def test_window_aggregation_validates_options(self):
+    def test_window_join_validates_options(self):
         table = self._table("window_validation", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
@@ -375,24 +375,24 @@ class MultimodalTemporalTest(unittest.TestCase):
             return table.scan().select("value")
 
         with self.assertRaisesRegex(ValueError, "non-negative"):
-            pmm.aggregate_window(
+            pmm.join_window(
                 scan(), scan(), on="event_time", by="episode_id",
                 preceding=-1, aggregations={"value": "mean"})
         with self.assertRaisesRegex(ValueError, "Unsupported aggregation"):
-            pmm.aggregate_window(
+            pmm.join_window(
                 scan(), scan(), on="event_time", by="episode_id",
                 preceding=1, aggregations={"value": "median"})
         with self.assertRaisesRegex(ValueError, "closed must be"):
-            pmm.aggregate_window(
+            pmm.join_window(
                 scan(), scan(), on="event_time", by="episode_id",
                 preceding=1, aggregations={"value": "mean"},
                 closed="middle")
         with self.assertRaisesRegex(ValueError, "missing aggregation columns"):
-            pmm.aggregate_window(
+            pmm.join_window(
                 scan(), scan(), on="event_time", by="episode_id",
                 preceding=1, aggregations={"missing": "mean"})
         with self.assertRaisesRegex(TypeError, "requires integer or floating"):
-            pmm.aggregate_window(
+            pmm.join_window(
                 scan(), table.scan().select("text"),
                 on="event_time", by="episode_id", preceding=1,
                 aggregations={"text": "first"}).to_arrow()

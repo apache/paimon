@@ -102,15 +102,16 @@ states_at_steps = aligned.interpolate(
 )
 ```
 
-Use `aggregate_window(left, right, ...)` directly or chain
-`aligned.aggregate_window(...)`. It reduces numeric right rows in each `by`
-group and `[left - preceding, left + following]` window. `following` defaults
-to zero; `closed` controls endpoints. Supported aggregations are `mean`, `min`,
-`max`, `first`, `last`, and `count`. Nulls are skipped; empty windows return
-null, except `count` returns zero.
+Use `join_window(left, right, ...)` directly or chain
+`aligned.join_window(...)`. Unlike single-table `rolling().agg()`, it joins
+each left row to right rows in the same `by` group and
+`[left - preceding, left + following]` time window, then aggregates them.
+`following` defaults to zero; `closed` controls endpoints. Supported
+aggregations are `mean`, `min`, `max`, `first`, `last`, and `count`. Nulls are
+skipped; empty windows return null, except `count` returns zero.
 
 ```python
-steps_with_imu = aligned.aggregate_window(
+steps_with_imu = aligned.join_window(
     imu.scan().select("acceleration"),
     preceding=timedelta(milliseconds=50),
     following=timedelta(milliseconds=50),

@@ -74,11 +74,11 @@ def interpolate(left, right, *, on, by, tolerance=None,
     )
 
 
-def aggregate_window(left, right, *, on, by, preceding, aggregations,
-                     following=None, closed="both", right_on=None,
-                     suffix="_right") -> "TemporalAlignment":
-    """Aggregate right values in a time window around each left row."""
-    return TemporalAlignment(left, on=on, by=by).aggregate_window(
+def join_window(left, right, *, on, by, preceding, aggregations,
+                following=None, closed="both", right_on=None,
+                suffix="_right") -> "TemporalAlignment":
+    """Join and aggregate right values in each left row's time window."""
+    return TemporalAlignment(left, on=on, by=by).join_window(
         right,
         preceding=preceding,
         following=following,
@@ -155,10 +155,10 @@ class TemporalAlignment:
         )
         return self._append(source)
 
-    def aggregate_window(self, right, *, preceding, aggregations,
-                         following=None, closed="both", right_on=None,
-                         suffix="_right") -> "TemporalAlignment":
-        """Append aggregation of a right-side time window."""
+    def join_window(self, right, *, preceding, aggregations,
+                    following=None, closed="both", right_on=None,
+                    suffix="_right") -> "TemporalAlignment":
+        """Append a right-side window join with aggregation."""
         position = len(self._sources) + 1
         source = _WindowAggregationRight(
             "right source %d" % position,
