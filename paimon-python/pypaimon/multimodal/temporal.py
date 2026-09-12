@@ -160,7 +160,7 @@ class TemporalAlignment:
                     suffix="_right") -> "TemporalAlignment":
         """Append a right-side window join with aggregation."""
         position = len(self._sources) + 1
-        source = _WindowAggregationRight(
+        source = _WindowJoinRight(
             "right source %d" % position,
             right,
             self._on,
@@ -518,7 +518,7 @@ class _LinearInterpolationRight(_AsOfJoinRight):
         return arrays
 
 
-class _WindowAggregationRight(_AsOfJoinRight):
+class _WindowJoinRight(_AsOfJoinRight):
 
     _SUPPORTED_AGGREGATIONS = {
         "count", "first", "last", "max", "mean", "min",
