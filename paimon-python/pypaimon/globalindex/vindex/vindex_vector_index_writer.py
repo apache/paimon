@@ -86,6 +86,52 @@ class VindexVectorIndexWriter:
         self._vector_temp.write(array("f", materialized).tobytes())
         self._vector_count += 1
 
+    def write_batch(self, vectors, relative_row_ids) -> None:
+        """Write Arrow arrays without materializing valid float32 vectors as lists.
+
+        Unsupported layouts and invalid vectors use the scalar path so that
+        validation errors and the order of successfully written rows match write().
+        """
+        if self._closed:
+            raise RuntimeError("VindexVectorIndexWriter is already closed.")
+        if len(vectors) != len(relative_row_ids):
+            raise ValueError("Vector and row ID batch lengths differ.")
+        if relative_row_ids.null_count:
+            raise ValueError("Cannot build global index because _ROW_ID is null.")
+        if len(vectors) == 0:
+            return
+
+        import numpy as np
+        import pyarrow as pa
+        import pyarrow.compute as pc
+
+        valid_vectors, valid_ids = vectors, relative_row_ids
+        if vectors.null_count:
+            valid = pc.is_valid(vectors)
+            valid_vectors = pc.filter(vectors, valid)
+            valid_ids = pc.filter(relative_row_ids, valid)
+        if len(valid_vectors) == 0:
+            self._row_count += len(vectors)
+            return
+
+        values = _float32_batch_values(np, pa, valid_vectors, self._dimension)
+        if (values is not None and values.null_count == 0
+                and valid_ids.type == pa.int64()):
+            data = values.to_numpy(zero_copy_only=True)
+            if np.isfinite(data).all():
+                ids = np.ascontiguousarray(
+                    valid_ids.to_numpy(zero_copy_only=False), dtype=np.int64)
+                data = np.ascontiguousarray(data, dtype=np.float32)
+                self._row_count += len(vectors)
+                self._ensure_temp_files()
+                self._row_id_temp.write(memoryview(ids).cast('B'))
+                self._vector_temp.write(memoryview(data).cast('B'))
+                self._vector_count += len(valid_vectors)
+                return
+
+        for vector, row_id in zip(vectors.to_pylist(), relative_row_ids.to_pylist()):
+            self.write(vector, row_id)
+
     def finish(self) -> List[ResultEntry]:
         if self._closed:
             raise RuntimeError("VindexVectorIndexWriter is already closed.")
@@ -353,6 +399,26 @@ def _sample_training_vectors(np, vectors, sample_ratio: float):
         np.arange(train_count, dtype=np.int64) * vector_count // train_count
     )
     return np.ascontiguousarray(vectors[indexes])
+
+
+def _float32_batch_values(np, pa, vectors, dimension):
+    vector_type = vectors.type
+    if not (
+        pa.types.is_list(vector_type)
+        or pa.types.is_large_list(vector_type)
+        or pa.types.is_fixed_size_list(vector_type)
+    ) or vector_type.value_type != pa.float32():
+        return None
+
+    if pa.types.is_fixed_size_list(vector_type):
+        if vector_type.list_size != dimension:
+            return None
+        return vectors.values.slice(vectors.offset * dimension, len(vectors) * dimension)
+
+    offsets = vectors.offsets.to_numpy(zero_copy_only=True)
+    if not np.all(np.diff(offsets) == dimension):
+        return None
+    return vectors.values.slice(int(offsets[0]), int(offsets[-1] - offsets[0]))
 
 
 def _materialize_vector(
