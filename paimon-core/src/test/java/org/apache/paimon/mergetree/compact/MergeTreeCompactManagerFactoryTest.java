@@ -36,15 +36,20 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -60,6 +65,46 @@ public class MergeTreeCompactManagerFactoryTest {
             DataTypes.ROW(
                     DataTypes.FIELD(0, "key", DataTypes.INT()),
                     DataTypes.FIELD(1, "value", DataTypes.INT()));
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testFailedFactoryClosesDefaultRewriter(boolean returnNull) throws Exception {
+        CompactRewriter delegate = mock(CompactRewriter.class);
+        CompactRewriterFactory factory =
+                (partition, bucket, rewriter) -> {
+                    if (returnNull) {
+                        return null;
+                    }
+                    throw new IllegalStateException("factory failed");
+                };
+        assertThatThrownBy(
+                        () ->
+                                MergeTreeCompactManagerFactory.wrapRewriter(
+                                        factory, BinaryRow.EMPTY_ROW, 0, delegate))
+                .isInstanceOf(returnNull ? NullPointerException.class : IllegalStateException.class)
+                .hasMessageContaining(returnNull ? "must return a rewriter" : "factory failed");
+        verify(delegate).close();
+    }
+
+    @Test
+    public void testCloseFailureDoesNotReplaceFactoryFailure() throws Exception {
+        CompactRewriter delegate = mock(CompactRewriter.class);
+        IOException closeFailure = new IOException("close failed");
+        doThrow(closeFailure).when(delegate).close();
+        IllegalStateException failure = new IllegalStateException("factory failed");
+        assertThatThrownBy(
+                        () ->
+                                MergeTreeCompactManagerFactory.wrapRewriter(
+                                        (partition, bucket, rewriter) -> {
+                                            throw failure;
+                                        },
+                                        BinaryRow.EMPTY_ROW,
+                                        0,
+                                        delegate))
+                .isSameAs(failure)
+                .hasSuppressedException(closeFailure);
+        verify(delegate).close();
+    }
 
     @Test
     public void testLookupValueProjection() throws Exception {
