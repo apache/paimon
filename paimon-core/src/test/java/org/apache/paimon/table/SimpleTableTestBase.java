@@ -108,6 +108,7 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -1643,6 +1644,50 @@ public abstract class SimpleTableTestBase {
                     .filterAndCommit(Collections.singletonMap(2L, write.prepareCommit()));
         }
         assertThat(sm.latestSnapshotId()).isEqualTo(previous);
+    }
+
+    @Test
+    public void testFilterAndCommitWithProvidedUserUnderStrictMode() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        SnapshotManager sm = table.snapshotManager();
+
+        // A first run commits identifier 0 under a caller-provided user.
+        BatchWriteBuilderImpl first =
+                ((BatchWriteBuilderImpl) table.newBatchWriteBuilder()).withCommitUser("user");
+        try (BatchTableWrite write = first.newWrite();
+                InnerTableCommit commit = first.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        long committed = sm.latestSnapshotId();
+
+        // A restarted run replays identifier 0 with strict mode bounded by the snapshot it starts
+        // from, which is the snapshot that identifier produced. The bound only saves lookup work
+        // for a user created for one run; a provided user has to be looked up beyond it, or the
+        // replay is committed again.
+        Map<String, String> strict = new HashMap<>();
+        strict.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(committed));
+        BatchWriteBuilderImpl replay =
+                ((BatchWriteBuilderImpl) table.copy(strict).newBatchWriteBuilder())
+                        .withCommitUser("user");
+        try (BatchTableWrite write = replay.newWrite();
+                InnerTableCommit commit = replay.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId())
+                .as("a replay by a provided user must be recognised across the strict mode bound")
+                .isEqualTo(committed);
+
+        // The bound stays in place for a user the builder created itself.
+        BatchWriteBuilderImpl generated =
+                (BatchWriteBuilderImpl) table.copy(strict).newBatchWriteBuilder();
+        try (BatchTableWrite write = generated.newWrite();
+                InnerTableCommit commit = generated.newCommit()) {
+            write.write(rowData(2, 20, 200L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(committed + 1);
     }
 
     @Test

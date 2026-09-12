@@ -18,8 +18,10 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.catalog.{Catalog, CatalogLoader, DelegateCatalog, Identifier}
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.sources.PaimonSink
+import org.apache.paimon.table.{CatalogEnvironment, FileStoreTableFactory}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
@@ -27,7 +29,9 @@ import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.{OutputMode, StreamingQuery, StreamTest}
 
 import java.io.File
-import java.util.Collections
+import java.util.{Collections, List => JList, Map => JMap}
+
+import scala.collection.JavaConverters._
 
 /**
  * Structured Streaming guarantees exactly-once only if the sink is idempotent for a repeated
@@ -377,6 +381,67 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: a replay on the direct postpone path retries the partition registration") {
+    withTempDir {
+      checkpointDir =>
+        // A commit publishes its snapshot and only then registers the partition in the metastore.
+        // If that registration fails, the replay of the batch has to retry it: the snapshot
+        // already exists, so the replay must not commit again, but it must not report success
+        // before the partition is registered either.
+        spark.sql(
+          "CREATE TABLE T (city STRING, population LONG, dt STRING) PARTITIONED BY (dt) " +
+            "TBLPROPERTIES ('primary-key' = 'city,dt', 'bucket' = '-2', " +
+            "'postpone.default-bucket-num' = '1', 'metastore.partitioned-table' = 'true')")
+        val base = loadTable("T")
+        FailOnceRegistration.reset(paimonCatalog)
+        val environment = new CatalogEnvironment(
+          base.catalogEnvironment().identifier(),
+          base.catalogEnvironment().uuid(),
+          FailOnceRegistration.loader,
+          null,
+          null,
+          null,
+          false,
+          true)
+        val table = FileStoreTableFactory.create(
+          base.fileIO(),
+          base.location(),
+          base.schema(),
+          new Options(base.options()),
+          environment)
+
+        def newSink(): PaimonSink = new PaimonSink(
+          spark.sqlContext,
+          table,
+          Nil,
+          OutputMode.Complete(),
+          Options.fromMap(
+            Collections.singletonMap("checkpointLocation", checkpointDir.getCanonicalPath)))
+
+        val batch: DataFrame = Seq(("HZ", 1L, "2026-09-12")).toDF("city", "population", "dt")
+
+        // The first attempt fails after the snapshot is published.
+        val failure = intercept[Exception](newSink().addBatch(0L, batch))
+        assert(
+          failure.getMessage.contains("metastore unavailable") ||
+            Option(failure.getCause).exists(_.getMessage.contains("metastore unavailable")))
+        assert(snapshotCount("T") == 1)
+        assert(FailOnceRegistration.attempts == 1)
+        assert(FailOnceRegistration.registered.isEmpty)
+
+        // The restarted query replays the batch.
+        newSink().addBatch(0L, batch)
+
+        assert(snapshotCount("T") == 1, "the replay must not commit a second snapshot")
+        assert(
+          FailOnceRegistration.attempts == 2,
+          "the replay must retry the partition registration that failed after the snapshot")
+        assert(
+          FailOnceRegistration.registered.contains("2026-09-12"),
+          "the partition committed by the replayed batch must be registered")
+    }
+  }
+
   test("Paimon Sink: addBatch with a repeated batchId must be a no-op") {
     withTempDir {
       checkpointDir =>
@@ -515,5 +580,46 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
             s"expiration should retain a single snapshot, found ${snapshotCount("T")}")
       }
     }
+  }
+}
+
+/** A catalog whose first partition registration fails, the way a metastore RPC can. */
+private[spark] object FailOnceRegistration {
+
+  @volatile private var wrapped: Catalog = _
+  @volatile var attempts: Int = 0
+  val registered: java.util.Set[String] =
+    Collections.synchronizedSet(new java.util.HashSet[String]())
+
+  def reset(catalog: Catalog): Unit = {
+    wrapped = catalog
+    attempts = 0
+    registered.clear()
+  }
+
+  // Refers to this object only, so that the loader stays serializable with the table.
+  val loader: CatalogLoader = () => new FailOnceCatalog(wrapped)
+
+  private class FailOnceCatalog(catalog: Catalog) extends DelegateCatalog(catalog) {
+
+    override def catalogLoader(): CatalogLoader = loader
+
+    override def createPartitions(
+        identifier: Identifier,
+        partitions: JList[JMap[String, String]]): Unit = {
+      attempts += 1
+      if (attempts == 1) {
+        throw new RuntimeException("metastore unavailable")
+      }
+      partitions.asScala.foreach(p => registered.add(p.get("dt")))
+    }
+
+    override def alterPartitions(
+        identifier: Identifier,
+        partitions: JList[org.apache.paimon.partition.PartitionStatistics]): Unit = {}
+
+    override def dropPartitions(
+        identifier: Identifier,
+        partitions: JList[JMap[String, String]]): Unit = {}
   }
 }

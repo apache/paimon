@@ -40,6 +40,7 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
     private final FileStoreTable table;
 
     private String commitUser;
+    private boolean commitUserProvided = false;
 
     @Nullable private Map<String, String> staticPartition;
 
@@ -57,6 +58,7 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
      */
     public PostponeFixedBucketWriteBuilder withCommitUser(String commitUser) {
         this.commitUser = commitUser;
+        this.commitUserProvided = true;
         return this;
     }
 
@@ -97,7 +99,8 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
                 Options.fromMap(table.options())
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true);
-        return newCommit(commitUser, ignoreEmpty);
+        return newCommit(commitUser, ignoreEmpty)
+                .filterCommittedIgnoresStrictModeBound(commitUserProvided);
     }
 
     public TableCommitImpl newCommit(String commitUser, boolean ignoreEmptyCommit) {

@@ -167,6 +167,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final CommitCleaner commitCleaner;
 
     private boolean ignoreEmptyCommit;
+    private boolean filterCommittedIgnoresStrictModeBound = false;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
     private long lastCommittedSnapshotId = -1L;
@@ -250,6 +251,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public FileStoreCommit filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound) {
+        this.filterCommittedIgnoresStrictModeBound = ignoresStrictModeBound;
+        return this;
+    }
+
+    @Override
     public FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire) {
         this.conflictDetection.withPartitionExpire(partitionExpire);
         return this;
@@ -296,7 +303,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
         Optional<Snapshot> latestSnapshot;
-        if (optionalStrictSnapshot.isPresent()) {
+        if (optionalStrictSnapshot.isPresent() && !filterCommittedIgnoresStrictModeBound) {
             latestSnapshot =
                     snapshotManager.latestSnapshotOfUser(
                             commitUser,

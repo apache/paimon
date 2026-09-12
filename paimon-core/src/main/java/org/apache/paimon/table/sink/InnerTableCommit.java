@@ -66,6 +66,18 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
     InnerTableCommit checkFilesExistence(boolean checkFilesExistence);
 
     /**
+     * Whether {@link StreamTableCommit#filterAndCommit} checks the append files of a committable
+     * against the files of the latest snapshot before committing them. By default it does.
+     *
+     * <p>The check guards a committable restored from an engine's state, whose files may have been
+     * committed, or removed, by an attempt the engine did not see complete. A caller filtering a
+     * committable it has just produced knows its files are new, and can skip a scan of the base
+     * files of every partition the committable touches. {@link #appendCommitCheckConflict} still
+     * forces the check regardless of this setting.
+     */
+    InnerTableCommit checkAppendFiles(boolean checkAppendFiles);
+
+    /**
      * If this is set to true, maintenance runs on the committing thread and its failure is thrown
      * to the caller, instead of running through an executor which stores the failure for the next
      * commit to report.
@@ -77,6 +89,14 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
      * lifecycle has to ask for it.
      */
     InnerTableCommit inlineMaintenance(boolean inlineMaintenance);
+
+    /**
+     * See {@link
+     * org.apache.paimon.operation.FileStoreCommit#filterCommittedIgnoresStrictModeBound}. A write
+     * builder enables this when it was given its commit user, since such a user can have committed
+     * before the base snapshot of the current write.
+     */
+    InnerTableCommit filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound);
 
     InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 

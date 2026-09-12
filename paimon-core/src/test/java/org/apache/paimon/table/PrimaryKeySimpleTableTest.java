@@ -88,6 +88,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
@@ -124,6 +125,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_FILE_STATS_MODE;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -282,6 +284,50 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         assertThat(file.fileName()).endsWith(".avro");
         assertThat(file.level()).isEqualTo(0);
         assertThat(file.valueStatsCols()).isEmpty();
+    }
+
+    @Test
+    public void testPostponeFixedBucketReplayLookupWithProvidedUser() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        SnapshotManager sm = table.snapshotManager();
+
+        // A first run commits identifier 0 under a caller-provided user.
+        PostponeFixedBucketWriteBuilder first =
+                table.newPostponeFixedBucketWriteBuilder().withCommitUser("user");
+        try (TableWriteImpl<?> write = first.newWrite();
+                InnerTableCommit commit = first.newCommit()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 1);
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        long committed = sm.latestSnapshotId();
+
+        // A restarted run replays identifier 0 in strict mode bounded by that snapshot, the way
+        // a direct postpone write starts from the latest snapshot. The provided user has to be
+        // looked up beyond the bound for the replay to be recognised.
+        Map<String, String> strict = new HashMap<>();
+        strict.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(committed));
+        FileStoreTable strictTable = table.copy(strict);
+        PostponeFixedBucketWriteBuilder replay =
+                strictTable.newPostponeFixedBucketWriteBuilder().withCommitUser("user");
+        try (TableWriteImpl<?> write = replay.newWrite();
+                InnerTableCommit commit = replay.newCommit()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 1);
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId())
+                .as("a replay by a provided user must be recognised across the strict mode bound")
+                .isEqualTo(committed);
+
+        // A committer created for an explicitly passed user is one the caller manages itself,
+        // like the staged committer with its per-run user, and keeps the bound.
+        PostponeFixedBucketWriteBuilder explicit = strictTable.newPostponeFixedBucketWriteBuilder();
+        try (TableWriteImpl<?> write = explicit.newWrite("user", null);
+                InnerTableCommit commit = explicit.newCommit("user", true)) {
+            write.writeAndReturn(rowData(2, 2, 2L), 0, 1);
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(committed + 1);
     }
 
     @Test

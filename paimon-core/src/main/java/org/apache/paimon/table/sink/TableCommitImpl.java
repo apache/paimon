@@ -95,6 +95,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
     private boolean checkFilesExistence = true;
+    private boolean checkAppendFiles = true;
     private boolean inlineMaintenance = false;
 
     public TableCommitImpl(
@@ -178,8 +179,20 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl checkAppendFiles(boolean checkAppendFiles) {
+        this.checkAppendFiles = checkAppendFiles;
+        return this;
+    }
+
+    @Override
     public TableCommitImpl inlineMaintenance(boolean inlineMaintenance) {
         this.inlineMaintenance = inlineMaintenance;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound) {
+        commit.filterCommittedIgnoresStrictModeBound(ignoresStrictModeBound);
         return this;
     }
 
@@ -279,7 +292,8 @@ public class TableCommitImpl implements InnerTableCommit {
         return filterAndCommitMultiple(
                 commitIdentifiersAndMessages.entrySet().stream()
                         .map(e -> createManifestCommittable(e.getKey(), e.getValue()))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                checkAppendFiles);
     }
 
     private ManifestCommittable createManifestCommittable(
