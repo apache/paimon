@@ -96,7 +96,6 @@ class PaimonLeRobotDataset:
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
-            max_open_videos=8,
             return_uint8=False):
         if sys.version_info < (3, 10):
             raise RuntimeError(
@@ -117,8 +116,6 @@ class PaimonLeRobotDataset:
             raise ValueError(
                 "video_backend must be None, 'torchcodec', or 'pyav'.")
         self.video_backend = video_backend
-        self.max_open_videos = _positive_int(
-            max_open_videos, "max_open_videos")
         if not isinstance(return_uint8, bool):
             raise TypeError("return_uint8 must be a boolean.")
         self.return_uint8 = return_uint8
@@ -244,7 +241,6 @@ class PaimonLeRobotDataset:
                     _open_video_decoder, backend=self.video_backend),
                 decode_fn=_decode_video_frame,
                 output_column=key,
-                max_open_videos=self.max_open_videos,
                 collate_fn=_identity,
             )
             for key in self._video_keys

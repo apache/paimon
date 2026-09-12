@@ -1919,7 +1919,6 @@ class LeRobotValidationTest(unittest.TestCase):
             dataset = pmm.PaimonLeRobotDataset(
                 table,
                 delta_timestamps={"camera": [0.0, 0.1]},
-                max_open_videos=1,
             )
             try:
                 last, first = dataset.__getitems__([4, 0])
