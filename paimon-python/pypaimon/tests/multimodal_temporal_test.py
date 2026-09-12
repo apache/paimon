@@ -188,6 +188,215 @@ class MultimodalTemporalTest(unittest.TestCase):
             row["value"] for row in rows
         ])
 
+    def test_window_aggregation_stays_in_group_and_skips_nulls(self):
+        anchors = self._table("window_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "average": pa.int32(),
+            "minimum": pa.int32(),
+            "maximum": pa.int32(),
+            "first_value": pa.int32(),
+            "last_value": pa.int32(),
+            "valid_count": pa.int32(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 10},
+            {"episode_id": 2, "event_time": 10},
+            {"episode_id": 3, "event_time": 10},
+        ])
+        samples.add([
+            dict({"episode_id": 1, "event_time": time}, **{
+                name: value for name in (
+                    "average", "minimum", "maximum", "first_value",
+                    "last_value", "valid_count")
+            })
+            for time, value in ((5, 1), (10, None), (15, 5))
+        ] + [dict({"episode_id": 2, "event_time": 10}, **{
+            name: 100 for name in (
+                "average", "minimum", "maximum", "first_value",
+                "last_value", "valid_count")
+        })])
+
+        result = pmm.aggregate_window(
+            anchors.scan(),
+            samples.scan().select([
+                "average", "minimum", "maximum", "first_value",
+                "last_value", "valid_count",
+            ]),
+            on="event_time",
+            by="episode_id",
+            preceding=5,
+            following=5,
+            aggregations={
+                "average": "mean",
+                "minimum": "min",
+                "maximum": "max",
+                "first_value": "first",
+                "last_value": "last",
+                "valid_count": "count",
+            },
+        )
+        rows = sorted(result.to_list(), key=lambda row: row["episode_id"])
+
+        self.assertIsInstance(result, pmm.TemporalAlignment)
+        self.assertEqual(pa.float64(), result.schema.field("average").type)
+        self.assertEqual(pa.int64(), result.schema.field("valid_count").type)
+        self.assertEqual(
+            (3.0, 1, 5, 1, 5, 2),
+            tuple(rows[0][name] for name in (
+                "average", "minimum", "maximum", "first_value",
+                "last_value", "valid_count")),
+        )
+        self.assertEqual(100.0, rows[1]["average"])
+        self.assertIsNone(rows[2]["average"])
+        self.assertEqual(0, rows[2]["valid_count"])
+
+    def test_window_aggregation_supports_asymmetric_timestamp_bounds(self):
+        anchors = self._table("window_timestamp_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+        })
+        samples = self._table("window_timestamp_samples", {
+            "episode_id": pa.int32(),
+            "captured_at": pa.timestamp("ms"),
+            "value": pa.float32(),
+        })
+        anchor = datetime(2026, 9, 1, 12, 0, 0)
+        anchors.add([{"episode_id": 1, "event_time": anchor}])
+        samples.add([
+            {"episode_id": 1,
+             "captured_at": anchor + timedelta(milliseconds=offset),
+             "value": value}
+            for offset, value in ((-11, 100.0), (-10, 1.0),
+                                  (0, 2.0), (5, 3.0), (6, 100.0))
+        ])
+
+        row = pmm.aggregate_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", right_on="captured_at", by="episode_id",
+            preceding=timedelta(milliseconds=10),
+            following=timedelta(milliseconds=5),
+            aggregations={"value": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual(2.0, row["value"])
+
+        right_closed = pmm.aggregate_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", right_on="captured_at", by="episode_id",
+            preceding=timedelta(milliseconds=10),
+            following=timedelta(milliseconds=5),
+            aggregations={"value": "mean"},
+            closed="right",
+        ).to_list()[0]
+        self.assertEqual(2.5, right_closed["value"])
+
+    def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
+        anchors = self._table("window_numeric_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_numeric_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "integer_value": pa.int64(),
+            "float_value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 1}])
+        samples.add([
+            {"episode_id": 1, "event_time": 0,
+             "integer_value": -(1 << 63),
+             "float_value": sys.float_info.max},
+            {"episode_id": 1, "event_time": 2,
+             "integer_value": (1 << 63) - 1,
+             "float_value": sys.float_info.max},
+        ])
+
+        row = pmm.aggregate_window(
+            anchors.scan(),
+            samples.scan().select(["integer_value", "float_value"]),
+            on="event_time", by="episode_id", preceding=1, following=1,
+            aggregations={
+                "integer_value": "mean",
+                "float_value": "mean",
+            },
+        ).to_list()[0]
+
+        self.assertEqual(-0.5, row["integer_value"])
+        self.assertEqual(sys.float_info.max, row["float_value"])
+
+    def test_window_aggregation_can_follow_an_asof_join(self):
+        anchors = self._table("window_chain_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        images = self._table("window_chain_images", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "image": pa.string(),
+        })
+        imu = self._table("window_chain_imu", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "acceleration": pa.float32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        images.add([{"episode_id": 1, "event_time": 9, "image": "frame"}])
+        imu.add([
+            {"episode_id": 1, "event_time": 8, "acceleration": 1.0},
+            {"episode_id": 1, "event_time": 10, "acceleration": 3.0},
+        ])
+
+        row = pmm.join_asof(
+            anchors.scan(), images.scan().select("image"),
+            on="event_time", by="episode_id", direction="nearest",
+        ).aggregate_window(
+            imu.scan().select("acceleration"),
+            preceding=2,
+            aggregations={"acceleration": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual("frame", row["image"])
+        self.assertEqual(2.0, row["acceleration"])
+
+    def test_window_aggregation_validates_options(self):
+        table = self._table("window_validation", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+            "text": pa.string(),
+        })
+
+        def scan():
+            return table.scan().select("value")
+
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            pmm.aggregate_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=-1, aggregations={"value": "mean"})
+        with self.assertRaisesRegex(ValueError, "Unsupported aggregation"):
+            pmm.aggregate_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"value": "median"})
+        with self.assertRaisesRegex(ValueError, "closed must be"):
+            pmm.aggregate_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"value": "mean"},
+                closed="middle")
+        with self.assertRaisesRegex(ValueError, "missing aggregation columns"):
+            pmm.aggregate_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"missing": "mean"})
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+            pmm.aggregate_window(
+                scan(), table.scan().select("text"),
+                on="event_time", by="episode_id", preceding=1,
+                aggregations={"text": "first"}).to_arrow()
+
     def test_linear_interpolation_preserves_an_exact_infinite_float(self):
         anchors = self._table("linear_exact_anchors", {
             "episode_id": pa.int32(),

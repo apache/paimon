@@ -44,6 +44,7 @@ from pypaimon.multimodal.table import (
 )
 from pypaimon.multimodal.temporal import (
     TemporalAlignment,
+    aggregate_window,
     interpolate,
     join_asof,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "VectorRoute",
     "VideoFrameCollator",
     "VideoFrameDescriptor",
+    "aggregate_window",
     "connect",
     "interpolate",
     "join_asof",
