@@ -24,6 +24,7 @@ import org.apache.paimon.types.RowKind;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -58,7 +59,10 @@ public class CdcRecord implements Serializable {
     public CdcRecord fieldNameLowerCase() {
         Map<String, String> newData = new HashMap<>();
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            newData.put(entry.getKey().toLowerCase(), entry.getValue());
+            // Locale.ROOT: must match the schema-side toLowerCaseIfNeed conversion;
+            // a Turkish default locale would lowercase 'I' to a dotless glyph and
+            // silently null out the column on the record-schema join
+            newData.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
         }
         return new CdcRecord(kind, newData);
     }
