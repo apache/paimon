@@ -102,6 +102,29 @@ states_at_steps = aligned.interpolate(
 )
 ```
 
+Use `join_window(left, right, ...)` directly or chain
+`aligned.join_window(...)`. Unlike single-table `rolling().agg()`, it joins
+each left row to right rows in the same `by` group and
+`[left - preceding, left + following]` time window, then aggregates them.
+`following` defaults to zero. `mean`, `min`, and `max` require integer or
+floating-point scalars; `count`, `first`, and `last` also accept non-numeric
+values. `closed` is `both`, `left`, `right`, or `neither` and refers to the
+interval endpoints. Nulls are skipped; empty windows return null, except
+`count` returns zero. Use `(source, operation)` pairs to aggregate one source
+column more than once; `{"value": "mean"}` remains valid shorthand.
+
+```python
+steps_with_imu = aligned.join_window(
+    imu.scan().select("acceleration"),
+    preceding=timedelta(milliseconds=50),
+    following=timedelta(milliseconds=50),
+    aggregations={
+        "acceleration_mean": ("acceleration", "mean"),
+        "acceleration_max": ("acceleration", "max"),
+    },
+)
+```
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered

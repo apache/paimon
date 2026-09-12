@@ -46,6 +46,7 @@ from pypaimon.multimodal.temporal import (
     TemporalAlignment,
     interpolate,
     join_asof,
+    join_window,
 )
 from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
@@ -79,6 +80,7 @@ __all__ = [
     "connect",
     "interpolate",
     "join_asof",
+    "join_window",
     "lit",
     "source_col",
     "target_col",
