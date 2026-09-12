@@ -340,6 +340,31 @@ class MultimodalTemporalTest(unittest.TestCase):
 
         self.assertEqual(5.0, row["value"])
 
+    def test_float_time_preserves_bigint_interpolation_precision(self):
+        anchors = self._table("linear_float_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_float_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.int64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 2.0}])
+        states.add([
+            {"episode_id": 1, "event_time": 0.0,
+             "value": -(1 << 63)},
+            {"episode_id": 1, "event_time": 3.0,
+             "value": 1 << 62},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+
     def test_linear_interpolation_handles_extreme_float_payloads(self):
         anchors = self._table("linear_extreme_value_anchors", {
             "episode_id": pa.int32(),
