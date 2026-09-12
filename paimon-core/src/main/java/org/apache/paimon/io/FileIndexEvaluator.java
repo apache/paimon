@@ -129,17 +129,6 @@ public class FileIndexEvaluator {
         }
     }
 
-    /**
-     * Evaluate a pure row-range read (no filter / topN / limit / deletion vector): push the full
-     * local effective-row range {@code [start, end]} down as a selection bitmap so the parquet
-     * reader prunes row groups by both endpoints. Starting the bitmap from {@code
-     * rowRange.startInclusive()} (instead of 0) lets row-group skipping avoid reading leading row
-     * groups that fall before the requested range.
-     *
-     * <p>Deletion vectors are not considered here: a range read carries no DV (physical ==
-     * effective), and any DV-aware effective-row correction is handled by a higher-layer
-     * RangeSkipReader.
-     */
     private static FileIndexResult evaluateRowRange(DataFileMeta file, RowRange rowRange) {
         // No DV in the range-read path; pass null so createBaseSelection skips the andNot step.
         BitmapIndexResult selection = createBaseSelection(file, null);
