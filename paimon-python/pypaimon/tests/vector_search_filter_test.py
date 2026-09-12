@@ -209,6 +209,11 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
                 "_ROW_ID": pa.array(row_ids, type=pa.int64()),
             })
 
+        def _new_arrow_batch_reader(self, splits):
+            table = self.to_arrow(splits)
+            batches = (batch for batch in table.to_batches(max_chunksize=2))
+            return pa.RecordBatchReader.from_batches(table.schema, batches), batches
+
     class _Builder:
         def with_partition_filter(self, predicate):
             calls["partition_filter"] = predicate
@@ -2910,13 +2915,12 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             reader = BatchVectorSearchReadImpl(
                 table, limit=5, vector_column=embedding_field,
                 query_vectors=[[1.0], [2.0]], filter_=None)
-            with mock.patch.object(
-                    reader, "_read_raw_search",
-                    return_value=DictBasedScoredIndexResult({8: 0.9})) as raw_read:
-                results = reader.read_batch([split, raw])
+            raw_calls = _install_raw_vector_read_builder(
+                table, "embedding", {8: [1.5]})
+            results = reader.read_batch([split, raw])
 
         # The raw fallback must be merged into EACH query, not dropped.
-        self.assertEqual(2, raw_read.call_count)
+        self.assertEqual(1, raw_calls["raw_read_count"])
         self.assertEqual([1, 8], sorted(list(results[0].results())))
         self.assertEqual([2, 8], sorted(list(results[1].results())))
 
