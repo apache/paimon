@@ -286,3 +286,32 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
+
+
+# Vector index range reads
+
+Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
+read multiple file ranges concurrently when the input stream supports
+thread-safe positional reads. Set the table option `vindex.read.parallelism`
+to a positive integer to control the maximum number of concurrent reads per
+index reader, including reads from concurrent native query callbacks.
+
+The default is **4** for remote index paths and **1** for local paths (including
+`file://`). Setting it to **1** disables range-level concurrency. Streams that
+only support `seek` and `read` remain serialized. Workers are created lazily
+and released when the index reader closes; separate readers have separate
+budgets. This option controls index I/O, not shard search or native compute
+threads.
+
+A reproducible serial/concurrent comparison is available with `pypaimon[vindex]`
+installed:
+
+```shell
+python -m pypaimon.benchmark.vindex_io_bench --output /tmp/vindex-io.json
+```
+
+The benchmark compares the original serial adapter with parallelism 1/2/4/8,
+checks byte-for-byte range results and identical native search row IDs/scores,
+and reports P50/P95 latency, read count, bytes read, and peak concurrent reads.
+It uses local files with optional injected per-read latency, not a live object
+store. Native query timings include reader open, initialization, and close.
