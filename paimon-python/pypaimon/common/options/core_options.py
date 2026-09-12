@@ -96,6 +96,7 @@ class GlobalIndexColumnUpdateAction(str, Enum):
 class GlobalIndexSearchMode(str, Enum):
     FAST = "fast"
     FULL = "full"
+    ADAPTIVE = "adaptive"
     DETAIL = "detail"
 
 

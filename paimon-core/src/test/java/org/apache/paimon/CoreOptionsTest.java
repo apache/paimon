@@ -159,6 +159,11 @@ public class CoreOptionsTest {
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
         assertThat(options.fullTextIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+
+        conf.setString(CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(), "adaptive");
+        options = new CoreOptions(conf);
+        assertThat(options.scalarIndexSearchMode())
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.ADAPTIVE);
     }
 
     @Test

@@ -68,9 +68,7 @@ class ScanQuery:
             return self._read_global_index_result(self._result_factory(self))
 
         read_builder = self._configured_read_builder()
-        scan = read_builder.new_scan()
-        plan = scan.plan()
-        return read_builder.new_read().to_arrow(plan.splits())
+        return read_builder.to_arrow()
 
     def to_arrow_batch_reader(self, *, blob_parallelism=None):
         """Stream this scan as Arrow batches without collecting a table."""
@@ -273,8 +271,7 @@ class ScanQuery:
         """
         blob_cols = self._resolve_blob_columns(columns)
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
-        arrow = read_builder.new_read().to_arrow(
-            read_builder.new_scan().plan().splits())
+        arrow = read_builder.to_arrow()
         map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         bodies = self._fetch_bodies(
             file_io, arrow.select(blob_cols).to_pydict(), blob_cols,

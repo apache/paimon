@@ -5965,6 +5965,11 @@ public class CoreOptions implements Serializable {
                 "full",
                 "Use snapshot next row id and global index coverage to detect missing row ids, "
                         + "and scan raw data only when a gap exists."),
+        ADAPTIVE(
+                "adaptive",
+                "For supported limited PyPaimon reads, search indexed data first and scan "
+                        + "unindexed rows only when the limit is not reached. Other reads use "
+                        + "full fallback semantics."),
         DETAIL(
                 "detail",
                 "Scan data files to find exact unindexed rows. "

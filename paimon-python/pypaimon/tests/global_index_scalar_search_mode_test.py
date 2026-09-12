@@ -90,6 +90,15 @@ class ScalarGlobalIndexSearchModeTest(unittest.TestCase):
         self.assertEqual(
             GlobalIndexSearchMode.FAST, options.full_text_index_search_mode())
 
+    def test_adaptive_scalar_mode(self):
+        options = CoreOptions(Options({
+            "scalar-index.search-mode": "adaptive",
+        }))
+        self.assertEqual(
+            GlobalIndexSearchMode.ADAPTIVE,
+            options.scalar_index_search_mode(),
+        )
+
     def test_coverage_honours_search_mode_override(self):
         coverage = _coverage(CoreOptions(Options.from_none()))
         self.assertEqual(
