@@ -49,8 +49,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -511,6 +513,65 @@ public class ParquetLegacyListReadTest {
         assertThatThrownBy(() -> createReader(path, readType))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Cannot read Parquet group 'arr' as an ARRAY");
+    }
+
+    @Test
+    public void testReadMissingNestedFieldWithListFallback() throws Exception {
+        // optional group s { optional group a (LIST) { repeated group element { optional int32 x;
+        // optional int32 y; } } }
+        MessageType schema =
+                new MessageType(
+                        "origin-parquet",
+                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                .addField(
+                                        Types.buildGroup(Type.Repetition.OPTIONAL)
+                                                .as(LogicalTypeAnnotation.listType())
+                                                .addField(
+                                                        Types.buildGroup(Type.Repetition.REPEATED)
+                                                                .optional(INT32)
+                                                                .named("x")
+                                                                .optional(INT32)
+                                                                .named("y")
+                                                                .named("element"))
+                                                .named("a"))
+                                .named("s"));
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        try (ParquetWriter<Group> writer = createWriter(path, schema)) {
+            SimpleGroupFactory factory = new SimpleGroupFactory(schema);
+            // row0: a null parent struct
+            writer.write(factory.newGroup());
+            // row1: a present struct with an empty list
+            Group emptyListRow = factory.newGroup();
+            emptyListRow.addGroup("s").addGroup("a");
+            writer.write(emptyListRow);
+            // row2: a present struct with one element
+            Group row = factory.newGroup();
+            row.addGroup("s").addGroup("a").addGroup("element").append("x", 1).append("y", 2);
+            writer.write(row);
+        }
+
+        RowType readType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(
+                                        0,
+                                        "s",
+                                        new RowType(
+                                                Collections.singletonList(
+                                                        new DataField(
+                                                                1, "newField", new IntType()))))));
+
+        List<Boolean> sNulls = new ArrayList<>();
+        List<Boolean> newFieldNulls = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = createReader(path, readType)) {
+            reader.forEachRemaining(
+                    row -> {
+                        sNulls.add(row.isNullAt(0));
+                        newFieldNulls.add(row.isNullAt(0) || row.getRow(0, 1).isNullAt(0));
+                    });
+        }
+        assertThat(sNulls).containsExactly(true, false, false);
+        assertThat(newFieldNulls).containsExactly(true, true, true);
     }
 
     private ParquetWriter<Group> createWriter(Path path, MessageType schema) throws IOException {
