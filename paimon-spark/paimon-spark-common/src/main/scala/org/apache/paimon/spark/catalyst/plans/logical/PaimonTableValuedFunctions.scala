@@ -38,6 +38,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, LeafNode, LogicalPla
 import org.apache.spark.sql.catalyst.util.MapData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -121,14 +122,19 @@ object PaimonTableValuedFunctions {
     val (catalogName, dbName, tableName) = {
       sessionState.sqlParser.parseMultipartIdentifier(identifier) match {
         case Seq(table) =>
-          (catalogManager.currentCatalog.name(), catalogManager.currentNamespace.head, table)
-        case Seq(db, table) => (catalogManager.currentCatalog.name(), db, table)
+          (
+            SparkVersionCompat.currentCatalog(catalogManager).name(),
+            SparkVersionCompat.currentNamespace(catalogManager).head,
+            table)
+        case Seq(db, table) =>
+          (SparkVersionCompat.currentCatalog(catalogManager).name(), db, table)
         case Seq(catalog, db, table) => (catalog, db, table)
         case _ => throw new RuntimeException(s"Invalid table identifier: $identifier")
       }
     }
 
-    val sparkCatalog = catalogManager.catalog(catalogName).asInstanceOf[TableCatalog]
+    val sparkCatalog =
+      SparkVersionCompat.catalog(catalogManager, catalogName).asInstanceOf[TableCatalog]
     val ident: Identifier = Identifier.of(Array(dbName), tableName)
     val sparkTable = sparkCatalog.loadTable(ident)
 

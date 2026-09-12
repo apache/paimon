@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{CreateFunction, DescribeFunc
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_FUNCTION}
 import org.apache.spark.sql.connector.catalog.CatalogManager
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.paimon.shims.{SparkShimLoader, SparkVersionCompat}
 import org.apache.spark.sql.types.DataType
 
 case class RewritePaimonFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
@@ -191,6 +191,13 @@ object UnResolvedPaimonV1Function {
       funcIdent: FunctionIdentifier,
       u: UnresolvedFunction,
       fun: Option[PaimonFunction]): UnResolvedPaimonV1Function = {
-    UnResolvedPaimonV1Function(funcIdent, u.arguments, u.isDistinct, u.filter, u.ignoreNulls, fun)
+    // Spark 4.2 widened `ignoreNulls` from Boolean to Option[Boolean].
+    UnResolvedPaimonV1Function(
+      funcIdent = funcIdent,
+      arguments = u.arguments,
+      isDistinct = u.isDistinct,
+      filter = u.filter,
+      ignoreNulls = SparkVersionCompat.ignoreNulls(u),
+      func = fun)
   }
 }

@@ -97,6 +97,22 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
     }
   }
 
+  test("Paimon V1 Function: default output column name excludes the catalog") {
+    // The registry key is the fully qualified 3-part identifier, but the name handed to the
+    // expression builder must stay 2-part, or an unaliased scalar/aggregate `SELECT udf(...)`
+    // column gets renamed from `db.udf(...)` to `catalog.db.udf(...)`. See
+    // `PaimonV1FunctionRegistry`'s `makeFunctionBuilder` for the mechanism.
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      // `dbName0`, not a literal: the expected name follows the session's current database, which
+      // the test base sets. A literal would keep passing if that ever changed.
+      assert(sql("SELECT udf_add2(3, 4)").columns.toSeq === Seq(s"$dbName0.udf_add2(3, 4)"))
+    }
+  }
+
   test("Paimon V1 Function: select with built-in function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
@@ -261,11 +277,19 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
 
-      assert(intercept[Exception] {
+      // Spark reworded this in 4.2: `error-conditions.json` dropped the "built-in/temporary"
+      // phrasing in favour of pointing at DROP TEMPORARY FUNCTION. Both mean the same refusal, and
+      // this suite runs on every supported version, so accept either.
+      val dropTempMessage = intercept[Exception] {
         sql(s"""
                |DROP FUNCTION udf_add2
                |""".stripMargin)
-      }.getMessage.contains("udf_add2 is a built-in/temporary function"))
+      }.getMessage
+      assert(
+        dropTempMessage.contains("udf_add2 is a built-in/temporary function") ||
+          dropTempMessage.contains("'DROP FUNCTION' expects a persistent function"),
+        s"unexpected DROP FUNCTION refusal: $dropTempMessage"
+      )
     }
   }
 

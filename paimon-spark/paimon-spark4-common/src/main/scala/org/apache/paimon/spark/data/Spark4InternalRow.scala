@@ -22,7 +22,7 @@ import org.apache.paimon.spark.AbstractSparkInternalRow
 import org.apache.paimon.types.{GeographyType, GeometryType, RowType}
 
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
+import org.apache.spark.unsafe.types.{BinaryView, VariantVal}
 
 class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
 
@@ -31,23 +31,20 @@ class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowTy
     new VariantVal(v.value(), v.metadata())
   }
 
-  override def getGeography(ordinal: Int): GeographyVal =
-    SparkShimLoader.shim
-      .toSparkGeography(
-        row.getBinary(ordinal),
-        rowType.getTypeAt(ordinal).asInstanceOf[GeographyType].getCrs,
-        rowType
-          .getTypeAt(ordinal)
-          .asInstanceOf[GeographyType]
-          .getAlgorithm
-          .toString
-      )
-      .asInstanceOf[GeographyVal]
-
-  override def getGeometry(ordinal: Int): GeometryVal =
-    SparkShimLoader.shim
-      .toSparkGeometry(
-        row.getBinary(ordinal),
-        rowType.getTypeAt(ordinal).asInstanceOf[GeometryType].getCrs)
-      .asInstanceOf[GeometryVal]
+  // Spark 4.2 (SPARK-57058) replaced `getGeography` / `getGeometry` on `SpecializedGetters` with a
+  // single `getBinaryView`; the geo value classes `GeographyVal` / `GeometryVal` were removed with
+  // them. Dispatch on the Paimon field type, which is what the pre-4.2 pair of overrides did
+  // implicitly. `paimon-spark-4.1` forks this class to keep the older two overrides.
+  override def getBinaryView(ordinal: Int): BinaryView = rowType.getTypeAt(ordinal) match {
+    case g: GeographyType =>
+      SparkShimLoader.shim
+        .toSparkGeography(row.getBinary(ordinal), g.getCrs, g.getAlgorithm.toString)
+        .asInstanceOf[BinaryView]
+    case g: GeometryType =>
+      SparkShimLoader.shim
+        .toSparkGeometry(row.getBinary(ordinal), g.getCrs)
+        .asInstanceOf[BinaryView]
+    case other =>
+      throw new UnsupportedOperationException(s"Not a BinaryView-backed Paimon type: $other")
+  }
 }

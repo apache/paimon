@@ -148,13 +148,24 @@ class CatalogQualifiedCreateTableLikeTest extends PaimonSparkTestBase {
       parseCreateTableLikeCommand(
         "CREATE TABLE paimon.test.extra.target_tbl LIKE paimon.test.extra.source_tbl")
     Assertions.assertEquals("target_tbl", nestedIdentifierCommand.targetIdent.name())
-    Assertions.assertEquals(
-      Seq("test.extra"),
-      nestedIdentifierCommand.targetIdent.namespace().toSeq)
     Assertions.assertEquals("source_tbl", nestedIdentifierCommand.sourceIdent.name())
+    // Assert only that the middle parts survive, in order: how they are *split* differs by version
+    // and is not what this test is about. Up to 4.1 Spark's own parser rejects a catalog-qualified
+    // CREATE TABLE LIKE, so Paimon's extension parser takes over and flattens everything between
+    // the catalog and the table into the single `database` slot of a V1 `TableIdentifier`; 4.2
+    // parses the statement itself into `CreateTableLike` and the raw name parts survive as-is.
+    //
+    // Neither shape is a table Paimon can create, but for different reasons: on 4.2 the two-part
+    // namespace violates the single-namespace rule (`CatalogUtils.checkNamespace`), while on <= 4.1
+    // the flattened `test.extra` is a legal namespace that simply does not exist. This test stops
+    // at the parser -- what it pins is that a name with an extra part is accepted and lands on
+    // `PaimonCreateTableLikeCommand` carrying the right table names.
     Assertions.assertEquals(
-      Seq("test.extra"),
-      nestedIdentifierCommand.sourceIdent.namespace().toSeq)
+      "test.extra",
+      nestedIdentifierCommand.targetIdent.namespace().mkString("."))
+    Assertions.assertEquals(
+      "test.extra",
+      nestedIdentifierCommand.sourceIdent.namespace().mkString("."))
   }
 
   private def createSourceTable(): Unit = {

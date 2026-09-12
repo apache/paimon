@@ -29,10 +29,12 @@ import org.apache.paimon.types.{DataType, RowType}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.catalog.CatalogStorageFormat
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, DescribeRelation, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, OverwriteByExpression, OverwritePartitionsDynamic, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
@@ -44,6 +46,7 @@ import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.types.StructType
 
+import java.net.URI
 import java.util.{Map => JMap}
 
 /**
@@ -74,6 +77,57 @@ trait SparkShim {
       schema: StructType,
       partitions: Array[Transform],
       properties: JMap[String, String]): Table
+
+  /**
+   * Returns `storage` with its `locationUri` replaced.
+   *
+   * Spark 4.2 added a 7th `serdeName` field to `CatalogStorageFormat`, so a named-argument `copy`
+   * emits `copy$default$7`, which older runtimes lack. Every version can express the replacement,
+   * but only against its own field count, so the call belongs in a per-version module.
+   */
+  def withStorageLocation(
+      storage: CatalogStorageFormat,
+      locationUri: Option[URI]): CatalogStorageFormat
+
+  /**
+   * Builds `OverwriteByExpression.byName` / `OverwritePartitionsDynamic.byName`.
+   *
+   * Both gained a trailing `withSchemaEvolution: Boolean` in Spark 4.2. Omitting it makes the
+   * compiler emit `byName$default$N`, absent on 3.x/4.0/4.1; naming it does not compile there. As
+   * with `createCreateTableAsSelectExec`, the construction has to live in a per-version module.
+   *
+   * Paimon never evolves the target schema on an overwrite, so on 4.2 these pass `false`.
+   */
+  def overwriteByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      deleteExpr: Expression,
+      writeOptions: Map[String, String]): OverwriteByExpression
+
+  /** Companion of [[overwriteByName]]; same reason for being a shim method. */
+  def overwritePartitionsDynamicByName(
+      table: NamedRelation,
+      query: LogicalPlan,
+      writeOptions: Map[String, String]): OverwritePartitionsDynamic
+
+  /**
+   * Builds a Spark `CreateTableAsSelectExec`.
+   *
+   * Goes through the shim because Spark 4.2 added an 8th `transaction` parameter. Its type,
+   * `Option[connector.catalog.transactions.Transaction]`, only exists on 4.2, so
+   * `paimon-spark-common` cannot name it; omitting it instead makes the compiler emit
+   * `CreateTableAsSelectExec$.apply$default$8`, which older runtimes do not have. Neither shape
+   * links everywhere, so the construction has to happen in a per-version module — the same reason
+   * `createReplaceTableAsSelectExec` below is a shim method.
+   */
+  def createCreateTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      ifNotExists: Boolean): SparkPlan
 
   def createReplaceTableAsSelectExec(
       catalog: TableCatalog,
@@ -316,4 +370,81 @@ trait SparkShim {
       function: PaimonFunction,
       arguments: Seq[Expression],
       parser: ParserInterface): Expression
+
+  /**
+   * Destructures Spark 4.2's `CreateTableLike` logical plan, or returns `None` on 3.x/4.0/4.1 where
+   * the node does not exist.
+   *
+   * Spark 4.2 (SPARK-51350) taught the parser `CREATE TABLE LIKE` for v2 catalogs and added
+   * `TableCatalog.createTableLike`, whose default implementation throws. Paimon used to intercept
+   * the syntax by catching the `ParseException` Spark raised for a catalog-qualified target; now
+   * that Spark parses it, the fallback never fires and the plan reaches the upstream exec. The node
+   * has to be matched instead, and it cannot be named here because `paimon-spark-common` also
+   * compiles against Spark 3.5.
+   *
+   * Returns the target and source name parts *unresolved*: this runs as a parser rule, before
+   * analysis, so the children are still `UnresolvedIdentifier` / `UnresolvedRelation`. The caller
+   * resolves them the same way it does for the V1 command.
+   *
+   * Returns (targetNameParts, sourceNameParts, provider, location, properties, ifNotExists,
+   * hasHiveStorageSyntax).
+   */
+  def createTableLikeParts(plan: LogicalPlan)
+      : Option[(Seq[String], Seq[String], Option[String], Option[String], Map[String, String], Boolean, Boolean)]
+
+  /**
+   * If `plan` is Spark 4.2's `DescribeTablePartition`, returns its relation, resolved partition
+   * spec, `isExtended` flag and output; `None` on 3.x/4.0/4.1 where the node does not exist.
+   *
+   * Spark 4.2 (SPARK-39660) split `DESCRIBE ... PARTITION` out of `DescribeRelation` into this
+   * separate plan. Without intercepting it Paimon tables fall through to the upstream
+   * `DescribeTablePartitionExec`, whose row shape differs from what Paimon emits (one row per
+   * metadata key, versus Paimon's single `Partition Parameters` row plus its `Database` / `Table`
+   * rows and `# Column Not Null` section). The node cannot be named here because
+   * `paimon-spark-common` also compiles against Spark 3.5.
+   *
+   * The spec values are returned already rendered to strings, keyed by partition column name, so
+   * they can be compared against Paimon's own `Partition.spec()` map. `ResolvedPartitionSpec`
+   * stores them as an `InternalRow`, so each field is read by the type `table.partitionSchema()`
+   * declares for it (the same schema `ResolvePartitionSpec` used to build the row) and rendered
+   * with `Literal.toString`.
+   *
+   * Note that this is NOT what upstream's own `DescribeTablePartitionExec` does: it renders via
+   * `ToPrettyString(...).eval(null)` plus `escapePathName`, which differs for null (`NULL` vs
+   * `null`), binary, and decimal. Paimon needs a string it can compare against `Partition.spec()`,
+   * not a display string. This rendering and `Partition.spec()`'s own do not agree for every type
+   * either; the 4.2 implementation's comment works DATE through as the example.
+   */
+  def describeTablePartition(
+      plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])]
+
+  /**
+   * Extracts the partition spec from a `DescribeRelation` node.
+   *
+   * Spark 4.2 (SPARK-39660) removed `partitionSpec` from `DescribeRelation` and introduced a
+   * separate `DescribeTablePartition` plan for `DESCRIBE ... PARTITION`, so on 4.2 this always
+   * returns an empty map and [[describeTablePartition]] carries the spec instead.
+   */
+  def describeRelationPartitionSpec(plan: DescribeRelation): Map[String, String]
+
+  /**
+   * Builds a Spark `DescribeTableExec`.
+   *
+   * Spark 4.2 (SPARK-56678) changed the constructor from `(output, table, isExtended)` to
+   * `(output, catalogName, identifier, table, isExtended)`.
+   */
+  def createDescribeTableExec(
+      output: Seq[Attribute],
+      catalogName: String,
+      identifier: Identifier,
+      table: Table,
+      isExtended: Boolean): SparkPlan
+
+  /**
+   * Whether the given `MergeIntoTable` requires schema evolution before rewrite.
+   *
+   * Spark 4.1 exposes this as `needSchemaEvolution`; Spark 4.2 replaced it with
+   * `pendingSchemaChanges`. Spark 3.x and 4.0 have neither.
+   */
+  def mergeNeedsSchemaEvolution(merge: MergeIntoTable): Boolean
 }

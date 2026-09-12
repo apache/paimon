@@ -33,6 +33,11 @@ under the License.
 
     <properties>
         <spark.version>4.1.2</spark.version>
+        <!-- Spark 4.x uses SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override
+             the Paimon parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly
+             2.x; otherwise `log4j-slf4j2-impl` + `slf4j-api:1.7.32` mix produces
+             `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder` at test startup. -->
+        <slf4j.version>2.0.16</slf4j.version>
         <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
              dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
              otherwise it inherits scala.binary.version=2.12 from paimon-parent. -->
@@ -55,6 +60,32 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-spark-common_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <!--
+          `paimon-spark4-common` transitively pulls in `spark-sql-api` at the version set by
+          `paimon-spark-common.spark.version` (4.2.0 under the `spark4` profile). Spark 4.2's
+          `SqlApiConf` added abstract `singleCharacterPipeOperatorEnabled()`, which Spark 4.1's
+          concrete anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
+          jars produces `AbstractMethodError` at parser configuration time. Pin `spark-sql-api` to
+          `${spark.version}` (4.1.2) so the classpath is uniformly 4.1 — the same pin
+          `paimon-spark-4.0` carries for the same reason.
+        -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql-api_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+            <exclusions>
+                <!-- Spark ships a tiny `spark-connect-shims` jar carrying a stub
+                     `org.apache.spark.SparkConf` with only `getAll()`. scalac resolves that in
+                     preference to spark-core's real `SparkConf` and fails with
+                     `value set is not a member of org.apache.spark.SparkConf`. The shims jar only
+                     matters to Spark Connect clients. Same exclusion as `paimon-spark-4.0`. -->
+                <exclusion>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-connect-shims_${scala.binary.version}</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -83,9 +114,15 @@ under the License.
 
         <!-- test -->
 
+        <!-- The 4.1-compiled build of `paimon-spark-ut`'s test sources. The baseline build cannot
+             be used here: Spark 4.2 turned `QueryTest` into a trait (SPARK-55910), so a
+             4.2-compiled `PaimonSparkTestBase` carries it as an interface and fails to load on a
+             4.0/4.1 runtime. `paimon-spark-ut-4.0` does not fit either — test sources construct
+             Spark internals directly, and `CTERelationDef` gained a 6th constructor argument in
+             4.1. See `paimon-spark-ut-4.1/pom.xml`. -->
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-spark-ut_${scala.binary.version}</artifactId>
+            <artifactId>paimon-spark-ut-4.1_${scala.binary.version}</artifactId>
             <version>${project.version}</version>
             <classifier>tests</classifier>
             <scope>test</scope>
