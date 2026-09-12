@@ -78,7 +78,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
-import static org.apache.paimon.manifest.ManifestIndexTestUtils.withIndexFileName;
+import static org.apache.paimon.manifest.ManifestIndexTestUtils.withExtraFiles;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -1259,7 +1259,8 @@ public class ManifestFileTest {
         assertThat(metas.size()).isGreaterThan(1);
 
         for (ManifestFileMeta meta : metas) {
-            assertThat(meta.indexFileName()).isEqualTo(meta.fileName() + ManifestRowIdIndex.SUFFIX);
+            assertThat(ManifestRowIdIndex.fileName(meta))
+                    .isEqualTo(meta.fileName() + ManifestRowIdIndex.SUFFIX);
             List<ManifestEntry> actual = manifests.read(meta.fileName());
             for (ManifestEntry entry :
                     Arrays.asList(actual.get(0), actual.get(actual.size() - 1))) {
@@ -1294,7 +1295,7 @@ public class ManifestFileTest {
         }
         rewrite.close();
         ManifestFileMeta rewritten = rewrite.result().get(0);
-        assertThat(rewritten.indexFileName())
+        assertThat(ManifestRowIdIndex.fileName(rewritten))
                 .isEqualTo(rewritten.fileName() + ManifestRowIdIndex.SUFFIX);
         assertThat(manifests.read(rewritten.fileName()))
                 .isEqualTo(manifests.read(source.fileName()));
@@ -1502,7 +1503,7 @@ public class ManifestFileTest {
                 createManifestFileFactory(tempDir.toString(), Long.MAX_VALUE, options, fileIO)
                         .create();
         ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
-        assertThat(meta.indexFileName()).isNull();
+        assertThat(ManifestRowIdIndex.fileName(meta)).isNull();
         assertThat(
                         java.nio.file.Files.exists(
                                 tempDir.resolve("manifest")
@@ -1531,26 +1532,37 @@ public class ManifestFileTest {
                         original.totalBuckets(),
                         original.file().newFirstRowId(100L));
         ManifestFileMeta written = manifests.write(Collections.singletonList(entry)).get(0);
-        assertThat(written.indexFileName()).isNotNull();
+        assertThat(ManifestRowIdIndex.fileName(written)).isNotNull();
         RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(0, 0)));
         io.reset();
-        ManifestFileMeta unindexed = withIndexFileName(written, null);
-        assertThat(manifests.selectBlocks(unindexed, query)).isNull();
-        assertThat(io.opened).isEmpty();
+        for (List<String> extraFiles :
+                Arrays.asList(
+                        null,
+                        Collections.<String>emptyList(),
+                        Collections.singletonList("other-partition-index"))) {
+            ManifestFileMeta unindexed = withExtraFiles(written, extraFiles);
+            assertThat(manifests.selectBlocks(unindexed, query)).isNull();
+            assertThat(io.opened).isEmpty();
+        }
         // An existing suffix-named object must not be inferred as a reference.
         assertThat(
                         java.nio.file.Files.exists(
-                                tempDir.resolve("manifest").resolve(written.indexFileName())))
+                                tempDir.resolve("manifest")
+                                        .resolve(ManifestRowIdIndex.fileName(written))))
                 .isTrue();
-        String explicitName = "custom-index-name";
+        String explicitName = "custom-index-name" + ManifestRowIdIndex.SUFFIX;
         java.nio.file.Files.move(
-                tempDir.resolve("manifest").resolve(written.indexFileName()),
+                tempDir.resolve("manifest").resolve(ManifestRowIdIndex.fileName(written)),
                 tempDir.resolve("manifest").resolve(explicitName));
-        ManifestFileMeta indexed = withIndexFileName(written, explicitName);
+        String otherName = "other-partition-index";
+        java.nio.file.Path otherPath = tempDir.resolve("manifest").resolve(otherName);
+        java.nio.file.Files.write(otherPath, new byte[] {1, 2, 3});
+        ManifestFileMeta indexed = withExtraFiles(written, Arrays.asList(otherName, explicitName));
         assertThat(manifests.selectBlocks(indexed, query).blocks()).isEmpty();
         assertThat(io.opened)
                 .containsExactly(new Path(tempDir.toString(), "manifest/" + explicitName));
         manifests.delete(indexed);
+        assertThat(java.nio.file.Files.exists(otherPath)).isFalse();
         assertThat(java.nio.file.Files.exists(tempDir.resolve("manifest").resolve(explicitName)))
                 .isFalse();
         assertThat(
@@ -1566,10 +1578,13 @@ public class ManifestFileTest {
         CommitCleaner cleaner = new CommitCleaner(lists, manifests, mock(IndexManifestFile.class));
         for (int mode = 0; mode < 2; mode++) {
             ManifestFileMeta meta = manifests.write(Collections.singletonList(gen.next())).get(0);
-            String indexName = "commit-index-" + mode;
+            String indexName = "commit-index-" + mode + ManifestRowIdIndex.SUFFIX;
             Path indexPath = new Path(tempDir.toString(), "manifest/" + indexName);
             LocalFileIO.create().newOutputStream(indexPath, false).close();
-            ManifestFileMeta indexed = withIndexFileName(meta, indexName);
+            String otherName = "commit-other-" + mode;
+            Path otherPath = new Path(tempDir.toString(), "manifest/" + otherName);
+            LocalFileIO.create().newOutputStream(otherPath, false).close();
+            ManifestFileMeta indexed = withExtraFiles(meta, Arrays.asList(otherName, indexName));
             if (mode == 0) {
                 when(lists.read("delta-list")).thenReturn(Collections.singletonList(indexed));
                 cleaner.cleanUpReuseTmpManifests(Pair.of("delta-list", 1L), null, null, null);
@@ -1578,6 +1593,7 @@ public class ManifestFileTest {
                         null, Collections.emptyList(), Collections.singletonList(indexed));
             }
             assertThat(LocalFileIO.create().exists(indexPath)).isFalse();
+            assertThat(LocalFileIO.create().exists(otherPath)).isFalse();
             assertThat(
                             java.nio.file.Files.exists(
                                     tempDir.resolve("manifest").resolve(meta.fileName())))

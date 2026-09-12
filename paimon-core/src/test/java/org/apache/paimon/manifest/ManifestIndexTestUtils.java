@@ -30,6 +30,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Obje
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Synthetic index references for manifest serialization and lifecycle tests. */
@@ -37,6 +38,11 @@ public final class ManifestIndexTestUtils {
     private ManifestIndexTestUtils() {}
 
     public static ManifestFileMeta withIndexFileName(ManifestFileMeta meta, String indexFileName) {
+        return withExtraFiles(
+                meta, indexFileName == null ? null : Collections.singletonList(indexFileName));
+    }
+
+    public static ManifestFileMeta withExtraFiles(ManifestFileMeta meta, List<String> extraFiles) {
         return new ManifestFileMeta(
                 meta.fileName(),
                 meta.fileSize(),
@@ -50,7 +56,7 @@ public final class ManifestIndexTestUtils {
                 meta.maxLevel(),
                 meta.minRowId(),
                 meta.maxRowId(),
-                indexFileName);
+                extraFiles);
     }
 
     /** Replaces only synthetic snapshot fixtures, using newly written manifest lists. */
@@ -73,7 +79,7 @@ public final class ManifestIndexTestUtils {
             List<ManifestFileMeta> indexed = new ArrayList<>();
             for (ManifestFileMeta meta : lists.read(value.asText())) {
                 // Deliberately use a name which cannot be derived by appending the sidecar suffix.
-                String name = "index-for-" + meta.fileName();
+                String name = "index-for-" + meta.fileName() + ManifestRowIdIndex.SUFFIX;
                 Path index = store.pathFactory().toManifestFilePath(name);
                 if (!io.exists(index)) {
                     // GC treats index bytes as opaque; unsupported/partial files are still owned.

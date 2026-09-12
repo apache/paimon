@@ -260,10 +260,15 @@ def select(data, manifest, query, settings):
     return Selection(header, tuple(selected))
 
 
+def index_file_name(manifest):
+    return next((name for name in manifest.extra_files or [] if name.endswith(SUFFIX)), None)
+
+
 def read_index(file_io, manifest_path, manifest, query, settings):
-    if manifest.index_file_name is None:
+    name = index_file_name(manifest)
+    if name is None:
         return None
-    index_path = manifest_path.rsplit('/', 1)[0] + '/' + manifest.index_file_name
+    index_path = manifest_path.rsplit('/', 1)[0] + '/' + name
     try:
         with file_io.new_input_stream(index_path) as stream:
             data = bytearray()

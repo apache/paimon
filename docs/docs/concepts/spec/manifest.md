@@ -58,6 +58,29 @@ skip manifests before opening them.
 | `_MIN_BUCKET`, `_MAX_BUCKET` | INT, nullable | Bucket bounds in the manifest. |
 | `_MIN_LEVEL`, `_MAX_LEVEL` | INT, nullable | Data-file level bounds in the manifest. |
 | `_MIN_ROW_ID`, `_MAX_ROW_ID` | BIGINT, nullable | Row-ID bounds when available. |
+| `_EXTRA_FILES` | ARRAY of STRING, nullable | Names of additional files in the manifest directory; defaults to null. |
+
+Each extra file belongs exclusively to one manifest. It is retained and cleaned up together with
+that manifest during snapshot, tag, or changelog deletion.
+
+### Row-ID Block Index
+
+With `manifest.row-id-index.write` enabled, a manifest writer can create a binary
+`<manifest-file-name>.row-id-index` sidecar. Its name is stored in the manifest-list
+record's `_EXTRA_FILES`; the existing Avro schemas and `_VERSION` identifiers are unchanged.
+Readers identify the row-ID index by the `.row-id-index` suffix among these explicit
+references, not by probing for a derived file name. Other extra-file references are preserved.
+
+With `manifest.row-id-index.read` enabled and a row-ID filter available, readers can use
+the sidecar to select complete Avro blocks before reading manifest entries. Both options
+default to `false`. Old manifests, null or empty extra-file lists, and lists containing only
+other extra-file types use the normal manifest read path. Missing, unsupported, corrupt,
+or over-budget indexes also fall back to that path. Writers omit the sidecar if complete
+row-ID coverage cannot be established within the configured range and byte budgets.
+
+Selected blocks still pass through entry filtering and ADD/DELETE reconciliation. Snapshot,
+tag, changelog, orphan-file and failed-commit cleanup retain or remove the sidecar through
+its extra-file reference together with the owning manifest.
 
 ## Manifest
 

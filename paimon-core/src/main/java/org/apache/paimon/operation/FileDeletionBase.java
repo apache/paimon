@@ -326,8 +326,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             String fileName = manifest.fileName();
             if (skippingSet.add(fileName)) {
                 manifests.add(fileName);
-                if (manifest.indexFileName() != null && skippingSet.add(manifest.indexFileName())) {
-                    manifests.add(manifest.indexFileName());
+                if (manifest.extraFiles() != null) {
+                    manifests.addAll(manifest.extraFiles());
                 }
             }
         }
@@ -514,8 +514,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected static void addManifestToSkippingSet(
             Set<String> skippingSet, ManifestFileMeta manifest) {
         skippingSet.add(manifest.fileName());
-        if (manifest.indexFileName() != null) {
-            skippingSet.add(manifest.indexFileName());
+        if (manifest.extraFiles() != null) {
+            skippingSet.addAll(manifest.extraFiles());
         }
     }
 

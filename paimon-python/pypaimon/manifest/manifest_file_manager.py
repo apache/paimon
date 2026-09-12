@@ -70,7 +70,7 @@ class ManifestFileManager:
         def _process_single_manifest(manifest_file: ManifestFileMeta):
             path = f"{self.manifest_path}/{manifest_file.file_name}"
             selected = None
-            if query is not None and manifest_file.index_file_name is not None:
+            if query is not None:
                 selected = read_index(self.file_io, path, manifest_file, query, settings)
                 if selected is not None and not selected.blocks:
                     return []
@@ -355,8 +355,8 @@ class ManifestFileManager:
 
     def delete(self, manifest: ManifestFileMeta):
         self.file_io.delete_quietly(f"{self.manifest_path}/{manifest.file_name}")
-        if manifest.index_file_name is not None:
-            self.file_io.delete_quietly(f"{self.manifest_path}/{manifest.index_file_name}")
+        for extra_file in manifest.extra_files or []:
+            self.file_io.delete_quietly(f"{self.manifest_path}/{extra_file}")
 
     def _flush(self, file_name: str, avro_bytes: bytes, entries) -> ManifestFileMeta:
         manifest_path = f"{self.manifest_path}/{file_name}"
@@ -372,7 +372,8 @@ class ManifestFileManager:
                     with self.file_io.new_output_stream(f"{self.manifest_path}/{index_file_name}") as output_stream:
                         output_stream.write(data)
             # Publish the reference only after both objects close successfully.
-            return self._build_meta(file_name, entries, len(avro_bytes), index_file_name)
+            return self._build_meta(file_name, entries, len(avro_bytes),
+                                    [index_file_name] if index_file_name is not None else None)
         except BaseException as e:
             self.file_io.delete_quietly(manifest_path)
             if index_file_name is not None:
@@ -382,7 +383,7 @@ class ManifestFileManager:
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
 
     def _build_meta(self, file_name: str, entries: List[ManifestEntry],
-                    file_size: int = None, index_file_name: Optional[str] = None) -> ManifestFileMeta:
+                    file_size: int = None, extra_files: Optional[List[str]] = None) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
@@ -441,5 +442,5 @@ class ManifestFileManager:
             schema_id=schema_id,
             min_row_id=min_row_id,
             max_row_id=max_row_id,
-            index_file_name=index_file_name,
+            extra_files=extra_files,
         )

@@ -309,8 +309,10 @@ public abstract class OrphanFilesClean implements Serializable {
         // collect manifests
         for (ManifestFileMeta manifest : manifestFileMetas) {
             usedFileWithFlagConsumer.accept(Pair.of(manifest.fileName(), true));
-            if (manifest.indexFileName() != null) {
-                usedFileWithFlagConsumer.accept(Pair.of(manifest.indexFileName(), false));
+            if (manifest.extraFiles() != null) {
+                for (String extraFile : manifest.extraFiles()) {
+                    usedFileWithFlagConsumer.accept(Pair.of(extraFile, false));
+                }
             }
         }
 

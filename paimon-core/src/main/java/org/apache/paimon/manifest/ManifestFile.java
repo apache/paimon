@@ -387,7 +387,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     @Nullable
     public ManifestRowIdIndex.Selection selectBlocks(
             ManifestFileMeta manifest, @Nullable RowRangeIndex query) {
-        return !rowIdIndexSettings.read || query == null || manifest.indexFileName() == null
+        return !rowIdIndexSettings.read || query == null
                 ? null
                 : ManifestRowIdIndex.read(
                         fileIO,
@@ -402,11 +402,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         return selected == null || !selected.blocks().isEmpty();
     }
 
-    /** Deletes an unreferenced manifest and its explicitly referenced sidecar. */
+    /** Deletes an unreferenced manifest and its explicitly referenced extra files. */
     public void delete(ManifestFileMeta manifest) {
         delete(manifest.fileName());
-        if (manifest.indexFileName() != null) {
-            delete(manifest.indexFileName());
+        if (manifest.extraFiles() != null) {
+            manifest.extraFiles().forEach(this::delete);
         }
     }
 

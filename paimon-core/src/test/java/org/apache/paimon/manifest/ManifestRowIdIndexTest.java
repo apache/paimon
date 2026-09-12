@@ -64,7 +64,8 @@ class ManifestRowIdIndexTest {
         ManifestFileMeta meta = mock(ManifestFileMeta.class);
         when(meta.fileName()).thenReturn(name);
         when(meta.fileSize()).thenReturn(size);
-        when(meta.indexFileName()).thenReturn(name + ManifestRowIdIndex.SUFFIX);
+        when(meta.extraFiles())
+                .thenReturn(Collections.singletonList(name + ManifestRowIdIndex.SUFFIX));
         when(meta.numAddedFiles()).thenReturn(entries);
         return meta;
     }

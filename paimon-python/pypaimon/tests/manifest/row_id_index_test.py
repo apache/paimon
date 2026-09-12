@@ -33,7 +33,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.row_id_index import (
     Block, Builder, Selection, Settings, SUFFIX, MAX_ROW_ID, Query, select, read_index,
-    read_selected_bytes,
+    read_selected_bytes, index_file_name,
 )
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -104,7 +104,7 @@ class RowIdIndexReadTest(unittest.TestCase):
                 data = builder.serialize('manifest-large', size, block_count)
                 meta = SimpleNamespace(file_name='manifest-large', file_size=size,
                                        num_added_files=block_count, num_deleted_files=0,
-                                       index_file_name='manifest-large' + SUFFIX)
+                                       extra_files=['manifest-large' + SUFFIX])
                 stream = CountingInput(data)
                 file_io = SimpleNamespace(new_input_stream=lambda path: stream)
                 actual = read_index(file_io, '/manifest/manifest-large', meta,
@@ -116,7 +116,7 @@ class RowIdIndexReadTest(unittest.TestCase):
 
     def test_index_short_reads_and_exact_budget(self):
         data, meta = golden(), golden_meta()
-        meta.index_file_name = meta.file_name + SUFFIX
+        meta.extra_files = [meta.file_name + SUFFIX]
         for max_read in (None, 7):
             with self.subTest(max_read=max_read):
                 stream = CountingInput(data, max_read)
@@ -129,7 +129,7 @@ class RowIdIndexReadTest(unittest.TestCase):
 
     def test_index_over_budget_stops_after_one_extra_byte(self):
         data, meta = golden(), golden_meta()
-        meta.index_file_name = meta.file_name + SUFFIX
+        meta.extra_files = [meta.file_name + SUFFIX]
         stream = CountingInput(data)
         file_io = SimpleNamespace(new_input_stream=lambda path: stream)
         self.assertIsNone(read_index(file_io, '/manifest/manifest-golden', meta,
@@ -303,48 +303,55 @@ class RowIdIndexScanTest(existing.ManifestEntryIdentifierTest):
     def test_explicit_reference_and_null_does_not_probe(self):
         manager = self.manifest_file_manager
         written = self.write_meta('explicit', [self.entry('data.parquet', 100)])
-        self.assertEqual(written.index_file_name, written.file_name + SUFFIX)
-        index_path = Path(manager.manifest_path, written.index_file_name)
-        explicit_path = index_path.with_name('independent-index')
+        self.assertEqual(index_file_name(written), written.file_name + SUFFIX)
+        index_path = Path(manager.manifest_path, index_file_name(written))
+        explicit_path = index_path.with_name('independent-index' + SUFFIX)
         index_path.rename(explicit_path)
-        indexed = replace(written, index_file_name=explicit_path.name)
+        other_path = index_path.with_name('other-partition-index')
+        other_path.write_bytes(b'not a row-id index')
+        indexed = replace(written, extra_files=[other_path.name, explicit_path.name])
         with patch.object(self.table.file_io, 'new_input_stream',
                           wraps=self.table.file_io.new_input_stream) as opened:
             self.assertEqual(manager.read_entries_parallel([indexed], row_ranges=[Range(0, 0)]), [])
         self.assertEqual([call[0][0] for call in opened.call_args_list], [str(explicit_path)])
 
-        unindexed = replace(indexed, index_file_name=None)
-        with patch.object(self.table.file_io, 'new_input_stream',
-                          wraps=self.table.file_io.new_input_stream) as opened:
-            actual = manager.read_entries_parallel([unindexed], row_ranges=[Range(0, 0)])
-        self.assertEqual(len(actual), 1)
-        self.assertEqual([call[0][0] for call in opened.call_args_list],
-                         [str(Path(manager.manifest_path, written.file_name))])
+        for extra_files in (None, [], [other_path.name]):
+            with self.subTest(extra_files=extra_files):
+                unindexed = replace(indexed, extra_files=extra_files)
+                with patch.object(self.table.file_io, 'new_input_stream',
+                                  wraps=self.table.file_io.new_input_stream) as opened:
+                    actual = manager.read_entries_parallel([unindexed], row_ranges=[Range(0, 0)])
+                self.assertEqual(len(actual), 1)
+                self.assertEqual([call[0][0] for call in opened.call_args_list],
+                                 [str(Path(manager.manifest_path, written.file_name))])
         manager.delete(indexed)
+        self.assertFalse(other_path.exists())
         self.assertFalse(explicit_path.exists())
         self.assertFalse(Path(manager.manifest_path, written.file_name).exists())
 
     def test_manifest_list_index_reference_compatibility(self):
         indexed = self.write_meta('indexed', [self.entry('data.parquet', 100)])
+        indexed = replace(indexed, extra_files=['other-index'] + indexed.extra_files)
         unindexed = self.write_meta('legacy-entry', [self.entry('old.parquet', None)])
-        self.assertIsNone(unindexed.index_file_name)
+        self.assertIsNone(index_file_name(unindexed))
         lists = ManifestListManager(self.table)
         lists.write('references', [indexed, unindexed])
         actual = lists.read('references')
-        self.assertEqual([meta.index_file_name for meta in actual], [indexed.index_file_name, None])
+        self.assertEqual([meta.extra_files for meta in actual], [indexed.extra_files, None])
+        self.assertEqual([index_file_name(meta) for meta in actual], [index_file_name(indexed), None])
         self.assertEqual([meta.file_name for meta in actual], [indexed.file_name, unindexed.file_name])
 
         data = Path(lists.manifest_path, 'references').read_bytes()
         legacy_schema = deepcopy(MANIFEST_FILE_META_SCHEMA)
         legacy_schema['fields'] = [field for field in legacy_schema['fields']
-                                   if field['name'] != '_INDEX_FILE_NAME']
+                                   if field['name'] != '_EXTRA_FILES']
         legacy_records = list(fastavro.reader(BytesIO(data), reader_schema=legacy_schema))
-        self.assertTrue(all('_INDEX_FILE_NAME' not in record for record in legacy_records))
+        self.assertTrue(all('_EXTRA_FILES' not in record for record in legacy_records))
         self.assertEqual([record['_FILE_NAME'] for record in legacy_records],
                          [indexed.file_name, unindexed.file_name])
         with self.table.file_io.new_output_stream(str(Path(lists.manifest_path, 'old-list'))) as stream:
             fastavro.writer(stream, legacy_schema, legacy_records)
-        self.assertTrue(all(meta.index_file_name is None for meta in lists.read('old-list')))
+        self.assertTrue(all(index_file_name(meta) is None for meta in lists.read('old-list')))
 
     def test_skips_blocks_inside_a_matching_manifest(self):
         entries = [self.entry('file-%d.parquet' % i, i * 1000) for i in range(4000)]
@@ -453,7 +460,7 @@ class RowIdIndexScanTest(existing.ManifestEntryIdentifierTest):
         for meta in outputs:
             self.assertTrue(Path(manager.manifest_path, meta.file_name + SUFFIX).exists())
         for meta in metas:
-            self.assertIsNotNone(meta.index_file_name)
+            self.assertIsNotNone(index_file_name(meta))
             manager.delete(meta)
             self.assertFalse(Path(manager.manifest_path, meta.file_name + SUFFIX).exists())
         original = self.table.file_io.new_output_stream

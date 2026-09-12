@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass
 
-from typing import Optional
+from typing import List, Optional
 from pypaimon.manifest.schema.simple_stats import (PARTITION_STATS_SCHEMA,
                                                    SimpleStats)
 
@@ -33,7 +33,7 @@ class ManifestFileMeta:
 
     min_row_id: Optional[int] = None
     max_row_id: Optional[int] = None
-    index_file_name: Optional[str] = None
+    extra_files: Optional[List[str]] = None
 
 MANIFEST_FILE_META_SCHEMA = {
     "type": "record",
@@ -48,6 +48,6 @@ MANIFEST_FILE_META_SCHEMA = {
         {"name": "_SCHEMA_ID", "type": "long"},
         {"name": "_MIN_ROW_ID", "type": ["null", "long"], "default": None},
         {"name": "_MAX_ROW_ID", "type": ["null", "long"], "default": None},
-        {"name": "_INDEX_FILE_NAME", "type": ["null", "string"], "default": None},
+        {"name": "_EXTRA_FILES", "type": ["null", {"type": "array", "items": "string"}], "default": None},
     ]
 }

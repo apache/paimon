@@ -25,6 +25,9 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.OffsetRow;
 
+import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
+import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
+
 /** Serializer for {@link ManifestFileMeta}. */
 public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMeta> {
 
@@ -57,9 +60,7 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
                 meta.maxLevel(),
                 meta.minRowId(),
                 meta.maxRowId(),
-                meta.indexFileName() == null
-                        ? null
-                        : BinaryString.fromString(meta.indexFileName()));
+                toStringArrayData(meta.extraFiles()));
     }
 
     @Override
@@ -96,6 +97,6 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
                 row.isNullAt(11) ? null : row.getLong(11),
                 row.getFieldCount() <= 12 || row.isNullAt(12)
                         ? null
-                        : row.getString(12).toString());
+                        : fromStringArrayData(row.getArray(12)));
     }
 }

@@ -55,9 +55,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
@@ -170,7 +174,7 @@ public class LocalOrphanFilesCleanTest {
                         .manifestListFactory()
                         .create()
                         .readDataManifests(table.snapshotManager().latestSnapshot())) {
-            Path sidecar = new Path(manifestDir, meta.indexFileName());
+            Path sidecar = new Path(manifestDir, ManifestRowIdIndex.fileName(meta));
             sidecars.add(sidecar);
             Path guessed = new Path(manifestDir, meta.fileName() + ManifestRowIdIndex.SUFFIX);
             fileIO.newOutputStream(guessed, false).close();
@@ -575,6 +579,56 @@ public class LocalOrphanFilesCleanTest {
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
         List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
         validate(deleted, snapshotData, changelogData);
+    }
+
+    @Test
+    public void testPreservesManifestExtraFiles() throws Exception {
+        commit(generateData());
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        List<ManifestFileMeta> manifests = manifestList.read(snapshot.deltaManifestList());
+        ManifestFileMeta meta = manifests.get(0);
+        String extraFile = "manifest-extra";
+        manifests.set(
+                0,
+                new ManifestFileMeta(
+                        meta.fileName(),
+                        meta.fileSize(),
+                        meta.numAddedFiles(),
+                        meta.numDeletedFiles(),
+                        meta.partitionStats(),
+                        meta.schemaId(),
+                        meta.minBucket(),
+                        meta.maxBucket(),
+                        meta.minLevel(),
+                        meta.maxLevel(),
+                        meta.minRowId(),
+                        meta.maxRowId(),
+                        Collections.singletonList(extraFile)));
+        Pair<String, Long> newManifestList = manifestList.write(manifests);
+        ObjectNode node =
+                (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(snapshot.toJson());
+        node.put("deltaManifestList", newManifestList.getKey());
+        node.put("deltaManifestListSize", newManifestList.getValue());
+        fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshot.id()), node.toString());
+        snapshotManager.invalidateCache();
+
+        Path extraPath = new Path(manifestDir, extraFile);
+        Path orphanPath = new Path(manifestDir, "orphan-extra");
+        fileIO.writeFile(extraPath, "extra file, not an Avro manifest", true);
+        fileIO.writeFile(orphanPath, "orphan", true);
+
+        LocalOrphanFilesClean cleaner =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        List<Path> deleted = cleaner.clean().getDeletedFilesPath();
+        assertThat(deleted)
+                .extracting(Path::getName)
+                .contains(orphanPath.getName())
+                .doesNotContain(extraFile);
+        assertThat(fileIO.exists(extraPath)).isTrue();
+        assertThat(fileIO.exists(orphanPath)).isFalse();
     }
 
     /** Manually make a FileNotFoundException to simulate snapshot expire while clean. */

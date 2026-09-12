@@ -71,6 +71,18 @@ public final class ManifestRowIdIndex {
         return new Path(manifest.toString() + SUFFIX);
     }
 
+    @Nullable
+    public static String fileName(ManifestFileMeta manifest) {
+        if (manifest.extraFiles() != null) {
+            for (String extraFile : manifest.extraFiles()) {
+                if (extraFile.endsWith(SUFFIX)) {
+                    return extraFile;
+                }
+            }
+        }
+        return null;
+    }
+
     /** Independent read/write switches and construction/serialization bounds. */
     public static final class Settings {
         public final boolean write;
@@ -371,13 +383,13 @@ public final class ManifestRowIdIndex {
             ManifestFileMeta manifest,
             RowRangeIndex query,
             Settings settings) {
-        if (manifest.indexFileName() == null) {
+        String indexFileName = fileName(manifest);
+        if (indexFileName == null) {
             return null;
         }
         try {
             byte[] data;
-            try (InputStream in =
-                    io.newInputStream(new Path(path.getParent(), manifest.indexFileName()))) {
+            try (InputStream in = io.newInputStream(new Path(path.getParent(), indexFileName))) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 byte[] buffer = new byte[Math.min(READ_BUFFER_BYTES, settings.maxBytes + 1)];
                 int n;

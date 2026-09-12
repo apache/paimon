@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -747,7 +748,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
                     rowIdStats == null ? null : rowIdStats.maxRowId,
-                    sidecarCreated ? ManifestRowIdIndex.path(path).getName() : null);
+                    sidecarCreated
+                            ? Collections.singletonList(ManifestRowIdIndex.path(path).getName())
+                            : null);
         }
     }
 
