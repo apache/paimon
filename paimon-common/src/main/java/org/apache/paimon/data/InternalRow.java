@@ -150,6 +150,8 @@ public interface InternalRow extends DataGetters {
                 return Timestamp.class;
             case ARRAY:
                 return InternalArray.class;
+            case VECTOR:
+                return InternalVector.class;
             case MULTISET:
             case MAP:
                 return InternalMap.class;
