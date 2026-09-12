@@ -19,16 +19,23 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import javax.annotation.Nullable;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -270,6 +277,43 @@ class PredicateJsonSerdeTest {
             assertThatThrownBy(() -> parse(testSpec.jsonString))
                     .hasMessageContaining(testSpec.expectedErrorMessage);
         }
+    }
+
+    @Test
+    void testTemporalAndDecimalLiteralsRoundTrip() {
+        Predicate predicate =
+                PredicateBuilder.and(
+                        temporalBuilder().equal(0, (int) LocalDate.of(2026, 1, 15).toEpochDay()),
+                        temporalBuilder().equal(1, 45_296_789), // 12:34:56.789
+                        temporalBuilder()
+                                .equal(
+                                        2,
+                                        Timestamp.fromLocalDateTime(
+                                                LocalDateTime.of(
+                                                        2026, 1, 15, 12, 34, 56, 789_000_000))),
+                        temporalBuilder()
+                                .equal(
+                                        3,
+                                        Timestamp.fromInstant(
+                                                Instant.parse("2026-01-15T04:34:56.789Z"))),
+                        temporalBuilder()
+                                .equal(
+                                        4,
+                                        Decimal.fromBigDecimal(
+                                                new BigDecimal("12345678901234567.891"), 20, 3)));
+
+        assertThat(parse(toJson(predicate))).isEqualTo(predicate);
+    }
+
+    private static PredicateBuilder temporalBuilder() {
+        return new PredicateBuilder(
+                RowType.of(
+                        DataTypes.DATE(),
+                        DataTypes.TIME(3),
+                        DataTypes.TIMESTAMP(6),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9),
+                        DataTypes.DECIMAL(20, 3),
+                        DataTypes.STRING()));
     }
 
     private static PredicateBuilder newBuilder() {
