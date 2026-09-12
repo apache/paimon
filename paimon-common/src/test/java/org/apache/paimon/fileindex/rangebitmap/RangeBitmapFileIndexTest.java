@@ -50,12 +50,34 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** test for {@link RangeBitmapFileIndex}. */
 public class RangeBitmapFileIndexTest {
 
     private static final int ROW_COUNT = 10000;
     private static final int BOUND = 1000000;
+
+    @Test
+    public void testChunkSizeBeyondIntRangeRejected() {
+        VarCharType varCharType = new VarCharType();
+
+        // a chunk size beyond int range must fail with a clear validation message instead of
+        // silently truncating to a negative int and crashing inside the writer
+        Options oversized = new Options();
+        oversized.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2g");
+        assertThatThrownBy(() -> new RangeBitmapFileIndex(varCharType, oversized).createWriter())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("chunk-size");
+
+        // a large but in-range chunk size still works
+        Options valid = new Options();
+        valid.setString(RangeBitmapFileIndex.CHUNK_SIZE, "16mb");
+        FileIndexWriter writer = new RangeBitmapFileIndex(varCharType, valid).createWriter();
+        writer.write(BinaryString.fromString("a"));
+        writer.write(BinaryString.fromString("b"));
+        assertThat(writer.serializedBytes()).isNotEmpty();
+    }
 
     @RepeatedTest(10)
     public void test() {
