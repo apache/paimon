@@ -106,18 +106,17 @@ class VindexVectorIndexWriter:
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)
-            vectors = np.fromfile(
+            training_vectors = _read_training_vectors(
+                np,
                 self._vector_temp_path,
-                dtype=np.float32,
-                count=self._vector_count * self._dimension,
-            ).reshape(self._vector_count, self._dimension)
-            training_vectors = _sample_training_vectors(
-                np, vectors, self._train_sample_ratio)
+                self._vector_count,
+                self._dimension,
+                self._train_sample_ratio,
+            )
             training = VectorIndexTrainer.train(
                 self._training_options(), training_vectors)
             try:
                 del training_vectors
-                del vectors
                 with VectorIndexWriter(training) as writer:
                     self._add_vectors_in_batches(np, writer)
                     with self._file_io.new_output_stream(file_path) as output_stream:
@@ -343,16 +342,43 @@ def _is_float_type(data_type: DataType) -> bool:
     )
 
 
-def _sample_training_vectors(np, vectors, sample_ratio: float):
-    vector_count = vectors.shape[0]
+def _read_training_vectors(
+    np, path: str, vector_count: int, dimension: int, sample_ratio: float
+):
+    """Read the deterministic training sample without loading the full shard.
+
+    Keep the existing evenly spaced sample positions, but gather them from
+    bounded file reads. Only the training sample and a read block need to be
+    resident; blocks containing no selected vectors are skipped entirely.
+    """
     train_count = max(1, min(vector_count, int(math.ceil(
         vector_count * sample_ratio))))
     if train_count == vector_count:
-        return vectors
+        return np.fromfile(
+            path, dtype=np.float32, count=vector_count * dimension,
+        ).reshape(vector_count, dimension)
+
     indexes = (
         np.arange(train_count, dtype=np.int64) * vector_count // train_count
     )
-    return np.ascontiguousarray(vectors[indexes])
+    training_vectors = np.empty((train_count, dimension), dtype=np.float32)
+    item_size = np.dtype(np.float32).itemsize
+    position = 0
+    with open(path, "rb") as vector_file:
+        while position < train_count:
+            start = int(indexes[position])
+            end = min(start + ADD_BATCH_SIZE, vector_count)
+            next_position = int(np.searchsorted(indexes, end))
+            vector_file.seek(start * dimension * item_size)
+            vectors = np.fromfile(
+                vector_file, dtype=np.float32,
+                count=(end - start) * dimension,
+            ).reshape(end - start, dimension)
+            training_vectors[position:next_position] = vectors[
+                indexes[position:next_position] - start]
+            del vectors
+            position = next_position
+    return training_vectors
 
 
 def _materialize_vector(

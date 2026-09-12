@@ -21,7 +21,9 @@ from decimal import Decimal
 import os
 import struct
 import sys
+import tempfile
 import types
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -41,7 +43,7 @@ from pypaimon.globalindex.full_text.native_full_text_index_writer import (
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
-    _sample_training_vectors,
+    _read_training_vectors,
     native_options,
     train_sample_ratio,
 )
@@ -1027,12 +1029,108 @@ class GlobalIndexBuildTest(
             0.5, train_sample_ratio(options, 'ivf-rq', 'other'))
 
         import numpy as np
-        vectors = np.arange(20, dtype=np.float32).reshape(10, 2)
-        sampled = _sample_training_vectors(np, vectors, 0.4)
-        self.assertEqual(
-            [[0.0, 1.0], [4.0, 5.0], [10.0, 11.0], [14.0, 15.0]],
-            sampled.tolist(),
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'vectors.bin')
+            for count, ratio, expected_positions in [
+                (10, 0.4, [0, 2, 5, 7]),
+                (10, 0.31, [0, 2, 5, 7]),
+                (10, 0.01, [0]),
+                (10, 0.99, list(range(10))),
+                (10, 1.0, list(range(10))),
+                (1, 0.01, [0]),
+                (100, 0.03, [0, 33, 66]),
+            ]:
+                with self.subTest(count=count, ratio=ratio):
+                    vectors = np.arange(
+                        count * 2, dtype=np.float32).reshape(count, 2)
+                    vectors.tofile(path)
+                    with patch(
+                        'pypaimon.globalindex.vindex.'
+                        'vindex_vector_index_writer.ADD_BATCH_SIZE', 3
+                    ), patch.object(np, 'fromfile', wraps=np.fromfile) as read:
+                        sampled = _read_training_vectors(
+                            np, path, count, 2, ratio)
+                    np.testing.assert_array_equal(
+                        sampled, vectors[expected_positions])
+                    self.assertEqual(np.float32, sampled.dtype)
+                    self.assertTrue(sampled.flags.c_contiguous)
+                    self.assertTrue(sampled.flags.writeable)
+                    if len(expected_positions) < count:
+                        # A small training sample must not allocate a full
+                        # shard via a single file read.
+                        self.assertTrue(all(
+                            call.kwargs['count'] <= 3 * 2
+                            for call in read.call_args_list))
+                    if count == 100:
+                        self.assertEqual(3, read.call_count)
+
+    def test_vindex_writer_sampled_training_adds_all_vectors(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('embedding', pa.list_(pa.float32())),
+        ])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        writer = VindexVectorIndexWriter(
+            table.file_io,
+            table.path_factory().global_index_path_factory().global_index_root_path(),
+            ArrayType(True, AtomicType('FLOAT')),
+            'ivf-flat',
+            {'ivf-flat.dimension': '2', 'ivf-flat.train.sample-ratio': '0.4'},
+            'embedding',
         )
+        self.addCleanup(writer.close)
+        writer.write(None, 0)
+        for i in range(10):
+            writer.write([float(i), float(i + 1)], i + 1)
+        paths = [writer._row_id_temp_path, writer._vector_temp_path]
+        _FakeVectorIndexWriter.instances = []
+        with patch.dict(sys.modules, paimon_vindex=types.SimpleNamespace(
+            VectorIndexTrainer=_FakeVectorIndexTrainer,
+            VectorIndexWriter=_FakeVectorIndexWriter,
+        )):
+            entries = writer.finish()
+
+        self.assertEqual(1, len(entries))
+        self.assertEqual(11, entries[0].row_count)
+        built = _FakeVectorIndexWriter.instances[0]
+        self.assertEqual(
+            [[0.0, 1.0], [2.0, 3.0], [5.0, 6.0], [7.0, 8.0]],
+            built.trained)
+        self.assertEqual('10', built.options['expected-vector-count'])
+        self.assertEqual(list(range(1, 11)), built.added_ids)
+        self.assertEqual(
+            [[float(i), float(i + 1)] for i in range(10)], built.added_vectors)
+        self.assertTrue(built.closed)
+        self.assertTrue(all(not os.path.exists(path) for path in paths))
+
+    def test_vindex_writer_training_failure_cleans_temp_files(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('embedding', pa.list_(pa.float32())),
+        ])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        writer = VindexVectorIndexWriter(
+            table.file_io,
+            table.path_factory().global_index_path_factory().global_index_root_path(),
+            ArrayType(True, AtomicType('FLOAT')),
+            'ivf-flat',
+            {'ivf-flat.dimension': '2', 'ivf-flat.train.sample-ratio': '0.5'},
+            'embedding',
+        )
+        self.addCleanup(writer.close)
+        writer.write([1.0, 0.0], 0)
+        writer.write([0.0, 1.0], 1)
+        paths = [writer._row_id_temp_path, writer._vector_temp_path]
+        with patch.dict(sys.modules, paimon_vindex=types.SimpleNamespace(
+            VectorIndexTrainer=_FakeVectorIndexTrainer,
+            VectorIndexWriter=_FakeVectorIndexWriter,
+        )), patch.object(
+            _FakeVectorIndexTrainer, 'train', side_effect=RuntimeError('training failed')
+        ), self.assertRaisesRegex(RuntimeError, 'training failed'):
+            writer.finish()
+
+        self.assertTrue(all(not os.path.exists(path) for path in paths))
+        self.assertFalse(table.file_io.exists(writer._file_path()))
 
     def test_split_by_contiguous_row_range_matches_java_builder(self):
         split = _FakeSplit([
