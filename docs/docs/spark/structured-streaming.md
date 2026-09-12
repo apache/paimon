@@ -91,8 +91,10 @@ uncommitted file.
 A query that starts from a new checkpoint gets a new commit user, so a micro-batch the previous
 run committed is not recognised and its data is written again.
 
-A table using postpone bucket with `postpone.batch-write-fixed-bucket` commits through a staged
-committer that cannot skip a replay; a warning is logged for every such micro-batch.
+A postpone bucket table with `postpone.default-bucket-num` commits an overwrite, such as a
+micro-batch in `complete` mode, through its direct fixed-bucket committer, where a replay is
+recognised as well. Its other writes go through a staged committer that cannot skip a replay; a
+warning is logged for every such micro-batch.
 
 :::
 
