@@ -77,6 +77,7 @@ default to `false`. Old manifests, null or empty extra-file lists, and lists con
 other extra-file types use the normal manifest read path. Missing, unsupported, corrupt,
 or over-budget indexes also fall back to that path. Writers omit the sidecar if complete
 row-ID coverage cannot be established within the configured range and byte budgets.
+Cancellation and interruption errors propagate instead of triggering a full-manifest fallback.
 
 Selected blocks still pass through entry filtering and ADD/DELETE reconciliation. Snapshot,
 tag, changelog, orphan-file and failed-commit cleanup retain or remove the sidecar through

@@ -44,6 +44,8 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -340,6 +342,89 @@ class ManifestRowIdIndexTest {
                 };
         assertThatThrownBy(() -> ManifestRowIdIndex.read(failed, path, manifest, query, settings))
                 .isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    void suppressedCancellationInterruptionAndFatalErrorsPropagate() {
+        ManifestFileMeta manifest = meta("m", 1, 1);
+        RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(1, 1)));
+        for (Throwable closeFailure :
+                Arrays.asList(
+                        new CancellationException("cancelled"),
+                        new java.io.InterruptedIOException("interrupted"),
+                        new AssertionError("fatal"))) {
+            AtomicBoolean closed = new AtomicBoolean();
+            LocalFileIO fileIO =
+                    new LocalFileIO() {
+                        @Override
+                        public org.apache.paimon.fs.SeekableInputStream newInputStream(Path path) {
+                            return new ByteArraySeekableStream(new byte[0]) {
+                                @Override
+                                public int read(byte[] bytes, int offset, int length)
+                                        throws IOException {
+                                    throw new IOException("read failed");
+                                }
+
+                                @Override
+                                public void close() throws IOException {
+                                    super.close();
+                                    closed.set(true);
+                                    if (closeFailure instanceof IOException) {
+                                        throw (IOException) closeFailure;
+                                    }
+                                    if (closeFailure instanceof Error) {
+                                        throw (Error) closeFailure;
+                                    }
+                                    throw (RuntimeException) closeFailure;
+                                }
+                            };
+                        }
+                    };
+            try {
+                assertThatThrownBy(
+                                () ->
+                                        ManifestRowIdIndex.read(
+                                                fileIO,
+                                                new Path(temp.toString(), "m"),
+                                                manifest,
+                                                query,
+                                                settings))
+                        .isInstanceOf(
+                                closeFailure instanceof java.io.InterruptedIOException
+                                        ? java.io.UncheckedIOException.class
+                                        : closeFailure.getClass());
+                assertThat(Thread.currentThread().isInterrupted())
+                        .isEqualTo(closeFailure instanceof java.io.InterruptedIOException);
+                assertThat(closed).isTrue();
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    @Test
+    void ordinaryExceptionCyclesFallBack() {
+        IOException first = new IOException("first");
+        IOException second = new IOException("second");
+        first.initCause(second);
+        second.addSuppressed(first);
+        LocalFileIO fileIO =
+                new LocalFileIO() {
+                    @Override
+                    public org.apache.paimon.fs.SeekableInputStream newInputStream(Path path)
+                            throws IOException {
+                        throw first;
+                    }
+                };
+        assertThat(
+                        ManifestRowIdIndex.read(
+                                fileIO,
+                                new Path(temp.toString(), "m"),
+                                meta("m", 1, 1),
+                                RowRangeIndex.create(Collections.singletonList(new Range(1, 1))),
+                                settings))
+                .isNull();
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
     }
 
     @Test

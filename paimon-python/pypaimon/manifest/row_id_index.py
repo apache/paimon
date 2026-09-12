@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Tuple
 
+from pyarrow import ArrowCancelled
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.utils.range import Range
 
@@ -42,6 +44,7 @@ HEADER = struct.Struct('>8sHHI32sqqI')
 BLOCK = struct.Struct('>qqqqI')
 PAIR = struct.Struct('>qq')
 LONG = struct.Struct('>q')
+_PROPAGATED_ERRORS = (InterruptedError, CancelledError, ArrowCancelled, MemoryError, RecursionError)
 
 
 @dataclass
@@ -279,9 +282,22 @@ def read_index(file_io, manifest_path, manifest, query, settings):
                 data.extend(chunk)
                 _require(len(data) <= settings.max_bytes)
         return select(data, manifest, query, settings)
-    except (InterruptedError, CancelledError, MemoryError, RecursionError):
+    except _PROPAGATED_ERRORS:
         raise
     except Exception as error:
+        pending = [error]
+        visited = set()
+        while pending:
+            cause = pending.pop()
+            if id(cause) in visited:
+                continue
+            visited.add(id(cause))
+            if not isinstance(cause, Exception) or isinstance(cause, _PROPAGATED_ERRORS):
+                raise cause
+            if cause.__cause__ is not None:
+                pending.append(cause.__cause__)
+            if cause.__context__ is not None:
+                pending.append(cause.__context__)
         LOG.debug('Cannot use row-id block index for %s; reading manifest: %s', manifest_path, error)
         return None
 

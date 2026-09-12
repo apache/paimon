@@ -48,8 +48,10 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 
@@ -409,7 +411,17 @@ public final class ManifestRowIdIndex {
         } catch (CancellationException failure) {
             throw failure;
         } catch (IOException | RuntimeException failure) {
-            for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            List<Throwable> pending = new ArrayList<>();
+            Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+            pending.add(failure);
+            for (int position = 0; position < pending.size(); position++) {
+                Throwable cause = pending.get(position);
+                if (!visited.add(cause)) {
+                    continue;
+                }
+                if (cause instanceof Error) {
+                    throw (Error) cause;
+                }
                 if (cause instanceof CancellationException) {
                     throw (CancellationException) cause;
                 }
@@ -420,6 +432,10 @@ public final class ManifestRowIdIndex {
                     Thread.currentThread().interrupt();
                     throw interrupted(failure);
                 }
+                if (cause.getCause() != null) {
+                    pending.add(cause.getCause());
+                }
+                Collections.addAll(pending, cause.getSuppressed());
             }
             if (Thread.currentThread().isInterrupted()) {
                 throw interrupted(failure);

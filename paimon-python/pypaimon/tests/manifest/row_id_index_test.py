@@ -20,10 +20,12 @@ import hashlib
 import os
 import struct
 import unittest
+from concurrent.futures import CancelledError
 from copy import deepcopy
 from io import BytesIO
 
 import fastavro
+from pyarrow import ArrowCancelled
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,6 +90,27 @@ class CountingInput(BytesIO):
     def seek(self, offset, whence=0):
         self.seeks.append(offset)
         return super().seek(offset, whence)
+
+
+class FailingIndexInput(BytesIO):
+    def __init__(self, data, failure, phase, close_failure=None):
+        super().__init__(data)
+        self.failure = failure
+        self.phase = phase
+        self.close_failure = close_failure
+
+    def read(self, size=-1):
+        if self.phase == 'read':
+            raise self.failure
+        return super().read(size)
+
+    def close(self):
+        was_closed = self.closed
+        super().close()
+        if not was_closed and self.close_failure is not None:
+            raise self.close_failure
+        if self.phase == 'close' and not was_closed:
+            raise self.failure
 
 
 class RowIdIndexReadTest(unittest.TestCase):
@@ -439,6 +462,84 @@ class RowIdIndexScanTest(existing.ManifestEntryIdentifierTest):
         with patch.object(self.table.file_io, 'new_input_stream', side_effect=InterruptedError('stop')):
             with self.assertRaises(InterruptedError):
                 read_index(self.table.file_io, path, metas[0], [Range(0, 0)], Settings())
+
+    def test_sidecar_cancellation_during_open(self):
+        self._check_sidecar_cancellation('open')
+
+    def test_sidecar_cancellation_during_read(self):
+        self._check_sidecar_cancellation('read')
+
+    def test_sidecar_cancellation_during_close(self):
+        self._check_sidecar_cancellation('close')
+
+    def _check_sidecar_cancellation(self, phase):
+        for failure_type in (ArrowCancelled, CancelledError, InterruptedError):
+            with self.subTest(phase=phase, failure_type=failure_type):
+                self._check_sidecar_io_failure(phase, failure_type('cancelled'), cancelled=True)
+
+    def test_sidecar_io_failures_fall_back_to_manifest(self):
+        for phase in ('open', 'read', 'close'):
+            for failure_type in (FileNotFoundError, TimeoutError, OSError):
+                with self.subTest(phase=phase, failure_type=failure_type):
+                    self._check_sidecar_io_failure(phase, failure_type('unavailable'), cancelled=False)
+
+    def test_sidecar_cancellation_survives_close_failure(self):
+        for failure_type in (ArrowCancelled, CancelledError, InterruptedError):
+            with self.subTest(failure_type=failure_type):
+                self._check_sidecar_io_failure('read', failure_type('cancelled'), cancelled=True,
+                                               close_failure=OSError('close failed'))
+
+    def test_sidecar_wrapped_cancellation_propagates(self):
+        for failure_type in (ArrowCancelled, CancelledError, InterruptedError):
+            with self.subTest(failure_type=failure_type):
+                cancellation = failure_type('cancelled')
+                wrapped = OSError('wrapped failure')
+                wrapped.__cause__ = cancellation
+                self._check_sidecar_io_failure('open', wrapped, cancelled=True,
+                                               expected_failure=cancellation)
+
+    def test_sidecar_exception_cycle_falls_back(self):
+        first = OSError('first')
+        second = OSError('second')
+        first.__cause__ = second
+        second.__cause__ = first
+        self._check_sidecar_io_failure('open', first, cancelled=False)
+
+    def _check_sidecar_io_failure(self, phase, failure, cancelled, close_failure=None,
+                                  expected_failure=None):
+        manager = self.manifest_file_manager
+        meta = self.write_meta('failure-' + phase + '-' + type(failure).__name__,
+                               [self.entry('data.parquet', 100)])
+        index_path = str(Path(manager.manifest_path, index_file_name(meta)))
+        body_path = str(Path(manager.manifest_path, meta.file_name))
+        stream = (FailingIndexInput(Path(index_path).read_bytes(), failure, phase, close_failure)
+                  if phase != 'open' else None)
+        original_open = self.table.file_io.new_input_stream
+
+        def open_stream(path):
+            if path == index_path:
+                if phase == 'open':
+                    raise failure
+                return stream
+            return original_open(path)
+
+        with patch.object(self.table.file_io, 'new_input_stream', side_effect=open_stream) as opened, \
+                patch.object(manager, 'read', wraps=manager.read) as read_body:
+            if cancelled:
+                expected = failure if expected_failure is None else expected_failure
+                with self.assertRaises(type(expected)) as raised:
+                    manager.read_entries_parallel([meta], row_ranges=[Range(100, 100)])
+                self.assertIs(raised.exception, expected)
+                read_body.assert_not_called()
+                self.assertEqual([call.args[0] for call in opened.call_args_list], [index_path])
+            else:
+                entries = manager.read_entries_parallel([meta], row_ranges=[Range(100, 100)])
+                self.assertEqual([entry.file.file_name for entry in entries], ['data.parquet'])
+                read_body.assert_called_once()
+                self.assertIsNone(read_body.call_args.kwargs['selected_blocks'])
+                self.assertEqual([call.args[0] for call in opened.call_args_list], [index_path, body_path])
+        if stream is not None:
+            self.assertTrue(stream.closed)
 
     def test_rolling_merge_limits_and_abort_cleanup(self):
         entries = [self.entry('file-%d' % i, i * 1000) for i in range(300)]
