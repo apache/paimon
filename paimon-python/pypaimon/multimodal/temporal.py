@@ -18,6 +18,7 @@
 
 from bisect import bisect_left, bisect_right
 from datetime import timedelta
+from fractions import Fraction
 import json
 import math
 from numbers import Integral, Real
@@ -202,7 +203,8 @@ class TemporalAlignment:
         for source in self._sources:
             source.plan()
             source_fetchers.append(
-                _RowIdFetcher(source.query, row_group_cache))
+                _RowIdFetcher(
+                    source.query, row_group_cache, source._fetch_names))
         schema = self._output_schema(anchor_fetcher.schema, source_fetchers)
         self.schema = schema
 
@@ -365,6 +367,7 @@ class _AsOfJoinRight:
             field for field, path in zip(schema, paths)
             if tuple(path) not in excluded
         ])
+        self._fetch_names = None
         self._index = None
 
     def plan(self):
@@ -550,12 +553,9 @@ class _WindowJoinRight(_AsOfJoinRight):
         source_names = {
             specification[1] for specification in self.aggregations
         }
-        query_schema, paths = _query_schema_and_paths(self.query)
-        self.query.select([
-            ".".join(path)
-            for field, path in zip(query_schema, paths)
-            if field.name in source_names
-        ])
+        self._fetch_names = tuple(
+            field.name for field in self.payload_schema
+            if field.name in source_names)
         self.payload_schema = pa.schema([
             field for field in self.payload_schema
             if field.name in source_names
@@ -688,6 +688,10 @@ def _aggregate_values(values, indices, aggregation):
             return sum(items) / len(items)
         if not all(math.isfinite(item) for item in items):
             return pc.mean(selected).as_py()
+        try:
+            return math.fsum(items) / len(items)
+        except OverflowError:
+            pass
         scale = max(abs(item) for item in items)
         if scale == 0:
             return 0.0
@@ -713,6 +717,14 @@ def _window_bound_key(name, value, data_type):
     if value < zero:
         raise ValueError("%s must be non-negative." % name)
     _validate_tolerance(value, data_type)
+    if pa.types.is_integer(data_type) and not isinstance(value, Integral):
+        try:
+            exact = Fraction(value)
+        except TypeError:
+            exact = Fraction(float(value))
+        if exact.denominator == 1:
+            return exact.numerator
+        return exact
     return _time_tolerance_key(value, data_type)
 
 
@@ -1001,13 +1013,29 @@ def _validate_metadata(query, metadata, key_columns):
 
 class _RowIdFetcher:
 
-    def __init__(self, query, row_group_cache):
+    def __init__(self, query, row_group_cache, output_names=None):
         _validate_pinned_tag(query)
-        self._schema = _query_schema(query)
+        query_schema, query_paths = _query_schema_and_paths(query)
+        visible_projection = query._effective_projection()
+        if output_names is None:
+            self._schema = query_schema
+        else:
+            output_names = set(output_names)
+            selected = [
+                (field, path)
+                for field, path in zip(query_schema, query_paths)
+                if field.name in output_names
+            ]
+            self._schema = pa.schema(
+                [field for field, unused in selected],
+                metadata=query_schema.metadata,
+            )
+            visible_projection = [
+                ".".join(path) for unused, path in selected
+            ]
         table = query._table.copy_without_time_travel({
             CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
         })
-        visible_projection = query._effective_projection()
         plan_builder = table.new_read_builder()
         if visible_projection is not None:
             plan_projection = visible_projection
@@ -1168,7 +1196,11 @@ class _RowIdFetcher:
             )
         take = pa.array(
             [positions[row_id] for row_id in row_ids], type=pa.int64())
-        return arrow.select(self._schema.names).take(take)
+        visible = pa.Table.from_arrays(
+            [arrow.column(index) for index in range(len(self._schema))],
+            schema=self._schema,
+        )
+        return visible.take(take)
 
     def _find_splits(self, ranges):
         split_indices = set()

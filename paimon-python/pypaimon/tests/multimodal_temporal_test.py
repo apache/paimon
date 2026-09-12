@@ -287,6 +287,32 @@ class MultimodalTemporalTest(unittest.TestCase):
         ).to_list()[0]
         self.assertEqual(2.5, right_closed["value"])
 
+    def test_window_join_keeps_float_bounds_exact_for_integer_time(self):
+        anchors = self._table("window_integer_bound_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_integer_bound_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        timestamp = 1_700_000_000_000_000_001
+        anchors.add([{"episode_id": 1, "event_time": timestamp}])
+        samples.add([
+            {"episode_id": 1, "event_time": timestamp - 1, "value": 1},
+            {"episode_id": 1, "event_time": timestamp, "value": 2},
+        ])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=0.0, following=0.0,
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+
+        self.assertEqual(1, row["matches"])
+
     def test_window_join_prunes_unaggregated_right_columns(self):
         anchors = self._table("window_projection_anchors", {
             "episode_id": pa.int32(),
@@ -332,6 +358,33 @@ class MultimodalTemporalTest(unittest.TestCase):
             name for columns in payload_reads for name in columns
         })
 
+    def test_window_join_preserves_nested_projection_aliases_when_pruned(self):
+        anchors = self._table("window_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1,
+            "event_time": 10,
+            "a_b": 3,
+            "a": {"b": 7},
+        }])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select(["a_b", "a.b"]),
+            on="event_time", by="episode_id", preceding=0,
+            aggregations={"nested_mean": ("a_b__0", "mean")},
+        ).to_list()[0]
+
+        self.assertEqual(7.0, row["nested_mean"])
+
     def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
         anchors = self._table("window_numeric_anchors", {
             "episode_id": pa.int32(),
@@ -365,6 +418,30 @@ class MultimodalTemporalTest(unittest.TestCase):
 
         self.assertEqual(-0.5, row["integer_value"])
         self.assertEqual(sys.float_info.max, row["float_value"])
+
+    def test_window_mean_preserves_finite_float_cancellation(self):
+        anchors = self._table("window_float_mean_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_float_mean_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 1}])
+        samples.add([
+            {"episode_id": 1, "event_time": 0, "value": 1e16},
+            {"episode_id": 1, "event_time": 2, "value": -1e16 + 2},
+        ])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id", preceding=1, following=1,
+            aggregations={"value": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual(1.0, row["value"])
 
     def test_window_join_can_follow_an_asof_join(self):
         anchors = self._table("window_chain_anchors", {
