@@ -1043,6 +1043,7 @@ class _RowIdFetcher:
         visible_projection = query._effective_projection()
         if output_names is None:
             self._schema = query_schema
+            visible_paths = query_paths
         else:
             output_names = set(output_names)
             selected = [
@@ -1054,9 +1055,8 @@ class _RowIdFetcher:
                 [field for field, unused in selected],
                 metadata=query_schema.metadata,
             )
-            visible_projection = [
-                ".".join(path) for unused, path in selected
-            ]
+            visible_paths = [path for unused, path in selected]
+            visible_projection = [".".join(path) for path in visible_paths]
         table = query._table.copy_without_time_travel({
             CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
         })
@@ -1131,10 +1131,6 @@ class _RowIdFetcher:
             builder.read_type())
         effective_schema = _effective_masked_schema(
             physical_schema, masking)
-        visible_paths = (
-            None if self._name_paths is None
-            else self._name_paths[:len(self._schema)]
-        )
         self._schema = _project_effective_schema(
             self._schema, visible_paths, effective_schema, masking)
         self._fetch_schema = _project_effective_schema(

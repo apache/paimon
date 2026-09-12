@@ -443,6 +443,62 @@ class MultimodalTemporalTest(unittest.TestCase):
 
         self.assertEqual(7.0, row["nested_mean"])
 
+    def test_window_join_preserves_masked_alias_types_when_pruned(self):
+        anchors = self._table("window_masked_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_masked_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [10, 20],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1], "event_time": [10],
+            "a_b": [3],
+            "a": pa.array([{"b": 7}],
+                          type=pa.struct([pa.field("b", pa.int32())])),
+        }))
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({
+                "name": "CAST",
+                "fieldRef": {"index": 2, "name": "a_b", "type": "INT"},
+                "type": "STRING",
+            })},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        for projection, source in (
+                (["a_b"], "a_b"), (["a.b", "a_b"], "a_b__0")):
+            with self.subTest(projection=projection):
+                result = pmm.join_window(
+                    anchors.scan(), samples.scan().select(projection),
+                    on="event_time", by="episode_id", preceding=0,
+                    aggregations={
+                        "first_value": (source, "first"),
+                        "last_value": (source, "last"),
+                    },
+                ).to_arrow()
+                for name in ("first_value", "last_value"):
+                    self.assertEqual(pa.string(), result[name].type)
+                    self.assertEqual(["3", None], result[name].to_pylist())
+
+            for operation in ("mean", "min", "max"):
+                with self.subTest(projection=projection, operation=operation):
+                    with self.assertRaisesRegex(
+                            TypeError, "requires an integer or floating"):
+                        pmm.join_window(
+                            anchors.scan(), samples.scan().select(projection),
+                            on="event_time", by="episode_id", preceding=0,
+                            aggregations={"value": (source, operation)},
+                        ).to_arrow()
+
     def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
         anchors = self._table("window_numeric_anchors", {
             "episode_id": pa.int32(),
