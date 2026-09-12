@@ -131,6 +131,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public SeekableInputStream newInputStream(Path path, long fileSize) throws IOException {
+        return fileIO().newInputStream(path, fileSize);
+    }
+
+    @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return fileIO().newOutputStream(path, overwrite);
     }
