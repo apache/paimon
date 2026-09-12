@@ -15,6 +15,80 @@ Pypaimon requires Python 3.6+.
 The core dependencies are listed in `dev/requirements.txt`.
 The development dependencies are listed in `dev/requirements-dev.txt`.
 
+# OSS metadata commits
+
+Install `pypaimon[oss]` (legacy PyArrow data access) or `pypaimon[jindo]`
+(Jindo data access). Both include `oss2` for atomic metadata writes.
+Configure `fs.oss.accessKeyId`, `fs.oss.accessKeySecret` and `fs.oss.endpoint`,
+plus `fs.oss.securityToken` when using STS. An endpoint without a scheme uses
+HTTPS for metadata writes. Credentials supplied only through an underlying
+filesystem's credential provider must also be supplied through these options.
+
+Metadata requests always use OSS Signature V4 for both AK and STS credentials,
+independently of the Jindo data-access signer setting. Set `fs.oss.region` to the
+bucket's region ID, such as `cn-hangzhou`. If unset, it is inferred from standard
+`oss-<region>.aliyuncs.com` or `oss-<region>-internal.aliyuncs.com` endpoints.
+Other endpoints, including acceleration endpoints, require an explicit region.
+
+Atomic metadata PUTs also forward the OSS server-side encryption options, using
+the same resolution as Java `OSSFileIO`:
+
+| Option | Behavior |
+| --- | --- |
+| `fs.oss.server-side-encryption` | `AES256`, `KMS` or `SM4` (case-insensitive) |
+| `fs.oss.server-side-encryption-key-id` | KMS key ID; implies `KMS` if the method is unset |
+| `fs.oss.server-side-data-encryption` | `SM4` with `KMS`; implies `KMS` if the method is unset |
+| `fs.oss.server-side-encryption-algorithm` | Legacy method fallback, used only if all three options above are unset |
+
+The first three options reject blank values and invalid combinations before any
+request is sent. If no encryption options are set, no encryption headers are
+added and OSS applies the bucket's default policy. These settings cover the
+atomic metadata PUT path; ordinary data writes still use the configured
+PyArrow/Jindo filesystem and its encryption capabilities.
+
+For `oss://` paths, `FileIO.get` selects `OssFileIO`, a thin `PyArrowFileIO`
+subclass that overrides atomic creation. Filesystem initialization, path handling,
+and ordinary PyArrow/Jindo file operations are inherited unchanged.
+Use `FileIO.get(path, options)` or construct `OssFileIO` explicitly for OSS atomic
+writes. REST token refresh and `ResolvingFileIO` also route atomic writes through
+this implementation.
+
+When the bucket is confirmed unversioned, `OssFileIO.try_to_write_atomic` uses a single OSS PUT
+with `x-oss-forbid-overwrite=true`. Exactly one writer can create a given object;
+`FileAlreadyExists` returns `False` so snapshot commits can retry. Other SDK errors
+are raised as `OSError`, retaining their cause for diagnostics. A lost PUT response
+is not retried by the SDK; the snapshot
+commit loop checks the commit user and identifier before retrying.
+
+The vendor SDK is an optional backend dependency, imported only for OSS atomic
+writes. The common FileIO API and Paimon table format remain independent of it.
+This implementation uses OSS-specific conditional creation; it does not provide
+the same atomic-write capability for every object store.
+
+Conditional creation requires a bucket that has **never enabled versioning**.
+The first atomic write on each `OssFileIO` instance checks `GetBucketVersioning`
+and caches the result, including the query-denied fallback. Concurrent first
+writes may repeat the check and warning. Query errors other than `403 AccessDenied`
+are not cached.
+If versioning is Enabled/Suspended,
+the state is unrecognized, or the query returns `403 AccessDenied`, the operation
+logs a warning when caching the fallback and uses the inherited PyArrow/Jindo
+temporary-file-and-rename path.
+This preserves legacy writes without making version-query permission mandatory,
+but the fallback does **not** guarantee safe concurrent commits. It also retains
+the existing backend's encryption behavior rather than applying the conditional
+PUT's OSS SSE headers. Invalid credentials, expired tokens, missing buckets, and
+other query failures still propagate as errors.
+
+Grant `oss:GetBucketVersioning` and keep versioning disabled to use conditional
+creation. Keep bucket versioning and version-query permissions unchanged for the
+instance's lifetime; recreate the FileIO after changing them. A configuration
+change is not guaranteed to produce an error and can invalidate the conditional-write guarantee.
+
+All concurrent writers must use conditional creation. Older Python clients or
+other clients that overwrite snapshot objects can still overwrite a successful
+commit. This change does not add conditional writes for other object stores.
+
 # Build
 
 You can build the source package by executing the following command:

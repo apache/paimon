@@ -173,6 +173,7 @@ jobs:
               python -m pip check
             fi
           fi
+          python -m pip install 'oss2>=2.18,<3'
           df -h
 
       - name: Run lint-python.sh

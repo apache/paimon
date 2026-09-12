@@ -17,9 +17,9 @@
 
 import unittest
 
+from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.read.reader.lance_utils import to_lance_specified
 
 
@@ -34,7 +34,7 @@ class LanceUtilsTest(unittest.TestCase):
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "test-secret",
         })
 
-        file_io = PyArrowFileIO(file_path, properties)
+        file_io = FileIO.get(file_path, properties)
         file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
 
         self.assertEqual(
@@ -60,7 +60,7 @@ class LanceUtilsTest(unittest.TestCase):
             OssOptions.OSS_SECURITY_TOKEN.key(): "test-token",
         })
 
-        file_io = PyArrowFileIO(file_path, properties)
+        file_io = FileIO.get(file_path, properties)
         file_path_for_lance, storage_options = to_lance_specified(file_io, file_path)
 
         self.assertEqual(file_path_for_lance, "oss://my-bucket/path/to/file.lance")

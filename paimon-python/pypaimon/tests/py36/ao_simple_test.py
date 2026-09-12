@@ -26,7 +26,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 TableNotExistException)
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.filesystem.oss_file_io import OssFileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -404,19 +404,19 @@ class AOSimpleTest(RESTBaseTest):
 
         with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
                 patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
-            PyArrowFileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
+            OssFileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_once_with(access_key="AKID",
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
                                               endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
-            PyArrowFileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
+            OssFileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
                                          endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
-            PyArrowFileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
+            OssFileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",

@@ -147,6 +147,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
+            original_file_io.token = RESTToken({}, 1)
+            original_backend = original_file_io.file_io()
 
             pickled = pickle.dumps(original_file_io)
 
@@ -157,6 +159,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertIsNone(deserialized_file_io.api_instance)
+            self.assertIsNot(deserialized_file_io.file_io(), original_backend)
 
             test_file_path = f"file://{self.temp_dir}/pickle_test.txt"
             test_content = b"pickle test content"
