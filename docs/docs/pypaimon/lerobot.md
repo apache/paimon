@@ -109,9 +109,8 @@ Scalars map to scalar types, vectors to `VECTOR`, higher-rank tensors to nested
 
 Video features map to `BLOB`. Frame rows reference MP4 payloads copied once per
 aligned file group. Video imports use the video grouping policy and check
-rolling before each Episode. They require a bucket-unaware table. Read them
-with a Paimon scan and `VideoFrameCollator`, or let `PaimonLeRobotDataset`
-decode the referenced frames with TorchCodec.
+rolling before each Episode. They require a bucket-unaware table. Use
+`VideoFrameCollator` for scans or `PaimonLeRobotDataset` for training.
 
 ## Capture LeRobot frames directly into Paimon
 
@@ -208,9 +207,8 @@ pin one named snapshot on every component.
 
 ## Train with Paimon LeRobot data
 
-For map-style training, read a tagged image- or video-backed table group
-created by `load_from_lerobot` directly from Paimon. `PaimonLeRobotDataset`
-requires the complete table group; a frame-only table created by
+For map-style training, pass an image- or video-backed table group created by
+`load_from_lerobot` to `PaimonLeRobotDataset`. A frame-only table created by
 `PaimonLeRobotWriter` is not sufficient.
 
 ```python
@@ -224,9 +222,7 @@ dataset = PaimonLeRobotDataset(
 loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 ```
 
-If `tag_name` is omitted, the latest snapshots are used. Metadata is available
-through `dataset.meta`. Frame lookups use the BTree on `index`; payload columns
-remain lazy. Video decoder sessions are cached per DataLoader worker; set
-`max_open_videos` to bound the number retained for each video feature. Video
-decoding uses TorchCodec when available and otherwise PyAV; set
-`video_backend="torchcodec"` or `"pyav"` to select one explicitly.
+Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
+on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
+to PyAV, and caches at most `max_open_videos` decoders per worker and feature.
+Set `video_backend` to force either decoder.
