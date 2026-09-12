@@ -27,6 +27,12 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 class OssFileIO(PyArrowFileIO):
     """Override atomic metadata creation; inherit all ordinary file operations."""
 
+    # Intentionally no lock: stable bucket configuration makes duplicate first
+    # queries acceptable. Without a lock, no additional __getstate__/__setstate__
+    # hooks are needed; the parent's pickle support already handles this None/bool
+    # cache, preserving its value under the same stability assumption.
+    _atomic_write_supported = None
+
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         uri = urlparse(path)
         if uri.scheme:
@@ -57,17 +63,7 @@ class OssFileIO(PyArrowFileIO):
             bucket = self._create_oss_bucket(session)
             headers = self._sse_headers()
             headers['x-oss-forbid-overwrite'] = 'true'
-            try:
-                versioning = bucket.get_bucket_versioning().status
-            except oss2.exceptions.ServerError as error:
-                if error.status != 403 or error.code != 'AccessDenied':
-                    raise
-                versioning = 'unknown (GetBucketVersioning denied)'
-            if versioning is not None:
-                self.logger.warning(
-                    "Using legacy temporary-file-and-rename writes for OSS bucket %s "
-                    "(versioning: %s). Concurrent commits are not protected against overwrites.",
-                    self._oss_bucket, versioning)
+            if not self._supports_atomic_write(bucket):
                 return super().try_to_write_atomic(path, content)
             try:
                 bucket.put_object(key, content.encode('utf-8'), headers=headers)
@@ -80,6 +76,26 @@ class OssFileIO(PyArrowFileIO):
             raise OSError("Failed to atomically write oss://{}/{}".format(self._oss_bucket, key)) from error
         finally:
             session.session.close()
+
+    def _supports_atomic_write(self, bucket):
+        """Cache the publication mode for this instance; failed queries remain retryable."""
+        import oss2
+
+        # Intentionally lock-free: duplicate first queries are acceptable with stable bucket configuration.
+        if self._atomic_write_supported is None:
+            try:
+                versioning = bucket.get_bucket_versioning().status
+            except oss2.exceptions.ServerError as error:
+                if error.status != 403 or error.code != 'AccessDenied':
+                    raise
+                versioning = 'unknown (GetBucketVersioning denied)'
+            self._atomic_write_supported = versioning is None
+            if not self._atomic_write_supported:
+                self.logger.warning(
+                    "Using legacy temporary-file-and-rename writes for OSS bucket %s "
+                    "(versioning: %s). Concurrent commits are not protected against overwrites.",
+                    self._oss_bucket, versioning)
+        return self._atomic_write_supported
 
     def _create_oss_bucket(self, session):
         """Build the metadata client with one V4 credential path for both AK and STS."""

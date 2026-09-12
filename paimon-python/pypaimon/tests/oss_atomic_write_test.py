@@ -170,7 +170,7 @@ def test_v4_authentication_reaches_conditional_put(oss_server, monkeypatch, tmp_
     assert io.try_to_write_atomic(path, 'data') is True
     assert io.try_to_write_atomic(path, 'overwrite') is False
     assert list(oss_server.objects.values()) == [b'data']
-    assert [method for method, _, _ in oss_server.auth_headers] == ['GET', 'PUT', 'GET', 'PUT']
+    assert [method for method, _, _ in oss_server.auth_headers] == ['GET', 'PUT', 'PUT']
     assert all(header_token == token for _, _, header_token in oss_server.auth_headers)
 
 
@@ -199,8 +199,10 @@ def test_atomic_competition_and_existing_content(oss_server, resolving):
         results = list(pool.map(write, range(2)))
     assert sorted(results) == [False, True]
     assert oss_server.objects == {'/test-bucket/table/p=a%2Fb/snapshot-1': contents[results.index(True)].encode()}
+    versioning_queries = oss_server.gets
     assert io.try_to_write_atomic(path, 'overwrite') is False
     assert list(oss_server.objects.values()) == [contents[results.index(True)].encode()]
+    assert oss_server.gets == versioning_queries
 
 
 @pytest.mark.parametrize('second_path,method', [
@@ -224,6 +226,7 @@ def test_rest_file_io_isolates_bucket_and_encryption(oss_server, second_path, me
             io.token = RESTToken({'fs.oss.securityToken': 'refreshed-token'}, oss_server.server_port + 1)
             assert io.try_to_write_atomic(target + '-next', 'next')
             assert oss_server.token == 'refreshed-token'
+            assert oss_server.gets == 2 * (index + 1)
 
 
 @pytest.mark.parametrize('versioning', ['Enabled', 'Suspended', None])
@@ -242,7 +245,8 @@ def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, tmp
     assert (tmp_path / 'snapshot-1').read_text() == '兼容写入'
     assert sorted(p.name for p in tmp_path.iterdir()) == ['snapshot-1']
     assert oss_server.puts == 0
-    assert 'Concurrent commits are not protected' in caplog.text
+    assert oss_server.gets == 1
+    assert caplog.text.count('Concurrent commits are not protected') == 1
 
 
 @pytest.mark.parametrize('method,status,code', [
@@ -252,11 +256,15 @@ def test_versioning_fallback_preserves_legacy_writes(oss_server, versioning, tmp
 ])
 def test_errors_are_not_competition(oss_server, method, status, code):
     oss_server.fail_method, oss_server.failure = method, (status, code)
+    io = file_io(oss_server)
     with pytest.raises(OSError) as caught:
-        file_io(oss_server).try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
+        io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
     assert isinstance(caught.value.__cause__, oss2.exceptions.ServerError)
     assert caught.value.__cause__.code == code
     assert oss_server.objects == {}
+    oss_server.fail_method = None
+    assert io.try_to_write_atomic('oss://test-bucket/snapshot-1', 'data')
+    assert oss_server.gets == (2 if method == 'GET' else 1)
 
 
 def test_lost_response_is_not_replayed_or_reported_as_conflict(oss_server):

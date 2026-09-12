@@ -66,9 +66,14 @@ This implementation uses OSS-specific conditional creation; it does not provide
 the same atomic-write capability for every object store.
 
 Conditional creation requires a bucket that has **never enabled versioning**.
-Each call first checks `GetBucketVersioning`. If versioning is Enabled/Suspended,
+The first atomic write on each `OssFileIO` instance checks `GetBucketVersioning`
+and caches the result, including the query-denied fallback. Concurrent first
+writes may repeat the check and warning. Query errors other than `403 AccessDenied`
+are not cached.
+If versioning is Enabled/Suspended,
 the state is unrecognized, or the query returns `403 AccessDenied`, the operation
-logs a warning and uses the inherited PyArrow/Jindo temporary-file-and-rename path.
+logs a warning when caching the fallback and uses the inherited PyArrow/Jindo
+temporary-file-and-rename path.
 This preserves legacy writes without making version-query permission mandatory,
 but the fallback does **not** guarantee safe concurrent commits. It also retains
 the existing backend's encryption behavior rather than applying the conditional
@@ -76,7 +81,9 @@ PUT's OSS SSE headers. Invalid credentials, expired tokens, missing buckets, and
 other query failures still propagate as errors.
 
 Grant `oss:GetBucketVersioning` and keep versioning disabled to use conditional
-creation. The check and PUT cannot be made atomic with a bucket configuration change.
+creation. Keep bucket versioning and version-query permissions unchanged for the
+instance's lifetime; recreate the FileIO after changing them. A configuration
+change is not guaranteed to produce an error and can invalidate the conditional-write guarantee.
 
 All concurrent writers must use conditional creation. Older Python clients or
 other clients that overwrite snapshot objects can still overwrite a successful
