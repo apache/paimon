@@ -695,6 +695,7 @@ def distributed_update_apply(
     estimated_size_bytes: Optional[int] = None,
     estimated_num_rows: Optional[int] = None,
     data_context=None,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -740,6 +741,9 @@ def distributed_update_apply(
         len(sorted_first_row_ids),
         data_context=data_context,
     )
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        update_ds = update_ds.materialize()
 
     # Pin commit-time conflict check to the snapshot the join was built on,
     # so concurrent commits between read and planner are detected.
@@ -1035,6 +1039,7 @@ def distributed_delete_apply(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    materialize_before_routing: bool = False,
 ) -> Tuple[list, int, list]:
     import base64
     import numpy as np
@@ -1057,6 +1062,10 @@ def distributed_delete_apply(
     anchor_info = planner._snapshot_anchor_ranges()
     if not anchor_info.anchors:
         return [], 0, []
+
+    if materialize_before_routing:
+        # Keep the matched join and file-routing shuffle in separate Ray jobs.
+        delete_ds = delete_ds.materialize()
 
     precomputed_info_ref = ray.put(anchor_info)
 
