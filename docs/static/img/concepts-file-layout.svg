@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 720" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">From a snapshot to its files</title>
+<desc id="desc">Arrows are metadata references. Optional branches depend on table features and the write.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1080" height="720" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="44" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">From a snapshot to its files</text>
+<text x="32" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Arrows are metadata references. Optional branches depend on table features and the write.</text>
+<rect x="32" y="114" width="242" height="180" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="145" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Snapshot N</text>
+<text x="50" y="174" font-size="18" font-weight="400" text-anchor="start" fill="#526277">schemaId</text>
+<text x="50" y="201" font-size="18" font-weight="400" text-anchor="start" fill="#526277">baseManifestList</text>
+<text x="50" y="228" font-size="18" font-weight="400" text-anchor="start" fill="#526277">deltaManifestList</text>
+<text x="50" y="255" font-size="18" font-weight="400" text-anchor="start" fill="#526277">optional references</text>
+<rect x="32" y="361" width="242" height="97" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="392" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Schema</text>
+<text x="50" y="421" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Fields, keys, options</text>
+<path d="M 153 294 V 361" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="169" y="335" font-size="17" font-weight="400" text-anchor="start" fill="#526277">schemaId</text>
+<rect x="340" y="114" width="326" height="100" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="358" y="145" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Base + delta lists</text>
+<text x="358" y="174" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Manifest names and statistics</text>
+<path d="M 274 164 H 340" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="340" y="270" width="326" height="98" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="358" y="301" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Data manifests</text>
+<text x="358" y="330" font-size="18" font-weight="400" text-anchor="start" fill="#526277">ADD / DELETE + file metadata</text>
+<path d="M 503 214 V 270" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="744" y="270" width="304" height="98" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="762" y="301" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Data files</text>
+<text x="762" y="330" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Partition / bucket paths</text>
+<path d="M 666 319 H 744" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="340" y="420" width="326" height="94" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="358" y="451" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Changelog list → manifests</text>
+<text x="358" y="480" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Changes for this snapshot</text>
+<rect x="744" y="420" width="304" height="94" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="762" y="451" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Changelog files</text>
+<text x="762" y="480" font-size="18" font-weight="400" text-anchor="start" fill="#526277">When a producer emits them</text>
+<path d="M 274 240 H 307 V 467 H 340" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<path d="M 666 467 H 744" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<rect x="340" y="560" width="326" height="94" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="358" y="591" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">Index manifest</text>
+<text x="358" y="620" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Index file metadata and ranges</text>
+<rect x="744" y="560" width="304" height="94" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="762" y="591" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Table index files</text>
+<text x="762" y="620" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Bucket indexes, deletion vectors</text>
+<path d="M 274 268 H 292 V 607 H 340" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<path d="M 666 607 H 744" fill="none" stroke="#526277" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+<text x="32" y="505" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Default directories</text>
+<text x="32" y="537" font-size="18" font-weight="400" text-anchor="start" fill="#526277">snapshot/ · schema/</text>
+<text x="32" y="564" font-size="18" font-weight="400" text-anchor="start" fill="#526277">manifest/ · index/</text>
+<text x="32" y="690" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Base + delta resolve live data files; optional changelog and index references serve separate purposes.</text>
+</g>
+</svg>

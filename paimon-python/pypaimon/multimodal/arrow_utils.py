@@ -26,6 +26,11 @@ def strict_arrow_table(
         source_path,
         batch_index,
         format_name):
+    """Validate one Arrow batch against the exact target table schema.
+
+    Reject missing, extra, or reordered columns, validate nested nullability,
+    and apply only Arrow safe casts before returning a ``pyarrow.Table``.
+    """
     if isinstance(data, pa.RecordBatch):
         table = pa.Table.from_batches([data])
     elif isinstance(data, pa.Table):

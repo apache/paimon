@@ -35,26 +35,37 @@ public class MosaicReaderFactory implements FormatReaderFactory {
     private final RowType dataSchemaRowType;
     private final RowType projectedRowType;
     @Nullable private final List<Predicate> predicates;
+    private final int prefetchRowGroups;
+    private final long prefetchMaxBytes;
 
     public MosaicReaderFactory(
             RowType dataSchemaRowType,
             RowType projectedRowType,
-            @Nullable List<Predicate> predicates) {
+            @Nullable List<Predicate> predicates,
+            int prefetchRowGroups,
+            long prefetchMaxBytes) {
         this.dataSchemaRowType = dataSchemaRowType;
         this.projectedRowType = projectedRowType;
         this.predicates = predicates;
+        this.prefetchRowGroups = Math.max(0, prefetchRowGroups);
+        this.prefetchMaxBytes = prefetchMaxBytes;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+        // One stream per row group being opened, plus one for the consumer's own reads.
         MosaicInputFileAdapter inputFile =
-                new MosaicInputFileAdapter(context.fileIO(), context.filePath());
+                new MosaicInputFileAdapter(
+                        context.fileIO(), context.filePath(), prefetchRowGroups + 1);
         return new MosaicRecordsReader(
                 inputFile,
                 context.fileSize(),
                 dataSchemaRowType,
                 projectedRowType,
                 predicates,
-                context.filePath());
+                context.filePath(),
+                context.selection(),
+                prefetchRowGroups,
+                prefetchMaxBytes);
     }
 }

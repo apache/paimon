@@ -26,6 +26,7 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -80,6 +81,53 @@ public class RowIdPredicateVisitorTest {
         // Test unrecognized predicate (should return empty)
         Predicate unrecognized = builder.greaterThan(0, 10);
         assertThat(unrecognized.visit(visitor)).isEmpty();
+    }
+
+    @Test
+    public void testUnsortedInLiteralsIntersectCorrectly() {
+        // IN literals in descending engine order: unsorted input to Range.and's
+        // two-pointer intersection silently drops rows (e.g. only [5,5] instead of
+        // [1,2] and [5,6]).
+        // >20 literals so PredicateBuilder keeps a real In leaf (smaller INs become
+        // an OR of equals): descending 25..5 exercises the In branch unsorted.
+        List<Object> descending = new ArrayList<>();
+        for (long v = 25; v >= 5; v--) {
+            descending.add(v);
+        }
+        Predicate inUnsorted = builder.in(rowIdIndex, descending);
+        Predicate between1To6 = builder.between(rowIdIndex, 1L, 6L);
+        Predicate and = PredicateBuilder.and(inUnsorted, between1To6);
+        Optional<List<Range>> result = and.visit(visitor);
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactly(new Range(5, 6));
+
+        // Duplicates in the IN list must not produce overlapping ranges.
+        List<Object> duplicates = new ArrayList<>();
+        for (int i = 0; i < 21; i++) {
+            duplicates.add(15L);
+        }
+        Predicate inDuplicates = builder.in(rowIdIndex, duplicates);
+        Predicate between10To20 = builder.between(rowIdIndex, 10L, 20L);
+        Optional<List<Range>> dedup =
+                PredicateBuilder.and(inDuplicates, between10To20).visit(visitor);
+        assertThat(dedup).isPresent();
+        assertThat(dedup.get()).containsExactly(new Range(15, 15));
+    }
+
+    @Test
+    public void testInvertedBetweenIsEmpty() {
+        // SQL allows BETWEEN 10 AND 5; it matches nothing and must not fabricate an
+        // inverted Range that breaks the from <= to invariant.
+        Predicate inverted = builder.between(rowIdIndex, 10L, 5L);
+        Optional<List<Range>> result = inverted.visit(visitor);
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEmpty();
+
+        // Inverted BETWEEN under OR must not break the union accumulation.
+        Predicate equal7 = builder.equal(rowIdIndex, 7L);
+        Optional<List<Range>> orResult = PredicateBuilder.or(inverted, equal7).visit(visitor);
+        assertThat(orResult).isPresent();
+        assertThat(orResult.get()).containsExactly(new Range(7, 7));
     }
 
     @Test

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 792" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Row changes, file changes, and physical cleanup</title>
+<desc id="desc">In a merge-on-read primary-key table, A holds rows 1 and 2. New files record an update to row 1 and deletion of row 2. Compaction replaces the active files with C containing row 1 paid. Old input files can remain for history until expiration can safely delete them. The latest file C remains.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1080" height="792" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="48" font-size="28" font-weight="700" text-anchor="start" fill="#172b4d">Row changes, file changes, and physical cleanup</text>
+<text x="32" y="80" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Illustrative MOR lifecycle; file letters and counts are schematic.</text>
+<text x="32" y="122" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Operation</text>
+<text x="238" y="122" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Latest snapshot reads</text>
+<text x="675" y="122" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Query result</text>
+<text x="875" y="122" font-size="18" font-weight="700" text-anchor="start" fill="#172b4d">Old inputs</text>
+<text x="32" y="188" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">1  Append</text>
+<rect x="220" y="148" width="430" height="104" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="238" y="180" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">A: (1, open), (2, open)</text>
+<text x="238" y="210" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Two current rows</text>
+<text x="675" y="191" font-size="20" font-weight="700" text-anchor="start" fill="#10705d">1 open, 2 open</text>
+<text x="875" y="188" font-size="18" font-weight="400" text-anchor="start" fill="#526277">None</text>
+<path d="M 435 252 V 290" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="32" y="330" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">2  Update / delete</text>
+<rect x="220" y="290" width="430" height="104" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="238" y="322" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">A + new change files</text>
+<text x="238" y="352" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Update 1 → paid; delete 2</text>
+<text x="675" y="333" font-size="20" font-weight="700" text-anchor="start" fill="#10705d">1 paid</text>
+<text x="875" y="330" font-size="18" font-weight="400" text-anchor="start" fill="#526277">May still be live</text>
+<text x="875" y="359" font-size="16" font-weight="400" text-anchor="start" fill="#526277">before compaction</text>
+<path d="M 435 394 V 432" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="32" y="472" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">3  Compact</text>
+<rect x="220" y="432" width="430" height="104" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="238" y="464" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">C: (1, paid)</text>
+<text x="238" y="494" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Retire inputs from latest snapshot</text>
+<text x="675" y="475" font-size="20" font-weight="700" text-anchor="start" fill="#10705d">1 paid</text>
+<text x="875" y="472" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A + changes</text>
+<text x="875" y="501" font-size="17" font-weight="400" text-anchor="start" fill="#946200">kept for history</text>
+<path d="M 435 536 V 574" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="32" y="614" font-size="21" font-weight="700" text-anchor="start" fill="#172b4d">4  Expire history</text>
+<rect x="220" y="574" width="430" height="104" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="238" y="606" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">C: (1, paid)</text>
+<text x="238" y="636" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Keep files required by latest state</text>
+<text x="675" y="617" font-size="20" font-weight="700" text-anchor="start" fill="#10705d">1 paid</text>
+<text x="875" y="614" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Eligible inputs</text>
+<text x="875" y="643" font-size="17" font-weight="400" text-anchor="start" fill="#10705d">reclaimed</text>
+<path d="M 32 706 L 1048 706" stroke="#d5dee9" stroke-width="1.5"/>
+<text x="32" y="740" font-size="20" font-weight="700" text-anchor="start" fill="#172b4d">Row DELETE ≠ manifest DELETE</text>
+<text x="32" y="770" font-size="18" font-weight="400" text-anchor="start" fill="#526277">A file containing row deletions is added; a manifest DELETE removes a file reference from a snapshot.</text>
+</g>
+</svg>

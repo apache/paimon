@@ -3,10 +3,6 @@ title: "CDC Ingestion"
 sidebar_position: 91
 ---
 
-import ConfigTable from '@site/src/components/ConfigTable';
-import temporalFunctionsHtml from '@site/generated/temporal_functions.html';
-import otherFunctionsHtml from '@site/generated/other_functions.html';
-
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -28,131 +24,85 @@ under the License.
 
 # Overview
 
-Paimon supports a variety of ways to ingest data into Paimon tables with schema evolution. This means that the added
-columns are synchronized to the Paimon table in real time and the synchronization job will not be restarted for this purpose.
+Use Paimon CDC actions to ingest database changes or change events from a message queue into
+Paimon tables. The actions create target tables and apply supported schema changes while the
+Flink job is running.
 
-We currently support the following sync ways:
+## Choose an Ingestion Path
 
-1. MySQL Synchronizing Table: synchronize one or multiple tables from MySQL into one Paimon table.
-2. MySQL Synchronizing Database: synchronize the whole MySQL database into one Paimon database.
-3. [Program API Sync](../program-api/flink-api#cdc-ingestion-table): synchronize your custom DataStream input into one Paimon table.
-4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table.
-5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
-6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table.
-7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
-8. Pulsar Synchronizing Table: synchronize one Pulsar topic's table into one Paimon table.
-9. Pulsar Synchronizing Database: synchronize one Pulsar topic containing multiple tables or multiple topics containing one table each into one Paimon database.
+| Source | Synchronize into one Paimon table | Synchronize into a Paimon database |
+| --- | --- | --- |
+| [MySQL](./mysql-cdc) | One source table, or merge multiple tables and shards | Synchronize selected tables; optionally merge same-name shards |
+| [PostgreSQL](./postgres-cdc) | One source table, or merge tables across schemas in one database | No database action |
+| [MongoDB](./mongo-cdc) | One collection | Synchronize selected collections |
+| [Kafka](./kafka-cdc) | Change events from one topic | Route tables from one or more topics |
+| [Pulsar](./pulsar-cdc) | Change events from one topic | Route tables from one or more topics |
+| [Flink DataStream API](../program-api/flink-api#cdc-ingestion-table) | Ingest custom CDC records | See the API guide for multi-table sinks |
 
-## What is Schema Evolution
+![Table synchronization merges selected sources into one target; database synchronization routes each source table to its target.](/img/cdc-ingestion-sync-modes.svg)
 
-Suppose we have a MySQL table named `tableA`, it has three fields: `field_1`, `field_2`, `field_3`. When we want to load
-this MySQL table to Paimon, we can do this in Flink SQL, or use [MySqlSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction).
+Choose **table synchronization** when you want one target table. If several source tables feed
+that target, their schemas must be compatible and their primary keys must identify rows across
+all sources. Rows with the same target primary key represent the same record.
 
-**Flink SQL:**
+Choose **database synchronization** when you want to preserve separate tables. Table filters,
+naming rules, primary-key requirements, and discovery of new tables depend on the source action;
+check its guide before starting the job.
 
-In Flink SQL, if we change the table schema of the MySQL table after the ingestion, the table schema change will not be synchronized to Paimon.
+### Flink CDC YAML Pipelines
 
-![](/img/cdc-ingestion-flinksql.png)
+Flink CDC also supports pipelines described in YAML. To write **into Paimon** through that framework,
+see the [Flink CDC Paimon sink connector](https://nightlies.apache.org/flink/flink-cdc-docs-release-3.5/docs/connectors/pipeline-connectors/paimon/).
+To read **from Paimon** and send changes to another system, see [Paimon as a Flink CDC Source](./flink-cdc).
+The action options in this section, such as `--table_conf`, belong to the Paimon action CLI.
 
-**MySqlSyncTableAction:**
+## Before You Start
 
-In [MySqlSyncTableAction](https://paimon.apache.org/docs/master/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction),
-if we change the table schema of the MySQL table after the ingestion, the table schema change will be synchronized to Paimon,
-and the data of `field_4` which is newly added will be synchronized to Paimon too.
+1. Set up [Paimon on Flink](../flink/quick-start) and install the source connector dependencies
+   listed in the source guide. Use the `paimon-flink-action-@@VERSION@@.jar` for the job.
+2. Choose the target warehouse, database, table layout, and primary keys. In action commands,
+   `--database` and `--table` identify the **Paimon target**; source names belong in `--mysql_conf`,
+   `--postgres_conf`, `--mongodb_conf`, `--kafka_conf`, or `--pulsar_conf`.
+3. Check the source's schema and change-event requirements. For Kafka and Pulsar, the event
+   format determines which types, table names, and keys can be recovered.
+4. Start with a source-specific example, then add [computed columns and job settings](./action-configuration).
 
-![](/img/cdc-ingestion-schema-evolution.png)
+## What Is Schema Evolution {#what-is-schema-evolution}
 
-## Schema Change Evolution
+An ordinary Flink SQL `INSERT INTO ... SELECT ...` job uses the schemas declared for that job.
+Adding a column in the source does not automatically add it to the SQL definitions and target table.
+Paimon CDC actions can carry the new field and its values through to Paimon without restarting
+for a supported column addition.
 
-Cdc Ingestion supports a limited number of schema changes. Currently, the framework can not rename table, drop columns, so the
-behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` will add a new column. Currently supported schema changes includes:
+![A declared Flink SQL schema keeps the original three fields, while a Paimon CDC action adds field_4 to the target.](/img/cdc-ingestion-schema-evolution.svg)
 
-* Adding columns.
+### Supported Changes {#schema-change-evolution}
 
-* Altering column types. More specifically,
+Schema evolution is not full DDL replication. Column additions and compatible type changes can
+be applied; dropping or renaming source objects does not perform the equivalent operation on
+existing Paimon objects. See [Schema Evolution and Type Mapping](./schema-evolution) for the
+supported changes, limitations, and mapping options.
 
-    * altering from a string type (char, varchar, text) to another string type with longer length,
-    * altering from a non-string type to string type (char, varchar, text),
-    * altering from a binary type (binary, varbinary, blob) to another binary type with longer length,
-    * altering from an integer type (tinyint, smallint, int, bigint) to another integer type with wider range,
-    * altering from a floating-point type (float, double) to another floating-point type with wider range,
+## Configuration Reference
 
-  are supported.
+<span id="computed-functions" />
+<span id="temporal-functions" />
+<span id="other-functions" />
 
-## Computed Functions
+- [Computed columns](./action-configuration#computed-functions): derive partition values and other
+  fields, with temporal and string functions.
 
-`--computed_column` are the definitions of computed columns. The argument field is from source table field name. 
+<span id="special-data-type-mapping" />
 
-### Temporal Functions
+- [Type mapping](./schema-evolution#special-data-type-mapping): control how source types become
+  Paimon types, including MySQL-specific mappings.
 
-Temporal functions can convert date and epoch time to another form. A common use case is to generate partition values.
+<span id="custom-job-settings" />
+<span id="checkpointing" />
+<span id="job-name" />
+<span id="table-configuration" />
 
-<ConfigTable html={temporalFunctionsHtml} />
-
-The data type of the temporal-column can be one of the following cases:
-1. DATE, DATETIME or TIMESTAMP.
-2. Any integer numeric type (such as INT and BIGINT). In this case, the data will be considered as epoch time of `1970-01-01 00:00:00`. 
-You should set precision of the value (default is 0).
-3. STRING. In this case, if you didn't set the time unit, the data will be considered as formatted string of DATE, 
-DATETIME or TIMESTAMP value. Otherwise, the data will be considered as string value of epoch time. So you must set time 
-unit in the latter case.
-
-The precision represents the unit of the epoch time. Currently, There are four valid precisions: `0` (for epoch seconds),
-`3` (for epoch milliseconds), `6`(for epoch microseconds) and `9` (for epoch nanoseconds). Take the time point 
-`1970-01-01 00:00:00.123456789` as an example, the epoch seconds are 0, the epoch milliseconds are 123, the epoch microseconds 
-are 123456, and the epoch nanoseconds are 123456789. The precision should match the input values. You can set precision 
-in this way: `date_format(epoch_col, yyyy-MM-dd, 0)`.
-
-`date_format` is a flexible function which is able to convert the temporal value to various formats with different format 
-strings. A most common format string is `yyyy-MM-dd HH:mm:ss.SSS`. Another example is `yyyy-ww` which can extract the year 
-and the week-of-the-year from the input. Note that the output is affected by the locale. For example, in some regions the 
-first day of a week is Monday while in others is Sunday, so if you use `date_format(date_col, yyyy-ww)` and the input of 
-date_col is 2024-01-07 (Sunday), the output maybe `2024-01` (if the first day of a week is Monday) or `2024-02` (if the 
-first day of a week is Sunday).
-
-### Other Functions
-
-<ConfigTable html={otherFunctionsHtml} />
-
-## Special Data Type Mapping
-
-It is possible that some data types of upstream systems cannot be directly mapped to Paimon data types. We have some special 
-data types mapping rules:
-
-1. MySQL `TINYINT(1)` type will be mapped to `Boolean`.
-2. MySQL `BIT(1)` type will be mapped to `Boolean`.
-3. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)`.
-4. MySQL `BINARY` will be mapped to Paimon `VARBINARY`. This is because the binary value is passed as bytes in binlog, so it
-   should be mapped to byte type (`BYTES` or `VARBINARY`). We choose `VARBINARY` because it can retain the length information. 
-5. Some upstream systems may not pass decimal precision and scale information. In this case, we will use `DECIMAL(38, 18)`.
-6. When using Hive catalog, MySQL `TIME` type will be mapped to `STRING`.
-
-We provide some options to customize the mapping rules. Please use `--type_mapping option1,option2,...` to specify them:
-
-1. `tinyint1-not-bool`: Map MySQL `TINYINT(1)` to Paimon `TINYINT` instead of `Boolean`.
-2. `to-nullable`: Ignore all `NOT NULL` constraints (except primary keys).
-3. `to-string`: Map all MySQL data type to `STRING`.
-4. `char-to-string`: Map MySQL `CHAR(length)`/`VARCHAR(length)` types to `STRING`.
-5. `longtext-to-bytes`: Map MySQL `LONGTEXT` types to `BYTES`.
-6. `decimal_no_change`: Avoid that Paimon CDC framework automatically use `DECIMAL(38, 18)`.
-7. `bigint-unsigned-to-bigint`: Map MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` to Paimon `BIGINT`, 
-   but there is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon 
-   `BIGINT` can only store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
-8. `allow_non_string_to_string`: Schema change doesn't support non-string type to string by default. Use this option to allow this change.
-
-## Custom Job Settings
-
-### Checkpointing
-
-Use `-Dexecution.checkpointing.interval=<interval>` to enable checkpointing and set interval. For 0.7 and later versions,
-if you haven't enabled checkpointing, Paimon will enable checkpointing by default and set checkpoint interval to 180 seconds.
-
-### Job Name
-
-Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.
-
-### table configuration
-
-You can use `--table_conf` to set table properties and some flink job properties (like `sink.parallelism`). If the table is
-created by the cdc job, the table's properties will be equal to the given properties. Otherwise, the job will use the given
-properties to alter table's properties. But note that immutable options (like `merge-engine`) and bucket number won't be altered.
+- [Job settings](./action-configuration#custom-job-settings): configure checkpointing, the job name,
+  catalog properties, and table properties.
+- [Starting with an empty topic](./action-configuration#starting-with-an-empty-topic): create the
+  target schema before running a Kafka or Pulsar table action.

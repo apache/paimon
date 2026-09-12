@@ -349,15 +349,31 @@ public class DateTimeUtils {
                 + milli;
     }
 
+    /**
+     * Whether the string is a non-negative decimal integer that fits in an {@code int}. Callers
+     * hand the string straight to {@link Integer#parseInt}, so the range matters as much as the
+     * characters.
+     */
     private static boolean isInteger(String s) {
-        boolean isInt = s.length() > 0;
+        if (s.isEmpty()) {
+            return false;
+        }
+        // Accumulate with overflow checking rather than a digit-count limit: a zero-padded
+        // component such as "00000002024" is still in range, so what matters is the value, not
+        // how many characters it took to write. Bailing out the moment the running value passes
+        // Integer.MAX_VALUE keeps the accumulator itself from overflowing a long.
+        long value = 0;
         for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) < '0' || s.charAt(i) > '9') {
-                isInt = false;
-                break;
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+            value = value * 10 + (c - '0');
+            if (value > Integer.MAX_VALUE) {
+                return false;
             }
         }
-        return isInt;
+        return true;
     }
 
     private static boolean isIllegalDate(int y, int m, int d) {

@@ -1103,7 +1103,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
-        boolean skipManifestMergeOnRetry = false;
+        boolean skipManifestMerge = false;
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
@@ -1128,13 +1128,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
             } else {
+                boolean skipManifestMergeForWriteOnly =
+                        options.writeOnly() && options.manifestMergeSkipOnWriteOnly();
                 ManifestMergeReuse manifestMergeReuse =
-                        tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
-                skipManifestMergeOnRetry = manifestMergeReuse == null && retryResult != null;
+                        skipManifestMergeForWriteOnly
+                                ? null
+                                : tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
+                skipManifestMerge =
+                        skipManifestMergeForWriteOnly
+                                || (manifestMergeReuse == null && retryResult != null);
                 if (manifestMergeReuse != null) {
                     mergeBeforeManifests = manifestMergeReuse.preservedManifests;
                     mergeAfterManifests = manifestMergeReuse.mergeAfterManifests;
-                } else if (skipManifestMergeOnRetry) {
+                } else if (skipManifestMerge) {
                     mergeAfterManifests = mergeBeforeManifests;
                 } else {
                     mergeAfterManifests =
@@ -1291,7 +1297,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     latestSnapshot,
                     baseDataFiles,
                     null,
-                    skipManifestMergeOnRetry
+                    skipManifestMerge
                             ? null
                             : new ManifestMergeResult(mergeBeforeManifests, mergeAfterManifests));
         }

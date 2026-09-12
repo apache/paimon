@@ -24,159 +24,99 @@ under the License.
 
 # StarRocks
 
-This documentation is a guide for using Paimon in StarRocks.
+Query existing Paimon tables through a StarRocks external catalog. Start with
+[Connecting Engines](./connecting-engines) if you need to identify the catalog and warehouse.
 
 ## Version
 
-Paimon currently supports StarRocks 3.1 and above. Recommended version is StarRocks 3.2.6 or above.
+Paimon catalogs are available in StarRocks 3.1 and later. Individual features depend on the
+StarRocks release. Use the [StarRocks Paimon catalog documentation](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/)
+for the supported catalog backends, storage configuration, and release-specific limitations.
+
+This integration reads Paimon tables. Creating an external catalog does not create or copy the
+tables, and the catalog does not support inserting, updating, or deleting Paimon data.
+
+## Prerequisites
+
+Prepare an existing Paimon database and table. Ensure the StarRocks processes that access metadata
+and data can reach the metastore and warehouse. Configure authentication and filesystem access
+using the StarRocks documentation for your storage system.
 
 ## Create Paimon Catalog
 
-Paimon catalogs are registered by executing a `CREATE EXTERNAL CATALOG` SQL in StarRocks.
-For example, you can use the following SQL to create a Paimon catalog named paimon_catalog.
+Choose the backend used by the writer. These examples assume HDFS access is already configured;
+replace the host names and warehouse path with your deployment values.
+
+### Filesystem Catalog
 
 ```sql
-CREATE EXTERNAL CATALOG paimon_catalog PROPERTIES(
+CREATE EXTERNAL CATALOG paimon_catalog PROPERTIES (
     "type" = "paimon",
     "paimon.catalog.type" = "filesystem",
-    "paimon.catalog.warehouse" = "oss://<your_bucket>/user/warehouse/"
+    "paimon.catalog.warehouse" = "hdfs://namenode:8020/warehouse/paimon"
 );
 ```
 
-More catalog types and configures can be seen in [Paimon catalog](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/).
+### Hive Metastore Catalog
+
+```sql
+CREATE EXTERNAL CATALOG paimon_hms PROPERTIES (
+    "type" = "paimon",
+    "paimon.catalog.type" = "hive",
+    "paimon.catalog.warehouse" = "hdfs://namenode:8020/warehouse/paimon",
+    "hive.metastore.uris" = "thrift://metastore:9083"
+);
+```
+
+For object storage, use the warehouse URI and authentication properties from the
+[StarRocks catalog examples](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/#examples).
 
 ## Query
-Suppose there already exists a database named `test_db` and a table named `test_tbl` in `paimon_catalog`,
-you can query this table using the following SQL:
+
+Assume `test_db.test_tbl` already exists in the configured warehouse:
+
 ```sql
-SELECT * FROM paimon_catalog.test_db.test_tbl;
+SELECT * FROM paimon_catalog.test_db.test_tbl LIMIT 10;
 ```
 
 ## Query System Tables
 
-You can access all kinds of Paimon system tables by StarRocks. For example, you can read the `ro` 
-(read-optimized) system table to improve reading performance of primary-key tables.
+On StarRocks versions supporting Paimon system tables, append the system-table suffix to the
+table name. Quote the complete table identifier containing `$`:
 
 ```sql
-SELECT * FROM paimon_catalog.test_db.test_tbl$ro;
+SELECT * FROM paimon_catalog.test_db.`test_tbl$partitions`;
+SELECT * FROM paimon_catalog.test_db.`test_tbl$ro`;
 ```
 
-For another example, you can query partition files of the table using the following SQL:
+The [`$ro` table](../concepts/system-tables#read-optimized-table) reads compacted data from a
+primary-key table. Its results can lag behind the latest snapshot until a full compaction
+completes. Use the ordinary table query when you need the latest state supported by the reader.
+See [MOR Read Optimized](../primary-key-table/table-mode#mor-read-optimized) for maintenance settings.
 
-```sql
-SELECT * FROM paimon_catalog.test_db.partition_tbl$partitions;
-/*
-+-----------+--------------+--------------------+------------+----------------------------+
-| partition | record_count | file_size_in_bytes | file_count | last_update_time           |
-+-----------+--------------+--------------------+------------+----------------------------+
-| [1]       |            1 |                645 |          1 | 2024-01-01 00:00:00.000000 |
-+-----------+--------------+--------------------+------------+----------------------------+
-*/
-```
+## Type Mapping {#starrocks-to-paimon-type-mapping}
 
-## StarRocks to Paimon type mapping
+The following table summarizes common Paimon types as exposed by StarRocks. It describes the
+**read direction**; it does not imply support for creating these types in Paimon from StarRocks.
+Refer to the [upstream type mapping](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/#paimon-to-starrocks-data-types)
+for your release, including precision and type limits.
 
-This section lists all supported type conversion between StarRocks and Paimon. 
-All StarRocks's data types can be found in this doc [StarRocks Data type overview](https://docs.starrocks.io/docs/sql-reference/data-types/).
+| Paimon type | StarRocks type |
+| --- | --- |
+| `BOOLEAN` | `BOOLEAN` |
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | Corresponding integer type |
+| `FLOAT`, `DOUBLE` | `FLOAT`, `DOUBLE` |
+| `DECIMAL(p, s)` | `DECIMAL(p, s)` |
+| `CHAR(n)` | `CHAR(n)` |
+| `VARCHAR(n)`, `STRING` | `VARCHAR` |
+| `BINARY(n)`, `VARBINARY(n)` | `VARBINARY` |
+| `DATE` | `DATE` |
+| `TIMESTAMP`, `TIMESTAMP WITH LOCAL TIME ZONE` | `DATETIME` |
+| `ARRAY` | `ARRAY` |
+| `MAP` | `MAP` |
+| `ROW` | `STRUCT` |
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 10%">StarRocks Data Type</th>
-      <th class="text-left" style="width: 10%">Paimon Data Type</th>
-      <th class="text-left" style="width: 5%">Atomic Type</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>STRUCT</code></td>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>MAP</code></td>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>ARRAY</code></td>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>BOOLEAN</code></td>
-      <td><code>BooleanType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>TINYINT</code></td>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>SMALLINT</code></td>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>INT</code></td>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>BIGINT</code></td>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>FLOAT</code></td>
-      <td><code>FloatType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DOUBLE</code></td>
-      <td><code>DoubleType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>CHAR(length)</code></td>
-      <td><code>CharType(length)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VARCHAR(MAX_VARCHAR_LENGTH)</code></td>
-      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VARCHAR(length)</code></td>
-      <td><code>VarCharType(length), length is less than VarCharType.MAX_LENGTH</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DATE</code></td>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DATETIME</code></td>
-      <td><code>TimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DECIMAL(precision, scale)</code></td>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VARBINARY(length)</code></td>
-      <td><code>VarBinaryType(length)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DATETIME</code></td>
-      <td><code>LocalZonedTimestampType</code></td>
-      <td>true</td>
-    </tr>
-    </tbody>
-</table>
+## Next Steps
+
+- Review [query performance](../primary-key-table/query-performance) and [table modes](../primary-key-table/table-mode).
+- Diagnose catalog and storage issues with [Connecting Engines](./connecting-engines#troubleshooting).

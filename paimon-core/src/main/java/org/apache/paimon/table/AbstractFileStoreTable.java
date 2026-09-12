@@ -30,7 +30,9 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.options.FallbackKey;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -76,11 +78,15 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
@@ -96,6 +102,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+
+    // Track explicit copy() keys, including removals, separately from persisted schema options.
+    @Nullable private Set<String> appliedDynamicOptionKeys;
 
     @Nullable protected transient SegmentsCache<Path> manifestCache;
     @Nullable protected transient Cache<Path, Snapshot> snapshotCache;
@@ -363,9 +372,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
+        Set<String> mergedDynamicOptionKeys = new HashSet<>(dynamicOptions.keySet());
+        if (appliedDynamicOptionKeys != null) {
+            mergedDynamicOptionKeys.addAll(appliedDynamicOptionKeys);
+        }
+
         if (tryTimeTravel) {
             // see if merged options contain time travel option
-            newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+            newTableSchema =
+                    tryTimeTravel(newOptions, mergedDynamicOptionKeys).orElse(newTableSchema);
         }
 
         // validate schema with new options
@@ -380,7 +395,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     () -> schemaManager().listAll(), new CoreOptions(newTableSchema.options()));
         }
 
-        return copy(newTableSchema);
+        FileStoreTable copied = copy(newTableSchema);
+        if (copied instanceof AbstractFileStoreTable) {
+            ((AbstractFileStoreTable) copied).appliedDynamicOptionKeys = mergedDynamicOptionKeys;
+        }
+        return copied;
     }
 
     @Override
@@ -406,6 +425,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                 fileIO, path, newTableSchema, catalogEnvironment)
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, path, newTableSchema, catalogEnvironment);
+        copied.appliedDynamicOptionKeys = appliedDynamicOptionKeys;
         if (snapshotCache != null) {
             copied.setSnapshotCache(snapshotCache);
         }
@@ -518,7 +538,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return snapshotExpire;
     }
 
-    private Optional<TableSchema> tryTimeTravel(Options options) {
+    private Optional<TableSchema> tryTimeTravel(Options options, Set<String> dynamicOptionKeys) {
         Snapshot snapshot;
         try {
             snapshot =
@@ -530,7 +550,46 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (snapshot == null) {
             return Optional.empty();
         }
-        return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
+        TableSchema historicalSchema = schemaManager().schema(snapshot.schemaId());
+        return Optional.of(
+                historicalSchema.copy(
+                        excludeCurrentSchemaFieldOptions(
+                                historicalSchema, options, dynamicOptionKeys)));
+    }
+
+    /** Prevents current column declarations from overriding a historical schema's field options. */
+    private static Map<String, String> excludeCurrentSchemaFieldOptions(
+            TableSchema historicalSchema, Options options, Set<String> dynamicOptionKeys) {
+        // Keep scan and runtime options. Only these directive-managed column declarations
+        // must follow the historical schema, since columns may have been added or dropped.
+        Map<String, String> historicalOptions = new HashMap<>(options.toMap());
+        for (ConfigOption<String> option :
+                Arrays.asList(
+                        CoreOptions.VECTOR_FIELD,
+                        CoreOptions.BLOB_FIELD,
+                        CoreOptions.BLOB_DESCRIPTOR_FIELD,
+                        CoreOptions.BLOB_VIEW_FIELD)) {
+            // Restore the canonical key and aliases together, or a stale alias may take effect
+            // when the historical schema has no canonical value.
+            List<String> keys = new ArrayList<>();
+            keys.add(option.key());
+            for (FallbackKey fallback : option.fallbackKeys()) {
+                keys.add(fallback.getKey());
+            }
+            if (keys.stream().anyMatch(dynamicOptionKeys::contains)) {
+                // Preserve explicit overrides; invalid values must still fail schema validation.
+                continue;
+            }
+            for (String key : keys) {
+                String value = historicalSchema.options().get(key);
+                if (value == null) {
+                    historicalOptions.remove(key);
+                } else {
+                    historicalOptions.put(key, value);
+                }
+            }
+        }
+        return historicalOptions;
     }
 
     @Override

@@ -127,11 +127,15 @@ class RayDatasource(Datasource):
         nested_name_paths = self._split_provider.nested_name_paths()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
+        include_row_kind = self._split_provider.include_row_kind()
         if not splits:
             return []
 
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
+            if include_row_kind:
+                from pypaimon.read.table_read import TableRead
+                self._schema = TableRead._add_row_kind_to_schema(self._schema)
         schema = self._schema
 
         if parallelism > len(splits):
@@ -150,6 +154,7 @@ class RayDatasource(Datasource):
                 schema=schema,
                 limit=limit,
                 nested_name_paths=nested_name_paths,
+                include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
@@ -159,7 +164,8 @@ class RayDatasource(Datasource):
             # columns and reads every projected leaf as NULL.
             worker_table_read = TableRead(
                 table, predicate, read_type, limit=limit,
-                nested_name_paths=nested_name_paths)
+                nested_name_paths=nested_name_paths,
+                include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
             has_data = False
@@ -187,6 +193,7 @@ class RayDatasource(Datasource):
             schema=schema,
             limit=limit,
             nested_name_paths=nested_name_paths,
+            include_row_kind=include_row_kind,
         )
 
         read_tasks = []
@@ -197,15 +204,16 @@ class RayDatasource(Datasource):
                 continue
 
             # Calculate metadata for this chunk
-            total_rows = 0
+            total_rows: Optional[int] = 0
             total_size = 0
 
             for split in chunk_splits:
-                if predicate is None:
-                    # Only estimate rows if no predicate (predicate filtering changes row count)
-                    merged = split.merged_row_count()
-                    row_count = merged if merged is not None else split.row_count
-                    if row_count > 0:
+                if predicate is None and total_rows is not None:
+                    row_count = split.merged_row_count()
+                    if row_count is None:
+                        # Physical rows cannot replace unknown counts after filtering or merging.
+                        total_rows = None
+                    else:
                         total_rows += row_count
                 if hasattr(split, 'file_size') and split.file_size > 0:
                     total_size += split.file_size
@@ -222,7 +230,7 @@ class RayDatasource(Datasource):
             elif predicate is not None:
                 num_rows = None  # Can't estimate with predicate filtering
             else:
-                num_rows = total_rows if total_rows > 0 else None
+                num_rows = total_rows
             size_bytes = total_size if total_size > 0 else None
 
             metadata_kwargs = {

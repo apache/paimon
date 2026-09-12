@@ -30,7 +30,7 @@ import org.apache.paimon.spark.read.BinPackingSplits
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.source.{DataSplit, PostponeMergePlan, PostponeMergeReadBuilder, SplitSerializer}
 import org.apache.paimon.types.{RowKind, RowType}
-import org.apache.paimon.utils.{IteratorRecordReader, SerializationUtils}
+import org.apache.paimon.utils.{BlobDescriptorResolvingRow, IteratorRecordReader, SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
@@ -119,6 +119,8 @@ private[spark] case class PostponeMergeOnReadExec(
     val readBuilder = mergePlan.readBuilder
     val resultRowType = mergePlan.corePlan.resultReadType()
     val blobAsDescriptor = mergePlan.blobAsDescriptor
+    val blobDescriptorFieldIndices = mergePlan.blobDescriptorFieldIndices
+    val uriReaderFactory = mergePlan.uriReaderFactory
     val outputAttributes = output
     val numOutputRows = longMetric(NUM_OUTPUT_ROWS)
     val numSplits = longMetric(NUM_SPLITS)
@@ -129,13 +131,16 @@ private[spark] case class PostponeMergeOnReadExec(
       rows =>
         val unsafeProjection = UnsafeProjection.create(outputAttributes, outputAttributes)
         new PostponeMergeOnReadExec.SortedBucketMergeIterator(
-          rows,
-          readBuilder,
-          resultRowType,
-          blobAsDescriptor,
-          numSplits,
-          partitionSize,
-          readBatchTime)
+          rows = rows,
+          readBuilder = readBuilder,
+          resultRowType = resultRowType,
+          blobAsDescriptor = blobAsDescriptor,
+          numSplits = numSplits,
+          partitionSize = partitionSize,
+          readBatchTime = readBatchTime,
+          uriReaderFactory = uriReaderFactory,
+          blobDescriptorFieldIndices = blobDescriptorFieldIndices
+        )
           .map {
             row =>
               numOutputRows += 1L
@@ -199,7 +204,9 @@ private[spark] object PostponeMergeOnReadExec {
       blobAsDescriptor: Boolean,
       numSplits: SQLMetric,
       partitionSize: SQLMetric,
-      readBatchTime: SQLMetric)
+      readBatchTime: SQLMetric,
+      uriReaderFactory: UriReaderFactory,
+      blobDescriptorFieldIndices: Array[Int])
     extends Iterator[InternalRow]
     with AutoCloseable {
 
@@ -207,6 +214,8 @@ private[spark] object PostponeMergeOnReadExec {
     private val ioManager = SparkUtils.createIOManager()
     private val read = readBuilder.newRead().withIOManager(ioManager)
     private val sparkRow = SparkInternalRow.create(resultRowType, blobAsDescriptor)
+    private lazy val blobDescriptorResolvingRow =
+      new BlobDescriptorResolvingRow(uriReaderFactory, blobDescriptorFieldIndices)
     private var currentReader: RecordReaderIterator[PaimonInternalRow] = _
     private var currentTimedReader: TimedRecordReader[PaimonInternalRow] = _
     private var nextRow: InternalRow = _
@@ -235,10 +244,18 @@ private[spark] object PostponeMergeOnReadExec {
           return
         }
         if (currentReader.hasNext) {
-          nextRow = sparkRow.replace(currentReader.next())
+          nextRow = sparkRow.replace(resolveBlobDescriptors(currentReader.next()))
         } else {
           closeCurrentReader()
         }
+      }
+    }
+
+    private def resolveBlobDescriptors(row: PaimonInternalRow): PaimonInternalRow = {
+      if (blobAsDescriptor || uriReaderFactory == null) {
+        row
+      } else {
+        blobDescriptorResolvingRow.replace(row)
       }
     }
 

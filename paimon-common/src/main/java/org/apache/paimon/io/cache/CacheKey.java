@@ -58,6 +58,10 @@ public interface CacheKey {
             this.hashCode = 31 * hashCode + Boolean.hashCode(isIndex);
         }
 
+        public Path filePath() {
+            return filePath;
+        }
+
         public long position() {
             return position;
         }

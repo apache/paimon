@@ -164,6 +164,26 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
+    public void testWritePreEpochSecondPrecisionTimestamp() {
+        RowType rowType =
+                RowType.of(DataTypes.TIMESTAMP(0), DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            // 1969-12-31T23:59:59.500, i.e. 500 millis before the epoch
+            Timestamp preEpoch = Timestamp.fromEpochMillis(-500);
+            writer.write(GenericRow.of(preEpoch, preEpoch));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            // sub-second millis must be truncated towards negative infinity, not towards zero
+            assertThat(row.getTimestamp(0, 0).toString()).isEqualTo("1969-12-31T23:59:59");
+            assertThat(row.getTimestamp(1, 0).toString()).isEqualTo("1969-12-31T23:59:59");
+        }
+    }
+
+    @Test
     public void testMissingMapColumnVectorizedRoundTrip() {
         RowType inputRowType = RowType.builder().field("id", DataTypes.INT()).build();
         RowType projectedRowType =

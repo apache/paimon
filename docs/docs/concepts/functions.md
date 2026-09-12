@@ -24,64 +24,70 @@ under the License.
 
 # Functions
 
-Paimon introduces a Function abstraction designed to support functions in a standard format for compute engine, addressing:
+A catalog function stores a reusable function definition and its metadata. The compute engine
+loads and executes the definition, so supported languages and function operations depend on the
+engine and catalog implementation.
 
-- **Unified Column-Level Filtering and Processing:** Facilitates operations at the column level, including tasks such as encryption and decryption of data.
+## Catalog and Engine Support
 
-- **Parameterized View Capabilities:** Supports parameterized operations within views, enhancing the dynamism and usability of data retrieval processes.
+The REST Catalog implements persistent function operations. The built-in Hive, JDBC, and
+Filesystem catalogs do not implement persistent function creation, alteration, or deletion.
+
+The engine adapter determines which stored definitions it can load:
+
+| Integration | Definitions loaded by the adapter |
+| --- | --- |
+| Flink catalog | File functions with implementation class and resource metadata. |
+| Spark V1 function interface | Java file functions. |
+| Spark V2 function interface | Lambda functions with a single return value. |
 
 ## Types of Functions Supported
 
-Currently, Paimon supports three types of functions:
+Paimon's function metadata can represent three definition types:
 
-1. **File Function:** Users can define functions within a file, providing flexibility and modular support for function definition.
+| Type | Definition |
+| --- | --- |
+| File function | References implementation resources, such as JAR files, with language and entry-point metadata. |
+| Lambda function | Stores a lambda definition and its language. |
+| SQL function | Stores a SQL definition. |
 
-2. **Lambda Function:** Empowering users to define functions using Java lambda expressions, enabling inline, concise, and functional-style operations.
-
-3. **SQL Function:** Users can define functions directly within SQL, which integrates seamlessly with SQL-based data processing.
+The metadata model does not imply that every engine can execute every definition type. The
+following examples show Java file functions in Flink; see [Functions in Spark](#functions-in-spark)
+for Spark usage.
 
 ## File Function Usage in Flink
 
-Paimon functions can be utilized within Apache Flink to execute complex data operations. Below are the SQL commands for creating, altering, and dropping functions in Flink environments.
+Select a Paimon [REST Catalog](./rest/) and make the implementation JAR accessible to the Flink
+job, then register the function in an existing database.
 
 ### Create Function
 
-To create a new function in Flink SQL:
-
 ```sql
--- Flink SQL
 CREATE FUNCTION mydb.parse_str
-    AS 'com.streaming.flink.udf.StrUdf' 
+    AS 'com.streaming.flink.udf.StrUdf'
     LANGUAGE JAVA
-    USING JAR 'oss://my_bucket/my_location/udf.jar' [, JAR 'oss://my_bucket/my_location/a.jar'];
+    USING JAR 'oss://my_bucket/my_location/udf.jar';
 ```
 
-This statement creates a Java-based user-defined function named `parse_str` within the `mydb` database, utilizing specified JAR files from an object storage location.
+Add further `JAR` resources to the `USING` clause when the function requires additional dependencies.
 
 ### Alter Function
 
-To modify an existing function in Flink SQL:
+Change the registered implementation class:
 
 ```sql
--- Flink SQL
 ALTER FUNCTION mydb.parse_str
-    AS 'com.streaming.flink.udf.StrUdf2' 
+    AS 'com.streaming.flink.udf.StrUdf2'
     LANGUAGE JAVA;
 ```
 
-This command changes the implementation of the `parse_str` function to use a new Java class definition.
-
 ### Drop Function
 
-To remove a function from Flink SQL:
-
 ```sql
--- Flink SQL
 DROP FUNCTION mydb.parse_str;
 ```
 
-This statement deletes the existing `parse_str` function from the `mydb` database, relinquishing its functionality.
-
 ## Functions in Spark
 
-see [SQL Functions](../spark/sql-functions#user-defined-function)
+See [Spark SQL Functions](../spark/sql-functions#user-defined-function) for supported definitions
+and examples.

@@ -448,6 +448,34 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     }
   }
 
+  test("btree global index IN predicate with more than 20 literals including NULL") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, idx INT)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.enabled' = 'true',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'btree-index.records-per-range' = '2')
+                  |""".stripMargin)
+
+      spark.sql(s"INSERT INTO T VALUES ${(0 until 100).map(i => s"($i, $i)").mkString(",")}")
+      createBTreeIndex("T", "idx")
+
+      // 21 distinct non-null literals plus NULL is 22 (> 20), so PredicateBuilder keeps a real In
+      // leaf that reaches BTreeIndexReader.visitIn with a null (previously an NPE). Pin
+      // inSetConversionThreshold high so the pushed predicate stays a plain Catalyst In whose
+      // translation carries the null.
+      val inList = ((0 to 20).map(_.toString) :+ "NULL").mkString(", ")
+      withSQLConf("spark.sql.optimizer.inSetConversionThreshold" -> "100") {
+        checkAnswer(
+          sql(s"SELECT id FROM T WHERE idx IN ($inList) ORDER BY id"),
+          (0 to 20).map(Row(_)))
+      }
+    }
+  }
+
   private def createBTreeIndex(tableName: String, column: String): Unit = {
     spark
       .sql(

@@ -65,13 +65,49 @@ import static org.apache.paimon.manifest.ManifestEntrySerializer.totalBucketGett
 @ThreadSafe
 public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, ManifestEntrySegments> {
 
+    @Nullable private final FilteredReader filteredReader;
+
     public ManifestEntryCache(
             SegmentsCache<Path> cache,
             ObjectSerializer<ManifestEntry> projectedSerializer,
             RowType formatSchema,
             FunctionWithIOException<Path, Long> fileSizeFunction,
             BiFunctionWithIOE<Path, Long, CloseableIterator<InternalRow>> reader) {
+        this(cache, projectedSerializer, formatSchema, fileSizeFunction, reader, null);
+    }
+
+    public ManifestEntryCache(
+            SegmentsCache<Path> cache,
+            ObjectSerializer<ManifestEntry> projectedSerializer,
+            RowType formatSchema,
+            FunctionWithIOException<Path, Long> fileSizeFunction,
+            BiFunctionWithIOE<Path, Long, CloseableIterator<InternalRow>> reader,
+            @Nullable FilteredReader filteredReader) {
         super(cache, projectedSerializer, formatSchema, fileSizeFunction, reader);
+        this.filteredReader = filteredReader;
+    }
+
+    /** Uncached reads skip non-matching partitions and buckets before decoding their stats. */
+    @Override
+    protected CloseableIterator<InternalRow> createFilteredIterator(
+            Path path, @Nullable Long fileSize, Filters<ManifestEntry> filters) throws IOException {
+        if (filteredReader != null && filters instanceof ManifestEntryFilters) {
+            ManifestEntryFilters manifestFilters = (ManifestEntryFilters) filters;
+            return filteredReader.read(
+                    path, fileSize, manifestFilters.partitionFilter, manifestFilters.bucketFilter);
+        }
+        return super.createFilteredIterator(path, fileSize, filters);
+    }
+
+    /** Reader of manifest rows which can skip entries by partition and bucket while decoding. */
+    @FunctionalInterface
+    public interface FilteredReader {
+        CloseableIterator<InternalRow> read(
+                Path path,
+                @Nullable Long fileSize,
+                @Nullable PartitionPredicate partitionFilter,
+                @Nullable BucketFilter bucketFilter)
+                throws IOException;
     }
 
     @Override

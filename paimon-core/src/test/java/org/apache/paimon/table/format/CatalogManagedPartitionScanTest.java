@@ -546,6 +546,52 @@ class CatalogManagedPartitionScanTest {
     }
 
     @Test
+    void testCustomLocationListingFailureNamesTheCatalogContextCredentials() throws Exception {
+        InjectingLocalFileIO clientFileIO = new InjectingLocalFileIO();
+        Path externalPath = new Path(tempDir.resolve("external").toUri());
+        writeDataFile(clientFileIO, externalPath, "files");
+        clientFileIO.failListingContaining("external", new IOException("not found login secrets"));
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(
+                        new PagedList<>(
+                                Collections.singletonList(
+                                        partition("2025", "11", externalPath.toString())),
+                                null));
+        Path tablePath = new Path(tempDir.resolve("table").toUri());
+        TableRootOnlyLocalFileIO tableFileIO = new TableRootOnlyLocalFileIO(tablePath);
+        FileIOLoader clientLoader =
+                new FileIOLoader() {
+                    @Override
+                    public String getScheme() {
+                        return "file";
+                    }
+
+                    @Override
+                    public LocalFileIO load(Path path) {
+                        return clientFileIO;
+                    }
+                };
+        CatalogContext catalogContext = CatalogContext.create(new Options(), clientLoader, null);
+        FormatTable table =
+                createTable(
+                        tableFileIO, tablePath, partitionManager(catalog), false, catalogContext);
+
+        // A permission failure on an archive bucket must say that the engine's own credentials
+        // listed it, or the user keeps looking at the table token.
+        assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("partition 'year=2025/month=11'")
+                .hasMessageContaining(table.fullName())
+                .hasMessageContaining("'" + externalPath + "'")
+                .hasMessageContaining("custom location outside the table directory")
+                .hasMessageContaining("credentials of the catalog context")
+                .hasMessageContaining("not with the table's data token")
+                .hasRootCauseMessage("not found login secrets");
+        assertThat(tableFileIO.listedPaths).isEmpty();
+    }
+
+    @Test
     void testWhitespacePartitionValueIsVisible() throws Exception {
         Catalog catalog = mock(Catalog.class);
         Partition whitespacePartition = partition("   ", "11");
@@ -919,6 +965,8 @@ class CatalogManagedPartitionScanTest {
                 stringPartitionTable(fileIO, tablePath, recordingCatalog(partitions), 4);
         assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
                 .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("partition 'year=2025/month=11'")
+                .hasMessageNotContaining("custom location")
                 .hasRootCauseInstanceOf(IOException.class)
                 .hasRootCauseMessage("boom");
     }

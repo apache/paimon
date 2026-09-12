@@ -27,295 +27,206 @@ under the License.
 
 # Hive
 
-This documentation is a guide for using Paimon in Hive.
+Use the Paimon storage handler to read tables from Hive, create tables, and insert records.
+A Hive-backed Paimon catalog and the Hive query engine are separate integrations:
+[using Hive metastore](../concepts/catalog#hive-catalog) does not require running queries in Hive.
 
 ## Version
 
-Paimon currently supports Hive 3.1, 2.3, 2.2, 2.1 and 2.1-cdh-6.3.
+This branch contains connectors for Hive 3.1, 2.3, 2.2, 2.1, and 2.1-cdh-6.3.
+Choose the jar matching your Hive distribution and Paimon release.
 
 ## Execution Engine
 
-Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write. 
-Note If you use beeline, please restart the hive cluster.
+| Operation | Hive execution engine | Limitations |
+| --- | --- | --- |
+| Read | MapReduce (MR) or Tez | Configure catalog and filesystem access before querying. |
+| Write | MapReduce (MR) | `INSERT INTO` only; `INSERT OVERWRITE` is not supported. |
+
+Prefer append tables for Hive inserts. Writing primary-key tables from Hive can produce many
+small files. For continuous ingestion or more extensive write operations, use
+[Flink](../flink/sql-write) or [Spark](../spark/sql-write).
 
 ## Installation
 
-Download the jar file with corresponding version.
+### Download the Connector
 
 <Stable>
 
-
-
-|                  | Jar                                                                                                                                                                                                                     |
-|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 3.1         | [paimon-hive-connector-3.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-3.1/@@VERSION@@/paimon-hive-connector-3.1-@@VERSION@@.jar)                         |
-| Hive 2.3         | [paimon-hive-connector-2.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.3/@@VERSION@@/paimon-hive-connector-2.3-@@VERSION@@.jar)                         |
-| Hive 2.2         | [paimon-hive-connector-2.2-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.2/@@VERSION@@/paimon-hive-connector-2.2-@@VERSION@@.jar)                         |
-| Hive 2.1         | [paimon-hive-connector-2.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1/@@VERSION@@/paimon-hive-connector-2.1-@@VERSION@@.jar)                         |
-| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar) |
-
-
+| Hive version | Connector |
+| --- | --- |
+| 3.1 | [paimon-hive-connector-3.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-3.1/@@VERSION@@/paimon-hive-connector-3.1-@@VERSION@@.jar) |
+| 2.3 | [paimon-hive-connector-2.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.3/@@VERSION@@/paimon-hive-connector-2.3-@@VERSION@@.jar) |
+| 2.2 | [paimon-hive-connector-2.2-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.2/@@VERSION@@/paimon-hive-connector-2.2-@@VERSION@@.jar) |
+| 2.1 | [paimon-hive-connector-2.1-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1/@@VERSION@@/paimon-hive-connector-2.1-@@VERSION@@.jar) |
+| 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar) |
 
 </Stable>
 
 <Unstable>
 
-
-
-|                  | Jar                                                                                                                                                                   |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 3.1         | [paimon-hive-connector-3.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-3.1/@@VERSION@@/)                 |
-| Hive 2.3         | [paimon-hive-connector-2.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.3/@@VERSION@@/)                 |
-| Hive 2.2         | [paimon-hive-connector-2.2-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.2/@@VERSION@@/)                 |
-| Hive 2.1         | [paimon-hive-connector-2.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1/@@VERSION@@/)                 |
-| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/) |
-
-
+| Hive version | Connector |
+| --- | --- |
+| 3.1 | [paimon-hive-connector-3.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-3.1/@@VERSION@@/) |
+| 2.3 | [paimon-hive-connector-2.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.3/@@VERSION@@/) |
+| 2.2 | [paimon-hive-connector-2.2-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.2/@@VERSION@@/) |
+| 2.1 | [paimon-hive-connector-2.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1/@@VERSION@@/) |
+| 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/) |
 
 </Unstable>
 
-You can also manually build bundled jar from the source code.
+Snapshot links point to artifact directories. Select a published timestamped jar for your version.
 
-To build from source code, [clone the git repository](@@GITHUB_REPO@@).
+### Install the Jar
 
-Build bundled jar with the following command.
-`mvn clean install -DskipTests`
+Copy the matching connector jar into the Hive installation's `auxlib` directory so the storage
+handler is available to Hive and its execution jobs. Restart existing Hive services after changing
+jars. When using Beeline, restart the HiveServer2 service used by the session.
 
-You can find Hive connector jar in `./paimon-hive/paimon-hive-connector-<hive-version>/target/paimon-hive-connector-<hive-version>-@@VERSION@@.jar`.
-
-There are several ways to add this jar to Hive.
-
-* You can create an `auxlib` folder under the root directory of Hive, and copy `paimon-hive-connector-@@VERSION@@.jar` into `auxlib`.
-* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/paimon-hive-connector-@@VERSION@@.jar` to enable paimon support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
-
-NOTE: 
-
-* If you are using HDFS :
-  * Make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
-  * You can set `paimon.hadoop-load-default-config` =`false` to disable loading the default value from `core-default.xml`、`hdfs-default.xml`, which may lead smaller size for split.
-* With hive cbo, it may lead to some incorrect query results, such as to query `struct` type with `not null` predicate, you can disable the cbo by `set hive.cbo.enable=false;` command.
-
-## Hive SQL: access Paimon Tables already in Hive metastore
-
-Run the following Hive SQL in Hive CLI to access the created table.
+For a temporary Hive CLI session, you can use `ADD JAR`:
 
 ```sql
--- Assume that paimon-hive-connector-<hive-version>-@@VERSION@@.jar is already in auxlib directory.
--- List tables in Hive
--- (you might need to switch to "default" database if you're not there by default)
-
-SHOW TABLES;
-
-/*
-OK
-test_table
-*/
-
--- Read records from test_table
-
-SELECT a, b FROM test_table ORDER BY a;
-
-/*
-OK
-1	Table
-2	Store
-*/
-
--- Insert records into test table
--- Limitations:
--- Only support INSERT INTO, not support INSERT OVERWRITE
--- It is recommended to write to a non primary key table
--- Writing to a primary key table may result in a large number of small files
-
-INSERT INTO test_table VALUES (3, 'Paimon');
-
-SELECT a, b FROM test_table ORDER BY a;
-
-/*
-OK
-1	Table
-2	Store
-3	Paimon
-*/
-
--- time travel
-
-SET paimon.scan.snapshot-id=1;
-SELECT a, b FROM test_table ORDER BY a;
-/*
-OK
-1	Table
-2	Store
-3	Paimon
-*/
-SET paimon.scan.snapshot-id=null;
-
+ADD JAR /path/to/paimon-hive-connector-3.1-@@VERSION@@.jar;
 ```
 
-## Hive SQL: create new Paimon Tables
+`ADD JAR` can cause class-loading failures for joins with the MR engine, including
+`KryoException: unable to find class`. Use `auxlib` for a persistent installation.
 
-You can create new paimon tables in Hive. Run the following Hive SQL in Hive CLI.
+### Build from Source
+
+From a checkout of the [Paimon repository](@@GITHUB_REPO@@), build only the required connector
+and its dependencies. For Hive 3.1:
+
+```bash
+mvn -pl paimon-hive/paimon-hive-connector-3.1 -am -DskipTests package
+```
+
+The bundled jar is under
+`paimon-hive/paimon-hive-connector-3.1/target/paimon-hive-connector-3.1-@@VERSION@@.jar`.
+Replace `3.1` with the connector module matching your Hive distribution.
+
+## Access Existing Tables {#hive-sql-access-paimon-tables-already-in-hive-metastore}
+
+If the table is already registered in the Hive metastore used by your Hive session, query it
+directly. For example, assume `default.test_table` contains columns `a` and `b`:
 
 ```sql
--- Assume that paimon-hive-connector-@@VERSION@@.jar is already in auxlib directory.
--- Let's create a new paimon table.
+USE default;
+SHOW TABLES;
+SELECT a, b FROM test_table ORDER BY a;
+```
 
-SET hive.metastore.warehouse.dir=warehouse_path;
+If the table is not registered there, use an external table as described below.
 
-CREATE TABLE hive_test_table(
+## Register an External Table {#hive-sql-access-paimon-tables-by-external-table}
+
+Point the external table at the existing **table directory**, rather than the warehouse root.
+The storage handler loads the schema from Paimon; do not repeat column definitions.
+
+```sql
+CREATE EXTERNAL TABLE external_test_table
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+LOCATION 'hdfs://namenode:8020/warehouse/paimon/default.db/test_table';
+
+SELECT a, b FROM external_test_table ORDER BY a;
+```
+
+Alternatively, use `paimon_location` in `TBLPROPERTIES`. This avoids Hive accessing the Paimon
+location through its own filesystem during table creation, which is useful for object storage.
+Paimon's filesystem still needs the required libraries and credentials.
+
+```sql
+CREATE EXTERNAL TABLE external_s3_table
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+TBLPROPERTIES (
+    'paimon_location' = 's3://paimon-bucket/warehouse/default.db/test_table'
+);
+```
+
+## Create a Table {#hive-sql-create-new-paimon-tables}
+
+Set the warehouse to your shared storage location, then create a table with the Paimon storage handler:
+
+```sql
+SET hive.metastore.warehouse.dir=hdfs://namenode:8020/warehouse/paimon;
+
+CREATE TABLE hive_test_table (
     a INT COMMENT 'The a field',
     b STRING COMMENT 'The b field'
 )
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler';
 ```
 
-## Hive SQL: access Paimon Tables by External Table
+## Insert Records
 
-To access existing paimon table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
+Use the MR execution engine. This example continues from the table created above:
 
 ```sql
--- Assume that paimon-hive-connector-@@VERSION@@.jar is already in auxlib directory.
--- Let's use the test_table created in the above section.
--- To create an external table, you don't need to specify any column or table properties.
--- Pointing the location to the path of table is enough.
-
-CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
-LOCATION '/path/to/table/store/warehouse/default.db/test_table';
-    
--- In addition to the way setting location above, you can also place the location setting in TBProperties
--- to avoid Hive accessing Paimon's location through its own file system when creating tables.
--- This method is effective in scenarios using Object storage,such as s3.
-
-CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
-TBLPROPERTIES (
- 'paimon_location' ='s3://xxxxx/path/to/table/store/warehouse/default.db/test_table'
-);
-
--- Read records from external_test_table
-
-SELECT a, b FROM external_test_table ORDER BY a;
-
-/*
-OK
-1	Table
-2	Store
-*/
-
--- Insert records into test table
-
-INSERT INTO external_test_table VALUES (3, 'Paimon');
-
-SELECT a, b FROM external_test_table ORDER BY a;
-
-/*
-OK
-1	Table
-2	Store
-3	Paimon
-*/
-
+SET hive.execution.engine=mr;
+INSERT INTO hive_test_table VALUES (1, 'Paimon'), (2, 'Hive');
+SELECT a, b FROM hive_test_table ORDER BY a;
 ```
 
-## Hive Type Conversion
+The same `INSERT INTO` syntax can write to a registered external Paimon table, subject to the
+[write limitations](#execution-engine).
 
-This section lists all supported type conversion between Hive and Paimon.
-All Hive's data types are available in package `org.apache.hadoop.hive.serde2.typeinfo`.
+## Time Travel
 
-<table className="table table-bordered">
-    <thead>
-    <tr>
-      <th className="text-left" style={{width: "10%"}}>Hive Data Type</th>
-      <th className="text-left" style={{width: "10%"}}>Paimon Data Type</th>
-      <th className="text-left" style={{width: "5%"}}>Atomic Type</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><code>StructTypeInfo</code></td>
-      <td><code>RowType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>MapTypeInfo</code></td>
-      <td><code>MapType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>ListTypeInfo</code></td>
-      <td><code>ArrayType</code></td>
-      <td>false</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("boolean")</code></td>
-      <td><code>BooleanType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("tinyint")</code></td>
-      <td><code>TinyIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("smallint")</code></td>
-      <td><code>SmallIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("int")</code></td>
-      <td><code>IntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("bigint")</code></td>
-      <td><code>BigIntType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("float")</code></td>
-      <td><code>FloatType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("double")</code></td>
-      <td><code>DoubleType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>CharTypeInfo(length)</code></td>
-      <td><code>CharType(length)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("string")</code></td>
-      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>VarcharTypeInfo(length)</code></td>
-      <td><code>VarCharType(length), length is less than VarCharType.MAX_LENGTH</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("date")</code></td>
-      <td><code>DateType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("timestamp")</code></td>
-      <td><code>TimestampType</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>DecimalTypeInfo(precision, scale)</code></td>
-      <td><code>DecimalType(precision, scale)</code></td>
-      <td>true</td>
-    </tr>
-    <tr>
-      <td><code>PrimitiveTypeInfo("binary")</code></td>
-      <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
-      <td>true</td>
-    </tr>
-    </tbody>
-</table>
+Set `paimon.scan.snapshot-id` to an existing, retained snapshot. The setting applies to the
+session's subsequent Paimon scans, so clear it before resuming ordinary queries.
+
+```sql
+-- Use 1 only if snapshot 1 still exists for this table.
+SET paimon.scan.snapshot-id=1;
+SELECT a, b FROM hive_test_table ORDER BY a;
+
+-- Resume reading the latest snapshot.
+SET paimon.scan.snapshot-id=null;
+```
+
+The rows returned depend on what was committed in that snapshot. See
+[Snapshot Management](../maintenance/manage-snapshots) for retention behavior.
+
+## Type Mapping {#hive-type-conversion}
+
+When creating a Paimon table in Hive, the connector converts Hive SQL types as follows.
+Nested types are converted recursively.
+
+| Hive type | Paimon type |
+| --- | --- |
+| `BOOLEAN` | `BOOLEAN` |
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | Corresponding integer type |
+| `FLOAT`, `DOUBLE` | `FLOAT`, `DOUBLE` |
+| `DECIMAL(p, s)` | `DECIMAL(p, s)` |
+| `CHAR(n)`, `VARCHAR(n)` | `CHAR(n)`, `VARCHAR(n)` |
+| `STRING` | `STRING` (`VARCHAR` with maximum length) |
+| `BINARY` | `VARBINARY` with maximum length |
+| `DATE` | `DATE` |
+| `TIMESTAMP` | `TIMESTAMP` |
+| `TIMESTAMP WITH LOCAL TIME ZONE` (Hive 3) | `TIMESTAMP WITH LOCAL TIME ZONE` |
+| `ARRAY`, `MAP`, `STRUCT` | `ARRAY`, `MAP`, `ROW` |
+
+The reverse mapping, when reading an existing Paimon table, is not always symmetric:
+
+| Paimon type | Hive representation |
+| --- | --- |
+| `BINARY`, `VARBINARY` | `BINARY` |
+| `CHAR(n)` or `VARCHAR(n)` beyond Hive's length limit | `STRING` |
+| `TIME` | `STRING` |
+| `TIMESTAMP WITH LOCAL TIME ZONE` | Hive 3 local-time-zone timestamp; ordinary `TIMESTAMP` in Hive 2 |
+| `MULTISET<T>` | `MAP<T, INT>` |
+
+See [Paimon Data Types](../concepts/data-types) for the Paimon type system.
+
+## Troubleshooting
+
+- **HDFS configuration:** set `HADOOP_HOME` or `HADOOP_CONF_DIR` so the connector can load the
+  Hadoop configuration. `SET paimon.hadoop-load-default-config=false;` skips loading
+  `core-default.xml` and `hdfs-default.xml`, which can reduce serialized split size; explicitly
+  provide the settings your filesystem requires.
+- **Incorrect results with Hive CBO:** if predicates on complex types produce incorrect results
+  (for example, `IS NOT NULL` on a struct), retry with `SET hive.cbo.enable=false;`.
+- **Class-loading failures:** verify the matching connector is installed in `auxlib` and restart
+  Hive services. See [installation](#installation) for the limitation of `ADD JAR`.
+
+For shared catalog and storage checks, see [Connecting Engines](./connecting-engines#troubleshooting).

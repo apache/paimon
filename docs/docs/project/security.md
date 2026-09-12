@@ -1,6 +1,6 @@
 ---
 title: "Security"
-sidebar_position: 4
+sidebar_position: 2
 ---
 
 <!--
@@ -24,6 +24,10 @@ under the License.
 
 # Security
 
+Use this page to report a possible vulnerability and understand which trust
+boundaries Paimon owns. For ordinary bugs, use the
+[contribution guide](./contributing.md#what-do-you-want-to-do).
+
 ## Reporting Security Issues
 
 The Apache Paimon Project uses the standard process outlined by the
@@ -34,11 +38,13 @@ Note that vulnerabilities should not be publicly disclosed until the project
 has responded.
 
 To report a possible security vulnerability, please email
-**[security@apache.org](mailto:security@apache.org)**.
+**[security@apache.org](mailto:security@apache.org)**. Include the affected
+Paimon version, deployment context, steps to reproduce, and the observed
+impact. Remove live credentials from examples and logs.
 
 ## Security Model
 
-Apache Paimon is a data lake platform and a set of libraries and integrations 
+Apache Paimon is a data lake platform and a set of libraries and integrations
 used inside larger systems such as catalogs, query engines, and services.
 
 In most deployments, the primary trust and authorization boundaries are

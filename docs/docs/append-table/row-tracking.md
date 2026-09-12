@@ -1,6 +1,6 @@
 ---
 title: "Row Tracking"
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 <!--
@@ -22,44 +22,63 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Row tracking
+# Row Tracking
 
-Row tracking allows Paimon to track row-level tracking in a Paimon append table. Once enabled on a Paimon table, two more hidden columns will be added to the table schema:
-- `_ROW_ID`: BIGINT, this is a unique identifier for each row in the table. It is used to track the update of the row and can be used to identify the row in case of update, merge into or delete.
-- `_SEQUENCE_NUMBER`: BIGINT, this is field indicates which `version` of this record is. It actually is the snapshot-id of the snapshot that this row belongs to. It is used to track the update of the row version.
+Row tracking adds two hidden metadata columns to an append table. They distinguish a row's identity from the snapshot
+in which its current version was written.
 
-Hidden columns follows the following rules:
-- Whenever we read from one table with row tracking enabled, the `_ROW_ID` and `_SEQUENCE_NUMBER` will be `NOT NULL`.
-- If we append records to row-tracking table in the first time, we don't actually write them to the data file, they are lazy assigned by committer.
-- If one row moved from one file to another file for **any reason**, the `_ROW_ID` column should be copied to the target file. The `_SEQUENCE_NUMBER` field should be set to `NULL` if the record is changed, otherwise, copy it too.
-- Whenever we read from a row-tracking table, we firstly read `_ROW_ID` and `_SEQUENCE_NUMBER` from the data file, then we read the value columns from the data file. If they found `NULL`, we read from `DataFileMeta` to fall back to the lazy assigned values. Anyway, it has no way to be `NULL`.
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `_ROW_ID` | `BIGINT` | Paimon's identifier for a row, preserved across updates and ordinary compaction. |
+| `_SEQUENCE_NUMBER` | `BIGINT` | The snapshot ID assigned when this version of the row was inserted or updated. Unchanged rows retain their version during ordinary compaction. |
 
-To enable row-tracking, you must config `row-tracking.enabled` to `true` in the table options when creating an append table.
-Consider an example via Flink SQL:
+These fields are managed by Paimon and are non-null when read. A row version is not the ID of every snapshot that
+contains the row: many later snapshots can still contain an unchanged row with an older sequence number.
+
+:::note Experimental
+
+Row tracking is experimental. Enable it when creating an unaware-bucket append table (`bucket = -1`, with no primary
+key or bucket key). `row-tracking.enabled` is immutable and cannot be enabled later with `ALTER TABLE`.
+
+:::
+
+## Enable Row Tracking
+
+For example, create a partitioned table in Flink SQL:
+
 ```sql
 CREATE TABLE part_t (
-    f0 INT,
-    f1 STRING,
+    id INT,
+    data STRING,
     dt STRING
-) PARTITIONED BY (dt)
-WITH ('row-tracking.enabled' = 'true');
-```
-Notice that:
-- Row tracking is only supported for unaware append tables, not for primary key tables. Which means you can't define `bucket` and `bucket-key` for the table.
-- Only spark support update, merge into and delete operations on row-tracking tables, Flink SQL does not support these operations yet.
-- This function is experimental, this line will be removed after being stable.
-
-After creating a row-tracking table, you can insert data into it as usual. The `_ROW_ID` and `_SEQUENCE_NUMBER` columns will be automatically managed by Paimon.
-```sql
-CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true');
-INSERT INTO t VALUES (11, 'a'), (22, 'b')
+) PARTITIONED BY (dt) WITH (
+    'bucket' = '-1',
+    'row-tracking.enabled' = 'true'
+);
 ```
 
-You can select the row tracking meta column with the following sql in spark:
+Insert data as usual; do not add the hidden columns to the user-defined schema. The following walkthrough uses
+Spark SQL for both querying the metadata columns and performing row-level changes on a regular append table.
+
+## Follow a Row Through Changes
+
+![An update assigns a new row version while retaining the row ID. Ordinary compaction preserves both values.](/img/append-row-tracking.svg)
+
+### Insert and Read
+
+Create a separate, unpartitioned table in a Paimon Spark catalog:
+
 ```sql
-SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
+CREATE TABLE t (id INT, data STRING) USING paimon
+TBLPROPERTIES ('row-tracking.enabled' = 'true');
+
+INSERT INTO t VALUES (11, 'a'), (22, 'b');
+SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id;
 ```
-You will get the following result:
+
+The results below illustrate an initially empty table with one commit per write statement and no intervening commits.
+Row-ID assignment can depend on file and write parallelism; do not rely on a business key receiving a particular ID.
+
 ```text
 +---+----+-------+----------------+
 | id|data|_ROW_ID|_SEQUENCE_NUMBER|
@@ -69,57 +88,85 @@ You will get the following result:
 +---+----+-------+----------------+
 ```
 
-Then you can update and query the table again:
+### Update
+
 ```sql
-UPDATE t SET data = 'new-data-update' WHERE id = 11;
--- Alternatively, update using the hidden row id `_ROW_ID`
-UPDATE t SET data = 'new-data-update' WHERE _ROW_ID = 0;
-SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
+UPDATE t SET data = 'a2' WHERE id = 11;
+SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id;
 ```
 
-You will get:
+The changed row retains its ID and receives a new sequence number. The untouched row keeps both values:
+
 ```text
-+---+---------------+-------+----------------+
-| id|           data|_ROW_ID|_SEQUENCE_NUMBER|
-+---+---------------+-------+----------------+
-| 22|              b|      1|               1|
-| 11|new-data-update|      0|               2|
-+---+---------------+-------+----------------+
++---+----+-------+----------------+
+| id|data|_ROW_ID|_SEQUENCE_NUMBER|
++---+----+-------+----------------+
+| 11|  a2|      0|               2|
+| 22|   b|      1|               1|
++---+----+-------+----------------+
 ```
 
-You can also merge into the table, suppose you have a source table `s` that contains (22, 'new-data-merge') and (33, 'c'):
+You can alternatively match an update with `WHERE _ROW_ID = 0`, using the ID returned by a previous query. Run either
+form once if you are following the illustrated sequence numbers.
+
+The sequence number records a write version, not a comparison of the old and new field values. A matching `UPDATE`
+can assign a new sequence number even when the assigned value is the same, such as `UPDATE t SET data = data WHERE id = 11`.
+
+### Merge
+
 ```sql
-MERGE INTO t USING s
-ON t.id = s.id
+CREATE TEMPORARY VIEW s AS
+SELECT * FROM VALUES (22, 'b2'), (33, 'c') AS source(id, data);
+
+MERGE INTO t USING s ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET t.data = s.data
 WHEN NOT MATCHED THEN INSERT *;
+
+SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id;
 ```
 
-You will get:
+The updated row retains its ID; the inserted row receives a new ID. Both versions come from the merge commit:
+
 ```text
-+---+---------------+-------+----------------+
-| id|           data|_ROW_ID|_SEQUENCE_NUMBER|
-+---+---------------+-------+----------------+
-| 11|new-data-update|      0|               2|
-| 22| new-data-merge|      1|               3|
-| 33|              c|      2|               3|
-+---+---------------+-------+----------------+
++---+----+-------+----------------+
+| id|data|_ROW_ID|_SEQUENCE_NUMBER|
++---+----+-------+----------------+
+| 11|  a2|      0|               2|
+| 22|  b2|      1|               3|
+| 33|   c|      2|               3|
++---+----+-------+----------------+
 ```
 
-You can also delete from the table:
+### Delete
 
 ```sql
 DELETE FROM t WHERE id = 11;
--- Alternatively, delete using the hidden row id `_ROW_ID`
-DELETE FROM t WHERE _ROW_ID = 0;
+SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id;
 ```
 
-You will get:
+The deleted row is no longer visible. The remaining rows retain their identity and version:
+
 ```text
-+---+---------------+-------+----------------+
-| id|           data|_ROW_ID|_SEQUENCE_NUMBER|
-+---+---------------+-------+----------------+
-| 22| new-data-merge|      1|               3|
-| 33|              c|      2|               3|
-+---+---------------+-------+----------------+
++---+----+-------+----------------+
+| id|data|_ROW_ID|_SEQUENCE_NUMBER|
++---+----+-------+----------------+
+| 22|  b2|      1|               3|
+| 33|   c|      2|               3|
++---+----+-------+----------------+
 ```
+
+You can also delete by a previously queried `_ROW_ID`. These metadata columns do not turn the table into a primary key
+table and do not deduplicate inserted business keys.
+
+## How Metadata Is Stored
+
+For newly appended rows, Paimon can assign IDs and sequence numbers lazily during commit using file metadata rather
+than writing the hidden values into every row. Readers use stored row metadata when available and fall back to the
+file metadata when a hidden value is absent.
+
+When an ordinary rewrite moves a row to another data file, its row ID is carried forward. Rows copied without being
+updated keep their sequence numbers; updated rows receive a new sequence number at commit. Ordinary compaction
+therefore does not by itself change a row's version.
+
+For the separate Data Evolution storage model, including maintenance that can reassign physical row IDs, see
+[Data Evolution](../multimodal-table/data-evolution).

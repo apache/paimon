@@ -45,6 +45,7 @@ import org.apache.orc.impl.writer.WriterEncryptionVariant;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -57,6 +58,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch}.
  */
 public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingWritePlan {
+
+    private static final String COMPRESS_ATTRIBUTE = OrcConf.COMPRESS.getAttribute();
 
     private final Vectorizer<InternalRow> vectorizer;
     private final Properties writerProperties;
@@ -84,7 +87,7 @@ public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingW
             MemorySize writeBatchMemory,
             boolean legacyTimestampLtzType) {
         this.vectorizer = checkNotNull(vectorizer);
-        this.writerProperties = checkNotNull(writerProperties);
+        this.writerProperties = upperCaseCompression(checkNotNull(writerProperties));
         this.confMap = new HashMap<>();
         this.legacyTimestampLtzType = legacyTimestampLtzType;
 
@@ -92,15 +95,37 @@ public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingW
         for (Map.Entry<String, String> entry : configuration) {
             confMap.put(entry.getKey(), entry.getValue());
         }
+        String compress = confMap.get(COMPRESS_ATTRIBUTE);
+        if (compress != null) {
+            confMap.put(COMPRESS_ATTRIBUTE, compress.toUpperCase(Locale.ROOT));
+        }
         this.writeBatchSize = writeBatchSize;
         this.writeBatchMemory = writeBatchMemory;
+    }
+
+    /**
+     * ORC resolves the compression kind through a locale sensitive {@code toUpperCase}, which turns
+     * the 'i' of zlib into 'İ' under a Turkish or Azeri default locale and then matches no {@link
+     * CompressionKind}. Upper case the option once here instead.
+     */
+    private static Properties upperCaseCompression(Properties properties) {
+        String compress = properties.getProperty(COMPRESS_ATTRIBUTE);
+        if (compress == null) {
+            return properties;
+        }
+        Properties normalized = new Properties();
+        for (String name : properties.stringPropertyNames()) {
+            normalized.setProperty(name, properties.getProperty(name));
+        }
+        normalized.setProperty(COMPRESS_ATTRIBUTE, compress.toUpperCase(Locale.ROOT));
+        return normalized;
     }
 
     @Override
     public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
         OrcFile.WriterOptions opts = getWriterOptions();
-        if (!writerProperties.containsKey(OrcConf.COMPRESS.getAttribute())) {
-            opts.compress(CompressionKind.valueOf(compression.toUpperCase()));
+        if (!writerProperties.containsKey(COMPRESS_ATTRIBUTE)) {
+            opts.compress(CompressionKind.valueOf(compression.toUpperCase(Locale.ROOT)));
         }
 
         opts.physicalWriter(

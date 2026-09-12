@@ -30,8 +30,8 @@ const config = {
   },
 
   customFields: {
-    version: '2.1-SNAPSHOT',
-    versionTitle: '2.1-SNAPSHOT',
+    version: '2.2-SNAPSHOT',
+    versionTitle: '2.2-SNAPSHOT',
     branch: 'master',
     flinkVersion: '1.20',
     isStable: false,
@@ -123,10 +123,10 @@ const config = {
         items: [
           {
             type: 'dropdown',
-            label: '2.1-SNAPSHOT',
+            label: '2.2-SNAPSHOT',
             position: 'right',
             items: [
-              {label: 'master (2.1-SNAPSHOT)', href: 'https://paimon.apache.org/docs/master'},
+              {label: 'master (2.2-SNAPSHOT)', href: 'https://paimon.apache.org/docs/master'},
               {label: '2.0 (stable)', href: 'https://paimon.apache.org/docs/2.0'},
               {label: '1.4', href: 'https://paimon.apache.org/docs/1.4'},
               {label: '1.3', href: 'https://paimon.apache.org/docs/1.3'},
@@ -153,7 +153,7 @@ const config = {
             title: 'Documentation',
             items: [
               {label: 'Getting Started', to: '/flink/quick-start'},
-              {label: 'Concepts', to: '/concepts/overview'},
+              {label: 'Concepts', to: '/concepts/'},
             ],
           },
           {

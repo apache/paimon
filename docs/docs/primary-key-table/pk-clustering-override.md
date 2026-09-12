@@ -28,8 +28,9 @@ By default, data files in a primary key table are physically sorted by the prima
 lookups but can hurt scan performance when queries filter on non-primary-key columns.
 
 **PK Clustering Override** mode changes the physical sort order of data files from the primary key to user-specified
-clustering columns. This significantly improves scan performance for queries that filter or group by clustering columns,
-while still maintaining primary key uniqueness through deletion vectors.
+clustering columns. Grouping nearby values can improve file pruning for selective filters on those columns.
+The layout maintains primary-key uniqueness through lookup and deletion-vector handling;
+the benefit depends on data distribution and the query predicates.
 
 ## Quick Start
 
@@ -48,7 +49,8 @@ CREATE TABLE my_table (
 );
 ```
 
-For `first-row` merge engine, deletion vectors are already built-in, so you don't need to enable them explicitly:
+For the `first-row` merge engine, this specialized layout handles row retention internally;
+you do not need to enable deletion vectors explicitly:
 
 ```sql
 CREATE TABLE my_table (
@@ -88,8 +90,9 @@ PK Clustering Override is beneficial when:
 :::info
 
 Although data files are no longer sorted by the primary key, filtering on bucket-key fields (which default to the
-primary key) still benefits from bucket pruning. The query engine can skip entire buckets that do not contain matching
-values, so queries like `WHERE id = 12345` remain efficient.
+primary key excluding partition columns) can still benefit from fixed-bucket pruning. The query
+engine can skip entire buckets when predicates determine the bucket key. This does not restore primary-key sorting or
+its file-range pruning, so benchmark point lookups as well as analytical scans.
 
 :::
 
@@ -97,4 +100,5 @@ values, so queries like `WHERE id = 12345` remain efficient.
 
 - Merge engine: `partial-update` or `aggregation`.
 - Changelog producer: `lookup` or `full-compaction`.
-- Configure: `sequence.fields` or `record-level.expire-time`.
+- Configuration: `sequence.field` or `record-level.expire-time`.
+- [Primary-key indexes](./global-index#requirements) and [managed BLOB storage](./blob-storage#requirements-and-limitations).

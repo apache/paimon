@@ -31,6 +31,38 @@ public class FileTypeTest {
 
     private static final String TABLE_ROOT = "hdfs://cluster/warehouse/db.db/table";
 
+    // ===== mutable files (bypass the cache) =====
+
+    @Test
+    public void testIsMutable() {
+        // Files overwritten in place under a stable path must bypass the cache.
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/snapshot/EARLIEST"))).isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/snapshot/LATEST"))).isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/consumer/consumer-myGroup")))
+                .isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/service/service-primary-key-lookup")))
+                .isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/tag/tag-myTag"))).isTrue();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/dt=2024-01-01/bucket-0/_SUCCESS")))
+                .isTrue();
+        // A temp rewrite of a mutable file is still mutable.
+        assertThat(
+                        FileType.isMutable(
+                                new Path(
+                                        TABLE_ROOT
+                                                + "/consumer/.consumer-myGroup."
+                                                + UUID.randomUUID()
+                                                + ".tmp")))
+                .isTrue();
+
+        // Write-once files stay cacheable: a new version lands under a new name.
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/snapshot/snapshot-1"))).isFalse();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/schema/schema-0"))).isFalse();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/manifest/manifest-a1b2c3d4-0")))
+                .isFalse();
+        assertThat(FileType.isMutable(new Path(TABLE_ROOT + "/bucket-0/data-abc.orc"))).isFalse();
+    }
+
     // ===== META files =====
 
     @Test

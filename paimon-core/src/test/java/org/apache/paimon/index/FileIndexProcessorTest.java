@@ -21,10 +21,14 @@ package org.apache.paimon.index;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -50,6 +54,74 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class FileIndexProcessorTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testProcessIndexesTwoKeysOfOneMapColumn() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        // both entries share the top level column "m"
+        options.put(CoreOptions.FILE_INDEX + ".bloom-filter.columns", "m[k1],m[k2]");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())
+                        },
+                        new String[] {"k", "m"});
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        FileStoreTable table;
+        try (FileSystemCatalog catalog = new FileSystemCatalog(fileIO, warehouse)) {
+            catalog.createDatabase("mydb", false);
+            catalog.createTable(
+                    identifier,
+                    new Schema(
+                            rowType.getFields(),
+                            Collections.emptyList(),
+                            Collections.singletonList("k"),
+                            options,
+                            ""),
+                    false);
+            table = (FileStoreTable) catalog.getTable(identifier);
+        }
+
+        Map<Object, Object> map = new HashMap<>();
+        map.put(BinaryString.fromString("k1"), 1);
+        map.put(BinaryString.fromString("k2"), 2);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, new GenericMap(map)));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        List<ManifestEntry> entries = table.store().newScan().plan().files();
+        assertThat(entries).isNotEmpty();
+        ManifestEntry entry = entries.get(0);
+
+        FileIndexProcessor processor = new FileIndexProcessor(table);
+        DataFileMeta processed = processor.process(entry.partition(), entry.bucket(), entry);
+        assertThat(processed.extraFiles()).isNotEmpty();
+
+        // both keys have to survive: deduplicating the entries instead of the column names
+        // would silently drop one of them
+        String indexFile =
+                processed.extraFiles().stream()
+                        .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("no file index was written"));
+        Path indexPath =
+                new Path(
+                        table.store().pathFactory().bucketPath(entry.partition(), entry.bucket()),
+                        indexFile);
+        try (FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(fileIO.newInputStream(indexPath), rowType)) {
+            assertThat(reader.readAll().keySet()).containsExactlyInAnyOrder("m[k1]", "m[k2]");
+        }
+    }
 
     @Test
     public void testProcessReadsTheSchemasOfTheTableBranch() throws Exception {

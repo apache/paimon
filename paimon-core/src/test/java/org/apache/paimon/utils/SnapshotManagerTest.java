@@ -95,6 +95,51 @@ public class SnapshotManagerTest {
                 .isFalse();
     }
 
+    @Test
+    public void testSnapshotExistsRetriesAfterIOException() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class)))
+                .thenThrow(new IOException("Temporary failure"))
+                .thenReturn(true);
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        assertThat(snapshotManager.snapshotExists(2)).isTrue();
+        Mockito.verify(fileIO, Mockito.times(2)).exists(Mockito.any(Path.class));
+    }
+
+    @Test
+    public void testSnapshotExistsFailsAfterMaxAttempts() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class)))
+                .thenThrow(new IOException("Persistent failure"));
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        assertThatThrownBy(() -> snapshotManager.snapshotExists(2))
+                .hasMessageContaining("Failed to check whether snapshot #2 exists")
+                .hasMessageContaining("after 3 attempts")
+                .hasRootCauseMessage("Persistent failure");
+        Mockito.verify(fileIO, Mockito.times(3)).exists(Mockito.any(Path.class));
+    }
+
+    @Test
+    public void testSnapshotExistsRestoresInterruptedStatus() throws IOException {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class)))
+                .thenThrow(new IOException("Temporary failure"));
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> snapshotManager.snapshotExists(2))
+                    .hasMessageContaining("Interrupted while checking whether snapshot #2 exists")
+                    .hasCauseInstanceOf(InterruptedException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            Mockito.verify(fileIO).exists(Mockito.any(Path.class));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {

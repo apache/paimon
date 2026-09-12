@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 736" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">A pipeline for payloads, features, and search</title>
+<desc id="desc">Ingest BLOB payloads and scalar metadata into a Data Evolution table. Read selected columns and compute features, then commit only the updated columns while retaining untouched payload files. Training readers can project the committed columns. Search requires a separate index build or refresh and a coverage policy for newly written rows.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<rect width="1080" height="736" rx="16" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="32" y="48" font-size="28" font-weight="700" text-anchor="start" fill="#172b4d">A pipeline for payloads, features, and search</text>
+<text x="32" y="80" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Keep large payloads reusable; track column versions and search coverage separately.</text>
+<rect x="32" y="126" width="300" height="130" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">1  Ingest</text>
+<text x="50" y="188" font-size="17" font-weight="400" text-anchor="start" fill="#526277">BLOB payloads</text>
+<text x="50" y="215" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Scalar metadata + application ID</text>
+<rect x="390" y="126" width="300" height="130" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="408" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">2  Compute</text>
+<text x="408" y="188" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Project the required columns</text>
+<text x="408" y="215" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Run inference in Ray or Spark</text>
+<rect x="748" y="126" width="300" height="130" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="766" y="158" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">3  Commit features</text>
+<text x="766" y="188" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Update selected columns</text>
+<text x="766" y="215" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Preserve untouched payloads</text>
+<path d="M 332 191 H 390" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 690 191 H 748" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="346" width="658" height="150" rx="10" fill="#f1f4f8" stroke="#64748b" stroke-width="1.5"/>
+<text x="50" y="378" font-size="21" font-weight="700" text-anchor="start" fill="#64748b">Data Evolution table</text>
+<text x="50" y="408" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Normal columns · dedicated BLOBs · optional vector files</text>
+<text x="50" y="435" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Readers align column versions by row ID.</text>
+<text x="50" y="462" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Updates preserve the complete affected normal-file range.</text>
+<path d="M 182 256 V 346" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 898 256 V 310 H 650 V 346" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="748" y="346" width="300" height="150" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="766" y="378" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">Training / analysis</text>
+<text x="766" y="408" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Select snapshot or tag</text>
+<text x="766" y="435" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Read projected columns</text>
+<text x="766" y="462" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Use PyTorch, Arrow, or Ray</text>
+<path d="M 690 421 H 748" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="32" y="568" width="300" height="116" rx="10" fill="#edf4ff" stroke="#2166b1" stroke-width="1.5"/>
+<text x="50" y="600" font-size="21" font-weight="700" text-anchor="start" fill="#2166b1">4  Build / refresh index</text>
+<text x="50" y="630" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Explicit indexing operation</text>
+<text x="50" y="657" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Choose coverage policy</text>
+<rect x="390" y="568" width="300" height="116" rx="10" fill="#eaf7f2" stroke="#10705d" stroke-width="1.5"/>
+<text x="408" y="600" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">5  Serve search</text>
+<text x="408" y="630" font-size="18" font-weight="400" text-anchor="start" fill="#526277">ANN / scalar / text queries</text>
+<text x="408" y="657" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Validate freshness and recall</text>
+<path d="M 182 496 V 568" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 332 626 H 390" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="748" y="584" font-size="18" font-weight="400" text-anchor="start" fill="#526277">New writes do not automatically</text>
+<text x="748" y="612" font-size="18" font-weight="400" text-anchor="start" fill="#526277">refresh an existing index.</text>
+<text x="748" y="640" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Fast search can omit rows</text>
+<text x="748" y="668" font-size="18" font-weight="400" text-anchor="start" fill="#526277">outside index coverage.</text>
+</g>
+</svg>

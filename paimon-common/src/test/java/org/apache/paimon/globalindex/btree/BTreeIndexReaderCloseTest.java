@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
@@ -197,13 +198,21 @@ public class BTreeIndexReaderCloseTest {
         };
     }
 
-    /** Fails page invalidation, which is what closing the reader's bloom filter does. */
+    /** Fails page invalidation during reader close. */
     private static class FailingCacheManager extends CacheManager {
 
         private boolean failing = false;
 
         FailingCacheManager() {
             super(MemorySize.VALUE_8_MB, 0);
+        }
+
+        @Override
+        protected void invalidPage(CacheKey key, Cache.CacheValue expected) {
+            if (failing) {
+                throw new RuntimeException("cache is down");
+            }
+            super.invalidPage(key, expected);
         }
 
         @Override

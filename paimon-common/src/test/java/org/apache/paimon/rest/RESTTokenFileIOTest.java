@@ -98,6 +98,36 @@ class RESTTokenFileIOTest {
     }
 
     @Test
+    void testFileIOCreationFailureSurfacesAsCheckedIOException() throws IOException {
+        Path tableRoot = new Path("resttoken-broken://bucket/table");
+        // the loader's access check fails, so FileIO.get cannot produce an inner FileIO
+        FileIO delegate = mock(FileIO.class);
+        when(delegate.exists(any())).thenThrow(new IOException("token fs unavailable"));
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("resttoken-broken");
+        when(loader.load(any())).thenReturn(delegate);
+        RESTApi api = mock(RESTApi.class);
+        Identifier identifier = Identifier.create("db", "table");
+        // a unique token, so the static token-keyed FileIO cache cannot serve another test's
+        // delegate and the creation path actually runs
+        when(api.loadTableToken(identifier))
+                .thenReturn(
+                        new GetTableTokenResponse(
+                                Collections.singletonMap("token", UUID.randomUUID().toString()),
+                                Long.MAX_VALUE));
+        RESTTokenFileIO fileIO =
+                new RESTTokenFileIO(
+                        CatalogContext.create(new Options(), loader, null),
+                        api,
+                        identifier,
+                        tableRoot);
+
+        // FileIO operations declare IOException; failing to create the inner FileIO must
+        // surface the same way instead of bypassing callers as UncheckedIOException
+        assertThatThrownBy(() -> fileIO.exists(tableRoot)).isInstanceOf(IOException.class);
+    }
+
+    @Test
     void testTryToWriteAtomicReachesInnerOverride() throws IOException {
         Path tableRoot = new Path("oss://bucket/table");
         FileIO delegate = mock(FileIO.class);

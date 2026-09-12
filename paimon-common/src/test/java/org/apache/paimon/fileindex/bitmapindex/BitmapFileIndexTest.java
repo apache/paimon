@@ -34,6 +34,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Rule;
@@ -146,6 +147,41 @@ public class BitmapFileIndexTest {
         LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
                 new LocalFileIO.LocalSeekableInputStream(file);
         return bitmapFileIndex.createReader(localSeekableInputStream, 0, 0);
+    }
+
+    @Test
+    public void testV2EntryLargerThanBlockSize() throws Exception {
+        FieldRef fieldRef = new FieldRef(0, "", DataTypes.STRING());
+        // "big" serializes to more than the default 16kb index-block-size, so it cannot
+        // share a block with any other key; the writer must still produce a readable
+        // index instead of failing with "index fail". "a" and "b" pack into the first
+        // block, so the ordinary size check is exercised too.
+        BinaryString big = BinaryString.fromString(StringUtils.repeat("x", 20_000));
+        BinaryString a = BinaryString.fromString("a");
+        BinaryString b = BinaryString.fromString("b");
+        Object[] dataColumn = {big, null, a, big, b};
+        FileIndexReader reader =
+                createTestReaderOnWriter(
+                        BitmapFileIndex.VERSION_2,
+                        16 * 1024,
+                        DataTypes.STRING(),
+                        writer -> {
+                            for (Object o : dataColumn) {
+                                writer.write(o);
+                            }
+                        });
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, big))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(0, 3));
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, a))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(2));
+        assert ((BitmapIndexResult) reader.visitEqual(fieldRef, b))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(4));
+        assert ((BitmapIndexResult) reader.visitIsNull(fieldRef))
+                .get()
+                .equals(RoaringBitmap32.bitmapOf(1));
     }
 
     private void testStringType(int version) throws Exception {

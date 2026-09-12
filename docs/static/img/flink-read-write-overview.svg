@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="510" viewBox="0 0 960 510" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One table, several ways to read</title>
+<desc id="desc">Flink writers commit snapshots to Paimon as checkpoints complete. Batch readers read one snapshot, streaming readers follow changes, and lookup joins enrich another stream.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="508" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">One table, several ways to read</text>
+<text x="28" y="77" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Choose the read path for the result your application needs.</text>
+<rect x="28" y="185" width="238" height="144" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="217" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Flink writer</text>
+<text x="44" y="246" font-size="18" fill="#526277" font-weight="400" text-anchor="start">SQL / Table API /</text>
+<text x="44" y="271" font-size="18" fill="#526277" font-weight="400" text-anchor="start">DataStream API</text>
+<text x="44" y="296" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Checkpoint completes</text>
+<path d="M 268 257 H 338" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="283" y="240" font-size="16" fill="#526277" font-weight="400" text-anchor="start">commit</text>
+<rect x="340" y="170" width="250" height="172" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="356" y="202" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">Paimon table</text>
+<text x="356" y="231" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Committed snapshots</text>
+<text x="356" y="256" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Data and changelog files</text>
+<text x="356" y="281" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Catalog + warehouse</text>
+<path d="M 592 220 H 627 V 145 H 663" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 592 257 H 663" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 592 294 H 627 V 373 H 663" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="666" y="96" width="266" height="99" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="682" y="128" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Batch query</text>
+<text x="682" y="157" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Read a snapshot; finish</text>
+<rect x="666" y="208" width="266" height="99" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="682" y="240" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Streaming query</text>
+<text x="682" y="269" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Follow table changes</text>
+<rect x="666" y="320" width="266" height="99" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="682" y="352" font-size="21" fill="#7051a3" font-weight="700" text-anchor="start">Lookup join</text>
+<text x="682" y="381" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Enrich incoming records</text>
+<rect x="28" y="444" width="904" height="42" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="471" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Table layout and changelog settings determine the available read semantics.</text>
+</g>
+</svg>

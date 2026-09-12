@@ -64,6 +64,8 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
           case BinaryPredicate(transform, literal) =>
             if (literal == null) {
               builder.isNull(transform)
+            } else if (isNaN(literal)) {
+              builder.isNaN(transform)
             } else {
               PredicateBuilder.and(builder.isNotNull(transform), builder.equal(transform, literal))
             }

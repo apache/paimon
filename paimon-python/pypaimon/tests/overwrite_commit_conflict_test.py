@@ -276,15 +276,17 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual([], incr_results)
         self.assertEqual(full_scans['n'], 1)
 
-    def test_incremental_merge_across_non_append_snapshot(self):
-        self._assert_merge_equals_full_scan(self._overwrite_target)
+    def test_full_scan_across_empty_delta_overwrite_snapshot(self):
+        self._assert_merge_equals_full_scan(
+            self._overwrite_target, hide_overwrite_delta=True)
 
     def test_incremental_merge_across_compact_snapshot(self):
         self._assert_merge_equals_full_scan(self._compact_target)
 
-    def _assert_merge_equals_full_scan(self, concurrent_fn):
-        # A non-APPEND snapshot (OVERWRITE/COMPACT, delta = ADD+DELETE) lands
-        # between retries; the merged base must still equal a fresh full scan.
+    def _assert_merge_equals_full_scan(self, concurrent_fn,
+                                       hide_overwrite_delta=False):
+        # A non-APPEND snapshot lands between retries; the conflict base must
+        # still equal a fresh full scan.
         K = 2
 
         wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
@@ -297,6 +299,18 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         captured = []
         orig_check = fsc.conflict_detection.check_conflicts
         orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
+
+        if hide_overwrite_delta:
+            orig_read_delta = fsc.commit_scanner.manifest_list_manager.read_delta
+
+            def read_delta(snapshot):
+                # Row-id reassignment replaces the base manifests in an
+                # OVERWRITE snapshot while deliberately writing an empty delta.
+                if snapshot.commit_kind == "OVERWRITE":
+                    return []
+                return orig_read_delta(snapshot)
+
+            fsc.commit_scanner.manifest_list_manager.read_delta = read_delta
 
         def spy_check(latest_snapshot, base_entries, delta_entries, *a, **k):
             captured.append((latest_snapshot, list(base_entries), list(delta_entries)))
@@ -315,6 +329,14 @@ class OverwriteCommitConflictTest(unittest.TestCase):
             return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
+
+        if hide_overwrite_delta:
+            with self.assertRaisesRegex(
+                    RuntimeError, "File deletion conflicts detected"):
+                c.commit(messages)
+            c.close()
+            self.assertEqual(cas['fails'], 1)
+            return
 
         c.commit(messages)
         c.close()

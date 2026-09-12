@@ -27,7 +27,10 @@ import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
+from pypaimon.read.reader.format_pyarrow_reader import (
+    FormatPyArrowReader,
+    _DecodedRowGroupCache,
+)
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
@@ -387,6 +390,55 @@ class ParquetRowRangeTest(unittest.TestCase):
                 for index in requested
             ],
         )
+
+    def test_oversized_row_group_bypasses_decoded_cache(self):
+        path = os.path.join(self.tempdir, "oversized-row-group.parquet")
+        pq.write_table(
+            pa.table({"payload": [b"x" * 256] * 16}),
+            path,
+            row_group_size=16,
+            compression="none",
+        )
+        cache = _DecodedRowGroupCache(1024)
+        small_key = ("small",)
+        list(cache.iter_or_load(
+            small_key,
+            lambda: iter([pa.record_batch({"value": pa.array([1])})]),
+        ))
+        decoded_rows = []
+        original = FormatPyArrowReader._read_parquet_row_group_batches
+
+        def tracked(reader, row_group, columns):
+            for batch in original(reader, row_group, columns):
+                decoded_rows.append(batch.num_rows)
+                yield batch
+
+        with mock.patch.object(
+                FormatPyArrowReader,
+                "_read_parquet_row_group_batches", tracked):
+            reader = FormatPyArrowReader(
+                _LocalFileIO(),
+                "parquet",
+                path,
+                [DataField(0, "payload", AtomicType("BYTES"))],
+                None,
+                batch_size=2,
+                row_ranges=[(0, 0)],
+                row_group_cache=cache,
+            )
+            try:
+                self.assertEqual(
+                    [b"x" * 256],
+                    reader.read_arrow_batch().column(0).to_pylist(),
+                )
+                self.assertEqual(2, sum(decoded_rows))
+                while reader.read_arrow_batch() is not None:
+                    pass
+            finally:
+                reader.close()
+
+        self.assertEqual(16, sum(decoded_rows))
+        self.assertEqual([small_key], list(cache._cache._entries))
 
 
 if __name__ == "__main__":

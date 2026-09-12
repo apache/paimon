@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -103,7 +104,7 @@ class SortLookupStoreCloseTest {
         for (int key = 0; key < 400; key += 40) {
             lookup(reader, key * 2);
         }
-        int cachedPages = cacheManager.pagesTaken.get();
+        int cachedPages = cacheManager.dataCache().asMap().size();
         assertThat(cachedPages).isGreaterThan(1);
 
         cacheManager.failFrom(1);
@@ -164,7 +165,6 @@ class SortLookupStoreCloseTest {
     /** A cache manager whose page invalidation can be made to fail. */
     private static class ThrowingCacheManager extends CacheManager {
 
-        private final AtomicInteger pagesTaken = new AtomicInteger();
         private final AtomicInteger invalidated = new AtomicInteger();
         private volatile int failFromCall;
 
@@ -178,19 +178,19 @@ class SortLookupStoreCloseTest {
         }
 
         @Override
-        public org.apache.paimon.memory.MemorySegment getPage(
-                CacheKey key,
-                org.apache.paimon.io.cache.CacheReader reader,
-                org.apache.paimon.io.cache.CacheCallback callback) {
-            pagesTaken.incrementAndGet();
-            return super.getPage(key, reader, callback);
+        public void invalidPage(CacheKey key) {
+            super.invalidPage(key);
+            invalidated();
         }
 
         @Override
-        public void invalidPage(CacheKey key) {
-            int call = invalidated.getAndIncrement();
-            super.invalidPage(key);
-            if (call >= failFromCall) {
+        protected void invalidPage(CacheKey key, Cache.CacheValue expected) {
+            super.invalidPage(key, expected);
+            invalidated();
+        }
+
+        private void invalidated() {
+            if (invalidated.getAndIncrement() >= failFromCall) {
                 throw new RuntimeException("invalidPage failed");
             }
         }

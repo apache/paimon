@@ -22,12 +22,14 @@ from typing import Mapping, Optional
 
 from pypaimon.catalog.catalog_exception import TableAlreadyExistException
 from pypaimon.multimodal.lerobot.metadata import (
+    _COMPANION_OPTION_KEYS,
     _append_arrow_tables,
     _load_dataset_metadata,
     _managed_table_options,
     _prepare_metadata_tables,
     _positive_integer,
-    _publish_dataset,
+    _commit_metadata,
+    _validate_tag_name,
     _validated_episode_tables,
 )
 from pypaimon.multimodal.lerobot.loader import _write_dataset
@@ -35,6 +37,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
     _validate_v3_required_features,
+    _video_feature_names,
 )
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
@@ -50,6 +53,12 @@ from pypaimon.multimodal.source_utils import (
 )
 
 
+_VIDEO_LAYOUT_ERROR = (
+    "LeRobot video import requires a bucket-unaware target table so each "
+    "Episode is written by one writer."
+)
+
+
 def load_from_lerobot(
         connection,
         table_name: str,
@@ -58,11 +67,13 @@ def load_from_lerobot(
         batch_size: int = 1024,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None,
-) -> int:
-    """Import LeRobot Dataset v3 and return its version ID.
+        tag_name: Optional[str] = None,
+) -> None:
+    """Import LeRobot Dataset v3 into a new Paimon table group.
 
     A new target table is created from LeRobot metadata. Episode, task, and
-    version metadata are stored in companion Paimon tables.
+    info/stats metadata are stored in companion Paimon tables. If provided,
+    ``tag_name`` pins all components to their imported snapshots.
     FileIO URI credentials come only from ``source_options`` and are not
     inherited from the target Catalog.
     """
@@ -73,6 +84,9 @@ def load_from_lerobot(
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) \
             or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
+
+    if tag_name is not None:
+        _validate_tag_name(tag_name)
 
     validated_source_options = _validated_source_options(source_options)
     _validate_source_kerberos(
@@ -87,19 +101,25 @@ def load_from_lerobot(
         _positive_integer(local_info.get("fps"), "fps")
         _validated_counts(local_info, resolved_source.path)
         _validate_v3_required_features(local_info)
+        video_fields = _video_feature_names(local_info)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
-            LeRobotDataset, resolved_source, local_info)
+            LeRobotDataset,
+            resolved_source,
+            local_info,
+            download_videos=bool(video_fields),
+        )
         try:
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
             _validate_v3_required_features(info)
+            video_fields = _video_feature_names(info)
 
             lerobot_schema = _schema_from_info(info)
             metadata = _load_dataset_metadata(
                 dataset, info, resolved_source)
-            return _import_dataset(
+            _import_dataset(
                 connection,
                 table_name,
                 dataset,
@@ -109,6 +129,8 @@ def load_from_lerobot(
                 batch_size,
                 options,
                 metadata,
+                tag_name,
+                video_fields,
             )
         finally:
             close = getattr(dataset, "close", None)
@@ -125,15 +147,22 @@ def _import_dataset(
         source_schema,
         batch_size,
         options,
-        metadata):
+        metadata,
+        tag_name,
+        video_fields):
     table = _create_target_table(
-        connection, table_name, source_schema, options)
+        connection,
+        table_name,
+        source_schema,
+        options,
+        metadata,
+        video_fields,
+    )
     tables = _prepare_metadata_tables(
         connection, table.raw_table, metadata)
-    version_id = 1
     episodes_snapshot_id = _append_arrow_tables(
         tables["episodes"],
-        _validated_episode_tables(metadata),
+        _validated_episode_tables(metadata, video_fields),
     )
     frames_snapshot_id = None
     if int(info["total_frames"]) > 0:
@@ -145,17 +174,17 @@ def _import_dataset(
             source_schema,
             batch_size,
             metadata,
+            video_fields,
         )
-    _publish_dataset(
+    _commit_metadata(
         connection,
         tables,
-        version_id,
+        tag_name,
         metadata,
         table.identifier,
         frames_snapshot_id,
         episodes_snapshot_id,
     )
-    return version_id
 
 
 def _validated_counts(info, source):
@@ -188,11 +217,29 @@ def _required_count(info, name, source):
 
 
 def _create_target_table(
-        connection, table_name, source_schema, options):
+        connection, table_name, source_schema, options, metadata,
+        video_fields=()):
     create_options = dict(options or {})
+    configured = create_options.get("video-frame-field")
+    if configured is not None:
+        requested = {
+            name.strip() for name in str(configured).split(",")
+            if name.strip()
+        }
+        if requested != set(video_fields):
+            raise ValueError(
+                "LeRobot video features %s do not match "
+                "'video-frame-field'=%r."
+                % (list(video_fields), configured)
+            )
+    if video_fields:
+        if str(create_options.get("bucket", "-1")).strip() != "-1":
+            raise ValueError(_VIDEO_LAYOUT_ERROR)
+        create_options["video-frame-field"] = ",".join(video_fields)
     managed_options = _managed_table_options(
-        connection._identifier(table_name))
-    reserved_options = set(managed_options).intersection(create_options)
+        connection._identifier(table_name), metadata)
+    reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(
+        create_options)
     if reserved_options:
         raise ValueError(
             "%s are managed by load_from_lerobot."

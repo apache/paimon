@@ -121,7 +121,8 @@ public class Range implements Serializable {
 
     public static List<Range> sortAndMergeOverlap(List<Range> ranges, boolean adjacent) {
         if (ranges == null || ranges.isEmpty()) {
-            return Collections.emptyList();
+            // Mutable: callers accumulate into the result across children.
+            return new ArrayList<>();
         }
 
         if (ranges.size() == 1) {
@@ -184,9 +185,18 @@ public class Range implements Serializable {
         return result;
     }
 
+    /**
+     * Groups row ids into ascending ranges, merging consecutive ids. The ids may arrive in any
+     * order and may repeat; both are normalized here, since the returned list has to be sorted and
+     * non-overlapping for {@link #and(List, List)} to intersect it correctly.
+     */
     public static List<Range> toRanges(Iterable<Long> ids) {
+        List<Long> sorted = new ArrayList<>();
+        ids.forEach(sorted::add);
+        Collections.sort(sorted);
+
         List<Range> ranges = new ArrayList<>();
-        Iterator<Long> iterator = ids.iterator();
+        Iterator<Long> iterator = sorted.iterator();
 
         if (!iterator.hasNext()) {
             return ranges;
@@ -197,6 +207,9 @@ public class Range implements Serializable {
 
         while (iterator.hasNext()) {
             long current = iterator.next();
+            if (current == rangeEnd) {
+                continue;
+            }
             if (current != rangeEnd + 1) {
                 // Save the current range and start a new one
                 ranges.add(new Range(rangeStart, rangeEnd));

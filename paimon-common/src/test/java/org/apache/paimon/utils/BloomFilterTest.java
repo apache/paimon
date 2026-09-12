@@ -22,6 +22,8 @@ import org.apache.paimon.memory.MemorySegment;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 
@@ -153,6 +155,34 @@ public class BloomFilterTest {
         Arrays.stream(inputs2)
                 .forEach(
                         i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void testProbeWithOffsetAndBorrowedSegment(boolean offHeap) {
+        MemorySegment original =
+                offHeap
+                        ? MemorySegment.allocateOffHeapMemory(75)
+                        : MemorySegment.allocateHeapMemory(75);
+        for (int i = 0; i < 11; i++) {
+            original.put(i, (byte) 0xff);
+        }
+        BloomFilter filter = new BloomFilter(10, 64);
+        filter.setMemorySegment(original, 11);
+        filter.addHash(42);
+        Assertions.assertThat(filter.testHash(42)).isTrue();
+        Assertions.assertThat(filter.testHash(43)).isFalse();
+
+        byte[] bytes = new byte[64];
+        original.get(11, bytes);
+        MemorySegment borrowed =
+                offHeap
+                        ? MemorySegment.allocateOffHeapMemory(64)
+                        : MemorySegment.allocateHeapMemory(64);
+        borrowed.put(0, bytes);
+        Assertions.assertThat(filter.testHash(42, borrowed)).isTrue();
+        Assertions.assertThat(filter.testHash(43, borrowed)).isFalse();
+        Assertions.assertThat(filter.getMemorySegment()).isSameAs(original);
     }
 
     private static int numHashFunctions(long expectedEntries, double fpp) {

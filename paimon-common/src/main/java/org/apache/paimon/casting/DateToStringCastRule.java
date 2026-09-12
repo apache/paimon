@@ -20,11 +20,12 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BinaryStringUtils;
 import org.apache.paimon.utils.DateTimeUtils;
-
-import static org.apache.paimon.types.VarCharType.STRING_TYPE;
 
 /** {@link DataTypeRoot#DATE} to {@link DataTypeFamily#CHARACTER_STRING} cast rule. */
 class DateToStringCastRule extends AbstractCastRule<Integer, BinaryString> {
@@ -32,11 +33,21 @@ class DateToStringCastRule extends AbstractCastRule<Integer, BinaryString> {
     static final DateToStringCastRule INSTANCE = new DateToStringCastRule();
 
     private DateToStringCastRule() {
-        super(CastRulePredicate.builder().input(DataTypeRoot.DATE).target(STRING_TYPE).build());
+        super(
+                CastRulePredicate.builder()
+                        .input(DataTypeRoot.DATE)
+                        .target(DataTypeFamily.CHARACTER_STRING)
+                        .build());
     }
 
     @Override
     public CastExecutor<Integer, BinaryString> create(DataType inputType, DataType targetType) {
-        return value -> BinaryString.fromString(DateTimeUtils.formatDate(value));
+        boolean padOrTrim =
+                targetType.is(DataTypeRoot.CHAR)
+                        || DataTypeChecks.getLength(targetType) != VarCharType.MAX_LENGTH;
+        return value -> {
+            BinaryString result = BinaryString.fromString(DateTimeUtils.formatDate(value));
+            return padOrTrim ? BinaryStringUtils.toCharacterString(result, targetType) : result;
+        };
     }
 }

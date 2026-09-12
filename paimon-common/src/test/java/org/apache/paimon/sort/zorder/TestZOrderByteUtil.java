@@ -18,17 +18,22 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 
 import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Random;
 
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
@@ -92,6 +97,201 @@ public class TestZOrderByteUtil {
             substringIndex++;
         }
         return result.toString();
+    }
+
+    /** Decimal z-values must order by value and stay distinct from the null sentinel. */
+    @Test
+    public void testZIndexerDecimalOrdering() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new DecimalType(20, 2)),
+                                new DataField(1, "b", new DecimalType(20, 2))));
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        // Two rows whose decimal z-values must order by value: (-1, 0) then (0, 1).
+        // Old code fed minimal two's-complement arrays into unsigned comparison,
+        // making -1 > 1 and 0 collide with the null sentinel.
+        GenericRow row1 = new GenericRow(2);
+        row1.setField(0, Decimal.fromBigDecimal(new BigDecimal("-1.00"), 20, 2));
+        row1.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        GenericRow row2 = new GenericRow(2);
+        row2.setField(0, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        row2.setField(1, Decimal.fromBigDecimal(new BigDecimal("1.00"), 20, 2));
+
+        byte[] z1 = Arrays.copyOf(indexer.index(row1), indexer.size());
+        byte[] z2 = Arrays.copyOf(indexer.index(row2), indexer.size());
+        // Interleaved bits: column a dominates the high bits of the z-value.
+        assertThat(compareUnsigned(z1, z2)).isLessThan(0);
+
+        GenericRow rowNull = new GenericRow(2);
+        rowNull.setField(0, null);
+        rowNull.setField(1, null);
+        byte[] zNull = Arrays.copyOf(indexer.index(rowNull), indexer.size());
+        // The null sentinel (all-zero bytes) sorts below every real value.
+        assertThat(compareUnsigned(zNull, z1)).isLessThan(0);
+        assertThat(compareUnsigned(zNull, z2)).isLessThan(0);
+
+        // A large magnitude still orders correctly against the small positives: the fixed-width
+        // encoding holds the whole unscaled value rather than projecting it into 8 bytes.
+        GenericRow big = new GenericRow(2);
+        big.setField(0, Decimal.fromBigDecimal(new BigDecimal("92233720368547758.08"), 20, 2));
+        big.setField(1, Decimal.fromBigDecimal(new BigDecimal("0.00"), 20, 2));
+        byte[] zBig = Arrays.copyOf(indexer.index(big), indexer.size());
+        assertThat(compareUnsigned(zBig, z2)).isGreaterThan(0);
+
+        // Its negative counterpart orders below the small negatives, but still above the null
+        // sentinel.
+        Decimal minUnscaled =
+                Decimal.fromBigDecimal(new BigDecimal("-92233720368547758.08"), 20, 2);
+        GenericRow negativeBig = new GenericRow(2);
+        negativeBig.setField(0, minUnscaled);
+        negativeBig.setField(1, minUnscaled);
+        byte[] zNegativeBig = Arrays.copyOf(indexer.index(negativeBig), indexer.size());
+        assertThat(compareUnsigned(zNull, zNegativeBig)).isLessThan(0);
+        assertThat(compareUnsigned(zNegativeBig, z1)).isLessThan(0);
+    }
+
+    /**
+     * High-precision decimals must keep full clustering resolution: ordinary small values, their
+     * negatives, and values past the long range all get distinct, correctly ordered z-keys.
+     */
+    @Test
+    public void testZIndexerHighPrecisionDecimalClustering() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new DecimalType(38, 18)),
+                                new DataField(1, "b", new DecimalType(38, 18))));
+        ZIndexer indexer = new ZIndexer(rowType, Arrays.asList("a", "b"));
+        indexer.open();
+
+        // Strictly ascending values, including small ones well below an 8-byte projection's
+        // overflow point (which collapsed 0..18 to a single key), sub-unit fractions, negatives,
+        // and a value past Long.MAX_VALUE. Each must get a strictly greater z-key than the last.
+        List<String> ascending =
+                Arrays.asList(
+                        "-90",
+                        "-10",
+                        "-2",
+                        "-1",
+                        "0",
+                        "0.001",
+                        "0.002",
+                        "1",
+                        "2",
+                        "3",
+                        "10",
+                        "20",
+                        "90",
+                        "12345678901234567890.123456789012345678");
+        byte[] previous = null;
+        for (String value : ascending) {
+            byte[] key = highPrecisionKey(indexer, value);
+            if (previous != null) {
+                assertThat(compareUnsigned(previous, key)).isLessThan(0);
+            }
+            previous = key;
+        }
+
+        // Null sorts below every real value.
+        byte[] zNull = Arrays.copyOf(indexer.index(new GenericRow(2)), indexer.size());
+        assertThat(compareUnsigned(zNull, highPrecisionKey(indexer, "-90"))).isLessThan(0);
+    }
+
+    private static byte[] highPrecisionKey(ZIndexer indexer, String value) {
+        GenericRow row = new GenericRow(2);
+        row.setField(0, Decimal.fromBigDecimal(new BigDecimal(value), 38, 18));
+        row.setField(1, Decimal.fromBigDecimal(new BigDecimal("0"), 38, 18));
+        return Arrays.copyOf(indexer.index(row), indexer.size());
+    }
+
+    private static int compareUnsigned(byte[] left, byte[] right) {
+        for (int i = 0; i < left.length && i < right.length; i++) {
+            int a = left[i] & 0xFF;
+            int b = right[i] & 0xFF;
+            if (a != b) {
+                return Integer.compare(a, b);
+            }
+        }
+        return Integer.compare(left.length, right.length);
+    }
+
+    /**
+     * Ordered-bytes transforms must preserve value order across negatives for floats and doubles.
+     */
+    @Test
+    public void testFloatDoubleNegativeOrdering() {
+        float[] floats = {
+            -Float.MAX_VALUE,
+            -2.5f,
+            -1f,
+            -Float.MIN_VALUE,
+            0f,
+            Float.MIN_VALUE,
+            1f,
+            2.5f,
+            Float.MAX_VALUE
+        };
+        long prevF =
+                ZOrderByteUtils.floatToOrderedBytes(floats[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < floats.length; i++) {
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(floats[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevF, cur)).isLessThan(0);
+            prevF = cur;
+        }
+
+        double[] doubles = {
+            -Double.MAX_VALUE,
+            -2.5d,
+            -1d,
+            -Double.MIN_VALUE,
+            0d,
+            Double.MIN_VALUE,
+            1d,
+            2.5d,
+            Double.MAX_VALUE
+        };
+        long prevD =
+                ZOrderByteUtils.doubleToOrderedBytes(doubles[0], ByteBuffer.allocate(8)).getLong(0);
+        for (int i = 1; i < doubles.length; i++) {
+            long cur =
+                    ZOrderByteUtils.doubleToOrderedBytes(doubles[i], ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prevD, cur)).isLessThan(0);
+            prevD = cur;
+        }
+
+        // Dense walk of adjacent negative bit patterns: value strictly decreases, so
+        // the transformed unsigned value must strictly decrease too. The old shift-31
+        // flip inverts order for a fraction of adjacent negative pairs.
+        for (int i = 1; i < 1000; i++) {
+            int bits = 0xC0400000 + i; // starting at -3.0f, descending values
+            long prev =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits - 1), ByteBuffer.allocate(8))
+                            .getLong(0);
+            long cur =
+                    ZOrderByteUtils.floatToOrderedBytes(
+                                    Float.intBitsToFloat(bits), ByteBuffer.allocate(8))
+                            .getLong(0);
+            assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+        }
+        for (int i = 0; i < 1000; i++) {
+            long bits = 0xC004000000000000L + i; // just below -2.5d, descending values
+            double v = Double.longBitsToDouble(bits);
+            long cur = ZOrderByteUtils.doubleToOrderedBytes(v, ByteBuffer.allocate(8)).getLong(0);
+            if (i > 0) {
+                long prev =
+                        ZOrderByteUtils.doubleToOrderedBytes(
+                                        Double.longBitsToDouble(bits - 1), ByteBuffer.allocate(8))
+                                .getLong(0);
+                assertThat(Long.compareUnsigned(prev, cur)).isGreaterThan(0);
+            }
+        }
     }
 
     /**

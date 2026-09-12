@@ -294,7 +294,7 @@ under the License.
             <td><h5>clustering.strategy</h5></td>
             <td style="word-wrap: break-word;">"auto"</td>
             <td>String</td>
-            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
+            <td>Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, respectively. When not configured, it will automatically determine the algorithm based on the number of columns in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, and 'hilbert' for 5 or more columns.</td>
         </tr>
         <tr>
             <td><h5>commit.callback.#.param</h5></td>
@@ -391,6 +391,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>MemorySize</td>
             <td>When incremental size is bigger than this threshold, force a full compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>continuous-compaction.initial-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">earliest</td>
+            <td><p>Enum</p></td>
+            <td>Initial snapshot mode for dedicated streaming compaction. When set to 'earliest' (the default), compaction starts from the earliest available snapshot if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. When set to 'latest', the latest snapshot is read in ALL mode as the initial baseline and subsequent scans start from the next snapshot. The 'latest' mode skips historical snapshot changes and should only be used when historical changelog replay is not required.<br /><br />Possible values:<ul><li>"earliest": Read snapshots from the earliest available snapshot.</li><li>"latest": Read the latest snapshot as the initial full baseline.</li></ul></td>
         </tr>
         <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
@@ -501,10 +507,22 @@ under the License.
             <td>The TTL in local index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.compaction.large-file-ratio</h5></td>
+            <td style="word-wrap: break-word;">2.0</td>
+            <td>Double</td>
+            <td>Size multiplier relative to target-file-size for selecting large normal files when data-evolution.compaction.split-large-files is enabled. An individual file must strictly exceed this threshold. The value must be finite and at least 1.0. This does not change the target size of compacted output files.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.compaction.rewrite-row-ids</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Legacy compatibility option. Setting this option to true fails. Data-evolution compaction preserves row IDs and logical deletions. Use the 'materialize_deletion_vectors' procedure to apply deletion vectors to the latest table state and assign new row IDs. Reclaiming files retained by historical snapshots or tags requires snapshot expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.compaction.split-large-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether data-evolution compaction selects normal data files larger than data-evolution.compaction.large-file-ratio times target-file-size, even below compaction.min.file-num when dedicated-file ranges allow splitting. Normal output ranges are estimated from input file sizes and row counts toward target-file-size, then adjusted to avoid cutting through any BLOB or VECTOR file range. Actual output sizes may differ from the target. Row IDs and logical deletions are preserved, and associated BLOB and VECTOR files are not rewritten by this option.</td>
         </tr>
         <tr>
             <td><h5>data-evolution.enabled</h5></td>
@@ -1088,6 +1106,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether to enable block-aware ordinary manifest merging. When disabled, ordinary manifest compaction uses the legacy full-entry merger.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.merge.skip-on-write-only</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip automatic manifest merging during commit when write-only is true. This also skips automatic manifest sort rewrite. Explicit manifest compaction is not affected.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
@@ -1811,7 +1835,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>target-file-row-num</h5></td>
             <td style="word-wrap: break-word;">9223372036854775807</td>
             <td>Long</td>
-            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction still produces a single file. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
+            <td>Target number of rows per newly written data file; a file rolls when this or target-file-size is reached, whichever comes first. Enforced at bundle granularity, so a bundled write may exceed it by up to one bundle. Only constrains files at write time: compaction is size-based and may merge into larger files, and data-evolution compaction produces a single file unless data-evolution.compaction.split-large-files is enabled. Bounds per-file rows for wide columns to avoid data-evolution OOM. PyPaimon supports this for data-evolution append tables; its primary-key, blob and vector writers still fail fast when it is enabled. Disabled by default.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>
@@ -1973,7 +1997,7 @@ The size strategy ranges by the data size allocated to each sorting task, which 
             <td><h5>write-only</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+            <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs. Automatic manifest merging is also skipped when manifest.merge.skip-on-write-only is true.</td>
         </tr>
         <tr>
             <td><h5>write.batch-memory</h5></td>
