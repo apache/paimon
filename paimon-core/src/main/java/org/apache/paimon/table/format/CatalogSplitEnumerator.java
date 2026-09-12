@@ -116,19 +116,26 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         for (Pair<LinkedHashMap<String, String>, Path> partition : partitions) {
             boolean useCatalogContextFileIO =
                     fileIOResolver.useCatalogContextFileIO(partition.getValue());
-            if (useCatalogContextFileIO) {
-                fileIOResolver.prepare(partition.getValue(), true);
-            } else if (!tableFileIOPrepared) {
-                fileIOResolver.prepare(partition.getValue(), false);
-                tableFileIOPrepared = true;
+            try {
+                if (useCatalogContextFileIO) {
+                    fileIOResolver.prepare(partition.getValue(), true);
+                } else if (!tableFileIOPrepared) {
+                    fileIOResolver.prepare(partition.getValue(), false);
+                    tableFileIOPrepared = true;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        listFailureMessage(
+                                partition.getKey(), partition.getValue(), useCatalogContextFileIO),
+                        e);
             }
         }
         Function<Pair<LinkedHashMap<String, String>, Path>, List<Split>> lister =
                 pair -> {
                     BinaryRow partitionRow = toPartitionRow(pair.getKey());
+                    boolean useCatalogContextFileIO =
+                            fileIOResolver.useCatalogContextFileIO(pair.getValue());
                     try {
-                        boolean useCatalogContextFileIO =
-                                fileIOResolver.useCatalogContextFileIO(pair.getValue());
                         return createSplits(
                                 fileIOResolver.fileIO(useCatalogContextFileIO),
                                 pair.getValue(),
@@ -139,7 +146,9 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
                         return Collections.emptyList();
                     } catch (IOException e) {
                         throw new RuntimeException(
-                                "Failed to list files for partition " + pair.getValue(), e);
+                                listFailureMessage(
+                                        pair.getKey(), pair.getValue(), useCatalogContextFileIO),
+                                e);
                     }
                 };
         int parallelism =
@@ -360,6 +369,25 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
                                 + "expected exactly the partition keys %s with values usable as "
                                 + "path components.",
                         spec, table.fullName(), table.partitionKeys()));
+    }
+
+    /** Says which credentials listed the partition, so a permission failure is actionable. */
+    private String listFailureMessage(
+            LinkedHashMap<String, String> spec, Path path, boolean useCatalogContextFileIO) {
+        String message =
+                String.format(
+                        "Failed to list files for partition '%s' of format table %s at '%s'.",
+                        PartitionPathUtils.generatePartitionName(spec, false),
+                        table.fullName(),
+                        path);
+        if (!useCatalogContextFileIO) {
+            return message;
+        }
+        return message
+                + " The partition is registered at a custom location outside the table"
+                + " directory, so it is listed with the filesystem credentials of the catalog"
+                + " context (the engine's own configuration, for example fs.oss.* or the Hadoop"
+                + " configuration), not with the table's data token.";
     }
 
     private void warnMissingPartition(LinkedHashMap<String, String> spec, Path path) {
