@@ -25,7 +25,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.schema.GroupType;
-import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.Type;
 
 import javax.annotation.Nullable;
@@ -38,7 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.isCanonicalList;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.resolveElementType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -53,9 +53,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * objectSchemaMap}.
  */
 public class VariantShreddingTypePruner {
-    private static final String LIST_WRAPPER_NAME = "list";
-    private static final String LIST_ELEMENT_NAME = "element";
-
     @Nullable private final PathNode root;
 
     VariantShreddingTypePruner(RowType variantRowType) {
@@ -197,55 +194,13 @@ public class VariantShreddingTypePruner {
             newFields.add(group.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
         }
 
-        Type elementType = parquetListElementType(listGroup);
+        Type elementType = resolveElementType(listGroup);
         Type clippedElement = clipShreddingRow(elementType.asGroupType(), node.arrayElement);
         GroupType repeated = listGroup.getType(0).asGroupType();
         GroupType clippedRepeated =
                 repeated.withNewFields(Collections.singletonList(clippedElement));
         newFields.add(listGroup.withNewFields(Collections.singletonList(clippedRepeated)));
         return group.withNewFields(newFields);
-    }
-
-    /**
-     * Returns true if the given group follows the canonical three-level Parquet list layout.
-     *
-     * <p>The canonical layout is described in the Parquet spec: <a
-     * href="https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#lists">LogicalTypes#Lists</a>
-     */
-    private static boolean isCanonicalList(Type type) {
-        if (type.isPrimitive()) {
-            return false;
-        }
-
-        GroupType listGroup = type.asGroupType();
-        // 1. Must be a LIST logical type.
-        if (!(listGroup.getLogicalTypeAnnotation()
-                instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation)) {
-            return false;
-        }
-
-        // 2. LIST group must have exactly one child named "list".
-        if (listGroup.getFieldCount() != 1) {
-            return false;
-        }
-        Type middle = listGroup.getType(0);
-        if (!LIST_WRAPPER_NAME.equals(middle.getName())) {
-            return false;
-        }
-
-        // 3. The child must be a repeated group.
-        if (middle.isPrimitive() || middle.getRepetition() != Type.Repetition.REPEATED) {
-            return false;
-        }
-        GroupType repeatedWrapper = middle.asGroupType();
-
-        // 4. The repeated wrapper must contain exactly one child named "element".
-        if (repeatedWrapper.getFieldCount() != 1) {
-            return false;
-        }
-
-        Type element = repeatedWrapper.getType(0);
-        return LIST_ELEMENT_NAME.equals(element.getName());
     }
 
     /** Returns true if the given group is a plain struct (not a Parquet list or map). */
