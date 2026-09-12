@@ -574,7 +574,11 @@ public class InferVariantShreddingSchema {
             if (current != null && !(current instanceof VariantType)) {
                 combined = current;
             } else if (previousSelected != null) {
-                combined = previousSelected;
+                // This node has no evidence in the current file. A previously selected schema
+                // is not evidence - its fields carry no counts - so it cannot be run through
+                // admission and retention again; carry it forward as it is, debiting the shared
+                // width budget for what it holds.
+                return retainSelectedSchema(previousSelected, maxFields);
             } else {
                 return DataTypes.VARIANT();
             }
@@ -652,6 +656,49 @@ public class InferVariantShreddingSchema {
 
         maxFields.remaining--;
         return selectScalarType(combined, current, previousSelected);
+    }
+
+    /**
+     * Carries a previously selected schema forward for a node the current file has no evidence for.
+     * The selection is already final, so nothing is re-thresholded, but its nodes still consume the
+     * shared width budget. The entry unit for this node has already been spent by the caller, so
+     * this mirrors what finalizeAdaptiveSchema does from that point on: a child is entered only
+     * while budget remains, entering it spends one unit, and a child that exhausts the budget
+     * becomes VARIANT while its field or array container is still kept.
+     */
+    private DataType retainSelectedSchema(DataType selected, MaxFields maxFields) {
+        if (selected instanceof RowType) {
+            List<DataField> fields = new ArrayList<>();
+            for (DataField field : ((RowType) selected).getFields()) {
+                if (maxFields.remaining <= 0) {
+                    break;
+                }
+                maxFields.remaining--;
+                DataType retained =
+                        maxFields.remaining <= 0
+                                ? DataTypes.VARIANT()
+                                : retainSelectedSchema(field.type(), maxFields);
+                fields.add(new DataField(fields.size(), field.name(), retained));
+            }
+            return fields.isEmpty() ? DataTypes.VARIANT() : new RowType(fields);
+        }
+        if (selected instanceof ArrayType) {
+            maxFields.remaining--;
+            DataType element =
+                    maxFields.remaining <= 0
+                            ? DataTypes.VARIANT()
+                            : retainSelectedSchema(
+                                    ((ArrayType) selected).getElementType(), maxFields);
+            return new ArrayType(element);
+        }
+        if (selected instanceof VariantType) {
+            // The caller has already spent this node's entry unit, and a VARIANT has no typed child
+            // to spend another on - the evidence-driven walk also returns VARIANT after the entry
+            // debit alone.
+            return selected;
+        }
+        maxFields.remaining--;
+        return selected;
     }
 
     private DataType selectScalarType(
