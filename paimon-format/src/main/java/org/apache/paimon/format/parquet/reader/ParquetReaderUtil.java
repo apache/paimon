@@ -43,6 +43,7 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -98,7 +99,11 @@ public class ParquetReaderUtil {
             GroupType parquetGroup = parquetType.asGroupType();
             for (int i = children.size(); i < parquetGroup.getFieldCount(); i++) {
                 Type extraType = parquetGroup.getType(i);
-                DataField extraField = convertToPaimonField(addFallbackFieldIds(extraType));
+                DataField extraField =
+                        convertToPaimonField(
+                                addFallbackFieldIds(extraType),
+                                listLayout,
+                                groupColumnIO.getFieldPath());
                 fieldsBuilder.add(
                         constructField(
                                 extraField,
@@ -177,7 +182,8 @@ public class ParquetReaderUtil {
             GroupType requestedGroup = parquetType.asGroupType();
 
             boolean threeLevel =
-                    listLayout.isThreeLevelList(requestedGroup, groupColumnIO.getFieldPath());
+                    listLayout.isThreeLevelList(
+                            requestedGroup, Arrays.asList(groupColumnIO.getFieldPath()));
             Type requestedElementType =
                     threeLevel
                             ? requestedGroup.getType(0).asGroupType().getType(0)

@@ -23,7 +23,6 @@ import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -175,7 +174,17 @@ public final class ParquetListLayoutResolver {
      * falls back to interpreting the requested node itself.
      */
     public static final class LayoutContext {
+        private static final LayoutContext EMPTY = new LayoutContext();
+
         private final Map<List<String>, Boolean> threeLevelMapping = new HashMap<>();
+
+        /**
+         * Returns a context carrying no file layout information. Lookups always fall back to
+         * interpreting the requested node itself, which is the shape-based behavior.
+         */
+        public static LayoutContext empty() {
+            return EMPTY;
+        }
 
         /** Builds the manifest by resolving every LIST-annotated node of the file schema. */
         public static LayoutContext fromFileSchema(GroupType fileSchema) {
@@ -207,8 +216,8 @@ public final class ParquetListLayoutResolver {
          * file schema; falls back to interpreting {@code requestedGroup} itself when the path is
          * not an annotated list in the file schema.
          */
-        public boolean isThreeLevelList(GroupType requestedGroup, String[] path) {
-            Boolean threeLevel = threeLevelMapping.get(Arrays.asList(path));
+        public boolean isThreeLevelList(GroupType requestedGroup, List<String> path) {
+            Boolean threeLevel = threeLevelMapping.get(path);
             return threeLevel != null
                     ? threeLevel
                     : ParquetListLayoutResolver.isThreeLevelList(requestedGroup);
