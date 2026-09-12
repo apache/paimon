@@ -24,6 +24,7 @@ import math
 import operator
 import os
 import sys
+from collections import OrderedDict
 from functools import partial
 
 import pyarrow as pa
@@ -1274,6 +1275,9 @@ def _open_torchcodec_decoder(stream):
 
 class _PyAVVideoDecoder:
 
+    # Reuse common overlapping delta windows without retaining a whole video.
+    _FRAME_CACHE_SIZE = 8
+
     def __init__(self, stream):
         try:
             import av
@@ -1283,23 +1287,75 @@ class _PyAVVideoDecoder:
                 "'pypaimon[lerobot]'."
             ) from error
         self._container = av.open(stream)
+        self._stream = self._container.streams.video[0]
         self._next_index = 0
-        self._frames = iter(self._container.decode(video=0))
+        self._timestamps = []
+        self._cache = OrderedDict()
+        self._frames = iter(self._container.decode(self._stream))
 
     def __getitem__(self, index):
-        if index < self._next_index:
-            self._container.seek(0)
-            self._next_index = 0
-            self._frames = iter(self._container.decode(video=0))
+        index = operator.index(index)
+        if index < 0:
+            raise IndexError("Video frame index %d is out of range." % index)
+        frame = self._cache.pop(index, None)
+        if frame is not None:
+            self._cache[index] = frame
+            return self._tensor(frame)
+
+        at_frontier = self._next_index == len(self._timestamps)
+        if index != self._next_index and not (
+                at_frontier and index >= self._next_index):
+            self._seek(index)
         try:
-            while self._next_index <= index:
+            while True:
                 frame = next(self._frames)
-                self._next_index += 1
+                if frame.pts is None:
+                    continue
+                timestamp = frame.pts * (
+                    frame.time_base or self._stream.time_base)
+                position = bisect.bisect_left(self._timestamps, timestamp)
+                if (
+                    position < len(self._timestamps)
+                    and self._timestamps[position] == timestamp
+                ):
+                    frame_index = position
+                elif self._next_index == len(self._timestamps):
+                    frame_index = self._next_index
+                    self._timestamps.append(timestamp)
+                else:
+                    continue
+                self._next_index = frame_index + 1
+                self._remember(frame_index, frame)
+                if frame_index == index:
+                    return self._tensor(frame)
+                if frame_index > index:
+                    break
         except StopIteration as error:
             raise IndexError(
                 "Video frame index %d is out of range." % index
             ) from error
+        raise IndexError("Video frame index %d is out of range." % index)
 
+    def _seek(self, index):
+        anchor = min(index, len(self._timestamps) - 1)
+        timestamp = self._timestamps[anchor]
+        self._container.seek(
+            round(timestamp / self._stream.time_base),
+            backward=True,
+            any_frame=False,
+            stream=self._stream,
+        )
+        self._next_index = None
+        self._frames = iter(self._container.decode(self._stream))
+
+    def _remember(self, index, frame):
+        self._cache.pop(index, None)
+        self._cache[index] = frame
+        if len(self._cache) > self._FRAME_CACHE_SIZE:
+            self._cache.popitem(last=False)
+
+    @staticmethod
+    def _tensor(frame):
         import numpy as np
         import torch
         array = np.array(frame.to_ndarray(format="rgb24"), copy=True)
@@ -1320,7 +1376,10 @@ def _identity(values):
 def _decode_video_rows(row_groups, collators):
     for collator in collators:
         for rows in row_groups:
-            indices = list(rows)
+            indices = [
+                index for index, row in rows.items()
+                if collator.video_column in row
+            ]
             if not indices:
                 continue
             decoded = collator([rows[index] for index in indices])

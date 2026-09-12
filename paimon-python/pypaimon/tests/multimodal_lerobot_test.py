@@ -44,6 +44,7 @@ from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
+    _PyAVVideoDecoder,
     _arrow_rows,
     _image_tensor,
     _index_names,
@@ -126,6 +127,63 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    @unittest.skipIf(av is None, "PyAV is not installed")
+    def test_pyav_decoder_reuses_windows_and_seeks_known_frames(self):
+        class Frame:
+
+            time_base = Fraction(1, 10)
+
+            def __init__(self, pts):
+                self.pts = pts
+
+            def to_ndarray(self, format):
+                assert format == "rgb24"
+                return np.full((2, 2, 3), self.pts, dtype=np.uint8)
+
+        class Container:
+
+            def __init__(self):
+                self.stream = SimpleNamespace(time_base=Fraction(1, 10))
+                self.streams = SimpleNamespace(video=[self.stream])
+                self.position = 0
+                self.decoded = 0
+                self.seeks = []
+
+            def decode(self, stream):
+                assert stream is self.stream
+                while self.position < 120:
+                    index = self.position
+                    self.position += 1
+                    self.decoded += 1
+                    yield Frame(index)
+
+            def seek(self, offset, *, backward, any_frame, stream):
+                assert backward
+                assert not any_frame
+                assert stream is self.stream
+                self.seeks.append(offset)
+                self.position = offset // 10 * 10
+
+            def close(self):
+                pass
+
+        container = Container()
+        with patch("av.open", return_value=container):
+            decoder = _PyAVVideoDecoder(io.BytesIO())
+        try:
+            for index in range(119):
+                decoder[index]
+                decoder[index + 1]
+            self.assertEqual(120, container.decoded)
+            self.assertEqual([], container.seeks)
+
+            decoder[5]
+            decoder[90]
+            self.assertEqual(127, container.decoded)
+            self.assertEqual([5, 90], container.seeks)
+        finally:
+            decoder.close()
 
     def test_default_video_backend_falls_back_on_os_error(self):
         stream = Mock()
@@ -1776,7 +1834,13 @@ class LeRobotValidationTest(unittest.TestCase):
                         "fps": 10.0,
                     },
                     "task_index": {"dtype": "int64", "shape": [1]},
+                    "action": {"dtype": "float32", "shape": [1]},
                     "camera": {
+                        "dtype": "video",
+                        "shape": [16, 16, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
+                    "camera_b": {
                         "dtype": "video",
                         "shape": [16, 16, 3],
                         "video_info": {"video.fps": 10.0},
@@ -1796,6 +1860,10 @@ class LeRobotValidationTest(unittest.TestCase):
                     "videos/camera/file_index": 0,
                     "videos/camera/from_timestamp": 0.5,
                     "videos/camera/to_timestamp": 0.7,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.5,
+                    "videos/camera_b/to_timestamp": 0.7,
                 },
                 {
                     "episode_index": 1,
@@ -1809,6 +1877,10 @@ class LeRobotValidationTest(unittest.TestCase):
                     "videos/camera/file_index": 0,
                     "videos/camera/from_timestamp": 0.1,
                     "videos/camera/to_timestamp": 0.4,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.1,
+                    "videos/camera_b/to_timestamp": 0.4,
                 },
             ]
             physical_frame_values = [24, 56, 88, 120, 168, 216]
@@ -1845,6 +1917,10 @@ class LeRobotValidationTest(unittest.TestCase):
                         container.mux(packet)
                 for packet in stream.encode():
                     container.mux(packet)
+            camera_b_path = (
+                temp_dir / "videos/camera_b/chunk-000/file-000.mp4")
+            camera_b_path.parent.mkdir(parents=True)
+            shutil.copy2(video_path, camera_b_path)
 
             class Dataset:
 
@@ -1862,6 +1938,8 @@ class LeRobotValidationTest(unittest.TestCase):
                         type=pa.float32(),
                     ),
                     "task_index": pa.array([0] * 5, type=pa.int64()),
+                    "action": pa.array(
+                        [0.0, 1.0, 2.0, 3.0, 4.0], type=pa.float32()),
                 })
 
                 def __len__(self):
@@ -1947,6 +2025,8 @@ class LeRobotValidationTest(unittest.TestCase):
                     [2, 3, 16, 16], list(last["camera"].shape))
                 self.assertEqual(
                     [2, 3, 16, 16], list(first["camera"].shape))
+                self.assertEqual(
+                    [3, 16, 16], list(first["camera_b"].shape))
                 self.assertEqual("torch.float32", str(last["camera"].dtype))
                 np.testing.assert_allclose(
                     [
@@ -1974,6 +2054,22 @@ class LeRobotValidationTest(unittest.TestCase):
                 self.assertEqual(list(range(5)), worker_indices)
             finally:
                 dataset.close()
+
+            action_dataset = pmm.PaimonLeRobotDataset(
+                table,
+                delta_timestamps={"action": [0.0, 0.1]},
+            )
+            try:
+                item = action_dataset[0]
+                self.assertEqual([2], list(item["action"].shape))
+                np.testing.assert_allclose(
+                    [0.0, 1.0], item["action"].tolist())
+                self.assertEqual(
+                    [3, 16, 16], list(item["camera"].shape))
+                self.assertEqual(
+                    [3, 16, 16], list(item["camera_b"].shape))
+            finally:
+                action_dataset.close()
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
