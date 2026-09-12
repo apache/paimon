@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
@@ -668,7 +669,9 @@ public class StringUtils {
     }
 
     public static String toLowerCaseIfNeed(String str, boolean caseSensitive) {
-        return caseSensitive ? str : str.toLowerCase();
+        // Locale.ROOT: identifier matching must not depend on the JVM default locale
+        // (e.g. Turkish lowercases 'I' to a dotless glyph and breaks column mapping)
+        return caseSensitive ? str : str.toLowerCase(Locale.ROOT);
     }
 
     public static boolean isNumeric(final CharSequence cs) {
@@ -733,14 +736,14 @@ public class StringUtils {
         if (value == null) {
             return null;
         }
-        return value.toUpperCase();
+        return value.toUpperCase(Locale.ROOT);
     }
 
     public static String toLowerCase(String value) {
         if (value == null) {
             return null;
         }
-        return value.toLowerCase();
+        return value.toLowerCase(Locale.ROOT);
     }
 
     public static boolean isOpenBracket(char c) {
