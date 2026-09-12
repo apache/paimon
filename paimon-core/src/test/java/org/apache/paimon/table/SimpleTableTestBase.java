@@ -50,6 +50,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -1592,6 +1593,56 @@ public abstract class SimpleTableTestBase {
             }
             lastId.set(latest);
         }
+    }
+
+    @Test
+    public void testFilterAndCommitWithInlineMaintenance() throws Exception {
+        // async expire but retain only the last snapshot, like
+        // testBatchWriteAsyncExpireFallbackToSync
+        Map<String, String> opts = new HashMap<>();
+        opts.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        opts.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        opts.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        opts.put(SNAPSHOT_EXPIRE_LIMIT.key(), "100");
+
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        table = table.copy(opts);
+        SnapshotManager sm = table.snapshotManager();
+
+        // A committer that commits once through filterAndCommit and is then closed, the way an
+        // engine which replays a batch with a stable identifier does. Without inline maintenance
+        // the expiration dispatched to the executor is cut short by the close.
+        BatchWriteBuilderImpl builder =
+                ((BatchWriteBuilderImpl) table.newBatchWriteBuilder()).withCommitUser("user");
+        long previous = 0;
+        for (long identifier = 0; identifier < 3; identifier++) {
+            try (BatchTableWrite write = builder.newWrite();
+                    InnerTableCommit commit = builder.newCommit()) {
+                write.write(rowData((int) identifier, (int) identifier * 10, identifier * 100L));
+                commit.inlineMaintenance(true)
+                        .filterAndCommit(
+                                Collections.singletonMap(identifier, write.prepareCommit()));
+            }
+
+            long latest = sm.latestSnapshotId();
+            assertThat(latest).isGreaterThan(previous);
+            if (previous > 0) {
+                assertThat(sm.snapshotExists(previous))
+                        .as("the previous snapshot should be expired before the committer closes")
+                        .isFalse();
+                assertThat(sm.earliestSnapshotId()).isEqualTo(latest);
+            }
+            previous = latest;
+        }
+
+        // A replayed identifier is recognised and does not create a snapshot.
+        try (BatchTableWrite write = builder.newWrite();
+                InnerTableCommit commit = builder.newCommit()) {
+            write.write(rowData(2, 20, 200L));
+            commit.inlineMaintenance(true)
+                    .filterAndCommit(Collections.singletonMap(2L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(previous);
     }
 
     @Test

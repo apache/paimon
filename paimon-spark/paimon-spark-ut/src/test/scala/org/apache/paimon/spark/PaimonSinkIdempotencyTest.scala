@@ -250,6 +250,72 @@ class PaimonSinkIdempotencyTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("Paimon Sink: complete mode replay on a postpone bucket table is not committed twice") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // A postpone bucket table with a default bucket number takes the direct fixed-bucket
+          // write path for an overwrite, which has its own committer.
+          spark.sql(
+            "CREATE TABLE T (city STRING, population LONG) TBLPROPERTIES (" +
+              "'primary-key' = 'city', 'bucket' = '-2', 'postpone.default-bucket-num' = '1')")
+          val location = loadTable("T").location().toString
+          val checkpointPath = checkpointDir.getCanonicalPath
+
+          val inputData = MemoryStream[(Int, String)]
+          val df = inputData
+            .toDS()
+            .toDF("uid", "city")
+            .groupBy("city")
+            .count()
+            .toDF("city", "population")
+          inputData.addData((1, "HZ"), (2, "BJ"), (3, "BJ"))
+
+          def start(): StreamingQuery =
+            df.writeStream
+              .outputMode("complete")
+              .option("checkpointLocation", checkpointPath)
+              .format("paimon")
+              .start(location)
+
+          runToCompletion(start())
+
+          val expected = Row("BJ", 2L) :: Row("HZ", 1L) :: Nil
+          checkAnswer(spark.sql("SELECT * FROM T ORDER BY city"), expected)
+          val snapshotsAfterFirstBatch = snapshotCount("T")
+          // The direct committer has to commit under the stable identity, or the replay below
+          // could not be recognised.
+          assert(
+            latestCommitUser("T").startsWith("spark-query-"),
+            s"expected the direct postpone committer to use the commit user derived from the " +
+              s"query id, but got '${latestCommitUser("T")}'"
+          )
+
+          dropCommitLogEntry(checkpointPath, 0)
+          runToCompletion(start())
+
+          checkAnswer(spark.sql("SELECT * FROM T ORDER BY city"), expected)
+          assert(
+            snapshotCount("T") == snapshotsAfterFirstBatch,
+            s"replaying batch 0 created another snapshot (${snapshotCount("T")} in total, " +
+              s"$snapshotsAfterFirstBatch before the replay)"
+          )
+
+          // A later batch is not a replay and has to be committed: the replay lookup must not
+          // mistake a higher batch id for one that was already committed.
+          inputData.addData((4, "SH"))
+          runToCompletion(start())
+
+          checkAnswer(
+            spark.sql("SELECT * FROM T ORDER BY city"),
+            Row("BJ", 2L) :: Row("HZ", 1L) :: Row("SH", 1L) :: Nil)
+          assert(
+            snapshotCount("T") == snapshotsAfterFirstBatch + 1,
+            s"the batch after the replay was not committed (${snapshotCount("T")} snapshots)")
+      }
+    }
+  }
+
   test("Paimon Sink: write.stream.commit-user overrides the derived commit user") {
     failAfter(streamingTimeout) {
       withTempDir {
