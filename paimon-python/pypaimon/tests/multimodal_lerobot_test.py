@@ -1915,6 +1915,45 @@ class LeRobotValidationTest(unittest.TestCase):
                 [0.5, 0.6, 0.1, 0.2, 0.3],
                 atol=1e-6,
             )
+
+            dataset = pmm.PaimonLeRobotDataset(
+                table,
+                delta_timestamps={"camera": [0.0, 0.1]},
+                max_open_videos=1,
+            )
+            try:
+                last, first = dataset.__getitems__([4, 0])
+                self.assertEqual(
+                    [2, 3, 16, 16], list(last["camera"].shape))
+                self.assertEqual(
+                    [2, 3, 16, 16], list(first["camera"].shape))
+                self.assertEqual("torch.float32", str(last["camera"].dtype))
+                np.testing.assert_allclose(
+                    [
+                        float(last["camera"][0].mean()) * 255,
+                        float(first["camera"][0].mean()) * 255,
+                        float(first["camera"][1].mean()) * 255,
+                    ],
+                    [120, 168, 216],
+                    atol=5,
+                )
+                self.assertEqual(
+                    [False, True], last["camera_is_pad"].tolist())
+                self.assertEqual(
+                    1, len(dataset._video_collators[0]._decoders))
+
+                from torch.utils.data import DataLoader
+                worker_indices = []
+                for batch in DataLoader(
+                        dataset,
+                        batch_size=2,
+                        shuffle=False,
+                        num_workers=2,
+                        multiprocessing_context="spawn"):
+                    worker_indices.extend(batch["index"].tolist())
+                self.assertEqual(list(range(5)), worker_indices)
+            finally:
+                dataset.close()
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
