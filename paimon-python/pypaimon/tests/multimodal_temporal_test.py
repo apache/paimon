@@ -499,6 +499,48 @@ class MultimodalTemporalTest(unittest.TestCase):
                             aggregations={"value": (source, operation)},
                         ).to_arrow()
 
+    def test_window_mean_uses_masked_numeric_alias_type_when_pruned(self):
+        anchors = self._table("window_numeric_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_numeric_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.string(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [10, 20],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [9, 11],
+            "a_b": ["6", "10"],
+            "a": pa.array([{"b": 1}, {"b": 2}],
+                          type=pa.struct([pa.field("b", pa.int32())])),
+        }))
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({
+                "name": "CAST",
+                "fieldRef": {"index": 2, "name": "a_b", "type": "STRING"},
+                "type": "DOUBLE",
+            })},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        for projection, source in (
+                (["a_b"], "a_b"), (["a.b", "a_b"], "a_b__0")):
+            with self.subTest(projection=projection):
+                result = pmm.join_window(
+                    anchors.scan(), samples.scan().select(projection),
+                    on="event_time", by="episode_id", preceding=1, following=1,
+                    aggregations={"value": (source, "mean")},
+                ).to_arrow()
+                self.assertEqual(pa.float64(), result["value"].type)
+                self.assertEqual([8.0, None], result["value"].to_pylist())
+
     def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
         anchors = self._table("window_numeric_anchors", {
             "episode_id": pa.int32(),
