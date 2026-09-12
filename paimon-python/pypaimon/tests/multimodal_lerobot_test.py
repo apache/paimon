@@ -129,7 +129,10 @@ def _catalog_metadata(connection, name):
 
 class LeRobotValidationTest(unittest.TestCase):
 
-    @unittest.skipIf(av is None, "PyAV is not installed")
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
     def test_pyav_decoder_reuses_windows_and_seeks_known_frames(self):
         class Frame:
 
@@ -188,7 +191,10 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             decoder.close()
 
-    @unittest.skipIf(av is None, "PyAV is not installed")
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
     def test_pyav_decoder_seeks_before_b_frames(self):
         output = io.BytesIO()
         with av.open(output, mode="w", format="mp4") as container:
