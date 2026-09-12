@@ -47,6 +47,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _arrow_rows,
     _image_tensor,
     _index_names,
+    _open_video_decoder,
     _selected_episodes,
     _torch_row,
 )
@@ -125,6 +126,26 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_default_video_backend_falls_back_on_os_error(self):
+        stream = Mock()
+        decoder = object()
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset."
+                "_open_torchcodec_decoder",
+                side_effect=OSError("unavailable")), patch(
+                "pypaimon.multimodal.lerobot.dataset._PyAVVideoDecoder",
+                return_value=decoder) as pyav:
+            self.assertIs(decoder, _open_video_decoder(stream))
+            stream.seek.assert_called_once_with(0)
+            pyav.assert_called_once_with(stream)
+
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset."
+                "_open_torchcodec_decoder",
+                side_effect=OSError("unavailable")):
+            with self.assertRaises(OSError):
+                _open_video_decoder(stream, backend="torchcodec")
 
     def test_dataset_requires_supported_python(self):
         with patch(

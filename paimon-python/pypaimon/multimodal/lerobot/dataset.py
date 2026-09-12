@@ -1249,7 +1249,7 @@ def _open_video_decoder(stream, backend=None):
     if backend in (None, "torchcodec"):
         try:
             return _open_torchcodec_decoder(stream)
-        except (ImportError, RuntimeError):
+        except (ImportError, OSError, RuntimeError):
             if backend == "torchcodec":
                 raise
             stream.seek(0)
