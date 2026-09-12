@@ -92,6 +92,25 @@ def test_java_primary_key_vector_index(catalog):
     assert filtered_rows.column("id").to_pylist() == [3]
 
 
+def test_java_primary_key_vector_refinement_uses_persisted_metric(catalog):
+    _require_native("paimon_vindex")
+    table = catalog.get_table("default.test_pk_vector_golden")
+
+    def search(read_table):
+        return (read_table.new_vector_search_builder()
+                .with_vector_column("embedding")
+                .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                .with_limit(3)
+                .with_option("ivf.refine_factor", "2")
+                .execute_local())
+
+    expected = search(table).positions
+    assert expected
+    for metric in ("l2", "inner_product", "cosine"):
+        changed = table.copy({"fields.embedding.distance.metric": metric})
+        assert search(changed).positions == expected
+
+
 def test_java_primary_key_full_text_index(catalog):
     _require_native("paimon_ftindex")
     table = catalog.get_table("default.test_pk_full_text_golden")
