@@ -284,11 +284,9 @@ class TemporalAlignment:
                 source.payload_schema if source_fetchers is None
                 else source_fetchers[position].schema
             )
-            for name in source.payload_schema.names:
-                field = source.output_field(
-                    payload_schema.field(name),
-                    effective=source_fetchers is not None,
-                )
+            for field in source.output_fields(
+                    payload_schema,
+                    effective=source_fetchers is not None):
                 output_name = field.name
                 if output_name in names:
                     output_name += source.suffix
@@ -406,6 +404,12 @@ class _AsOfJoinRight:
     @staticmethod
     def output_field(field, effective=True):
         return field
+
+    def output_fields(self, payload_schema, effective=True):
+        return [
+            self.output_field(payload_schema.field(name), effective)
+            for name in self.payload_schema.names
+        ]
 
     def build_arrays(self, anchor_rows, fetcher):
         matches = [self.match(row) for row in anchor_rows]
@@ -543,28 +547,35 @@ class _WindowJoinRight(_AsOfJoinRight):
         self.aggregations = _normalize_aggregations(
             aggregations, self.payload_schema, self.label,
             self._SUPPORTED_AGGREGATIONS)
+        source_names = {
+            specification[1] for specification in self.aggregations
+        }
         query_schema, paths = _query_schema_and_paths(self.query)
         self.query.select([
             ".".join(path)
             for field, path in zip(query_schema, paths)
-            if field.name in self.aggregations
+            if field.name in source_names
         ])
         self.payload_schema = pa.schema([
             field for field in self.payload_schema
-            if field.name in self.aggregations
+            if field.name in source_names
         ], metadata=self.payload_schema.metadata)
 
-    def output_field(self, field, effective=True):
-        try:
-            output_type = _aggregate_output_type(
-                field.type, self.aggregations[field.name])
-        except TypeError:
-            if effective:
-                raise
-            output_type = field.type
-        return pa.field(
-            field.name, output_type, nullable=True,
-            metadata=field.metadata)
+    def output_fields(self, payload_schema, effective=True):
+        fields = []
+        for output_name, source_name, aggregation in self.aggregations:
+            source = payload_schema.field(source_name)
+            try:
+                output_type = _aggregate_output_type(
+                    source.type, aggregation)
+            except TypeError:
+                if effective:
+                    raise
+                output_type = source.type
+            fields.append(pa.field(
+                output_name, output_type, nullable=True,
+                metadata=source.metadata))
+        return fields
 
     def match(self, anchor_row):
         key = tuple(anchor_row[name] for name in self.by)
@@ -601,14 +612,13 @@ class _WindowJoinRight(_AsOfJoinRight):
             for match in matches
         ]
         arrays = []
-        for field in self.payload_schema:
-            effective = fetcher.schema.field(field.name)
-            aggregation = self.aggregations[field.name]
+        for _, source_name, aggregation in self.aggregations:
+            effective = fetcher.schema.field(source_name)
             output_type = _aggregate_output_type(
                 effective.type, aggregation)
             arrays.append(pa.array([
                 _aggregate_values(
-                    values[field.name], row_indices, aggregation)
+                    values[source_name], row_indices, aggregation)
                 for row_indices in indices
             ], type=output_type))
         return arrays
@@ -617,28 +627,49 @@ class _WindowJoinRight(_AsOfJoinRight):
 def _normalize_aggregations(aggregations, schema, label, supported):
     if not isinstance(aggregations, dict) or not aggregations:
         raise ValueError("aggregations must be a non-empty dict.")
-    unknown = [name for name in aggregations if name not in schema.names]
-    if unknown:
-        raise ValueError(
-            "%s is missing aggregation columns %r." % (label, unknown))
-    for name, aggregation in aggregations.items():
+    normalized = []
+    missing = []
+    for output_name, specification in aggregations.items():
+        if not isinstance(output_name, str) or not output_name:
+            raise ValueError(
+                "Aggregation output names must be non-empty strings.")
+        if isinstance(specification, str):
+            source_name = output_name
+            aggregation = specification
+        elif isinstance(specification, tuple) and len(specification) == 2:
+            source_name, aggregation = specification
+        else:
+            raise ValueError(
+                "Aggregation %r must be an operation or a "
+                "(source column, operation) pair." % output_name)
+        if not isinstance(source_name, str) or not source_name:
+            raise ValueError(
+                "Aggregation source columns must be non-empty strings.")
+        if source_name not in schema.names:
+            missing.append(source_name)
         if not isinstance(aggregation, str) or aggregation not in supported:
             raise ValueError(
-                "Unsupported aggregation %r for column %r; expected one of "
-                "%r." % (aggregation, name, sorted(supported)))
-    return dict(aggregations)
+                "Unsupported aggregation %r for output %r; expected one of "
+                "%r." % (aggregation, output_name, sorted(supported)))
+        normalized.append((output_name, source_name, aggregation))
+    if missing:
+        raise ValueError(
+            "%s is missing aggregation columns %r." % (label, missing))
+    return tuple(normalized)
 
 
 def _aggregate_output_type(data_type, aggregation):
+    if aggregation == "count":
+        return pa.int64()
+    if aggregation in ("first", "last"):
+        return data_type
     if not (pa.types.is_integer(data_type)
             or pa.types.is_floating(data_type)):
         raise TypeError(
-            "Window aggregation requires integer or floating-point scalar "
-            "columns; got %s." % data_type)
+            "Window %s aggregation requires an integer or floating-point "
+            "scalar column; got %s." % (aggregation, data_type))
     if aggregation == "mean":
         return pa.float64()
-    if aggregation == "count":
-        return pa.int64()
     return data_type
 
 

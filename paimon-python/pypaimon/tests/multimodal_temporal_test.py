@@ -196,12 +196,8 @@ class MultimodalTemporalTest(unittest.TestCase):
         samples = self._table("window_samples", {
             "episode_id": pa.int32(),
             "event_time": pa.int64(),
-            "average": pa.int32(),
-            "minimum": pa.int32(),
-            "maximum": pa.int32(),
-            "first_value": pa.int32(),
-            "last_value": pa.int32(),
-            "valid_count": pa.int32(),
+            "value": pa.int32(),
+            "label": pa.string(),
         })
         anchors.add([
             {"episode_id": 1, "event_time": 10},
@@ -209,47 +205,43 @@ class MultimodalTemporalTest(unittest.TestCase):
             {"episode_id": 3, "event_time": 10},
         ])
         samples.add([
-            dict({"episode_id": 1, "event_time": time}, **{
-                name: value for name in (
-                    "average", "minimum", "maximum", "first_value",
-                    "last_value", "valid_count")
-            })
-            for time, value in ((5, 1), (10, None), (15, 5))
-        ] + [dict({"episode_id": 2, "event_time": 10}, **{
-            name: 100 for name in (
-                "average", "minimum", "maximum", "first_value",
-                "last_value", "valid_count")
-        })])
+            {"episode_id": 1, "event_time": 5,
+             "value": 1, "label": "a"},
+            {"episode_id": 1, "event_time": 10,
+             "value": None, "label": None},
+            {"episode_id": 1, "event_time": 15,
+             "value": 5, "label": "c"},
+            {"episode_id": 2, "event_time": 10,
+             "value": 100, "label": "z"},
+        ])
 
         result = pmm.join_window(
             anchors.scan(),
-            samples.scan().select([
-                "average", "minimum", "maximum", "first_value",
-                "last_value", "valid_count",
-            ]),
+            samples.scan().select(["value", "label"]),
             on="event_time",
             by="episode_id",
             preceding=5,
             following=5,
             aggregations={
-                "average": "mean",
-                "minimum": "min",
-                "maximum": "max",
-                "first_value": "first",
-                "last_value": "last",
-                "valid_count": "count",
+                "average": ("value", "mean"),
+                "minimum": ("value", "min"),
+                "maximum": ("value", "max"),
+                "first_label": ("label", "first"),
+                "last_label": ("label", "last"),
+                "valid_count": ("label", "count"),
             },
         )
         rows = sorted(result.to_list(), key=lambda row: row["episode_id"])
 
         self.assertIsInstance(result, pmm.TemporalAlignment)
         self.assertEqual(pa.float64(), result.schema.field("average").type)
+        self.assertEqual(pa.string(), result.schema.field("first_label").type)
         self.assertEqual(pa.int64(), result.schema.field("valid_count").type)
         self.assertEqual(
-            (3.0, 1, 5, 1, 5, 2),
+            (3.0, 1, 5, "a", "c", 2),
             tuple(rows[0][name] for name in (
-                "average", "minimum", "maximum", "first_value",
-                "last_value", "valid_count")),
+                "average", "minimum", "maximum", "first_label",
+                "last_label", "valid_count")),
         )
         self.assertEqual(100.0, rows[1]["average"])
         self.assertIsNone(rows[2]["average"])
@@ -436,11 +428,12 @@ class MultimodalTemporalTest(unittest.TestCase):
             pmm.join_window(
                 scan(), scan(), on="event_time", by="episode_id",
                 preceding=1, aggregations={"missing": "mean"})
-        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+        with self.assertRaisesRegex(
+                TypeError, "requires an integer or floating"):
             pmm.join_window(
                 scan(), table.scan().select("text"),
                 on="event_time", by="episode_id", preceding=1,
-                aggregations={"text": "first"}).to_arrow()
+                aggregations={"text": "mean"}).to_arrow()
 
     def test_linear_interpolation_preserves_an_exact_infinite_float(self):
         anchors = self._table("linear_exact_anchors", {
