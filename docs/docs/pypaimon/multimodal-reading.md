@@ -102,6 +102,30 @@ states_at_steps = aligned.interpolate(
 )
 ```
 
+Use `aggregate_window` to reduce higher-frequency numeric scalar samples
+around each left timestamp. Bounds are inclusive by default; `following`
+defaults to zero.
+Supported aggregations are `mean`, `min`, `max`, `first`, `last`, and `count`;
+nulls are skipped. Set `closed` to `left`, `right`, or `neither` to exclude
+endpoints. Empty windows return null, except `count` returns zero.
+
+```python
+from pypaimon.multimodal import aggregate_window
+
+steps_with_imu = aggregate_window(
+    steps.scan(),
+    imu.scan().select(["acceleration", "angular_velocity"]),
+    on="event_time",
+    by="episode_id",
+    preceding=timedelta(milliseconds=50),
+    following=timedelta(milliseconds=50),
+    aggregations={
+        "acceleration": "mean",
+        "angular_velocity": "mean",
+    },
+)
+```
+
 ### Reading BLOB columns
 
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
