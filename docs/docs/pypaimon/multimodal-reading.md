@@ -102,27 +102,19 @@ states_at_steps = aligned.interpolate(
 )
 ```
 
-Use `aggregate_window` to reduce higher-frequency numeric scalar samples
-around each left timestamp. Bounds are inclusive by default; `following`
-defaults to zero.
-Supported aggregations are `mean`, `min`, `max`, `first`, `last`, and `count`;
-nulls are skipped. Set `closed` to `left`, `right`, or `neither` to exclude
-endpoints. Empty windows return null, except `count` returns zero.
+Use `aggregate_window(left, right, ...)` directly or chain
+`aligned.aggregate_window(...)`. It reduces numeric right rows in each `by`
+group and `[left - preceding, left + following]` window. `following` defaults
+to zero; `closed` controls endpoints. Supported aggregations are `mean`, `min`,
+`max`, `first`, `last`, and `count`. Nulls are skipped; empty windows return
+null, except `count` returns zero.
 
 ```python
-from pypaimon.multimodal import aggregate_window
-
-steps_with_imu = aggregate_window(
-    steps.scan(),
-    imu.scan().select(["acceleration", "angular_velocity"]),
-    on="event_time",
-    by="episode_id",
+steps_with_imu = aligned.aggregate_window(
+    imu.scan().select("acceleration"),
     preceding=timedelta(milliseconds=50),
     following=timedelta(milliseconds=50),
-    aggregations={
-        "acceleration": "mean",
-        "angular_velocity": "mean",
-    },
+    aggregations={"acceleration": "mean"},
 )
 ```
 
