@@ -24,16 +24,21 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** Block-level in-memory cache with LRU eviction. Thread-safe. */
 public class LocalMemoryCacheManager implements LocalCacheManager {
+
+    /**
+     * File-size memos are tiny but per-path; bound them so reading millions of distinct files
+     * cannot grow the heap without limit. A dropped memo only costs one extra getFileStatus.
+     */
+    private static final int MAX_FILE_SIZE_ENTRIES = 65536;
 
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
     private final LinkedHashMap<BlockKey, byte[]> cache;
-    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final LinkedHashMap<String, Long> fileSizeCache = new LinkedHashMap<>(64, 0.75f, true);
 
     private long currentSize;
 
@@ -80,13 +85,22 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
 
     @Override
     public long getFileSize(String filePath) {
-        Long size = fileSizeCache.get(filePath);
-        return size != null ? size : -1;
+        synchronized (lock) {
+            Long size = fileSizeCache.get(filePath);
+            return size != null ? size : -1;
+        }
     }
 
     @Override
     public void putFileSize(String filePath, long size) {
-        fileSizeCache.put(filePath, size);
+        synchronized (lock) {
+            fileSizeCache.put(filePath, size);
+            while (fileSizeCache.size() > MAX_FILE_SIZE_ENTRIES) {
+                Iterator<String> it = fileSizeCache.keySet().iterator();
+                it.next();
+                it.remove();
+            }
+        }
     }
 
     @Override
@@ -100,8 +114,8 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
                     iterator.remove();
                 }
             }
+            fileSizeCache.keySet().removeIf(filePath -> filePath.startsWith(filePathPrefix));
         }
-        fileSizeCache.keySet().removeIf(filePath -> filePath.startsWith(filePathPrefix));
     }
 
     private static class BlockKey {

@@ -213,6 +213,24 @@ class CachingFileIOTest {
     }
 
     @Test
+    void fileSizeMemoIsBounded() {
+        LocalMemoryCacheManager cache = new LocalMemoryCacheManager(Long.MAX_VALUE, 64);
+        long entries = 70000;
+
+        cache.putFileSize("file-0", 100L);
+        for (long i = 1; i <= entries; i++) {
+            cache.putFileSize("file-" + i, i);
+        }
+
+        // the oldest memos are evicted; a lost memo only costs one re-stat
+        assertThat(cache.getFileSize("file-0")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("file-" + entries)).isEqualTo(entries);
+        // invalidation by prefix still works on the bounded map
+        cache.invalidate("file-" + entries);
+        assertThat(cache.getFileSize("file-" + entries)).isEqualTo(-1L);
+    }
+
+    @Test
     void testMetaFileIsCached() throws IOException {
         byte[] data = "snapshot data".getBytes();
         MockFileIO delegate = new MockFileIO();
