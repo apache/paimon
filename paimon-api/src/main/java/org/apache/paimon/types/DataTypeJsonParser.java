@@ -39,7 +39,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public final class DataTypeJsonParser {
 
     public static DataField parseDataField(JsonNode json) {
-        return parseDataField(json, null);
+        // auto-assign the id when the json carries none, mirroring the public
+        // parseDataType entry; a null counter would NPE on such input
+        return parseDataField(json, new AtomicInteger(-1));
     }
 
     private static DataField parseDataField(JsonNode json, AtomicInteger fieldId) {
