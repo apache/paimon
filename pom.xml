@@ -113,6 +113,9 @@ under the License.
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
+        <fluss.version>1.0-SNAPSHOT</fluss.version>
+        <fluss.scala.binary.version>2.12</fluss.scala.binary.version>
+        <fluss.curator.version>5.4.0</fluss.curator.version>
         <parquet.version>1.16.0</parquet.version>
         <orc.version>1.9.8</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
