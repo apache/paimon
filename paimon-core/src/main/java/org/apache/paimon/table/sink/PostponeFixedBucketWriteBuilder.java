@@ -38,7 +38,9 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable table;
-    private final String commitUser;
+
+    private String commitUser;
+    private boolean commitUserProvided = false;
 
     @Nullable private Map<String, String> staticPartition;
 
@@ -48,6 +50,16 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
                 "Postpone fixed-bucket write requires a postpone-bucket table.");
         this.table = table;
         this.commitUser = createCommitUser(new Options(table.options()));
+    }
+
+    /**
+     * Use a caller-provided commit user instead of the random one, for the same reason as {@link
+     * BatchWriteBuilderImpl#withCommitUser}.
+     */
+    public PostponeFixedBucketWriteBuilder withCommitUser(String commitUser) {
+        this.commitUser = commitUser;
+        this.commitUserProvided = true;
+        return this;
     }
 
     @Override
@@ -87,7 +99,8 @@ public class PostponeFixedBucketWriteBuilder implements BatchWriteBuilder {
                 Options.fromMap(table.options())
                         .getOptional(CoreOptions.SNAPSHOT_IGNORE_EMPTY_COMMIT)
                         .orElse(true);
-        return newCommit(commitUser, ignoreEmpty);
+        return newCommit(commitUser, ignoreEmpty)
+                .filterCommittedIgnoresStrictModeBound(commitUserProvided);
     }
 
     public TableCommitImpl newCommit(String commitUser, boolean ignoreEmptyCommit) {

@@ -66,6 +66,48 @@ Use a durable checkpoint location accessible to the cluster for deployed jobs. G
 its own checkpoint directory. Stop this example with `writer.stop()`.
 Streaming writes also support [Schema Evolution on Write](./schema-evolution).
 
+### Exactly-once
+
+Structured Streaming replays a micro-batch with its original batch id when a query is restarted
+after failing between the sink writing the batch and Spark recording that batch as completed.
+Paimon commits every micro-batch under a commit user that is stable across restarts, and skips a
+batch that the same user already committed, so a replay does not write the data twice.
+
+What the commit user identifies is one incarnation of a checkpoint, not the place it is stored:
+reusing it across two different queries would make Paimon skip the data of the second one, while
+changing it within one query would bring the duplicate back. It is therefore derived from the query
+id that Spark persists in the checkpoint, which is new when a checkpoint is recreated, unchanged
+when a query resumes from one, and independent of how the location is spelled. Set
+`write.stream.commit-user` to pin it explicitly, either as an option of the writer or as a
+`spark.paimon.write.stream.commit-user` session conf, which is only needed if a query has to keep
+its identity across a new checkpoint:
+
+```scala
+val stream = df
+  .writeStream
+  .outputMode("append")
+  .option("checkpointLocation", "/path/to/checkpoint")
+  .option("write.stream.commit-user", "my-streaming-job")
+  .format("paimon")
+  .start("/path/to/paimon/sink/table")
+```
+
+:::note
+
+A skipped replay leaves the data files it wrote behind, uncommitted. They are removed by
+[orphan file cleaning](../maintenance/manage-snapshots#remove-orphan-files), like any other
+uncommitted file.
+
+A query that starts from a new checkpoint gets a new commit user, so a micro-batch the previous
+run committed is not recognised and its data is written again.
+
+A postpone bucket table with `postpone.default-bucket-num` commits an overwrite, such as a
+micro-batch in `complete` mode, through its direct fixed-bucket committer, where a replay is
+recognised as well. Its other writes go through a staged committer that cannot skip a replay; a
+warning is logged for every such micro-batch.
+
+:::
+
 ## Streaming Query
 
 :::info

@@ -50,6 +50,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -107,6 +108,7 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -1592,6 +1594,100 @@ public abstract class SimpleTableTestBase {
             }
             lastId.set(latest);
         }
+    }
+
+    @Test
+    public void testFilterAndCommitWithInlineMaintenance() throws Exception {
+        // async expire but retain only the last snapshot, like
+        // testBatchWriteAsyncExpireFallbackToSync
+        Map<String, String> opts = new HashMap<>();
+        opts.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        opts.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        opts.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        opts.put(SNAPSHOT_EXPIRE_LIMIT.key(), "100");
+
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        table = table.copy(opts);
+        SnapshotManager sm = table.snapshotManager();
+
+        // A committer that commits once through filterAndCommit and is then closed, the way an
+        // engine which replays a batch with a stable identifier does. Without inline maintenance
+        // the expiration dispatched to the executor is cut short by the close.
+        BatchWriteBuilderImpl builder =
+                ((BatchWriteBuilderImpl) table.newBatchWriteBuilder()).withCommitUser("user");
+        long previous = 0;
+        for (long identifier = 0; identifier < 3; identifier++) {
+            try (BatchTableWrite write = builder.newWrite();
+                    InnerTableCommit commit = builder.newCommit()) {
+                write.write(rowData((int) identifier, (int) identifier * 10, identifier * 100L));
+                commit.inlineMaintenance(true)
+                        .filterAndCommit(
+                                Collections.singletonMap(identifier, write.prepareCommit()));
+            }
+
+            long latest = sm.latestSnapshotId();
+            assertThat(latest).isGreaterThan(previous);
+            if (previous > 0) {
+                assertThat(sm.snapshotExists(previous))
+                        .as("the previous snapshot should be expired before the committer closes")
+                        .isFalse();
+                assertThat(sm.earliestSnapshotId()).isEqualTo(latest);
+            }
+            previous = latest;
+        }
+
+        // A replayed identifier is recognised and does not create a snapshot.
+        try (BatchTableWrite write = builder.newWrite();
+                InnerTableCommit commit = builder.newCommit()) {
+            write.write(rowData(2, 20, 200L));
+            commit.inlineMaintenance(true)
+                    .filterAndCommit(Collections.singletonMap(2L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(previous);
+    }
+
+    @Test
+    public void testFilterAndCommitWithProvidedUserUnderStrictMode() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> {});
+        SnapshotManager sm = table.snapshotManager();
+
+        // A first run commits identifier 0 under a caller-provided user.
+        BatchWriteBuilderImpl first =
+                ((BatchWriteBuilderImpl) table.newBatchWriteBuilder()).withCommitUser("user");
+        try (BatchTableWrite write = first.newWrite();
+                InnerTableCommit commit = first.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        long committed = sm.latestSnapshotId();
+
+        // A restarted run replays identifier 0 with strict mode bounded by the snapshot it starts
+        // from, which is the snapshot that identifier produced. The bound only saves lookup work
+        // for a user created for one run; a provided user has to be looked up beyond it, or the
+        // replay is committed again.
+        Map<String, String> strict = new HashMap<>();
+        strict.put(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), String.valueOf(committed));
+        BatchWriteBuilderImpl replay =
+                ((BatchWriteBuilderImpl) table.copy(strict).newBatchWriteBuilder())
+                        .withCommitUser("user");
+        try (BatchTableWrite write = replay.newWrite();
+                InnerTableCommit commit = replay.newCommit()) {
+            write.write(rowData(1, 10, 100L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId())
+                .as("a replay by a provided user must be recognised across the strict mode bound")
+                .isEqualTo(committed);
+
+        // The bound stays in place for a user the builder created itself.
+        BatchWriteBuilderImpl generated =
+                (BatchWriteBuilderImpl) table.copy(strict).newBatchWriteBuilder();
+        try (BatchTableWrite write = generated.newWrite();
+                InnerTableCommit commit = generated.newCommit()) {
+            write.write(rowData(2, 20, 200L));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
+        assertThat(sm.latestSnapshotId()).isEqualTo(committed + 1);
     }
 
     @Test

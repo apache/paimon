@@ -94,6 +94,9 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
+    private boolean checkFilesExistence = true;
+    private boolean checkAppendFiles = true;
+    private boolean inlineMaintenance = false;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -166,6 +169,30 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
         this.expireForEmptyCommit = expireForEmptyCommit;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl checkFilesExistence(boolean checkFilesExistence) {
+        this.checkFilesExistence = checkFilesExistence;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl checkAppendFiles(boolean checkAppendFiles) {
+        this.checkAppendFiles = checkAppendFiles;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl inlineMaintenance(boolean inlineMaintenance) {
+        this.inlineMaintenance = inlineMaintenance;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound) {
+        commit.filterCommittedIgnoresStrictModeBound(ignoresStrictModeBound);
         return this;
     }
 
@@ -265,7 +292,8 @@ public class TableCommitImpl implements InnerTableCommit {
         return filterAndCommitMultiple(
                 commitIdentifiersAndMessages.entrySet().stream()
                         .map(e -> createManifestCommittable(e.getKey(), e.getValue()))
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList()),
+                checkAppendFiles);
     }
 
     private ManifestCommittable createManifestCommittable(
@@ -333,13 +361,15 @@ public class TableCommitImpl implements InnerTableCommit {
         List<ManifestCommittable> retryCommittables = commit.filterCommitted(sortedCommittables);
 
         if (!retryCommittables.isEmpty()) {
-            checkFilesExistence(retryCommittables);
+            if (checkFilesExistence) {
+                verifyFilesExist(retryCommittables);
+            }
             commitMultiple(retryCommittables, checkAppendFiles);
         }
         return retryCommittables.size();
     }
 
-    private void checkFilesExistence(List<ManifestCommittable> committables) {
+    private void verifyFilesExist(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
         IndexFilePathFactories indexFactories = new IndexFilePathFactories(commit.pathFactory());
@@ -411,7 +441,7 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        if (batchCommitted) {
+        if (batchCommitted || inlineMaintenance) {
             maintain(identifier, doExpire);
         } else {
             executor.execute(
