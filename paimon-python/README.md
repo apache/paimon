@@ -288,6 +288,22 @@ the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
 
 
+# Vector index range reads
+
+Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
+read multiple file ranges concurrently when the input stream supports
+thread-safe positional reads. Set the table option `vindex.read.parallelism`
+to a positive integer to control the maximum number of concurrent reads per
+index reader, including reads from concurrent native query callbacks.
+
+The default is **4** for remote index paths and **1** for local paths (including
+`file://`). Setting it to **1** disables range-level concurrency. Streams that
+only support `seek` and `read` remain serialized. Workers are created lazily
+and released when the index reader closes; separate readers have separate
+budgets. This option controls index I/O, not shard search or native compute
+threads.
+
+
 # Vector fallback scoring and refinement
 
 Raw vector fallback and refinement score regular FLOAT vectors in bounded

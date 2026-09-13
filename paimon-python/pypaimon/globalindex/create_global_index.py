@@ -21,6 +21,7 @@ from functools import cmp_to_key
 from typing import Dict, List, Optional, Sequence, Union
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -51,6 +52,7 @@ from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     VINDEX_IDENTIFIERS,
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+    ADD_BATCH_SIZE,
     VindexVectorIndexWriter,
 )
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -302,13 +304,20 @@ class GlobalIndexBuilder:
 
             writer = self._create_generic_index_writer(index_path, index_field)
             try:
-                for value, row_id in _extract_index_rows(
-                    table,
-                    self._index_columns[0],
-                    SpecialFields.ROW_ID.name,
-                    index_range,
-                ):
-                    writer.write(value, row_id - index_range.from_)
+                if self._index_type in VINDEX_IDENTIFIERS:
+                    if table.column(SpecialFields.ROW_ID.name).null_count:
+                        raise ValueError("Cannot build global index because _ROW_ID is null.")
+                    for batch in table.to_batches(max_chunksize=ADD_BATCH_SIZE):
+                        _write_vector_batch(
+                            writer, batch, self._index_columns[0], index_range)
+                else:
+                    for value, row_id in _extract_index_rows(
+                        table,
+                        self._index_columns[0],
+                        SpecialFields.ROW_ID.name,
+                        index_range,
+                    ):
+                        writer.write(value, row_id - index_range.from_)
 
                 index_adds = _to_index_manifest_entries(
                     self._table,
@@ -442,6 +451,21 @@ def _extract_sorted_rows(
         return comparator(left_key, right_key)
 
     return sorted(rows, key=cmp_to_key(compare))
+
+
+def _write_vector_batch(writer, batch, index_column, row_range):
+    row_ids = batch.column(SpecialFields.ROW_ID.name)
+    if row_ids.null_count:
+        raise ValueError("Cannot build global index because _ROW_ID is null.")
+    vectors = batch.column(index_column)
+    selected = pc.and_(
+        pc.greater_equal(row_ids, row_range.from_),
+        pc.less_equal(row_ids, row_range.to),
+    )
+    if not pc.all(selected).as_py():
+        row_ids = pc.filter(row_ids, selected)
+        vectors = pc.filter(vectors, selected)
+    writer.write_batch(vectors, pc.subtract(row_ids, row_range.from_))
 
 
 def _extract_index_rows(
