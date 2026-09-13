@@ -31,12 +31,12 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -349,17 +349,10 @@ public abstract class HadoopCompliantFileIO implements FileIO {
          * @param bytes the number of bytes to skip.
          */
         public void skipFully(long bytes) throws IOException {
-            while (bytes > 0) {
-                long skipped = in.skip(bytes);
-                if (skipped <= 0) {
-                    // a blocking stream returning 0 from skip means EOF; looping here
-                    // would spin forever instead of failing the read
-                    throw new EOFException(
-                            String.format(
-                                    "Unexpected end of stream while skipping %s bytes.", bytes));
-                }
-                bytes -= skipped;
-            }
+            // hadoop's helper probes with read() before calling it EOF, because skip may return
+            // 0 without being at the end. The loop this replaces treated that 0 as progress and
+            // spun forever.
+            IOUtils.skipFully(in, bytes);
         }
     }
 

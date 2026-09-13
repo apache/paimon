@@ -20,35 +20,58 @@ package org.apache.paimon.fs.hadoop;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 import java.io.EOFException;
-import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Tests that {@code HadoopSeekableInputStream#skipFully} fails fast at end of stream instead of
- * spinning on a zero-byte skip.
+ * {@code HadoopSeekableInputStream#skipFully} turns a short forward seek into skips. A stream that
+ * returns 0 from {@code skip} used to spin forever; a 0 has to be resolved by reading, because
+ * {@link java.io.InputStream#skip} may return it without being at the end.
  */
 class HadoopFileIOSkipFullyTest {
 
     @Test
-    @Timeout(10)
-    void skipFullyFailsFastAtEndOfStream() throws Exception {
+    void skipFullyThrowsWhenTheStreamReallyEnds() throws Exception {
         FSDataInputStream in = mock(FSDataInputStream.class);
-        // a blocking stream at EOF keeps returning 0 from skip; the mock rethrows after a
-        // few zero-skips so the unfixed loop surfaces as the wrong exception instead of
-        // spinning forever
-        when(in.skip(anyLong()))
-                .thenReturn(0L, 0L, 0L)
-                .thenThrow(new IOException("mock exhausted"));
+        when(in.skip(anyLong())).thenReturn(0L);
+        // the read probe is what distinguishes EOF from a transient zero
+        when(in.read()).thenReturn(-1);
 
+        assertThatThrownBy(() -> skipFully(in, 4096L)).hasRootCauseInstanceOf(EOFException.class);
+        verify(in).read();
+    }
+
+    @Test
+    void skipFullyContinuesAfterATransientZero() throws Exception {
+        FSDataInputStream in = mock(FSDataInputStream.class);
+        // 0 first, then progress: the old loop threw here, and before that it spun
+        when(in.skip(anyLong())).thenReturn(0L, 4095L);
+        when(in.read()).thenReturn(7);
+
+        assertThatCode(() -> skipFully(in, 4096L)).doesNotThrowAnyException();
+        // the probe consumed one byte, so only the remaining 4095 are skipped
+        verify(in).read();
+    }
+
+    @Test
+    void skipFullyIsANoOpForNothingToSkip() throws Exception {
+        FSDataInputStream in = mock(FSDataInputStream.class);
+
+        assertThatCode(() -> skipFully(in, 0L)).doesNotThrowAnyException();
+        verify(in, never()).skip(anyLong());
+    }
+
+    private static void skipFully(FSDataInputStream in, long bytes) throws Exception {
         Class<?> clazz =
                 Class.forName("org.apache.paimon.fs.hadoop.HadoopFileIO$HadoopSeekableInputStream");
         Constructor<?> constructor = clazz.getDeclaredConstructor(FSDataInputStream.class);
@@ -56,9 +79,6 @@ class HadoopFileIOSkipFullyTest {
         Object stream = constructor.newInstance(in);
         Method skipFully = clazz.getDeclaredMethod("skipFully", long.class);
         skipFully.setAccessible(true);
-
-        assertThatThrownBy(() -> skipFully.invoke(stream, 4096L))
-                .hasRootCauseInstanceOf(EOFException.class)
-                .hasRootCauseMessage("Unexpected end of stream while skipping 4096 bytes.");
+        skipFully.invoke(stream, bytes);
     }
 }

@@ -24,11 +24,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -215,17 +215,10 @@ public abstract class HadoopCompliantFileIO implements FileIO {
          * @param bytes the number of bytes to skip.
          */
         public void skipFully(long bytes) throws IOException {
-            while (bytes > 0) {
-                long skipped = in.skip(bytes);
-                if (skipped <= 0) {
-                    // a blocking stream returning 0 from skip means EOF; looping here
-                    // would spin forever instead of failing the read
-                    throw new EOFException(
-                            String.format(
-                                    "Unexpected end of stream while skipping %s bytes.", bytes));
-                }
-                bytes -= skipped;
-            }
+            // hadoop's helper probes with read() before calling it EOF, because skip may return
+            // 0 without being at the end. The loop this replaces treated that 0 as progress and
+            // spun forever.
+            IOUtils.skipFully(in, bytes);
         }
     }
 
