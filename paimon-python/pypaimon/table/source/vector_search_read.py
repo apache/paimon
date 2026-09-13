@@ -792,7 +792,8 @@ def _table_options_map(table):
 def _configured_vector_metric(options, vector_column, index_type=None):
     field_prefix = "fields.%s." % vector_column.name
     index_prefix = "%s." % index_type if index_type else None
-    keys = [field_prefix + "distance.metric", field_prefix + "metric"]
+    keys = [field_prefix + "pk-vector.distance.metric",
+            field_prefix + "distance.metric", field_prefix + "metric"]
     if index_prefix is not None:
         keys.extend([index_prefix + "distance.metric", index_prefix + "metric"])
     keys.extend(["test.vector.metric", "lumina.distance.metric", "distance.metric", "metric"])

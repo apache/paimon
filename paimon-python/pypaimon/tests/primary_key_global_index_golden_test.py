@@ -121,3 +121,30 @@ def test_java_primary_key_full_text_index(catalog):
               .execute_local())
     rows = _read_search_result(table, result)
     assert sorted(rows.column("id").to_pylist()) == [1, 3]
+
+
+@pytest.mark.parametrize("metric,expected_id", [("l2", 2), ("cosine", 1), ("inner_product", 1)])
+def test_java_primary_key_raw_only_uses_column_metric(catalog, metric, expected_id):
+    from dataclasses import replace
+    from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
+    from pypaimon.table.source.vector_search_read import _compute_score
+
+    table = catalog.get_table("default.test_pk_vector_golden")
+    # Remove legacy aliases so only the documented PK column option is available.
+    options = {key: None for key in table.options.options.to_map() if key.endswith(".metric")}
+    options.update({"fields.embedding.pk-vector.distance.metric": metric,
+                    "fields.other.pk-vector.distance.metric": "cosine",
+                    "vector-index.search-mode": "full"})
+    table = table.copy(options)
+    query = [0.1, 0.0, 0.0, 0.0]
+    builder = (table.new_vector_search_builder().with_vector_column("embedding")
+               .with_query_vector(query).with_limit(1))
+    plan = builder.new_vector_search_scan().scan()
+    raw_plan = PrimaryKeyVectorScanPlan(plan.snapshot_id, [
+        replace(split, payloads=(), uncovered_data_files=tuple(
+            file.file_name for file in split.data_split.files)) for split in plan.splits()])
+    result = builder.new_vector_search_read().read_plan(raw_plan)
+    rows = _read_search_result(table, result)
+    assert rows.column("id").to_pylist() == [expected_id]
+    assert result.positions[0].score == _compute_score(
+        query, rows.column("embedding")[0].as_py(), metric)

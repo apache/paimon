@@ -145,7 +145,8 @@ class VectorMetricResolutionTest(unittest.TestCase):
         return DataEvolutionVectorRead(query_vector=[1.0], **kwargs)
 
     def test_query_metric_aliases_are_validated(self):
-        for key in ('fields.embedding.distance.metric', 'fields.embedding.metric',
+        for key in ('fields.embedding.pk-vector.distance.metric',
+                    'fields.embedding.distance.metric', 'fields.embedding.metric',
                     'ivf-flat.distance.metric', 'ivf-flat.metric', 'distance.metric', 'metric'):
             with self.subTest(key=key):
                 native = Mock(spec=['vector_metric'])
