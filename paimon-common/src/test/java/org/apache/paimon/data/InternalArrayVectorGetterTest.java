@@ -80,4 +80,18 @@ class InternalArrayVectorGetterTest {
 
         assertThat(readBack.getVector(0).toFloatArray()).isEqualTo(new float[] {4.0f, 5.0f, 6.0f});
     }
+
+    @Test
+    void vectorArrayCopyResolvesDataClass() {
+        // copy() of a GenericArray goes through InternalRow.getDataClass(VECTOR) to allocate the
+        // element array; without the VECTOR case that throws "Illegal type", so this pins the
+        // getDataClass fix (the round-trip test above copies raw bytes and never reaches it).
+        InternalArraySerializer serializer = new InternalArraySerializer(VECTOR_TYPE);
+        BinaryVector vector = BinaryVector.fromPrimitiveArray(new float[] {7.0f, 8.0f, 9.0f});
+        GenericArray array = new GenericArray(new Object[] {vector});
+
+        InternalArray copied = serializer.copy(array);
+
+        assertThat(copied.getVector(0).toFloatArray()).isEqualTo(new float[] {7.0f, 8.0f, 9.0f});
+    }
 }
