@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -213,7 +214,7 @@ public final class DataTypeJsonParser {
                     builder.setLength(0);
                     cursor = consumeIdentifier(builder, chars, cursor);
                     final String token = builder.toString();
-                    final String normalizedToken = token.toUpperCase();
+                    final String normalizedToken = token.toUpperCase(Locale.ROOT);
                     if (KEYWORDS.contains(normalizedToken)) {
                         tokens.add(new Token(TokenType.KEYWORD, cursor, normalizedToken));
                     } else {
@@ -344,7 +345,7 @@ public final class DataTypeJsonParser {
 
     private static final Set<String> KEYWORDS =
             Stream.of(Keyword.values())
-                    .map(k -> k.toString().toUpperCase())
+                    .map(k -> k.toString().toUpperCase(Locale.ROOT))
                     .collect(Collectors.toSet());
 
     private static class Token {

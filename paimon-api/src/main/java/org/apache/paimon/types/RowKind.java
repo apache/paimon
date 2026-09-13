@@ -20,6 +20,8 @@ package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
 
+import java.util.Locale;
+
 /**
  * Lists all kinds of changes that a row can describe in a changelog.
  *
@@ -135,7 +137,7 @@ public enum RowKind {
      * @see #shortString() for mapping of string and {@link RowKind}.
      */
     public static RowKind fromShortString(String value) {
-        switch (value.toUpperCase()) {
+        switch (value.toUpperCase(Locale.ROOT)) {
             case "+I":
                 return INSERT;
             case "-U":

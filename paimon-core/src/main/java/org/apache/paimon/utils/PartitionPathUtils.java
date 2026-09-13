@@ -42,6 +42,7 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -302,7 +303,7 @@ public class PartitionPathUtils {
         if (c < 16) {
             sb.append('0');
         }
-        sb.append(Integer.toHexString(c).toUpperCase());
+        sb.append(Integer.toHexString(c).toUpperCase(Locale.ROOT));
     }
 
     public static String unescapePathName(String path) {

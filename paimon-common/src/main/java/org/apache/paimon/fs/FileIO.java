@@ -48,6 +48,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
@@ -562,7 +563,7 @@ public interface FileIO extends Serializable, Closeable {
             for (String[] keys : loader.requiredOptions()) {
                 boolean found = false;
                 for (String key : keys) {
-                    if (options.contains(key.toLowerCase())) {
+                    if (options.contains(key.toLowerCase(Locale.ROOT))) {
                         found = true;
                         break;
                     }

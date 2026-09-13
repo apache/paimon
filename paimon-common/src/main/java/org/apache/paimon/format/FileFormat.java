@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -88,15 +89,15 @@ public abstract class FileFormat {
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
         return FormatFactoryUtil.discoverFactory(
-                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
+                        FileFormat.class.getClassLoader(), identifier.toLowerCase(Locale.ROOT))
                 .create(context);
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {
         Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase() + ".";
+        String prefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            if (key.toLowerCase().startsWith(prefix)) {
+            if (key.toLowerCase(Locale.ROOT).startsWith(prefix)) {
                 result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }
