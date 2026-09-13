@@ -25,8 +25,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Obje
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DataTypeJsonParser}. */
 class DataTypeJsonParserTest {
@@ -34,19 +36,29 @@ class DataTypeJsonParserTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void parseDataFieldWithoutIdAutoAssigns() throws Exception {
+    void parseDataFieldWithoutIdAndWithoutCounterIsRejected() {
         ObjectNode json = MAPPER.createObjectNode();
         json.put("name", "x");
         json.put("type", "INT");
 
-        DataField field = DataTypeJsonParser.parseDataField(json);
-        assertThat(field.id()).isZero();
-        assertThat(field.name()).isEqualTo("x");
-        assertThat(field.type()).isEqualTo(new IntType());
+        // a table schema must carry its field ids: they drive projection and schema evolution,
+        // so silently assigning one would be worse than refusing to parse
+        assertThatThrownBy(() -> DataTypeJsonParser.parseDataField(json))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
     }
 
     @Test
-    void parseDataFieldKeepsExplicitId() throws Exception {
+    void parseDataFieldDrawsIdsFromOneCounter() {
+        AtomicInteger fieldId = new AtomicInteger(-1);
+
+        assertThat(DataTypeJsonParser.parseDataField(fieldJson("a"), fieldId).id()).isZero();
+        assertThat(DataTypeJsonParser.parseDataField(fieldJson("b"), fieldId).id()).isEqualTo(1);
+        assertThat(DataTypeJsonParser.parseDataField(fieldJson("c"), fieldId).id()).isEqualTo(2);
+    }
+
+    @Test
+    void parseDataFieldKeepsExplicitId() {
         ObjectNode json = MAPPER.createObjectNode();
         json.put("id", 7);
         json.put("name", "x");
@@ -70,5 +82,12 @@ class DataTypeJsonParserTest {
                                 Arrays.asList(
                                         new DataField(0, "a", new IntType()),
                                         new DataField(1, "b", DataTypes.STRING()))));
+    }
+
+    private static ObjectNode fieldJson(String name) {
+        ObjectNode json = MAPPER.createObjectNode();
+        json.put("name", name);
+        json.put("type", "INT");
+        return json;
     }
 }

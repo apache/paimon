@@ -18,15 +18,53 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.types.DataField;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ParameterUtils}. */
 class ParameterUtilsTest {
+
+    @Test
+    void testParseDataFieldArrayWithoutIds() {
+        // create_function passes a user-written parameter list, which may omit the ids; each
+        // field still has to get its own instead of every one landing on 0
+        List<DataField> fields =
+                ParameterUtils.parseDataFieldArray(
+                        "[{\"name\":\"a\",\"type\":\"INT\"},"
+                                + "{\"name\":\"b\",\"type\":\"STRING\"},"
+                                + "{\"name\":\"c\",\"type\":\"BIGINT\"}]");
+
+        assertThat(fields).extracting(DataField::id).containsExactly(0, 1, 2);
+        assertThat(fields).extracting(DataField::name).containsExactly("a", "b", "c");
+    }
+
+    @Test
+    void testParseDataFieldArrayKeepsExplicitIds() {
+        List<DataField> fields =
+                ParameterUtils.parseDataFieldArray(
+                        "[{\"id\":3,\"name\":\"a\",\"type\":\"INT\"},"
+                                + "{\"id\":9,\"name\":\"b\",\"type\":\"STRING\"}]");
+
+        assertThat(fields).extracting(DataField::id).containsExactly(3, 9);
+    }
+
+    @Test
+    void testParseDataFieldArrayRejectsPartialIds() {
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"id\":7,\"name\":\"b\",\"type\":\"STRING\"}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Partial field id is not allowed");
+    }
 
     @Test
     void testParseIntegerRanges() {
