@@ -1303,8 +1303,14 @@ class _PyAVVideoDecoder:
             self._cache[index] = frame
             return self._tensor(frame)
 
+        indexed = (
+            index > 0 and not self._timestamps
+            and self._index_packets()
+        )
         at_frontier = self._next_index == len(self._timestamps)
-        if index != self._next_index and not (
+        if indexed:
+            self._seek(index)
+        elif index != self._next_index and not (
                 at_frontier and index >= self._next_index):
             self._seek(index)
         try:
@@ -1338,6 +1344,28 @@ class _PyAVVideoDecoder:
                 "Video frame index %d is out of range." % index
             ) from error
         raise IndexError("Video frame index %d is out of range." % index)
+
+    def _index_packets(self):
+        entries = []
+        for packet in self._container.demux(self._stream):
+            if (packet.pts is None
+                    or getattr(packet, "is_discard", False)):
+                continue
+            timestamp = packet.pts * (
+                packet.time_base or self._stream.time_base)
+            entries.append((timestamp, packet.is_keyframe))
+        if not entries:
+            self._container.seek(
+                0, backward=True, any_frame=False, stream=self._stream)
+            self._frames = iter(self._container.decode(self._stream))
+            return False
+        entries.sort(key=lambda entry: entry[0])
+        self._timestamps = [timestamp for timestamp, unused in entries]
+        self._keyframes = [
+            index for index, (unused, keyframe) in enumerate(entries)
+            if keyframe
+        ]
+        return True
 
     def _seek(self, index):
         position = bisect.bisect_right(self._keyframes, index)

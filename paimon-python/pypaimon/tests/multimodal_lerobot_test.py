@@ -191,6 +191,72 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             decoder.close()
 
+    def test_pyav_decoder_indexes_cold_random_reads(self):
+        class Frame:
+
+            time_base = Fraction(1, 10)
+
+            def __init__(self, pts):
+                self.pts = pts
+                self.key_frame = pts % 10 == 0
+
+            def to_ndarray(self, format):
+                assert format == "rgb24"
+                return np.full((2, 2, 3), self.pts, dtype=np.uint8)
+
+        class Container:
+
+            def __init__(self):
+                self.stream = SimpleNamespace(time_base=Fraction(1, 10))
+                self.streams = SimpleNamespace(video=[self.stream])
+                self.position = 0
+                self.decoded = 0
+                self.demuxed = 0
+                self.seeks = []
+
+            def demux(self, stream):
+                assert stream is self.stream
+                for index in range(120):
+                    self.demuxed += 1
+                    yield SimpleNamespace(
+                        pts=index, time_base=Fraction(1, 10),
+                        is_discard=False, is_keyframe=index % 10 == 0,
+                    )
+
+            def decode(self, stream):
+                assert stream is self.stream
+                while self.position < 120:
+                    index = self.position
+                    self.position += 1
+                    self.decoded += 1
+                    yield Frame(index)
+
+            def seek(self, offset, *, backward, any_frame, stream):
+                assert backward
+                assert not any_frame
+                assert stream is self.stream
+                self.seeks.append(offset)
+                self.position = offset
+
+            def close(self):
+                pass
+
+        container = Container()
+        fake_av = SimpleNamespace(open=lambda unused_stream: container)
+        tensor = staticmethod(
+            lambda frame: frame.to_ndarray(format="rgb24"))
+        with patch.dict(sys.modules, {"av": fake_av}), patch.object(
+                _PyAVVideoDecoder, "_tensor", tensor):
+            decoder = _PyAVVideoDecoder(io.BytesIO())
+            try:
+                frame = decoder[95]
+                self.assertEqual(120, container.demuxed)
+                self.assertEqual([90], container.seeks)
+                self.assertEqual(6, container.decoded)
+                self.assertTrue((frame == 95).all())
+            finally:
+                decoder.close()
+
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",
