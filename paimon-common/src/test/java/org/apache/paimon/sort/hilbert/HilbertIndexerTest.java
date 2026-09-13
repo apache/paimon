@@ -130,6 +130,28 @@ public class HilbertIndexerTest {
         }
     }
 
+    /**
+     * Sizes and inequalities are proxies for the property the width exists to guarantee: the key
+     * carries the whole index. State it directly, at the two dimension counts where the index needs
+     * its last byte the most.
+     */
+    @Test
+    public void testKeyCarriesTheWholeIndex() {
+        for (int dimensions : new int[] {8, 9}) {
+            Long[] topOfSpace = new Long[dimensions];
+            Arrays.fill(topOfSpace, Long.MAX_VALUE);
+            Long[] oneLowBitOff = topOfSpace.clone();
+            oneLowBitOff[dimensions - 1] = Long.MAX_VALUE - 1;
+
+            for (Long[] point : new Long[][] {topOfSpace, oneLowBitOff}) {
+                byte[] key = HilbertIndexer.hilbertCurvePosBytes(point);
+                assertThat(new BigInteger(1, key))
+                        .as("key must round-trip the index at %s dimensions", dimensions)
+                        .isEqualTo(index(point));
+            }
+        }
+    }
+
     private static BigInteger index(Long[] points) {
         long[] data = Arrays.stream(points).mapToLong(Long::longValue).toArray();
         return HilbertCurve.bits(63).dimensions(points.length).index(data);
