@@ -18,12 +18,12 @@
 
 from pypaimon.multimodal.lerobot.api import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
-from pypaimon.multimodal.lerobot.reader import LeRobotFrameReader
+from pypaimon.multimodal.lerobot.dataset_source import LeRobotDatasetSource
 from pypaimon.multimodal.lerobot.writer import PaimonLeRobotWriter
 
 
 __all__ = [
-    "LeRobotFrameReader",
+    "LeRobotDatasetSource",
     "PaimonLeRobotDataset",
     "PaimonLeRobotWriter",
     "load_from_lerobot",

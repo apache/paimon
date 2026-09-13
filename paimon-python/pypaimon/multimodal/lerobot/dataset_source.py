@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Frame readers used by :class:`PaimonLeRobotDataset`."""
+"""Logical frame sources used by :class:`PaimonLeRobotDataset`."""
 
 import os
 from abc import ABC, abstractmethod
@@ -25,14 +25,19 @@ from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.read.query_auth_split import QueryAuthSplit
 
 
-class LeRobotFrameReader(ABC):
-    """Batch reader for logical LeRobot frame rows.
+class LeRobotDatasetSource(ABC):
+    """Data and metadata source for logical LeRobot frame rows.
 
     Implementations may resolve one logical row from multiple Paimon tables.
     Image values must be encoded bytes or BLOB descriptors. Video values must
     be serialized ``VideoFrameDescriptor`` instances. Descriptor-backed
-    readers expose their resolved ``file_io``.
+    sources expose their resolved ``file_io``.
     """
+
+    @property
+    @abstractmethod
+    def metadata(self):
+        """Return LeRobot metadata for this source."""
 
     @property
     @abstractmethod
@@ -47,10 +52,11 @@ class LeRobotFrameReader(ABC):
         """Release reader resources."""
 
 
-class _PaimonTableFrameReader(LeRobotFrameReader):
-    """Default frame reader for one indexed Paimon frames table."""
+class _PaimonTableDatasetSource(LeRobotDatasetSource):
+    """Default source for one indexed Paimon frames table."""
 
-    def __init__(self, raw_table, projection, total_frames):
+    def __init__(self, raw_table, metadata, projection, total_frames):
+        self._metadata = metadata
         self._schema = _target_schema(raw_table)
         self._table, self.snapshot_id, splits = _indexed_read_table(
             raw_table, projection)
@@ -62,6 +68,10 @@ class _PaimonTableFrameReader(LeRobotFrameReader):
                 % (snapshot.next_row_id, total_frames))
         self.file_io = self._table.file_io
         self._locator = _FrameLocator(self._table, snapshot, splits)
+
+    @property
+    def metadata(self):
+        return self._metadata
 
     @property
     def schema(self):

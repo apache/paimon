@@ -227,24 +227,20 @@ on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
 to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
 either decoder.
 
-Use a frame reader when one logical frame is assembled from multiple tables:
+Use a dataset source when one logical frame is assembled from multiple tables:
 
 ```python
-from pypaimon.multimodal import LeRobotFrameReader, PaimonLeRobotDataset
+from pypaimon.multimodal import LeRobotDatasetSource, PaimonLeRobotDataset
 
-class CustomFrameReader(LeRobotFrameReader):
+class CustomDatasetSource(LeRobotDatasetSource):
+    metadata = dataset_metadata
     schema = logical_frame_schema
 
     def read_indices(self, indices, columns):
         return resolve_frame_rows(indices, columns)  # pyarrow.Table
 
-dataset = PaimonLeRobotDataset(
-    reader=CustomFrameReader(),
-    metadata=metadata,
-)
+dataset = PaimonLeRobotDataset(CustomDatasetSource())
 ```
 
-`LeRobotFrameReader` is a logical row contract, not a physical `frames` table.
-It may query any tables. `metadata` separately supplies `info`, `episodes`,
-`tasks`, and optional `stats` and `subtasks`. Descriptor-backed media readers
-also expose `file_io`.
+`LeRobotDatasetSource` supplies metadata and logical frame rows. It may query
+any tables. Descriptor-backed media sources also expose `file_io`.

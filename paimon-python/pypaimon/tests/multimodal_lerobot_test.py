@@ -325,7 +325,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 pmm.PaimonLeRobotDataset(Mock())
             load.assert_not_called()
 
-    def test_dataset_reads_one_batch_from_logical_frame_reader(self):
+    def test_dataset_reads_one_batch_from_logical_source(self):
         try:
             import torch
         except ImportError as error:
@@ -363,11 +363,16 @@ class LeRobotValidationTest(unittest.TestCase):
             for index in range(3)
         }
 
-        class Reader(pmm.LeRobotFrameReader):
+        class Source(pmm.LeRobotDatasetSource):
 
-            def __init__(self):
+            def __init__(self, metadata):
+                self._metadata = metadata
                 self.calls = []
                 self.closed = False
+
+            @property
+            def metadata(self):
+                return self._metadata
 
             @property
             def schema(self):
@@ -383,7 +388,6 @@ class LeRobotValidationTest(unittest.TestCase):
             def close(self):
                 self.closed = True
 
-        reader = Reader()
         metadata = {
             "repo_id": "logical/multi-table",
             "revision": "dataset-version-12",
@@ -398,16 +402,16 @@ class LeRobotValidationTest(unittest.TestCase):
             "tasks": ["pick"],
             "stats": {"action": {"mean": [1.0]}},
         }
+        source = Source(metadata)
         dataset = pmm.PaimonLeRobotDataset(
-            reader=reader,
-            metadata=metadata,
+            source,
             delta_timestamps={"action": [-0.1, 0.0, 0.1]},
         )
 
         sample, _ = dataset.__getitems__([1, 2])
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
-                         reader.calls)
+                         source.calls)
         self.assertIsNone(dataset.tag_name)
         self.assertEqual("dataset-version-12", dataset.meta.revision)
         self.assertEqual((2,), dataset.features["observation.state"]["shape"])
@@ -422,7 +426,7 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
         dataset.close()
-        self.assertTrue(reader.closed)
+        self.assertTrue(source.closed)
 
     def test_metadata_json_preserves_nested_values(self):
         values = {
