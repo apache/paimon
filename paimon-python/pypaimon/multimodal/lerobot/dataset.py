@@ -79,12 +79,16 @@ class PaimonDatasetReader(ABC):
     """Read-side implementation for Paimon-backed LeRobot datasets.
 
     Subclasses provide a logical Arrow schema and batched ``read_indices``.
-    Resolved LeRobot metadata remains available through :attr:`meta`.
+    Resolved LeRobot metadata remains available through :attr:`meta`. Readers
+    must be picklable for DataLoader workers. Readers returning BLOB or video
+    descriptors must set ``file_io`` before calling ``super().__init__``.
 
     Set ``return_uint8=True`` to keep 8-bit visual frames in their decoded
     ``torch.uint8`` representation instead of normalizing them to float32.
     Higher-bit-depth images retain the existing float32 behavior.
     """
+
+    file_io = None
 
     def __init__(
             self,
@@ -130,7 +134,12 @@ class PaimonDatasetReader(ABC):
 
     @abstractmethod
     def read_indices(self, indices, columns):
-        """Return requested logical frame rows as a :class:`pyarrow.Table`."""
+        """Return one row per requested absolute index as a PyArrow Table.
+
+        ``indices`` are unique; result order is unrestricted. Returned rows
+        must contain every requested column without missing or duplicate
+        indices.
+        """
 
     def _validate_physical_metadata(self):
         return False

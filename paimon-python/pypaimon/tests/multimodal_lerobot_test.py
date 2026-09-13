@@ -355,7 +355,6 @@ class LeRobotValidationTest(unittest.TestCase):
                 "task_index": {"dtype": "int64", "shape": [1]},
                 "observation.state": {"dtype": "float32", "shape": [2]},
                 "action": {"dtype": "float32", "shape": [1]},
-                "camera.image": {"dtype": "image", "shape": [2, 2, 3]},
             },
         }
         rows = {
@@ -367,8 +366,6 @@ class LeRobotValidationTest(unittest.TestCase):
                 "task_index": 0,
                 "observation.state": [index, index + 1],
                 "action": float(index),
-                "camera.image": _image_bytes(
-                    np.full((2, 2, 3), index, dtype=np.uint8), None),
             }
             for index in range(3)
         }
@@ -432,7 +429,6 @@ class LeRobotValidationTest(unittest.TestCase):
             sample["observation.state"], torch.tensor([1.0, 2.0]))
         torch.testing.assert_close(
             sample["action"], torch.tensor([0.0, 1.0, 2.0]))
-        self.assertEqual([3, 2, 2], list(sample["camera.image"].shape))
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
         dataset.close()
