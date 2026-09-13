@@ -13,29 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Check licensing
+name: CI / Licensing
 
 on:
-  push:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
+  workflow_call:
+
+permissions:
+  contents: read
 
 env:
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
-  build:
+  check:
+    name: Artifact licensing
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     env:
       MVN_COMMON_OPTIONS: -U -B --no-transfer-progress
@@ -50,6 +42,13 @@ jobs:
         with:
           java-version: 8
           distribution: 'temurin'
+      - name: Cache Maven dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.m2/repository
+          key: ci-maven-licensing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ci-maven-licensing-${{ runner.os }}-${{ runner.arch }}-
       - name: Build
         run: |
           set -o pipefail
