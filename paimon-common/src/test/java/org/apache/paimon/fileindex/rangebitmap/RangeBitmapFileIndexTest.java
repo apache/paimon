@@ -62,28 +62,22 @@ public class RangeBitmapFileIndexTest {
     public void testChunkSizeBeyondIntRangeRejected() {
         VarCharType varCharType = new VarCharType();
 
-        // "2g" narrows to a negative int, which crashes on the writer's first chunk allocation
-        Options negativeAfterNarrowing = new Options();
-        negativeAfterNarrowing.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2g");
+        // the boundary is the whole guard: one byte past int range is rejected, int range itself
+        // is accepted. "2g" and "4g" would both only re-test the same comparison
+        Options justPastIntRange = new Options();
+        justPastIntRange.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2147483648 bytes");
         assertThatThrownBy(
                         () ->
-                                new RangeBitmapFileIndex(varCharType, negativeAfterNarrowing)
+                                new RangeBitmapFileIndex(varCharType, justPastIntRange)
                                         .createWriter())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("chunk-size");
 
-        // "4g" narrows to 0, which is the case worth guarding: it does not crash at all, it
-        // gives every key its own chunk and builds a silently bloated index
-        Options zeroAfterNarrowing = new Options();
-        zeroAfterNarrowing.setString(RangeBitmapFileIndex.CHUNK_SIZE, "4g");
-        assertThatThrownBy(
-                        () ->
-                                new RangeBitmapFileIndex(varCharType, zeroAfterNarrowing)
-                                        .createWriter())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("chunk-size");
+        Options atIntRange = new Options();
+        atIntRange.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2147483647 bytes");
+        assertThat(new RangeBitmapFileIndex(varCharType, atIntRange).createWriter()).isNotNull();
 
-        // a large but in-range chunk size still works
+        // a large but in-range chunk size still writes and serializes
         Options valid = new Options();
         valid.setString(RangeBitmapFileIndex.CHUNK_SIZE, "16mb");
         FileIndexWriter writer = new RangeBitmapFileIndex(varCharType, valid).createWriter();

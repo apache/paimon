@@ -73,10 +73,9 @@ public class RangeBitmapFileIndex implements FileIndexer {
             KeyFactory factory = KeyFactory.create(dataType);
             String chunkSize = options.getString(CHUNK_SIZE, factory.defaultChunkSize());
             long bytes = MemorySize.parse(chunkSize).getBytes();
-            // the chunk size becomes an eagerly allocated per-chunk buffer, so anything beyond
-            // int range cannot work. Truncating is worse than rejecting: "2g" narrows to a
-            // negative int and crashes deep inside the writer, while "4g" narrows to 0 and
-            // "5g" to 1g, which build a silently wrong index instead of failing at all.
+            // the chunk size becomes an eagerly allocated per-chunk buffer, so it has to fit an
+            // int. Narrowing it silently substitutes a different size: "2g" becomes negative and
+            // fails only once the writer allocates, "4g" becomes 0 and "5g" becomes 1g.
             if (bytes > Integer.MAX_VALUE) {
                 throw new IllegalArgumentException(
                         String.format(
