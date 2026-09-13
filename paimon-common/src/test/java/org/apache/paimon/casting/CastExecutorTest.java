@@ -1049,6 +1049,80 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testStringToNestedArrayKeepsInnerSyntax() {
+        // quotes and escapes belong to whichever level wrote them: the outer split must leave a
+        // nested literal's own syntax in place for the element rule to parse again, or the inner
+        // separator stops being protected and the element count changes
+        ArrayType nested = new ArrayType(new ArrayType(DataTypes.STRING()));
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, nested);
+
+        assertNestedElements(cast, "[[\"a,b\"], [c]]", new String[] {"a,b"}, new String[] {"c"});
+        assertNestedElements(cast, "[[a\\,b], [c]]", new String[] {"a,b"}, new String[] {"c"});
+        assertNestedElements(cast, "[[\"null\"], [a]]", new String[] {"null"}, new String[] {"a"});
+        assertNestedElements(cast, "[[\"\"], [a]]", new String[] {""}, new String[] {"a"});
+        assertNestedElements(cast, "[[\" a \"], [b]]", new String[] {" a "}, new String[] {"b"});
+        assertNestedElements(cast, "[[1, 2], [3]]", new String[] {"1", "2"}, new String[] {"3"});
+    }
+
+    private static void assertNestedElements(
+            CastExecutor<BinaryString, InternalArray> cast, String literal, String[]... expected) {
+        InternalArray outer = cast.cast(BinaryString.fromString(literal));
+        assertThat(outer.size()).as("outer size of %s", literal).isEqualTo(expected.length);
+        for (int i = 0; i < expected.length; i++) {
+            InternalArray inner = outer.getArray(i);
+            assertThat(inner.size())
+                    .as("inner size of %s at %s", literal, i)
+                    .isEqualTo(expected[i].length);
+            for (int j = 0; j < expected[i].length; j++) {
+                assertThat(inner.getString(j).toString())
+                        .as("element %s.%s of %s", i, j, literal)
+                        .isEqualTo(expected[i][j]);
+            }
+        }
+    }
+
+    @Test
+    public void testStringToArrayEscapedNullIsALiteral() {
+        ArrayType arrayType = new ArrayType(DataTypes.STRING());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // escaping, like quoting, says the token is written text rather than the null literal
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[\\null, x]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("null"), BinaryString.fromString("x")
+                        }));
+    }
+
+    @Test
+    public void testStringToRowKeepsWhitespaceOnlyField() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.STRING()),
+                        DataTypes.FIELD(1, "f1", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "f2", DataTypes.STRING()));
+        CastExecutor<BinaryString, InternalRow> cast =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
+        // a field written as whitespace is an empty field, not an absent one: dropping it would
+        // turn a working cast into a field count mismatch
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{a,  ,b}"),
+                GenericRow.of(
+                        BinaryString.fromString("a"),
+                        BinaryString.fromString(""),
+                        BinaryString.fromString("b")));
+    }
+
+    @Test
     public void testSplitMapEntriesWithQuotes() {
         String content = "1, \"abc\"";
         List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);

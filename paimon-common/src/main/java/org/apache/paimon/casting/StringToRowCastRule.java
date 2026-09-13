@@ -148,7 +148,7 @@ class StringToRowCastRule extends AbstractCastRule<BinaryString, InternalRow> {
             TokenSplitter.Token token, CastExecutor<BinaryString, Object> castExecutor) {
         String value = token.value();
         // only an unquoted null is the null field; "null" is the four-character string
-        return !token.quoted() && "null".equals(value)
+        return !token.literal() && "null".equals(value)
                 ? null
                 : castExecutor.cast(BinaryString.fromString(value));
     }

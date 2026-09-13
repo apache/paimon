@@ -29,32 +29,36 @@ import java.util.Stack;
  * escapes and nesting.
  *
  * <p>A separator only separates outside quotes and at bracket depth zero, so {@code "a,b"} and
- * {@code [a, b]} each stay one token. Quotes and backslashes are grouping syntax and do not survive
- * into the value, but whether a token was quoted does: quoting is how the literal text {@code null}
- * and the empty string are written, which are otherwise unrepresentable.
+ * {@code [a, b]} each stay one token.
+ *
+ * <p>Quotes and backslashes are this level's syntax, so they are removed at depth zero and kept
+ * verbatim inside a nested literal, where they are the inner level's syntax and the rule for that
+ * element parses them again. Whether they appeared at depth zero is remembered: quoting or escaping
+ * is how the literal text {@code null} and the empty string are written, which are otherwise
+ * unrepresentable.
  *
  * <p>Whitespace around a token is dropped; whitespace inside quotes is kept.
  */
 class TokenSplitter {
 
-    /** One token of a literal body, plus whether quotes contributed to it. */
+    /** One token of a literal body, plus whether its value was written as a literal. */
     static class Token {
 
         private final String value;
-        private final boolean quoted;
+        private final boolean literal;
 
-        Token(String value, boolean quoted) {
+        Token(String value, boolean literal) {
             this.value = value;
-            this.quoted = quoted;
+            this.literal = literal;
         }
 
         String value() {
             return value;
         }
 
-        /** Whether the token was written with quotes, which makes its value a literal string. */
-        boolean quoted() {
-            return quoted;
+        /** Whether quotes or an escape made this a literal string rather than a bare word. */
+        boolean literal() {
+            return literal;
         }
     }
 
@@ -66,25 +70,43 @@ class TokenSplitter {
         Stack<Character> bracketStack = new Stack<>();
         boolean inQuotes = false;
         boolean escaped = false;
-        boolean quoted = false;
+        boolean literal = false;
+        // whether this token received any character at all, whitespace included
+        boolean present = false;
         // length of current up to the last character that was not unquoted whitespace
         int end = 0;
 
         for (char c : content.toCharArray()) {
+            boolean nested = !bracketStack.isEmpty();
             if (escaped) {
-                // an escaped character stands for itself; the backslash is syntax
+                // the escapee stands for itself and is never read as syntax
                 escaped = false;
+                present = true;
                 current.append(c);
                 end = current.length();
                 continue;
             }
             if (c == '\\') {
                 escaped = true;
+                present = true;
+                if (nested) {
+                    // the inner rule has to see the escape to protect its own separators
+                    current.append(c);
+                    end = current.length();
+                } else {
+                    literal = true;
+                }
                 continue;
             }
             if (c == '"') {
                 inQuotes = !inQuotes;
-                quoted = true;
+                present = true;
+                if (nested) {
+                    current.append(c);
+                    end = current.length();
+                } else {
+                    literal = true;
+                }
                 continue;
             }
             if (!inQuotes) {
@@ -93,32 +115,35 @@ class TokenSplitter {
                 } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
                     bracketStack.pop();
                 } else if (c == ',' && bracketStack.isEmpty()) {
-                    addToken(tokens, current, end, quoted);
+                    addToken(tokens, current, end, literal, present);
                     current.setLength(0);
                     end = 0;
-                    quoted = false;
+                    literal = false;
+                    present = false;
                     continue;
                 } else if (Character.isWhitespace(c) && end == 0) {
                     // leading whitespace outside quotes is not part of the token
+                    present = true;
                     continue;
                 }
             }
+            present = true;
             current.append(c);
             if (inQuotes || !Character.isWhitespace(c)) {
                 end = current.length();
             }
         }
 
-        addToken(tokens, current, end, quoted);
+        addToken(tokens, current, end, literal, present);
         return tokens;
     }
 
     private static void addToken(
-            List<Token> tokens, StringBuilder current, int end, boolean quoted) {
-        // an empty unquoted token is absent rather than empty, so a trailing or doubled
-        // separator does not invent a value
-        if (end > 0 || quoted) {
-            tokens.add(new Token(current.substring(0, end), quoted));
+            List<Token> tokens, StringBuilder current, int end, boolean literal, boolean present) {
+        // a token that never received a character is absent rather than empty, so a trailing or
+        // doubled separator does not invent a value; one that received only whitespace is empty
+        if (present || literal) {
+            tokens.add(new Token(current.substring(0, end), literal));
         }
     }
 }
