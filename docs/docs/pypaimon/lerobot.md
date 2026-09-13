@@ -227,8 +227,7 @@ on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
 to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
 either decoder.
 
-Subclass `PaimonDatasetReader` when one logical frame is assembled from
-multiple tables:
+Subclass `PaimonDatasetReader` for a custom logical frame layout:
 
 ```python
 from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset
@@ -249,6 +248,6 @@ reader = CustomDatasetReader(version, delta_timestamps=delta_timestamps)
 dataset = PaimonLeRobotDataset(reader)
 ```
 
-`PaimonDatasetReader` may query any tables. It batches logical row reads and
-reuses the standard Episode, delta-window, media, and Torch handling. Readers
-returning media descriptors must set `file_io` before calling `super().__init__`.
+`PaimonDatasetReader` batches logical row reads and reuses the standard
+Episode, delta-window, media, and Torch handling. Readers returning media
+descriptors must set `file_io` before calling `super().__init__`.
