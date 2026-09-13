@@ -41,8 +41,9 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
 
     public RestoreAndFailCommittableStateManager(
             SerializableSupplier<VersionedSerializer<GlobalCommitT>> committableSerializer,
-            boolean partitionMarkDoneRecoverFromState) {
-        super(committableSerializer, partitionMarkDoneRecoverFromState);
+            boolean partitionMarkDoneRecoverFromState,
+            EndInputCommittableHandler<GlobalCommitT> endInputHandler) {
+        super(committableSerializer, partitionMarkDoneRecoverFromState, endInputHandler);
     }
 
     @Override

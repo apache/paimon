@@ -41,8 +41,31 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** {@link Committer} for dynamic store. */
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
+
+    public static final EndInputCommittableHandler<ManifestCommittable> END_INPUT_HANDLER =
+            new EndInputCommittableHandler<ManifestCommittable>() {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public boolean isEndInput(ManifestCommittable committable) {
+                    return committable.identifier() == CommitterOperator.END_INPUT_CHECKPOINT_ID;
+                }
+
+                @Override
+                public ManifestCommittable merge(
+                        ManifestCommittable target, ManifestCommittable source) {
+                    checkArgument(
+                            target.identifier() == source.identifier(),
+                            "Cannot merge committables from different checkpoints %s and %s.",
+                            target.identifier(),
+                            source.identifier());
+                    return mergeManifestCommittables(target, source);
+                }
+            };
 
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
@@ -104,6 +127,15 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             manifestCommittable.addFileCommittable(file);
         }
         return manifestCommittable;
+    }
+
+    static ManifestCommittable mergeManifestCommittables(
+            ManifestCommittable target, ManifestCommittable source) {
+        for (CommitMessage commitMessage : source.fileCommittables()) {
+            target.addFileCommittable(commitMessage);
+        }
+        source.properties().forEach(target::addProperty);
+        return target;
     }
 
     @Override
