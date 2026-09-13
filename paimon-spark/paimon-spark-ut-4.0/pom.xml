@@ -59,6 +59,14 @@ under the License.
              dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
              otherwise it inherits scala.binary.version=2.12 from paimon-parent. -->
         <scala.binary.version>2.13</scala.binary.version>
+        <!-- The tests belong to `paimon-spark-ut`, which runs them against the baseline. This module
+             exists only to produce a 4.0-compiled test-jar, so nothing should run them a second time
+             here. Both surefire and scalatest-maven-plugin bind their `skipTests` parameter to this
+             property; `maven.test.skip` would also skip test compilation and leave the test-jar
+             empty. Without this, surefire inherits the root pom's `default-test` and
+             `integration-tests` executions and fails on `TestLoggerExtension` with
+             `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder`. -->
+        <skipTests>true</skipTests>
     </properties>
 
     <dependencies>
@@ -216,16 +224,6 @@ under the License.
                 </executions>
             </plugin>
 
-            <!-- The tests belong to `paimon-spark-ut`, which already runs them against the baseline.
-                 This module exists only to produce a 4.0-compiled test-jar for the 4.0 module to
-                 consume, so running them a second time here would just double CI time. -->
-            <plugin>
-                <groupId>org.scalatest</groupId>
-                <artifactId>scalatest-maven-plugin</artifactId>
-                <configuration>
-                    <skipTests>true</skipTests>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 </project>
