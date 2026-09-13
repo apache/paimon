@@ -142,9 +142,11 @@ public class ParameterUtils {
         if (data != null) {
             JsonNode jsonArray = JsonSerdeUtil.fromJson(data, JsonNode.class);
             if (jsonArray.isArray()) {
-                // one counter for the whole array: a user-supplied parameter list may omit the
-                // ids, and each field still needs its own
-                AtomicInteger fieldId = new AtomicInteger(-1);
+                // A counter only for a list that carries no ids at all, and one counter for the
+                // whole list so each field gets its own. Supplying it when some field already has
+                // an id would let the rest silently draw a colliding one, so in that case pass
+                // null and let the parser reject the list.
+                AtomicInteger fieldId = carriesAnyFieldId(jsonArray) ? null : new AtomicInteger(-1);
                 for (JsonNode objNode : jsonArray) {
                     DataField dataField = DataTypeJsonParser.parseDataField(objNode, fieldId);
                     list.add(dataField);
@@ -152,5 +154,14 @@ public class ParameterUtils {
             }
         }
         return list;
+    }
+
+    private static boolean carriesAnyFieldId(JsonNode jsonArray) {
+        for (JsonNode objNode : jsonArray) {
+            if (objNode.get("id") != null) {
+                return true;
+            }
+        }
+        return false;
     }
 }

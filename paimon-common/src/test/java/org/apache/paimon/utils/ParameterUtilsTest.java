@@ -57,13 +57,38 @@ class ParameterUtilsTest {
 
     @Test
     void testParseDataFieldArrayRejectsPartialIds() {
+        // both orders must be rejected: supplying a counter to a list that already carries an id
+        // would let the id-less fields silently draw a colliding one
         assertThatThrownBy(
                         () ->
                                 ParameterUtils.parseDataFieldArray(
                                         "[{\"name\":\"a\",\"type\":\"INT\"},"
                                                 + "{\"id\":7,\"name\":\"b\",\"type\":\"STRING\"}]"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Partial field id is not allowed");
+                .hasMessageContaining("Field id is required");
+
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"name\":\"b\",\"type\":\"STRING\"}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
+    }
+
+    @Test
+    void testParseDataFieldArrayRejectsIdLessNestedField() {
+        // a nested row inside an explicitly numbered list would otherwise draw id 0 and collide
+        // with the first top-level field
+        assertThatThrownBy(
+                        () ->
+                                ParameterUtils.parseDataFieldArray(
+                                        "[{\"id\":0,\"name\":\"a\",\"type\":\"INT\"},"
+                                                + "{\"id\":1,\"name\":\"b\",\"type\":"
+                                                + "{\"type\":\"ROW\",\"fields\":"
+                                                + "[{\"name\":\"x\",\"type\":\"INT\"}]}}]"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Field id is required");
     }
 
     @Test
