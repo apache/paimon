@@ -148,7 +148,7 @@ import static com.amazonaws.util.StringUtils.UTF8;
 //  This class is copied from aws-java-sdk-s3 (Apache License 2.0)
 //  in order to replaced {@code XMLReaderFactory.createXMLReader} by
 //  {@code SAX_PARSER_FACTORY.newSAXParser().getXMLReader()} to
-//  avoid JDK-8015099.
+//  avoid JDK-8015099 when the MinIO test fixture uses the SDK v1 client.
 //
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------

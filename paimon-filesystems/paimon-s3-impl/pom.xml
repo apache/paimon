@@ -49,25 +49,10 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- AWS dependencies (bundled) -->
+        <!-- AWS SDK v1 support for legacy credential providers. S3A uses SDK v2 clients. -->
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-core</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-s3</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-kms</artifactId>
-            <version>${fs.s3.aws.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-dynamodb</artifactId>
             <version>${fs.s3.aws.version}</version>
         </dependency>
         <dependency>
@@ -111,7 +96,9 @@
             </exclusions>
         </dependency>
 
-        <!-- AWS SDK v2 dependencies - only include necessary modules -->
+        <!-- AWS SDK v2 dependencies used by S3A and its credential providers.
+             IAM, Glue, DynamoDB and Lake Formation clients are not needed for S3 access.
+             IAM role credentials are handled by auth and STS, not the IAM service client. -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>apache-client</artifactId>
@@ -134,11 +121,6 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
-            <artifactId>iam</artifactId>
-            <version>${fs.s3.awssdk.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
             <artifactId>sso</artifactId>
             <version>${fs.s3.awssdk.version}</version>
         </dependency>
@@ -154,22 +136,7 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
-            <artifactId>glue</artifactId>
-            <version>${fs.s3.awssdk.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
-            <version>${fs.s3.awssdk.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>dynamodb</artifactId>
-            <version>${fs.s3.awssdk.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>lakeformation</artifactId>
             <version>${fs.s3.awssdk.version}</version>
         </dependency>
         <dependency>
@@ -185,6 +152,14 @@
             <version>${jaxb.api.version}</version>
             <!-- packaged as an optional dependency that is only accessible on Java 11+ -->
             <scope>provided</scope>
+        </dependency>
+
+        <!-- The MinIO fixture uses the SDK v1 S3 client. -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-s3</artifactId>
+            <version>${fs.s3.aws.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -307,15 +282,6 @@
                                         <exclude>PropertyList-1.0.dtd</exclude>
                                         <exclude>META-INF/services/javax.xml.stream.*</exclude>
                                         <exclude>META-INF/LICENSE.txt</exclude>
-                                    </excludes>
-                                </filter>
-                                <filter>
-                                    <artifact>com.amazonaws:aws-java-sdk-s3</artifact>
-                                    <!-- Make sure we are using the overridden XmlResponsesSaxParser.
-                                        Filter must be removed as soon as XmlResponsesSaxParser of this module is
-                                        dropped, for example when discontinuing support for Java 8. -->
-                                    <excludes>
-                                        <exclude>com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser**</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

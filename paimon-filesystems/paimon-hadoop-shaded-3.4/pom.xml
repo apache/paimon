@@ -131,6 +131,12 @@
                     <artifactId>kerb-simplekdc</artifactId>
                 </exclusion>
                 <exclusion>
+                    <!-- Hadoop uses hadoop-shaded-guava. The unshaded copy is only needed by Curator,
+                         which is excluded below. -->
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>org.apache.curator</groupId>
                     <artifactId>curator-client</artifactId>
                 </exclusion>
