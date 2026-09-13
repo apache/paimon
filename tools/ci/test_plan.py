@@ -17,6 +17,7 @@
 """Behavioral checks for CI routing and the complete PR/push diff."""
 
 import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -171,6 +172,52 @@ class GitDiffTest(unittest.TestCase):
         self.assertIsNone(plan.changed_paths('workflow_dispatch', {}))
         with patch('subprocess.check_output', side_effect=subprocess.CalledProcessError(128, 'git')):
             self.assertIsNone(plan.changed_paths('push', {'before': 'a' * 40, 'after': self.base}))
+
+    def run_pr_plan(self, base, head):
+        Path('event.json').write_text(json.dumps({
+            'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}))
+        env = {'GITHUB_EVENT_NAME': 'pull_request', 'GITHUB_EVENT_PATH': 'event.json',
+               'GITHUB_OUTPUT': 'output.txt', 'GITHUB_STEP_SUMMARY': 'summary.md'}
+        with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()) as log:
+            plan.main()
+        outputs = dict(line.split('=', 1) for line in Path('output.txt').read_text().splitlines())
+        return {key: json.loads(value) for key, value in outputs.items()}, log.getvalue()
+
+    def test_pr_unavailable_diff_runs_full_ci_with_unchanged_oversized_file(self):
+        self.commit('docs/static/old image.png', 'x' * (1048576 + 1))
+        base = self.git('rev-parse', 'HEAD')
+        self.commit('paimon-spark/Change.scala', 'spark')
+        head = self.git('rev-parse', 'HEAD')
+        git_output = subprocess.check_output
+
+        def unavailable_diff(command, *args, **kwargs):
+            if command[:2] == ['git', 'diff']:
+                raise subprocess.CalledProcessError(128, command)
+            return git_output(command, *args, **kwargs)
+
+        with patch('subprocess.check_output', side_effect=unavailable_diff):
+            outputs, log = self.run_pr_plan(base, head)
+        self.assertTrue(all(outputs[key] for key in ('java', 'python', 'docs', 'licensing')))
+        self.assertEqual(len(outputs['matrix']['include']), 13)
+        summary = Path('summary.md').read_text()
+        self.assertIn('Full run (manual or unavailable diff).', summary)
+        self.assertIn('Skipping changed-file size check', log)
+        self.assertIn('Skipping changed-file size check', summary)
+
+    def test_pr_size_guard_ignores_unchanged_but_rejects_changed_oversized_files(self):
+        self.commit('docs/static/old image.png', 'x' * (1048576 + 1))
+        base = self.git('rev-parse', 'HEAD')
+        self.commit('paimon-spark/Change.scala', 'spark')
+        outputs, _ = self.run_pr_plan(base, self.git('rev-parse', 'HEAD'))
+        self.assertEqual(len(outputs['matrix']['include']), 6)
+
+        for path in ('docs/static/old image.png', 'docs/static/new image.png'):
+            with self.subTest(path=path):
+                base = self.git('rev-parse', 'HEAD')
+                self.commit(path, 'y' * (1048576 + 1))
+                with self.assertRaisesRegex(ValueError, 'Changed file exceeds 1 MiB') as error:
+                    self.run_pr_plan(base, self.git('rev-parse', 'HEAD'))
+                self.assertIn(path, str(error.exception))
 
     def test_github_outputs_are_valid_json_and_summary_explains_selection(self):
         self.commit('paimon-spark/Change.scala', 'spark')

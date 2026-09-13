@@ -152,13 +152,14 @@ def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     paths = changed_paths(event_name, event)
     plan = select(paths or [], full=paths is None)
+    size_warning = None
     if event_name == "pull_request":
-        # Even if diff resolution fails, keep the file-size guard effective.
-        size_paths = paths
-        if size_paths is None:
-            size_paths = [os.fsdecode(p) for p in subprocess.check_output(
-                ["git", "ls-files", "-z"]).split(b"\0") if p]
-        check_file_sizes(size_paths)
+        if paths is None:
+            # Existing oversized files must not block the full-CI fallback.
+            size_warning = "Skipping changed-file size check because the PR diff is unavailable."
+            print("::warning::" + size_warning)
+        else:
+            check_file_sizes(paths)
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         for key, value in plan.items():
             output.write(key + "=" + json.dumps(value, separators=(",", ":")) + "\n")
@@ -166,6 +167,8 @@ def main():
         summary.write("## CI selection\n\n")
         summary.write("Full run (manual or unavailable diff).\n\n" if paths is None
                       else "Compared {} changed paths.\n\n".format(len(paths)))
+        if size_warning:
+            summary.write("**Warning:** " + size_warning + "\n\n")
         for lane in plan["matrix"]["include"]:
             summary.write("- " + lane["name"] + "\n")
         for key in ("python", "docs", "licensing"):

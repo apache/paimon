@@ -19,6 +19,10 @@ Diffs are read from Git without a changed-file API limit. If a complete diff is
 unavailable (including a new branch), CI runs all suites. Manual dispatch also
 runs everything.
 
+PRs check changed files against a 1 MiB size limit. When the PR diff is unavailable,
+this check is skipped with a warning in the log and run summary so that existing
+oversized files do not block the full CI run.
+
 | Changed paths | Java tests |
 | --- | --- |
 | `paimon-spark/**` | Spark 3/4, core and integrations, Flink 1/Spark E2E |
