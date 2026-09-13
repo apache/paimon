@@ -317,14 +317,13 @@ public class HilbertIndexer implements Serializable {
         long[] data = Arrays.stream(points).mapToLong(Long::longValue).toArray();
         HilbertCurve hilbertCurve = HilbertCurve.bits(BITS_NUM).dimensions(points.length);
         BigInteger index = hilbertCurve.index(data);
-        // an N-dimensional 63-bit index needs up to 63*N/8 + 1 bytes (the extra one is
-        // BigInteger's sign byte when the top bit is set); keep the legacy 63-byte width
-        // for up to 8 dimensions — which still truncates the low byte for the half of the
-        // space with the top bit set, preserved only for byte stability of existing keys —
-        // and use the full width beyond that instead of silently dropping low-order bits.
-        // Hilbert keys are transient in all current consumers, so nothing persists the
-        // legacy shape.
-        int paddingBytes = data.length <= 8 ? BITS_NUM : BITS_NUM * data.length / 8 + 1;
+        // an N-dimensional 63-bit index needs up to 63*N/8 + 1 bytes: the extra byte covers
+        // BigInteger's sign byte when the top bit is set. paddingToNByte drops trailing bytes
+        // when the array is longer than the width, so a narrower width silently discards
+        // low-order bits — at 8 dimensions that also inverts the order, because the sign byte
+        // makes an upper-half index sort below a smaller lower-half one. Hilbert keys are
+        // transient sort keys in every consumer, so widening them breaks nothing.
+        int paddingBytes = BITS_NUM * data.length / 8 + 1;
         return ConvertBinaryUtil.paddingToNByte(index.toByteArray(), paddingBytes);
     }
 

@@ -23,9 +23,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.davidmoten.hilbert.HilbertCurve;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -88,10 +92,58 @@ public class HilbertIndexerTest {
         assertThat(highSecond).hasSize(127);
         assertThat(highFirst).isNotEqualTo(highSecond);
 
-        // up to 8 dimensions keep the legacy 63-byte width, so existing indexes are stable
-        assertThat(HilbertIndexer.hilbertCurvePosBytes(new Long[] {0L, 0L})).hasSize(63);
+        // the width is 63*N/8 + 1 for every N, so a 2-dimension key is 16 bytes and an
+        // 8-dimension one is 64 — the extra byte over the 63-byte magnitude is what makes
+        // room for BigInteger's sign byte
+        assertThat(HilbertIndexer.hilbertCurvePosBytes(new Long[] {0L, 0L})).hasSize(16);
         assertThat(HilbertIndexer.hilbertCurvePosBytes(new Long[] {0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L}))
-                .hasSize(63);
+                .hasSize(64);
+    }
+
+    /**
+     * At 8 dimensions the index fills 63 bytes, so the top half of the space carries
+     * BigInteger's sign byte and spills to 64. Truncating that back to 63 does not merely lose
+     * resolution: the leading zero makes a large index sort below a smaller one.
+     */
+    @Test
+    public void testEightDimensionKeysOrderLikeTheirIndex() {
+        List<Long[]> points = new ArrayList<>();
+        for (long i = 0; i < 24; i++) {
+            // spread the points over the whole space so some land in the top half
+            long v = Long.MAX_VALUE / 23 * i;
+            points.add(new Long[] {v, v / 3, i, Long.MAX_VALUE - v, v / 7, i * 31, v / 11, i});
+        }
+
+        for (Long[] left : points) {
+            for (Long[] right : points) {
+                int indexOrder = index(left).compareTo(index(right));
+                int keyOrder =
+                        compareUnsigned(
+                                HilbertIndexer.hilbertCurvePosBytes(left),
+                                HilbertIndexer.hilbertCurvePosBytes(right));
+                assertThat(Integer.signum(keyOrder))
+                        .as(
+                                "key order must follow index order for %s vs %s",
+                                Arrays.toString(left), Arrays.toString(right))
+                        .isEqualTo(Integer.signum(indexOrder));
+            }
+        }
+    }
+
+    private static BigInteger index(Long[] points) {
+        long[] data = Arrays.stream(points).mapToLong(Long::longValue).toArray();
+        return HilbertCurve.bits(63).dimensions(points.length).index(data);
+    }
+
+    private static int compareUnsigned(byte[] left, byte[] right) {
+        assertThat(left).hasSameSizeAs(right);
+        for (int i = 0; i < left.length; i++) {
+            int cmp = Integer.compare(left[i] & 0xFF, right[i] & 0xFF);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return 0;
     }
 
     private static GenericRow booleanRow(Boolean value) {
