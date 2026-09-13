@@ -3510,6 +3510,9 @@ class BatchVectorSearchTest(unittest.TestCase):
         def _fake_create(index_type, file_io, index_path,
                          index_io_meta_list, options=None):
             class _FakeReader(GlobalIndexReader):
+                def vector_metric(self_inner):
+                    return "l2"
+
                 def visit_batch_vector_search(self_inner, bvs):
                     captured_limits.append(bvs.limit)
                     return _completed_future([

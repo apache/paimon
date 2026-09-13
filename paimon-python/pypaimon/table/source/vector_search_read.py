@@ -86,6 +86,31 @@ class AbstractVectorSearchReadImpl:
         self._filter = filter_
         self._partition_filter = partition_filter
         self._options = dict(options or {})
+        self._index_metric = None
+
+    def _search_metric(self, index_type=None):
+        if self._index_metric is not None:
+            return self._index_metric
+        return _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+
+    def _record_index_metric(self, reader, index_type):
+        """Keep one persisted metric for indexed scores, raw search and refinement."""
+        metric_getter = getattr(reader, "vector_metric", None)
+        if metric_getter is None:
+            return
+        metric = _normalize_metric(metric_getter())
+        requested = _configured_vector_metric(
+            self._options, self._vector_column, index_type)
+        if requested is not None and requested != metric:
+            raise ValueError(
+                "Query vector metric '%s' does not match index metric '%s' for column '%s'."
+                % (requested, metric, self._vector_column.name))
+        if self._index_metric is not None and self._index_metric != metric:
+            raise ValueError(
+                "Cannot merge vector indexes with different metrics '%s' and '%s' for column '%s'."
+                % (self._index_metric, metric, self._vector_column.name))
+        self._index_metric = metric
 
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
@@ -235,7 +260,12 @@ class AbstractVectorSearchReadImpl:
             index_io_meta_list,
             self._table.table_schema.options,
         )
-        return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        try:
+            self._record_index_metric(reader, vector_index_files[0].index_type)
+            return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        except Exception:
+            reader.close()
+            raise
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
               query_vector, search_limit, include_row_ids):
@@ -275,8 +305,7 @@ class AbstractVectorSearchReadImpl:
             return DictBasedScoredIndexResult({})
 
         top_k_heap = []
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
+        metric = self._search_metric(index_type)
         row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
         vectors = table.column(self._vector_column.name).to_pylist()
         for row_id, stored in zip(row_ids, vectors):
@@ -444,8 +473,7 @@ class AbstractVectorSearchReadImpl:
 
         raw_vectors = self._read_raw_vectors(
             union_candidates, include_filter=False, snapshot=snapshot)
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
+        metric = self._search_metric(index_type)
         return [
             self._score_raw_vectors(
                 candidates[i].results(),
@@ -488,6 +516,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         self._query_vector = query_vector
 
     def _read(self, splits, snapshot):
+        self._index_metric = None
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
@@ -550,6 +579,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         self._query_vectors = list(query_vectors)
 
     def _read_batch(self, splits, snapshot):
+        self._index_metric = None
         n = len(self._query_vectors)
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
@@ -759,41 +789,31 @@ def _table_options_map(table):
     return table_options.to_map() if table_options is not None else {}
 
 
-def _raw_search_metric(table, vector_column, options, index_type=None):
-    candidates = []
+def _configured_vector_metric(options, vector_column, index_type=None):
     field_prefix = "fields.%s." % vector_column.name
     index_prefix = "%s." % index_type if index_type else None
-    for key in [
-        field_prefix + "distance.metric",
-        field_prefix + "metric",
-        *(([
-            index_prefix + "distance.metric",
-            index_prefix + "metric",
-        ]) if index_prefix is not None else []),
-        "test.vector.metric",
-        "lumina.distance.metric",
-        "distance.metric",
-        "metric",
-    ]:
+    keys = [field_prefix + "distance.metric", field_prefix + "metric"]
+    if index_prefix is not None:
+        keys.extend([index_prefix + "distance.metric", index_prefix + "metric"])
+    keys.extend(["test.vector.metric", "lumina.distance.metric", "distance.metric", "metric"])
+    for key in keys:
         if key in options:
-            candidates.append(options[key])
+            return _normalize_metric(options[key])
+    return None
+
+
+def _raw_search_metric(table, vector_column, options, index_type=None):
+    from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+
     table_map = _table_options_map(table)
-    for key in [
-        field_prefix + "distance.metric",
-        field_prefix + "metric",
-        *(([
-            index_prefix + "distance.metric",
-            index_prefix + "metric",
-        ]) if index_prefix is not None else []),
-        "test.vector.metric",
-        "lumina.distance.metric",
-        "distance.metric",
-        "metric",
-    ]:
-        if key in table_map:
-            candidates.append(table_map[key])
-    if candidates:
-        return _normalize_metric(candidates[0])
+    for source in (options, table_map):
+        configured = _configured_vector_metric(source, vector_column, index_type)
+        if configured is not None:
+            return configured
+
+    # Before an index exists, use its writer's default, not another column's metric.
+    if index_type in VINDEX_IDENTIFIERS:
+        return "inner_product"
 
     inferred = None
     for key, value in list(options.items()) + list(table_map.items()):
