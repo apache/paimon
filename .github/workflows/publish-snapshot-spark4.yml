@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: Publish Snapshot
+name: Publish / Snapshot / Spark 4
 
 on:
   schedule:
@@ -25,22 +25,24 @@ on:
   workflow_dispatch:
 
 env:
-  JDK_VERSION: 8
+  JDK_VERSION: 17
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
+  group: publish-snapshot-spark4-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   publish-snapshot:
     if: github.repository == 'apache/paimon'
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      # temporarily publish the jdk8 version to maven
-      # lately when jdk is deprecated, we need update it to jdk11
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v5
         with:
@@ -50,9 +52,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.m2/repository
-          key: snapshot-maven-${{ hashFiles('**/pom.xml') }}
+          key: snapshot-maven-spark4-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
-            snapshot-maven-
+            snapshot-maven-spark4-${{ runner.os }}-${{ runner.arch }}-
       - name: Publish snapshot
         env:
           ASF_USERNAME: ${{ secrets.NEXUS_USER }}
@@ -64,9 +66,9 @@ jobs:
           echo "<id>apache.snapshots.https</id><username>$ASF_USERNAME</username>" >> $tmp_settings
           echo "<password>$ASF_PASSWORD</password>" >> $tmp_settings
           echo "</server></servers></settings>" >> $tmp_settings
-          
-          mvn --settings $tmp_settings -ntp clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,flink1
-          # deploy for scala 2.13
-          mvn --settings $tmp_settings -ntp clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,scala-2.13,flink1 -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark3-common_2.13,org.apache.paimon:paimon-spark-3.2_2.13,org.apache.paimon:paimon-spark-3.3_2.13,org.apache.paimon:paimon-spark-3.4_2.13,org.apache.paimon:paimon-spark-3.5_2.13
+        
+          mvn --settings $tmp_settings -ntp clean install -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1 -pl org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13 -am
+          # skip deploy paimon-spark-common_2.13 since they are already deployed in publish-snapshot.yml
+          mvn --settings $tmp_settings -ntp clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1 -pl org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-ut_2.13,org.apache.paimon:paimon-spark-4.0_2.13,org.apache.paimon:paimon-spark-4.1_2.13
 
           rm $tmp_settings
