@@ -33,7 +33,10 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.source.ChainSplit;
@@ -57,6 +60,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -348,6 +352,56 @@ public class ChainTableFileStoreTableTest {
             }
         }
         assertThat(foundChainSplit).as("Should have found at least one ChainSplit").isTrue();
+    }
+
+    @Test
+    public void testChainOverwriteReplayCompletesSnapshotCleanup() throws Exception {
+        createChainTable(options -> {});
+        FileStoreTable chainTable = loadTable();
+        FileStoreTable snapshotTable = chainTable.switchToBranch(SNAPSHOT_BRANCH);
+        FileStoreTable deltaTable = chainTable.switchToBranch(DELTA_BRANCH);
+        Map<String, String> partition =
+                ImmutableMap.of("region", "CN", "dt", "20250810", "hour", "20");
+
+        writeWithCommit(snapshotTable, row(1L, 1L, "value-1", "CN", "20250810", "20"));
+        assertThat(getResult(loadTable(), partition))
+                .containsExactly(row(1L, 1L, "value-1", "CN", "20250810", "20"));
+
+        // An overwrite of the delta branch publishes its snapshot, and only then clears the same
+        // partition of the snapshot branch so that reads fall through to the delta. Commit it
+        // through a copy on which that callback does nothing: the state it leaves behind is the
+        // one a callback that failed after the snapshot was published leaves behind.
+        Map<String, String> noCleanup = new HashMap<>();
+        noCleanup.put(CoreOptions.SCAN_FALLBACK_DELTA_BRANCH.key(), "none");
+        overwriteDelta(deltaTable.copy(noCleanup), partition, "value-2");
+        assertThat(getResult(loadTable(), partition))
+                .as("the snapshot branch still hides the delta until its partition is cleared")
+                .containsExactly(row(1L, 1L, "value-1", "CN", "20250810", "20"));
+
+        // A restarted job replays the batch under the same user and identifier. The commit is
+        // recognised as already published, so the callback is retried rather than called, and
+        // the retry has to complete the cleanup the first attempt did not.
+        overwriteDelta(deltaTable, partition, "value-2");
+
+        assertThat(deltaTable.snapshotManager().snapshotCount())
+                .as("the replay must not publish a second snapshot")
+                .isEqualTo(1);
+        assertThat(getResult(loadTable(), partition))
+                .as("the replay must complete the cleanup of the snapshot branch")
+                .containsExactly(row(1L, 2L, "value-2", "CN", "20250810", "20"));
+    }
+
+    private void overwriteDelta(FileStoreTable deltaTable, Map<String, String> partition, String v)
+            throws Exception {
+        BatchWriteBuilderImpl builder =
+                ((BatchWriteBuilderImpl) deltaTable.newBatchWriteBuilder()).withCommitUser("user");
+        builder.withOverwrite(partition);
+        try (BatchTableWrite write =
+                        builder.newWrite().withIOManager(new IOManagerImpl(tempDir.toString()));
+                InnerTableCommit commit = builder.newCommit()) {
+            write.write(row(1L, 2L, v, "CN", "20250810", "20"));
+            commit.filterAndCommit(Collections.singletonMap(0L, write.prepareCommit()));
+        }
     }
 
     private FileStoreTable loadTable() {
