@@ -40,6 +40,8 @@ import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
 import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
+import java.util.Locale
+
 import scala.collection.JavaConverters._
 
 object ReplacePaimonFunctions {
@@ -269,7 +271,7 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
       case actual if actual == expectedType => expression
       case actual =>
         throw new UnsupportedOperationException(
-          s"$argumentName must be ${expectedType.simpleString.toUpperCase} type, " +
+          s"$argumentName must be ${expectedType.simpleString.toUpperCase(Locale.ROOT)} type, " +
             s"but found ${actual.simpleString}")
     }
   }

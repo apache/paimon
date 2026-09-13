@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.spark.SparkSource;
 import org.apache.paimon.spark.SparkTypeUtils;
 import org.apache.paimon.spark.format.PaimonFormatTable;
 import org.apache.paimon.table.FormatTable;
@@ -50,15 +49,23 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /** Catalog supports format table. */
 public interface FormatTableCatalog {
 
     default boolean isFormatTable(@Nullable String provide) {
-        return provide != null
-                && SparkSource.FORMAT_NAMES().contains(provide.toLowerCase(Locale.ROOT));
+        if (provide == null) {
+            return false;
+        }
+        // compare against the enum names rather than a pre-lowered list, so the answer does not
+        // depend on the locale that was in effect when that list was built
+        for (FormatTable.Format format : FormatTable.Format.values()) {
+            if (format.name().equalsIgnoreCase(provide)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     default Table toSparkFormatTable(Identifier ident, FormatTable formatTable) {
