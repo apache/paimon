@@ -1101,7 +1101,7 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToRowKeepsWhitespaceOnlyField() {
+    public void testStringToRowWhitespaceOnlyFieldIsNotAField() {
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "f0", DataTypes.STRING()),
@@ -1111,15 +1111,37 @@ public class CastExecutorTest {
                 (CastExecutor<BinaryString, InternalRow>)
                         CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
 
-        // a field written as whitespace is an empty field, not an absent one: dropping it would
-        // turn a working cast into a field count mismatch
+        // whitespace is not part of a token, so a field made only of whitespace was never
+        // written, and where it sits does not change that
+        for (String literal : new String[] {"{a,  ,b}", "{ ,a,b}", "{a,b, }"}) {
+            assertThatThrownBy(() -> cast.cast(BinaryString.fromString(literal)))
+                    .as("%s", literal)
+                    .hasMessageContaining("Row field count mismatch. Expected: 3, Actual: 2");
+        }
+
+        // quoting is how an empty field is written
         compareCastResult(
                 cast,
-                BinaryString.fromString("{a,  ,b}"),
+                BinaryString.fromString("{a, \"\", b}"),
                 GenericRow.of(
                         BinaryString.fromString("a"),
                         BinaryString.fromString(""),
                         BinaryString.fromString("b")));
+    }
+
+    @Test
+    public void testStringToArraySkipsAnEmptyElement() {
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // an element written as nothing, with or without whitespace, is no element: handing the
+        // empty string to the int cast instead would fail the whole array
+        compareCastResult(
+                cast, BinaryString.fromString("[1,,3]"), new GenericArray(new Integer[] {1, 3}));
+        compareCastResult(
+                cast, BinaryString.fromString("[1, , 3]"), new GenericArray(new Integer[] {1, 3}));
     }
 
     @Test
