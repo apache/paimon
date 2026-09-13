@@ -25,7 +25,7 @@ from pypaimon.table.source.primary_key_scored_result import (
 from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPlan
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_read import (
-    _check_vector_dimension, _compute_score, _raw_search_metric, _to_vector_list)
+    _check_vector_dimension, _compute_score, _to_vector_list)
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
@@ -38,6 +38,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
     def read_plan(self, plan):
         if not isinstance(plan, PrimaryKeyVectorScanPlan):
             raise ValueError("Primary-key vector read requires a PrimaryKeyVectorScanPlan.")
+        self._index_metric = None
         index_type = self._table.options.primary_key_vector_index_type(
             self._vector_column.name)
         indexed_limit = self._indexed_search_limit(index_type)
@@ -115,8 +116,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
             plan.snapshot_id, source_splits, candidates)
         reader = self._table.new_read_builder().with_projection(
             [self._vector_column.name]).new_read()
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
+        metric = self._search_metric(index_type)
 
         def reranked_iter():
             for split in candidate_result.splits:
@@ -168,8 +168,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         return reranked
 
     def _raw_candidates(self, plan):
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options,
+        metric = self._search_metric(
             self._table.options.primary_key_vector_index_type(
                 self._vector_column.name))
         read_builder = self._table.new_read_builder().with_projection(
