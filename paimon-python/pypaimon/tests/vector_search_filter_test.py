@@ -201,6 +201,9 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
             return _Plan(self._row_ids)
 
     class _Read:
+        def _resolve_parallelism(self, runtime, num_splits):
+            return 1
+
         def to_arrow(self, splits):
             row_ids = list(splits)
             return pa.table({

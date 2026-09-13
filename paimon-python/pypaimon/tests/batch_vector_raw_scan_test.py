@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+import threading
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -196,6 +197,92 @@ class BatchVectorRawScanTest(BatchModeMixin, DataEvolutionTestBase, unittest.Tes
         current = builder.execute_batch_local()
         self.assertEqual([1.0], list(_scores(current[0]).values()))
         self.assertNotEqual(list(old[0].results()), list(current[0].results()))
+
+    def test_public_batch_search_preserves_split_parallelism(self):
+        table = self._create_table(partition_keys=['pt'])
+        for partition in range(4):
+            self._write_arrow(table, self._data(
+                [[1, 0], [0, 1], None, [0, 0], [partition, 1]], partition))
+        original = TableRead._arrow_batch_generator
+        for parallelism in (1, 2, 4, None):
+            options = {} if parallelism is None else {'read.parallelism': str(parallelism)}
+            read_table = table.copy(options)
+            expected_workers = 4 if parallelism is None else parallelism
+            for metric in ('l2', 'cosine', 'inner_product'):
+                for queries in ([[1, 0]], [[1, 0], [0, 1]]):
+                    with self.subTest(parallelism=parallelism, metric=metric, queries=queries):
+                        expected = [_scores(read_table.new_vector_search_builder()
+                                            .with_vector_column('embedding').with_query_vector(query)
+                                            .with_option('metric', metric).with_limit(2).execute_local())
+                                    for query in queries]
+                        barrier = threading.Barrier(expected_workers)
+                        lock = threading.Lock()
+                        state = {'active': 0, 'peak': 0, 'closed': 0}
+                        seen = []
+
+                        def tracked(table_read, splits, *args):
+                            source = original(table_read, splits, *args)
+                            with lock:
+                                state['active'] += 1
+                                state['peak'] = max(state['peak'], state['active'])
+                                seen.extend(id(split) for split in splits)
+                            try:
+                                barrier.wait(timeout=5)
+                                yield from source
+                            finally:
+                                source.close()
+                                with lock:
+                                    state['active'] -= 1
+                                    state['closed'] += 1
+
+                        with patch.object(TableRead, '_arrow_batch_generator', tracked), \
+                                patch('pypaimon.read.table_read.os.cpu_count', return_value=4):
+                            actual = (read_table.new_batch_vector_search_builder()
+                                      .with_vector_column('embedding').with_query_vectors(queries)
+                                      .with_option('metric', metric).with_limit(2).execute_batch_local())
+                        self.assertEqual(expected, [_scores(result) for result in actual])
+                        self.assertEqual(4, len(seen))
+                        self.assertEqual(4, len(set(seen)))
+                        self.assertEqual({'active': 0, 'peak': expected_workers,
+                                          'closed': expected_workers}, state)
+
+    def test_parallel_failure_closes_all_started_readers(self):
+        table = self._create_table(
+            partition_keys=['pt'], options=dict(self.table_options, **{'read.parallelism': '2'}))
+        for partition in range(4):
+            self._write_arrow(table, self._data([[1, 0], [0, 1]], partition))
+        original = TableRead._arrow_batch_generator
+        for failure in ('dimension', 'read'):
+            with self.subTest(failure=failure):
+                barrier = threading.Barrier(2)
+                lock = threading.Lock()
+                started = []
+                closed = []
+
+                def tracked(table_read, *args):
+                    source = original(table_read, *args)
+                    with lock:
+                        worker = len(started)
+                        started.append(worker)
+                    try:
+                        barrier.wait(timeout=5)
+                        for batch in source:
+                            yield batch
+                            if failure == 'read' and worker == 0:
+                                raise RuntimeError('injected parallel read failure')
+                    finally:
+                        source.close()
+                        with lock:
+                            closed.append(worker)
+
+                query = [1] if failure == 'dimension' else [1, 0]
+                exception = ValueError if failure == 'dimension' else RuntimeError
+                message = 'dimension mismatch' if failure == 'dimension' else 'injected parallel read failure'
+                with patch.object(TableRead, '_arrow_batch_generator', tracked):
+                    with self.assertRaisesRegex(exception, message):
+                        (table.new_batch_vector_search_builder().with_vector_column('embedding')
+                         .with_query_vectors([query]).with_limit(2).execute_batch_local())
+                self.assertEqual([0, 1], sorted(closed))
 
 
 if __name__ == '__main__':

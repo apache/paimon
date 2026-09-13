@@ -18,7 +18,7 @@
 """Vector search read to read index files."""
 
 from abc import ABC, abstractmethod
-from concurrent.futures import wait
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -610,19 +610,38 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
     def _read_raw_batch_search(self, raw_row_ranges, pre_filter,
                                index_type=None, snapshot=None):
         """Scan raw rows once, keeping a separate top-k heap for each query."""
-        from pypaimon.read.table_read import _ClosableArrowBatchReader
-
         heaps = [[] for _ in self._query_vectors]
         raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
         if not raw_row_ranges or not heaps:
             return [_scored_result(heap) for heap in heaps]
 
         table_read, splits = self._plan_raw_read(raw_row_ranges, True, snapshot)
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+        workers = min(len(splits), table_read._resolve_parallelism(None, len(splits)))
+        if workers <= 1:
+            return self._score_raw_splits(table_read, splits, metric)
+
+        # Keep only one streaming reader and Q top-k heaps per worker, even
+        # when the plan contains many splits. Each split is scanned once.
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(
+                self._score_raw_splits, table_read, splits[i::workers], metric)
+                for i in range(workers)]
+            for future in futures:
+                for heap, result in zip(heaps, future.result()):
+                    score_getter = result.score_getter()
+                    for row_id in result.results():
+                        _offer_score(heap, self._limit, row_id, score_getter(row_id))
+        return [_scored_result(heap) for heap in heaps]
+
+    def _score_raw_splits(self, table_read, splits, metric):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
+        heaps = [[] for _ in self._query_vectors]
         reader, batches = table_read._new_arrow_batch_reader(splits)
         # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
-            metric = _raw_search_metric(
-                self._table, self._vector_column, self._options, index_type)
             for batch in batch_reader:
                 row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
                 vectors = batch.column(self._vector_column.name).to_pylist()
