@@ -47,8 +47,7 @@ object SparkVersionCompat {
    * Reflection is immune: only invoke opcodes carry the class/interface distinction, so
    * `Class.getMethod` resolves the same either way. These four are every `CatalogManager` member
    * `paimon-spark-common` reaches today; a fifth belongs here too. Nothing enforces that
-   * automatically — `tools/spark-binary-compat/check_linkage.py` finds a direct call, but it is a
-   * manual script, not wired into the build.
+   * automatically.
    */
   private lazy val currentCatalogMethod = catalogManagerMethod("currentCatalog")
   private lazy val catalogByNameMethod = catalogManagerMethod("catalog", classOf[String])

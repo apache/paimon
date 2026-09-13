@@ -16,22 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.data
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.AbstractSparkInternalRow
-import org.apache.paimon.types.RowType
-
-import org.apache.spark.unsafe.types.VariantVal
-
-/**
- * Spark 4.0-compatible override of the `paimon-spark4-common` `Spark4InternalRow`. See
- * `Spark4ArrayData` for the rationale: neither the 4.1 `getGeography` / `getGeometry` pair nor the
- * 4.2 `getBinaryView` may appear in the bytecode we ship for 4.0 runtimes.
- */
-class Spark4InternalRow(rowType: RowType) extends AbstractSparkInternalRow(rowType) {
-
-  override def getVariant(i: Int): VariantVal = {
-    val v = row.getVariant(i)
-    new VariantVal(v.value(), v.metadata())
-  }
-}
+class KeyPropertyCaseResolutionTest extends KeyPropertyCaseResolutionTestBase

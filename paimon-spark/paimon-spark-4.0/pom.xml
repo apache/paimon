@@ -33,10 +33,12 @@ under the License.
 
     <properties>
         <spark.version>4.0.3</spark.version>
-        <!-- Spark 4.x uses SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override
-             the Paimon parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly
-             2.x; otherwise `log4j-slf4j2-impl` + `slf4j-api:1.7.32` mix produces
-             `NoClassDefFoundError: org/slf4j/spi/LoggingEventBuilder` at test startup. -->
+        <!-- This module resolves `log4j-slf4j2-impl` onto the test classpath, and that binding
+             needs SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override the Paimon
+             parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly 2.x;
+             otherwise the mix produces `NoClassDefFoundError:
+             org/slf4j/spi/LoggingEventBuilder` at test startup. `paimon-spark-4.2` resolves no
+             `log4j-slf4j2-impl` and needs no override. -->
         <slf4j.version>2.0.16</slf4j.version>
         <!-- Spark 4 only supports Scala 2.13. Pin it locally so this _2.13 module resolves its
              dependencies to _2.13 even when the spark4 profile is inactive (see issue #6682);
@@ -64,7 +66,7 @@ under the License.
 
         <!--
           `paimon-spark4-common` transitively pulls in `spark-sql-api` at the version set by
-          `paimon-spark-common.spark.version` (4.1.2 under the `spark4` profile). Spark 4.1's
+          `paimon-spark-common.spark.version` (4.2.0 under the `spark4` profile). Spark 4.1's
           `SqlApiConf` added abstract `manageParserCaches()`, which Spark 4.0's concrete
           anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
           jars produces `AbstractMethodError` at parser configuration time. Pin

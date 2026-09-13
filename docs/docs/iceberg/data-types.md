@@ -68,7 +68,7 @@ compatibility publishes only millisecond time values.
 **Note on Geospatial Types:**
 - `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.
 - Geospatial columns require Parquet for data, per-level, and changelog files. When Iceberg metadata is enabled, set `metadata.iceberg.format-version` to `3`.
-- Spark SQL supports geospatial columns in Spark 4.1 when `spark.sql.geospatial.enabled=true`, for CRSs recognized by Spark, with the `spherical` geography edge algorithm. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
+- Spark SQL supports geospatial columns in Spark 4.1 and later, for CRSs recognized by Spark, with the `spherical` geography edge algorithm. Spark 4.1 keeps them behind `spark.sql.geospatial.enabled=true` outside its own test environment; Spark 4.2 enables them by default. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
 - When Iceberg metadata is enabled, a `GEOGRAPHY` CRS cannot contain a comma, including in nested columns, because Iceberg's geospatial type grammar uses commas to separate parameters.
 - Iceberg REST catalog publication does not yet support geospatial columns. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
 

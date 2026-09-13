@@ -33,7 +33,8 @@ class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkA
   // Spark 4.2 (SPARK-57058) replaced `getGeography` / `getGeometry` on `SpecializedGetters` with a
   // single `getBinaryView`; the geo value classes `GeographyVal` / `GeometryVal` were removed with
   // them. Dispatch on the Paimon element type, which is what the pre-4.2 pair of overrides did
-  // implicitly. `paimon-spark-4.1` forks this class to keep the older two overrides.
+  // implicitly. `paimon-spark-4.1` forks this class to implement the 4.1 pair, and
+  // `paimon-spark-4.0` forks it to declare neither shape.
   override def getBinaryView(ordinal: Int): BinaryView = elementType match {
     case g: GeographyType =>
       SparkShimLoader.shim

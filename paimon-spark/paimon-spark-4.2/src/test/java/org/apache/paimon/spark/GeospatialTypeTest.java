@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests Spark 4.1 geometry and geography interoperability. */
+/** Tests Spark 4.2 geometry and geography interoperability. */
 class GeospatialTypeTest {
 
     /** Little-endian WKB for POINT(1 2): byte order, type, then two 8-byte doubles. */
@@ -75,9 +75,10 @@ class GeospatialTypeTest {
 
     @Test
     void testWkbReadWriteRoundTrip() {
-        // The geometry column uses a projected CRS on purpose, so each field's own CRS has to reach
-        // Spark for the assertions below to hold. The 4.2 fork of this test relies on the same
-        // setup to catch a transposed geometry/geography dispatch in `getBinaryView`.
+        // The geometry column uses a projected CRS on purpose. `getBinaryView` dispatches on the
+        // Paimon field type, and the two branches produce identical payloads when both columns are
+        // OGC:CRS84, so a transposed dispatch would pass unnoticed. EPSG:3857 is not a geographic
+        // CRS, so reading this column as a geography fails.
         RowType paimonType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY("EPSG:3857")),
@@ -86,10 +87,12 @@ class GeospatialTypeTest {
 
         SparkInternalRow sparkRow =
                 SparkInternalRow.create(paimonType).replace(GenericRow.of(POINT_WKB, POINT_WKB));
-        assertThat(STUtils.stAsBinary(sparkRow.getGeometry(0))).isEqualTo(POINT_WKB);
-        assertThat(STUtils.stSrid(sparkRow.getGeometry(0))).isEqualTo(3857);
-        assertThat(STUtils.stAsBinary(sparkRow.getGeography(1))).isEqualTo(POINT_WKB);
-        assertThat(STUtils.stSrid(sparkRow.getGeography(1))).isEqualTo(4326);
+        // SPARK-57058 replaced `getGeometry` / `getGeography` with a single `getBinaryView`, and
+        // split `stAsBinary` / `stSrid` into geometry and geography variants.
+        assertThat(STUtils.stGeomAsBinary(sparkRow.getBinaryView(0))).isEqualTo(POINT_WKB);
+        assertThat(STUtils.stGeomSrid(sparkRow.getBinaryView(0))).isEqualTo(3857);
+        assertThat(STUtils.stGeogAsBinary(sparkRow.getBinaryView(1))).isEqualTo(POINT_WKB);
+        assertThat(STUtils.stGeogSrid(sparkRow.getBinaryView(1))).isEqualTo(4326);
 
         SparkInternalRowWrapper internalWrapper =
                 new SparkInternalRowWrapper(sparkType, 2).replace(sparkRow);

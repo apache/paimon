@@ -56,13 +56,13 @@ class MavenCommandsTest(unittest.TestCase):
     def test_spark_retains_all_connector_versions_and_scala_variants(self):
         for scala in ('2.12', '2.13'):
             test = self.commands('spark3', scala)[1]
-            for version in ('ut', '3.2', '3.3', '3.4', '3.5'):
-                self.assertIn('org.apache.paimon:paimon-spark-' + version + '_' + scala,
-                              self.modules(test))
+            self.assertEqual(self.modules(test),
+                             {'org.apache.paimon:paimon-spark-' + version + '_' + scala
+                              for version in ('ut', '3.2', '3.3', '3.4', '3.5')})
             self.assertIn('-Pflink1,spark3,scala-' + scala, test)
         self.assertEqual(self.modules(self.commands('spark4', '2.13', 17)[1]),
                          {'org.apache.paimon:paimon-spark-' + version + '_2.13'
-                          for version in ('ut', '4.0', '4.1')})
+                          for version in ('ut', '4.0', '4.1', '4.2')})
 
     def test_core_keeps_common_and_docs_tests_and_existing_jdk11_exclusion(self):
         for java in (8, 11):
