@@ -299,14 +299,3 @@ L2 and cosine retain scalar accumulation order. Inner product retains Python
 `sum` semantics, including its behavior on newer Python versions. Existing
 Top-K tie-breaking rules are preserved. The same scoring path is used for raw and
 refined primary-key vector results.
-
-To compare Parquet reads, conversion, scoring and Top-K with the original
-scalar implementation and a blocked-scalar ablation:
-
-```shell
-python -m pypaimon.benchmark.vector_scoring_bench --output /tmp/scoring.json
-```
-
-Each variant runs in a fresh process and reports timings, process peak RSS,
-and a checksum of result row IDs and score bits. This measures the fallback
-read-and-score path; Paimon manifest planning and ANN index search are excluded.
