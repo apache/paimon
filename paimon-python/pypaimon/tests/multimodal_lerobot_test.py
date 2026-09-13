@@ -107,6 +107,15 @@ class _ManualDatasetReader(pmm.PaimonDatasetReader):
         raise NotImplementedError
 
 
+class _PickleDatasetReader(_ManualDatasetReader):
+
+    def __init__(self, value):
+        self.value = value
+
+    def __getstate__(self):
+        return {"value": self.value}
+
+
 def _replaced_contract(field, old, new):
     description = field.metadata[b"description"].decode("utf-8")
     if old not in description:
@@ -433,6 +442,15 @@ class LeRobotValidationTest(unittest.TestCase):
                          sample["action_is_pad"].tolist())
         dataset.close()
         self.assertTrue(reader.closed)
+
+    def test_dataset_does_not_proxy_pickle_protocol(self):
+        dataset = pmm.PaimonLeRobotDataset(_PickleDatasetReader(7))
+        with self.assertRaises(AttributeError):
+            dataset.__getattr__("__getstate__")
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        self.assertIsInstance(restored.reader, _PickleDatasetReader)
+        self.assertEqual(7, restored.reader.value)
 
     def test_metadata_json_preserves_nested_values(self):
         values = {

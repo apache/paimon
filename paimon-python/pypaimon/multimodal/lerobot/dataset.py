@@ -651,6 +651,8 @@ class PaimonLeRobotDataset:
         self.reader.close()
 
     def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         reader = self.__dict__.get("reader")
         if reader is None:
             raise AttributeError(name)
