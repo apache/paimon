@@ -168,14 +168,26 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * materialized with the complete manifest schema.
      */
     public CloseableIterator<ProjectedManifestEntry> scan(String fileName, Projection projection) {
+        return scan(fileName, projection, null, null);
+    }
+
+    /**
+     * Scans projected manifest entries and filters partitions and buckets before decoding nested
+     * data-file metadata.
+     */
+    public CloseableIterator<ProjectedManifestEntry> scan(
+            String fileName,
+            Projection projection,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter) {
         try {
             CloseableIterator<InternalRow> rows =
                     createManifestIterator(
                             fileIO,
                             pathFactory.toPath(fileName),
                             projection.projectedType(),
-                            null,
-                            null);
+                            partitionFilter,
+                            bucketFilter);
             return new CloseableIterator<ProjectedManifestEntry>() {
 
                 @Override

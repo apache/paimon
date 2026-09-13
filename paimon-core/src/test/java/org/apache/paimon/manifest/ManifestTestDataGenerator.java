@@ -101,6 +101,8 @@ public class ManifestTestDataGenerator {
         long numDeletedFiles = 0;
         int minBucket = Integer.MAX_VALUE;
         int maxBucket = Integer.MIN_VALUE;
+        int minTotalBuckets = Integer.MAX_VALUE;
+        int maxTotalBuckets = Integer.MIN_VALUE;
         int minLevel = Integer.MAX_VALUE;
         int maxLevel = Integer.MIN_VALUE;
         for (ManifestEntry entry : entries) {
@@ -112,6 +114,8 @@ public class ManifestTestDataGenerator {
             }
             minBucket = Math.min(minBucket, entry.bucket());
             maxBucket = Math.max(maxBucket, entry.bucket());
+            minTotalBuckets = Math.min(minTotalBuckets, entry.totalBuckets());
+            maxTotalBuckets = Math.max(maxTotalBuckets, entry.totalBuckets());
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
         }
@@ -128,7 +132,10 @@ public class ManifestTestDataGenerator {
                 minLevel,
                 maxLevel,
                 null,
-                null);
+                null,
+                null,
+                minTotalBuckets,
+                maxTotalBuckets);
     }
 
     private void mergeLevelsIfNeeded(BinaryRow partition, int bucket) {

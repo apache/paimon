@@ -1060,10 +1060,22 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.bucket-first</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Sort manifest entries by bucket before the configured partition field. This improves manifest pruning for bucket-key point lookups spanning many partitions, at the cost of wider partition ranges in each manifest.</td>
+        </tr>
+        <tr>
             <td><h5>manifest-sort.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.force-rewrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Force an explicit manifest compaction to rewrite already compacted manifest runs using the configured manifest sort order. This should be supplied as a one-shot dynamic option for maintenance, not persisted for routine writes.</td>
         </tr>
         <tr>
             <td><h5>manifest-sort.max-rewrite-size</h5></td>

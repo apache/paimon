@@ -157,6 +157,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
+        manifestsReader.withBucketFilter(bucketFilter);
         this.bucketFilter = bucketFilter;
         return this;
     }
@@ -164,6 +165,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withTotalAwareBucketFilter(
             TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
+        manifestsReader.withTotalAwareBucketFilter(totalAwareBucketFilter);
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -415,16 +417,27 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             List<ManifestFileMeta> manifests,
             Function<ManifestEntry, T> converter,
             boolean useSequential) {
-        Set<Identifier> deletedEntries =
-                FileEntry.readDeletedEntries(
-                        manifest ->
-                                readManifest(
-                                        manifest,
-                                        SimpleFileEntry::from,
-                                        FileEntry.deletedFilter(),
-                                        null),
-                        manifests,
-                        parallelism);
+        Set<Identifier> deletedEntries;
+        if (manifestEntryFilter == null) {
+            deletedEntries =
+                    FileEntry.readDeletedEntries(
+                            manifestFileFactory.create(),
+                            manifests,
+                            parallelism,
+                            manifestsReader.partitionFilter(),
+                            createBucketFilter());
+        } else {
+            deletedEntries =
+                    FileEntry.readDeletedEntries(
+                            manifest ->
+                                    readManifest(
+                                            manifest,
+                                            SimpleFileEntry::from,
+                                            FileEntry.deletedFilter(),
+                                            null),
+                            manifests,
+                            parallelism);
+        }
 
         manifests =
                 manifests.stream()

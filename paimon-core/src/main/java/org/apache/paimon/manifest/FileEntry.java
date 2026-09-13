@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.ProjectedDataFileMeta;
 import org.apache.paimon.memory.MemorySegmentUtils;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -361,6 +362,15 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
+        return readDeletedEntries(manifestFile, manifestFiles, manifestReadParallelism, null, null);
+    }
+
+    static Set<Identifier> readDeletedEntries(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifestFiles,
+            @Nullable Integer manifestReadParallelism,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable BucketFilter bucketFilter) {
         manifestFiles =
                 manifestFiles.stream()
                         .filter(file -> file.numDeletedFiles() > 0)
@@ -372,7 +382,9 @@ public interface FileEntry {
                     try (CloseableIterator<ProjectedManifestEntry> entries =
                             manifestFile.scan(
                                     manifest.fileName(),
-                                    ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                                    ProjectedManifestEntry.DELETE_ENTRY_PROJECTION,
+                                    partitionFilter,
+                                    bucketFilter)) {
                         while (entries.hasNext()) {
                             ProjectedManifestEntry entry = entries.next();
                             if (entry.isDelete()) {

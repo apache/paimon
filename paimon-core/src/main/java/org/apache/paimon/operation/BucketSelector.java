@@ -23,6 +23,7 @@ import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.manifest.ManifestBucketFilter;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.In;
@@ -31,7 +32,6 @@ import org.apache.paimon.predicate.PartitionValuePredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
-import org.apache.paimon.utils.TriFilter;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
@@ -55,9 +55,11 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitOr;
 
 /** Selector to select bucket from {@link Predicate}. */
 @ThreadSafe
-public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
+public class BucketSelector implements ManifestBucketFilter {
 
     public static final int MAX_VALUES = 1000;
+    private static final int MAX_TOTAL_BUCKET_RANGE = 10_000;
+    private static final int MAX_MANIFEST_BUCKET_COMBINATIONS = 10_000;
 
     private final BucketFunctionType bucketFunctionType;
     private final RowType rowType;
@@ -65,6 +67,7 @@ public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
     private final RowType bucketKeyType;
     private final Predicate predicate;
     private final Map<BinaryRow, Optional<PartitionSelector>> partitionSelectors;
+    private final Optional<PartitionSelector> manifestSelector;
 
     public BucketSelector(
             Predicate predicate,
@@ -78,6 +81,7 @@ public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
         this.partitionType = partitionType;
         this.bucketKeyType = bucketKeyType;
         this.partitionSelectors = new ConcurrentHashMap<>();
+        this.manifestSelector = createPartitionSelectorFromPredicate(predicate);
     }
 
     @Override
@@ -85,6 +89,24 @@ public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
         return partitionSelectors
                 .computeIfAbsent(partition, this::createPartitionSelector)
                 .map(selector -> selector.test(bucket, numBucket))
+                .orElse(true);
+    }
+
+    @Override
+    public boolean mayContain(
+            int minBucket, int maxBucket, int minTotalBuckets, int maxTotalBuckets) {
+        if (minBucket < 0
+                || maxBucket < minBucket
+                || minTotalBuckets <= 0
+                || maxTotalBuckets < minTotalBuckets
+                || (long) maxTotalBuckets - minTotalBuckets >= MAX_TOTAL_BUCKET_RANGE) {
+            return true;
+        }
+        return manifestSelector
+                .map(
+                        selector ->
+                                selector.mayContain(
+                                        minBucket, maxBucket, minTotalBuckets, maxTotalBuckets))
                 .orElse(true);
     }
 
@@ -96,9 +118,14 @@ public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
             return Optional.empty();
         }
 
+        return createPartitionSelectorFromPredicate(partRemoved.get());
+    }
+
+    private Optional<PartitionSelector> createPartitionSelectorFromPredicate(
+            Predicate sourcePredicate) {
         List<Predicate> bucketFilters =
                 pickTransformFieldMapping(
-                        splitAnd(partRemoved.get()),
+                        splitAnd(sourcePredicate),
                         rowType.getFieldNames(),
                         bucketKeyType.getFieldNames());
         if (bucketFilters.isEmpty()) {
@@ -225,6 +252,26 @@ public class BucketSelector implements TriFilter<BinaryRow, Integer, Integer> {
                 builder.add(bucketFunction.bucket(key, numBucket));
             }
             return builder.build();
+        }
+
+        private boolean mayContain(
+                int minBucket, int maxBucket, int minTotalBuckets, int maxTotalBuckets) {
+            long combinations = ((long) maxTotalBuckets - minTotalBuckets + 1) * bucketKeys.size();
+            if (combinations > MAX_MANIFEST_BUCKET_COMBINATIONS) {
+                return true;
+            }
+            for (int totalBuckets = minTotalBuckets; ; totalBuckets++) {
+                for (BinaryRow key : bucketKeys) {
+                    int bucket = bucketFunction.bucket(key, totalBuckets);
+                    if (bucket >= minBucket && bucket <= maxBucket) {
+                        return true;
+                    }
+                }
+                if (totalBuckets == maxTotalBuckets) {
+                    break;
+                }
+            }
+            return false;
         }
     }
 }

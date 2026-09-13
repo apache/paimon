@@ -60,7 +60,9 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
                 meta.maxLevel(),
                 meta.minRowId(),
                 meta.maxRowId(),
-                toStringArrayData(meta.extraFiles()));
+                toStringArrayData(meta.extraFiles()),
+                meta.minTotalBuckets(),
+                meta.maxTotalBuckets());
     }
 
     @Override
@@ -95,6 +97,8 @@ public class ManifestFileMetaSerializer extends ObjectSerializer<ManifestFileMet
                 row.isNullAt(9) ? null : row.getInt(9),
                 row.isNullAt(10) ? null : row.getLong(10),
                 row.isNullAt(11) ? null : row.getLong(11),
-                row.isNullAt(12) ? null : fromStringArrayData(row.getArray(12)));
+                row.isNullAt(12) ? null : fromStringArrayData(row.getArray(12)),
+                row.getFieldCount() <= 13 || row.isNullAt(13) ? null : row.getInt(13),
+                row.getFieldCount() <= 14 || row.isNullAt(14) ? null : row.getInt(14));
     }
 }

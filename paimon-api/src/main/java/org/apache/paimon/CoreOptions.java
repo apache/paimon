@@ -589,6 +589,16 @@ public class CoreOptions implements Serializable {
                             "Partition field name to sort manifest entries by. Validated by"
                                     + " schema validation, if not configured, defaults to the first partition field.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SORT_BUCKET_FIRST =
+            key("manifest-sort.bucket-first")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Sort manifest entries by bucket before the configured partition"
+                                    + " field. This improves manifest pruning for bucket-key point"
+                                    + " lookups spanning many partitions, at the cost of wider"
+                                    + " partition ranges in each manifest.");
+
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
                     .memoryType()
@@ -598,6 +608,16 @@ public class CoreOptions implements Serializable {
                                     + " sort rewrite pass. Sections exceeding this limit are"
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
+
+    public static final ConfigOption<Boolean> MANIFEST_SORT_FORCE_REWRITE =
+            key("manifest-sort.force-rewrite")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Force an explicit manifest compaction to rewrite already compacted"
+                                    + " manifest runs using the configured manifest sort order."
+                                    + " This should be supplied as a one-shot dynamic option for"
+                                    + " maintenance, not persisted for routine writes.");
 
     public static final ConfigOption<Boolean> MANIFEST_MERGE_OPTIMIZE_ENABLED =
             key("manifest.merge-optimize.enabled")
@@ -3223,8 +3243,16 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_SORT_PARTITION_FIELD);
     }
 
+    public boolean manifestSortBucketFirst() {
+        return options.get(MANIFEST_SORT_BUCKET_FIRST);
+    }
+
     public long manifestSortMaxRewriteSize() {
         return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
+    }
+
+    public boolean manifestSortForceRewrite() {
+        return options.get(MANIFEST_SORT_FORCE_REWRITE);
     }
 
     public boolean manifestMergeOptimizeEnabled() {

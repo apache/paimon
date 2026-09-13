@@ -27,8 +27,10 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +57,44 @@ public class BucketSelectorTest {
 
         Set<Integer> selected = selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS);
         assertThat(selected).hasSize(1);
+    }
+
+    @Test
+    public void testManifestBucketRange() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        RowType partType = RowType.of();
+        RowType bucketKeyType = DataTypes.ROW(DataTypes.FIELD(0, "k", DataTypes.INT()));
+        PredicateBuilder pb = new PredicateBuilder(rowType);
+        BucketSelector selector =
+                new BucketSelector(
+                        pb.equal(0, 5),
+                        BucketFunctionType.DEFAULT,
+                        rowType,
+                        partType,
+                        bucketKeyType);
+
+        int selected =
+                selectedBuckets(selector, BinaryRow.EMPTY_ROW, NUM_BUCKETS).iterator().next();
+        assertThat(selector.mayContain(selected, selected, NUM_BUCKETS, NUM_BUCKETS)).isTrue();
+        int different = (selected + 1) % NUM_BUCKETS;
+        assertThat(selector.mayContain(different, different, NUM_BUCKETS, NUM_BUCKETS)).isFalse();
+
+        // Unknown or excessively broad total-bucket ranges must fall back conservatively.
+        assertThat(selector.mayContain(0, 0, 0, NUM_BUCKETS)).isTrue();
+        assertThat(selector.mayContain(0, 0, 1, 20_001)).isTrue();
+
+        List<Object> values = new ArrayList<>();
+        for (int value = 0; value < BucketSelector.MAX_VALUES; value++) {
+            values.add(value);
+        }
+        BucketSelector largeSelector =
+                new BucketSelector(
+                        pb.in(0, values),
+                        BucketFunctionType.DEFAULT,
+                        rowType,
+                        partType,
+                        bucketKeyType);
+        assertThat(largeSelector.mayContain(100, 100, 1, 11)).isTrue();
     }
 
     @Test

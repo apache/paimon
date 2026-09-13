@@ -290,7 +290,11 @@ public class ManifestsTableTest extends TableTestBase {
                                                     .maxValues()
                                                     .getInt(0))),
                             manifestFileMeta.minRowId(),
-                            manifestFileMeta.maxRowId()));
+                            manifestFileMeta.maxRowId(),
+                            manifestFileMeta.minBucket(),
+                            manifestFileMeta.maxBucket(),
+                            manifestFileMeta.minTotalBuckets(),
+                            manifestFileMeta.maxTotalBuckets()));
         }
         return expectedRow;
     }
