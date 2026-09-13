@@ -1567,6 +1567,59 @@ public class JavaPyE2ETest {
         assertAdditionalMapBlobKeyTypes(table, "python");
     }
 
+    /** Java writes shared-shredding MAP columns for Python to read. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteSharedShreddingMapTable() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc")) {
+            Identifier identifier = identifier("shared_shredding_map_java_test_" + format);
+            catalog.dropTable(identifier, true);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column(
+                                    "metrics",
+                                    DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                            .option(BUCKET.key(), "-1")
+                            .option(CoreOptions.FILE_FORMAT.key(), format)
+                            .option(CoreOptions.WRITE_ONLY.key(), "true")
+                            .option("fields.metrics.map.storage-layout", "shared-shredding")
+                            .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                            .build();
+            catalog.createTable(identifier, schema, false);
+
+            Map<Object, Object> first = new LinkedHashMap<>();
+            first.put(BinaryString.fromString("hot"), 10L);
+            first.put(BinaryString.fromString("warm"), 20L);
+            first.put(BinaryString.fromString("overflow"), 30L);
+            Map<Object, Object> second = new LinkedHashMap<>();
+            second.put(BinaryString.fromString("hot"), null);
+            second.put(BinaryString.fromString("new"), 40L);
+
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(1, new GenericMap(first)));
+                write.write(GenericRow.of(2, new GenericMap(second)));
+                write.write(GenericRow.of(3, new GenericMap(Collections.emptyMap())));
+                write.write(GenericRow.of(4, null));
+                commit.commit(write.prepareCommit());
+            }
+
+            Map<Object, Object> later = new LinkedHashMap<>();
+            later.put(BinaryString.fromString("late"), 50L);
+            later.put(BinaryString.fromString("hot"), 60L);
+            table = (FileStoreTable) catalog.getTable(identifier);
+            writeBuilder = table.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(5, new GenericMap(later)));
+                commit.commit(write.prepareCommit());
+            }
+        }
+    }
+
     private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
             throws Exception {
         Map<Integer, Map<Integer, byte[]>> rows = new HashMap<>();

@@ -16,7 +16,7 @@
 #  limitations under the License.
 ################################################################################
 
-name: Release Java
+name: Release / Java packages
 
 on:
   workflow_call:

@@ -343,7 +343,7 @@ archive; the PyPaimon source distribution must not be used by itself for an
 independent release. Run the tests from
 `paimon-PAIMON_VERSION/paimon-python` on as many supported Python versions as
 your environment allows. Use the Python matrix in the candidate's
-`.github/workflows/paimon-python-checks.yml` to select relevant versions rather
+`.github/workflows/ci-python.yml` to select relevant versions rather
 than assuming that a matrix from another release applies:
 
 ```shell
