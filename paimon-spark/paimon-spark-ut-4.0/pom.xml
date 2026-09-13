@@ -34,7 +34,9 @@ under the License.
     <!--
       A second compilation of `paimon-spark-ut`'s test sources, against Spark 4.0.3 instead of the
       `spark4` profile baseline. Owns no sources of its own: `build-helper` adds
-      `../paimon-spark-ut/src/test` verbatim, so there is exactly one copy of every test to maintain.
+      `../paimon-spark-ut/src/test/scala` and `src/test/java` as test-source roots, and
+      `<testResources>` points at that module's test resources, so there is exactly one copy of every
+      test to maintain.
 
       Why a whole module rather than a second classifier on `paimon-spark-ut`: a Maven module has one
       dependency set, so producing two artifacts compiled against different Spark versions from one
@@ -46,10 +48,8 @@ under the License.
       the same sources against 4.0.3 cannot emit a reference to a symbol 4.0.3 does not have, so the
       stub is deleted here.
 
-      Serves `paimon-spark-4.0` only. `paimon-spark-4.1` needs nothing of the kind while the baseline
-      is 4.1.x, and compiling once for the whole 4.x line does not work anyway: the one-directional
-      compatibility that holds for `src/main` (a 4.0-compiled class loads on 4.1) does not hold for
-      test sources, which construct Spark internals directly.
+      Serves `paimon-spark-4.0` only: `paimon-spark-4.1` pins 4.1.2, which is the baseline, so the
+      baseline build already matches its runtime and it keeps consuming `paimon-spark-ut` directly.
     -->
     <properties>
         <spark.version>4.0.3</spark.version>
@@ -85,10 +85,11 @@ under the License.
         <!--
           `${paimon-sparkx-common}` transitively pulls in `spark-sql-api` at the `spark4` profile
           baseline (4.1.2), so every Spark artifact is pinned to ${spark.version} here to keep the
-          whole compile classpath on 4.0. Same reasoning, and the same `spark-connect-shims`
-          exclusions, as `paimon-spark-4.0`: Spark 4.0.3's shims jar carries a stub
-          `org.apache.spark.SparkConf` with only `getAll()`, which scalac resolves in preference to
-          spark-core's real one, failing with `value set is not a member of org.apache.spark.SparkConf`.
+          whole compile classpath on 4.0. Same reasoning as `paimon-spark-4.0`, and the same
+          `spark-connect-shims` exclusion on `spark-sql-api` and `spark-sql`: Spark 4.0.3's shims jar
+          carries a stub `org.apache.spark.SparkConf` with only `getAll()`, which scalac resolves in
+          preference to spark-core's real one, failing with `value set is not a member of
+          org.apache.spark.SparkConf`.
         -->
         <dependency>
             <groupId>org.apache.spark</groupId>
