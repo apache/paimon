@@ -201,6 +201,9 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
             return _Plan(self._row_ids)
 
     class _Read:
+        def _resolve_parallelism(self, runtime, num_splits):
+            return 1
+
         def to_arrow(self, splits):
             row_ids = list(splits)
             return pa.table({
@@ -208,6 +211,11 @@ def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector
                     [row_id_to_vector[row_id] for row_id in row_ids]),
                 "_ROW_ID": pa.array(row_ids, type=pa.int64()),
             })
+
+        def _new_arrow_batch_reader(self, splits):
+            table = self.to_arrow(splits)
+            batches = (batch for batch in table.to_batches(max_chunksize=2))
+            return pa.RecordBatchReader.from_batches(table.schema, batches), batches
 
     class _Builder:
         def with_partition_filter(self, predicate):
@@ -2910,13 +2918,12 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             reader = BatchVectorSearchReadImpl(
                 table, limit=5, vector_column=embedding_field,
                 query_vectors=[[1.0], [2.0]], filter_=None)
-            with mock.patch.object(
-                    reader, "_read_raw_search",
-                    return_value=DictBasedScoredIndexResult({8: 0.9})) as raw_read:
-                results = reader.read_batch([split, raw])
+            raw_calls = _install_raw_vector_read_builder(
+                table, "embedding", {8: [1.5]})
+            results = reader.read_batch([split, raw])
 
         # The raw fallback must be merged into EACH query, not dropped.
-        self.assertEqual(2, raw_read.call_count)
+        self.assertEqual(1, raw_calls["raw_read_count"])
         self.assertEqual([1, 8], sorted(list(results[0].results())))
         self.assertEqual([2, 8], sorted(list(results[1].results())))
 
@@ -3510,6 +3517,9 @@ class BatchVectorSearchTest(unittest.TestCase):
         def _fake_create(index_type, file_io, index_path,
                          index_io_meta_list, options=None):
             class _FakeReader(GlobalIndexReader):
+                def vector_metric(self_inner):
+                    return "l2"
+
                 def visit_batch_vector_search(self_inner, bvs):
                     captured_limits.append(bvs.limit)
                     return _completed_future([
@@ -3564,6 +3574,61 @@ class BatchVectorSearchTest(unittest.TestCase):
 
     def tearDown(self):
         mock.patch.stopall()
+
+
+class VectorSearchReaderCleanupTest(unittest.TestCase):
+
+    def test_reader_lifetime_for_single_and_batch_search(self):
+        from concurrent.futures import Future
+
+        from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
+        from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
+
+        column = _field(1, "embedding", "FLOAT")
+        read = DataEvolutionVectorRead(_StubTable([column], []), 1, column, [1.0])
+        for batch in (False, True):
+            for outcome in ("sync_error", "pending_success", "pending_error", "completed"):
+                with self.subTest(batch=batch, outcome=outcome):
+                    stream = io.BytesIO(b"index")
+                    reader = mock.Mock()
+                    reader.close.side_effect = stream.close
+                    visit = (reader.visit_batch_vector_search if batch
+                             else reader.visit_vector_search)
+                    error = ValueError("Query vector dimension mismatch")
+                    source = Future()
+                    result = [None, None] if batch else None
+                    if outcome == "sync_error":
+                        visit.side_effect = error
+                    else:
+                        visit.return_value = source
+                        if outcome == "completed":
+                            source.set_result(result)
+                    offset = OffsetGlobalIndexReader(reader, 0, 10)
+                    evaluate = read._eval_batch if batch else read._eval
+                    query = [[1.0], [2.0]] if batch else [1.0]
+                    with mock.patch.object(read, "_open_offset_reader",
+                                           return_value=(reader, offset)):
+                        if outcome == "sync_error":
+                            with self.assertRaises(ValueError) as raised:
+                                evaluate(0, 10, [object()], query, 1, None)
+                            self.assertIs(error, raised.exception)
+                        else:
+                            future = evaluate(0, 10, [object()], query, 1, None)
+                            if outcome.startswith("pending"):
+                                reader.close.assert_not_called()
+                                self.assertFalse(stream.closed)
+                                if outcome == "pending_error":
+                                    source.set_exception(error)
+                                else:
+                                    source.set_result(result)
+                            if outcome == "pending_error":
+                                with self.assertRaises(ValueError) as raised:
+                                    future.result()
+                                self.assertIs(error, raised.exception)
+                            else:
+                                self.assertEqual(result, future.result())
+                    reader.close.assert_called_once_with()
+                    self.assertTrue(stream.closed)
 
 
 if __name__ == "__main__":
