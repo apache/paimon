@@ -2021,6 +2021,11 @@ public class SchemaValidation {
 
     private static void validateManifestSort(TableSchema schema, CoreOptions options) {
         if (options.manifestSortEnabled()) {
+            checkArgument(
+                    !options.dataEvolutionEnabled() || !options.manifestSortBucketFirst(),
+                    "'%s' is not supported when '%s' is enabled.",
+                    CoreOptions.MANIFEST_SORT_BUCKET_FIRST.key(),
+                    CoreOptions.DATA_EVOLUTION_ENABLED.key());
             if (!options.dataEvolutionEnabled()) {
                 checkArgument(
                         !schema.partitionKeys().isEmpty(),

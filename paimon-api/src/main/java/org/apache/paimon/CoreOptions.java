@@ -589,6 +589,16 @@ public class CoreOptions implements Serializable {
                             "Partition field name to sort manifest entries by. Validated by"
                                     + " schema validation, if not configured, defaults to the first partition field.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SORT_BUCKET_FIRST =
+            key("manifest-sort.bucket-first")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Sort manifest entries by bucket before the configured partition"
+                                    + " field. This improves manifest pruning for bucket-key point"
+                                    + " lookups spanning many partitions, at the cost of wider"
+                                    + " partition ranges in each manifest.");
+
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")
                     .memoryType()
@@ -3221,6 +3231,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String manifestSortPartitionField() {
         return options.get(MANIFEST_SORT_PARTITION_FIELD);
+    }
+
+    public boolean manifestSortBucketFirst() {
+        return options.get(MANIFEST_SORT_BUCKET_FIRST);
     }
 
     public long manifestSortMaxRewriteSize() {

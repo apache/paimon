@@ -119,7 +119,8 @@ public class ManifestCompactDryRun {
                         options.dataEvolutionEnabled(),
                         manifests,
                         options.manifestSortPartitionField(),
-                        partitionType);
+                        partitionType,
+                        options.manifestSortBucketFirst());
         ManifestFileSorter.ClassifyResult classifyResult =
                 ManifestFileSorter.classifyManifests(
                         manifests,
