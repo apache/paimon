@@ -348,18 +348,10 @@ class PaimonDatasetReader(ABC):
 
     def get_item(self, index):
         """Return one fully assembled frame."""
-        return self[index]
+        return self.get_items([index])[0]
 
     def get_items(self, indices):
         """Return fully assembled frames for one batch."""
-        return self.__getitems__(indices)
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            return self.__getitems__(range(*index.indices(len(self))))
-        return self.__getitems__([index])[0]
-
-    def __getitems__(self, indices):
         dataset_indices = [
             _normalize_index(index, len(self)) for index in indices
         ]
@@ -458,6 +450,14 @@ class PaimonDatasetReader(ABC):
                     item[key] = self.image_transforms(item[key])
             result.append(item)
         return result
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return self.get_items(range(*index.indices(len(self))))
+        return self.get_item(index)
+
+    def __getitems__(self, indices):
+        return self.get_items(indices)
 
     def close(self):
         first_error = None
