@@ -739,8 +739,8 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
                     rowIdStats == null ? null : rowIdStats.maxRowId,
-                    null,
-                    totalBucketsKnown ? totalBuckets : null);
+                    totalBucketsKnown ? totalBuckets : null,
+                    null);
         }
     }
 

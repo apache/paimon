@@ -143,8 +143,8 @@ public class ManifestTestDataGenerator {
                 maxLevel,
                 null,
                 null,
-                null,
-                totalBucketsKnown ? totalBuckets : null);
+                totalBucketsKnown ? totalBuckets : null,
+                null);
     }
 
     private void mergeLevelsIfNeeded(BinaryRow partition, int bucket) {

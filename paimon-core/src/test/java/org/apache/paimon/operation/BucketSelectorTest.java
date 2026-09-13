@@ -104,8 +104,8 @@ public class BucketSelectorTest {
                 0,
                 null,
                 null,
-                null,
-                totalBuckets);
+                totalBuckets,
+                null);
     }
 
     @Test

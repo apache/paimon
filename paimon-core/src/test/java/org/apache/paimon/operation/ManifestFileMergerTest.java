@@ -239,6 +239,8 @@ public class ManifestFileMergerTest extends ManifestFileMetaTestBase {
                 current.minLevel(),
                 current.maxLevel(),
                 current.minRowId(),
-                current.maxRowId());
+                current.maxRowId(),
+                null,
+                null);
     }
 }

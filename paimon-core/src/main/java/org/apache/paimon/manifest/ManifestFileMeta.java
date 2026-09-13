@@ -59,11 +59,12 @@ public class ManifestFileMeta {
                             new DataField(9, "_MAX_LEVEL", new IntType(true)),
                             new DataField(10, "_MIN_ROW_ID", new BigIntType(true)),
                             new DataField(11, "_MAX_ROW_ID", new BigIntType(true)),
+                            new DataField(12, "_TOTAL_BUCKETS", new IntType(true)),
                             new DataField(
-                                    12,
+                                    13,
                                     "_EXTRA_FILES",
-                                    new ArrayType(true, new VarCharType(false, Integer.MAX_VALUE))),
-                            new DataField(13, "_TOTAL_BUCKETS", new IntType(true))));
+                                    new ArrayType(
+                                            true, new VarCharType(false, Integer.MAX_VALUE)))));
 
     private final String fileName;
     private final long fileSize;
@@ -77,38 +78,8 @@ public class ManifestFileMeta {
     private final @Nullable Integer maxLevel;
     private final @Nullable Long minRowId;
     private final @Nullable Long maxRowId;
-    private final @Nullable List<String> extraFiles;
     private final @Nullable Integer totalBuckets;
-
-    public ManifestFileMeta(
-            String fileName,
-            long fileSize,
-            long numAddedFiles,
-            long numDeletedFiles,
-            SimpleStats partitionStats,
-            long schemaId,
-            @Nullable Integer minBucket,
-            @Nullable Integer maxBucket,
-            @Nullable Integer minLevel,
-            @Nullable Integer maxLevel,
-            @Nullable Long minRowId,
-            @Nullable Long maxRowId) {
-        this(
-                fileName,
-                fileSize,
-                numAddedFiles,
-                numDeletedFiles,
-                partitionStats,
-                schemaId,
-                minBucket,
-                maxBucket,
-                minLevel,
-                maxLevel,
-                minRowId,
-                maxRowId,
-                null,
-                null);
-    }
+    private final @Nullable List<String> extraFiles;
 
     public ManifestFileMeta(
             String fileName,
@@ -123,39 +94,8 @@ public class ManifestFileMeta {
             @Nullable Integer maxLevel,
             @Nullable Long minRowId,
             @Nullable Long maxRowId,
+            @Nullable Integer totalBuckets,
             @Nullable List<String> extraFiles) {
-        this(
-                fileName,
-                fileSize,
-                numAddedFiles,
-                numDeletedFiles,
-                partitionStats,
-                schemaId,
-                minBucket,
-                maxBucket,
-                minLevel,
-                maxLevel,
-                minRowId,
-                maxRowId,
-                extraFiles,
-                null);
-    }
-
-    public ManifestFileMeta(
-            String fileName,
-            long fileSize,
-            long numAddedFiles,
-            long numDeletedFiles,
-            SimpleStats partitionStats,
-            long schemaId,
-            @Nullable Integer minBucket,
-            @Nullable Integer maxBucket,
-            @Nullable Integer minLevel,
-            @Nullable Integer maxLevel,
-            @Nullable Long minRowId,
-            @Nullable Long maxRowId,
-            @Nullable List<String> extraFiles,
-            @Nullable Integer totalBuckets) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -168,8 +108,8 @@ public class ManifestFileMeta {
         this.maxLevel = maxLevel;
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
-        this.extraFiles = extraFiles;
         this.totalBuckets = totalBuckets;
+        this.extraFiles = extraFiles;
     }
 
     public String fileName() {
@@ -220,12 +160,12 @@ public class ManifestFileMeta {
         return maxRowId;
     }
 
-    public @Nullable List<String> extraFiles() {
-        return extraFiles;
-    }
-
     public @Nullable Integer totalBuckets() {
         return totalBuckets;
+    }
+
+    public @Nullable List<String> extraFiles() {
+        return extraFiles;
     }
 
     @Override
@@ -246,8 +186,8 @@ public class ManifestFileMeta {
                 && Objects.equals(maxLevel, that.maxLevel)
                 && Objects.equals(minRowId, that.minRowId)
                 && Objects.equals(maxRowId, that.maxRowId)
-                && Objects.equals(extraFiles, that.extraFiles)
-                && Objects.equals(totalBuckets, that.totalBuckets);
+                && Objects.equals(totalBuckets, that.totalBuckets)
+                && Objects.equals(extraFiles, that.extraFiles);
     }
 
     @Override
@@ -265,8 +205,8 @@ public class ManifestFileMeta {
                 maxLevel,
                 minRowId,
                 maxRowId,
-                extraFiles,
-                totalBuckets);
+                totalBuckets,
+                extraFiles);
     }
 
     @Override
@@ -285,8 +225,8 @@ public class ManifestFileMeta {
                 maxLevel,
                 minRowId,
                 maxRowId,
-                extraFiles,
-                totalBuckets);
+                totalBuckets,
+                extraFiles);
     }
 
     // ----------------------- Serialization -----------------------------

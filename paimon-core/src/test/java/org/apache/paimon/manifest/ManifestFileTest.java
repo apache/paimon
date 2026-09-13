@@ -281,7 +281,9 @@ public class ManifestFileTest {
                         null,
                         null,
                         source.minRowId(),
-                        source.maxRowId());
+                        source.maxRowId(),
+                        null,
+                        null);
 
         ManifestAvroWriter writer = manifestFile.createAvroWriter();
         try (ManifestAvroReader reader = openManifestReader(source)) {

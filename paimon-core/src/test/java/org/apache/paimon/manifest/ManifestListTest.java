@@ -158,6 +158,8 @@ public class ManifestListTest {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             null));
         }
         return result;
@@ -194,8 +196,8 @@ public class ManifestListTest {
                             meta.maxLevel(),
                             meta.minRowId(),
                             meta.maxRowId(),
-                            extraFiles,
-                            meta.totalBuckets()));
+                            meta.totalBuckets(),
+                            extraFiles));
         }
         return metas;
     }
