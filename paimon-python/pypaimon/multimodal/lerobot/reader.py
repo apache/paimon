@@ -27,9 +27,9 @@ from pypaimon.read.query_auth_split import QueryAuthSplit
 class _PaimonTableFrameReader:
     """Read logical frame rows from one indexed Paimon table."""
 
-    def __init__(self, frames_table, projection):
+    def __init__(self, frames_table, *, columns):
         self._table, self.snapshot_id, splits = _indexed_read_table(
-            frames_table, projection)
+            frames_table, columns)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
         self.num_rows = snapshot.next_row_id

@@ -235,12 +235,12 @@ from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset
 class CustomDatasetReader(PaimonDatasetReader):
     def __init__(self, metadata, source, **kwargs):
         self._source = source
-        self.file_io = getattr(source, "file_io", None)
-        super().__init__(metadata, **kwargs)
-
-    @property
-    def schema(self):
-        return self._source.schema
+        super().__init__(
+            metadata,
+            schema=source.schema,
+            file_io=getattr(source, "file_io", None),
+            **kwargs,
+        )
 
     def read_indices(self, indices, columns):
         return self._source.read_indices(indices, columns)

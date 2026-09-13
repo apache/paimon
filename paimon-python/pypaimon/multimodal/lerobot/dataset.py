@@ -78,23 +78,21 @@ _CONTROL_FEATURES = frozenset({
 class PaimonDatasetReader(ABC):
     """Read-side implementation for Paimon-backed LeRobot datasets.
 
-    Subclasses provide a logical Arrow schema and batched ``read_indices``.
-    Resolved LeRobot metadata remains available through :attr:`meta`. Readers
-    must be picklable for DataLoader workers. Readers returning BLOB or video
-    descriptors must set ``file_io`` before calling ``super().__init__``.
+    Subclasses provide batched ``read_indices``. Resolved LeRobot metadata
+    remains available through :attr:`meta`. Readers must be picklable for
+    DataLoader workers.
 
     Set ``return_uint8=True`` to keep 8-bit visual frames in their decoded
     ``torch.uint8`` representation instead of normalizing them to float32.
     Higher-bit-depth images retain the existing float32 behavior.
     """
 
-    file_io = None
-
     def __init__(
             self,
             meta,
             *,
-            tag_name=None,
+            schema,
+            file_io=None,
             episodes=None,
             image_transforms=None,
             delta_timestamps=None,
@@ -105,9 +103,13 @@ class PaimonDatasetReader(ABC):
             _resolved_meta=False):
         _require_dataset_python()
         metadata = meta if _resolved_meta else _reader_metadata(meta)
+        if not isinstance(schema, pa.Schema):
+            raise TypeError(
+                "PaimonDatasetReader schema must be a pyarrow.Schema.")
+        self.schema = schema
+        self.file_io = file_io
         info = self._init_dataset(
             metadata,
-            tag_name,
             episodes,
             image_transforms,
             delta_timestamps,
@@ -116,21 +118,12 @@ class PaimonDatasetReader(ABC):
             video_backend,
             return_uint8,
         )
-        schema = self.schema
-        if not isinstance(schema, pa.Schema):
-            raise TypeError(
-                "PaimonDatasetReader.schema must be a pyarrow.Schema.")
         projection, validation_context, subtasks = \
             self._init_frame_contract(
                 schema, info, self._validate_physical_metadata())
         rows = self._open_frame_rows(projection)
         self._set_frame_rows(
             rows, projection, validation_context, subtasks)
-
-    @property
-    @abstractmethod
-    def schema(self):
-        """Return the logical frame schema as :class:`pyarrow.Schema`."""
 
     @abstractmethod
     def read_indices(self, indices, columns):
@@ -150,7 +143,6 @@ class PaimonDatasetReader(ABC):
     def _init_dataset(
             self,
             metadata,
-            tag_name,
             episodes,
             image_transforms,
             delta_timestamps,
@@ -159,7 +151,6 @@ class PaimonDatasetReader(ABC):
             video_backend,
             return_uint8):
         self.meta = metadata
-        self.tag_name = tag_name
         self.repo_id = self.meta.repo_id
         self.image_transforms = image_transforms
         self.delta_timestamps = delta_timestamps
@@ -561,9 +552,10 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             video_backend=None,
             return_uint8=False):
         self._frames_table, meta = _load_dataset(table, tag_name)
+        self.tag_name = tag_name
         super().__init__(
             meta,
-            tag_name=tag_name,
+            schema=_target_schema(self._frames_table),
             episodes=episodes,
             image_transforms=image_transforms,
             delta_timestamps=delta_timestamps,
@@ -574,10 +566,6 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             _resolved_meta=True,
         )
 
-    @property
-    def schema(self):
-        return _target_schema(self._frames_table)
-
     def read_indices(self, indices, columns):
         return self._frame_rows.read_indices(indices, columns)
 
@@ -585,7 +573,8 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
         return True
 
     def _open_frame_rows(self, projection):
-        rows = _PaimonTableFrameReader(self._frames_table, projection)
+        rows = _PaimonTableFrameReader(
+            self._frames_table, columns=projection)
         if rows.num_rows != self._total_frames:
             raise ValueError(
                 "Paimon table has %d rows but metadata declares %d frames."

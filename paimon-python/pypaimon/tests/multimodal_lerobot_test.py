@@ -99,10 +99,6 @@ except ImportError:
 
 class _ManualDatasetReader(pmm.PaimonDatasetReader):
 
-    @property
-    def schema(self):
-        raise NotImplementedError
-
     def read_indices(self, indices, columns):
         raise NotImplementedError
 
@@ -384,11 +380,8 @@ class LeRobotValidationTest(unittest.TestCase):
             def __init__(self, metadata, **kwargs):
                 self.calls = []
                 self.closed = False
-                super().__init__(metadata, **kwargs)
-
-            @property
-            def schema(self):
-                return _schema_from_info(info)
+                super().__init__(
+                    metadata, schema=_schema_from_info(info), **kwargs)
 
             def read_indices(self, indices, columns):
                 self.calls.append((indices, columns))
@@ -419,6 +412,8 @@ class LeRobotValidationTest(unittest.TestCase):
             metadata,
             delta_timestamps={"action": [-0.1, 0.0, 0.1]},
         )
+        with self.assertRaisesRegex(TypeError, "tag_name"):
+            Reader(metadata, tag_name="snapshot-b")
         dataset = pmm.PaimonLeRobotDataset(reader)
 
         self.assertIsInstance(dataset.reader, pmm.PaimonDatasetReader)
@@ -428,7 +423,7 @@ class LeRobotValidationTest(unittest.TestCase):
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
                          reader.calls)
-        self.assertIsNone(dataset.tag_name)
+        self.assertFalse(hasattr(dataset, "tag_name"))
         self.assertEqual("dataset-version-12", dataset.meta.revision)
         self.assertEqual((2,), dataset.features["observation.state"]["shape"])
         self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
@@ -879,6 +874,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 "pypaimon.multimodal.lerobot.dataset."
                 "_load_dataset",
                 return_value=loaded), patch(
+                "pypaimon.multimodal.lerobot.dataset._target_schema",
+                return_value=pa.schema([])), patch(
                 "pypaimon.multimodal.lerobot.dataset.sys.version_info",
                 (3, 10)):
             for invalid in (0, 1, None, "true"):
