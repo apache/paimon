@@ -31,9 +31,9 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
-import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

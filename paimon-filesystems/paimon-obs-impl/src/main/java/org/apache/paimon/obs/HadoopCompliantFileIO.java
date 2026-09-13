@@ -25,10 +25,10 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 
-import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.io.IOUtils;
 
 import javax.annotation.Nullable;
 
