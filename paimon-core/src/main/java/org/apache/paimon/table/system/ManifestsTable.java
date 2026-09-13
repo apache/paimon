@@ -55,6 +55,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -105,7 +106,11 @@ public class ManifestsTable implements ReadonlyTable {
                                     "max_partition_stats",
                                     SerializationUtils.newStringType(true)),
                             new DataField(7, "min_row_id", new BigIntType(true)),
-                            new DataField(8, "max_row_id", new BigIntType(true))));
+                            new DataField(8, "max_row_id", new BigIntType(true)),
+                            new DataField(9, "min_bucket", new IntType(true)),
+                            new DataField(10, "max_bucket", new IntType(true)),
+                            new DataField(11, "min_total_buckets", new IntType(true)),
+                            new DataField(12, "max_total_buckets", new IntType(true))));
 
     private final FileStoreTable dataTable;
 
@@ -347,7 +352,11 @@ public class ManifestsTable implements ReadonlyTable {
                     partitionCastExecutor.cast(manifestFileMeta.partitionStats().minValues()),
                     partitionCastExecutor.cast(manifestFileMeta.partitionStats().maxValues()),
                     manifestFileMeta.minRowId(),
-                    manifestFileMeta.maxRowId());
+                    manifestFileMeta.maxRowId(),
+                    manifestFileMeta.minBucket(),
+                    manifestFileMeta.maxBucket(),
+                    manifestFileMeta.minTotalBuckets(),
+                    manifestFileMeta.maxTotalBuckets());
         }
     }
 

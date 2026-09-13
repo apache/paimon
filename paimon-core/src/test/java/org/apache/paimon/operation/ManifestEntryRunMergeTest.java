@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -111,6 +112,26 @@ class ManifestEntryRunMergeTest extends ManifestFileMetaTestBase {
                                 .collect(Collectors.toList()));
     }
 
+    @Test
+    void testBucketFirstManifestComparisonFallsBackForLegacyMetadata() {
+        ManifestFileMeta first = makeManifest(bucketEntry("first", 2, 0));
+        ManifestFileMeta legacy = copyWithoutBucketStats(makeManifest(bucketEntry("legacy", 1, 2)));
+        ManifestFileMeta last = makeManifest(bucketEntry("last", 0, 1));
+
+        ManifestFileSorter.ManifestSortKey sortKey =
+                ManifestFileSorter.createSortKey(
+                        false, Arrays.asList(first, legacy, last), null, partitionType, true);
+
+        assertThat(sortKey.compareMin(first, legacy)).isPositive();
+        assertThat(sortKey.compareMin(legacy, last)).isPositive();
+        assertThat(sortKey.compareMin(first, last)).isPositive();
+
+        ManifestFileSorter.ManifestSortKey bucketSortKey =
+                ManifestFileSorter.createSortKey(
+                        false, Arrays.asList(first, last), null, partitionType, true);
+        assertThat(bucketSortKey.compareMin(first, last)).isNegative();
+    }
+
     private ManifestEntry rowIdEntry(String fileName, long firstRowId) {
         return ManifestEntry.create(
                 FileKind.ADD,
@@ -139,6 +160,60 @@ class ManifestEntryRunMergeTest extends ManifestFileMetaTestBase {
                         firstRowId,
                         Collections.singletonList("f0"),
                         null));
+    }
+
+    private ManifestEntry bucketEntry(String fileName, int partitionValue, int bucket) {
+        BinaryRow entryPartition = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(entryPartition);
+        writer.writeInt(0, partitionValue);
+        writer.complete();
+
+        return ManifestEntry.create(
+                FileKind.ADD,
+                entryPartition,
+                bucket,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        1,
+                        entryPartition,
+                        entryPartition,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        Collections.singletonList("f0"),
+                        null));
+    }
+
+    private ManifestFileMeta copyWithoutBucketStats(ManifestFileMeta meta) {
+        return new ManifestFileMeta(
+                meta.fileName(),
+                meta.fileSize(),
+                meta.numAddedFiles(),
+                meta.numDeletedFiles(),
+                meta.partitionStats(),
+                meta.schemaId(),
+                null,
+                null,
+                meta.minLevel(),
+                meta.maxLevel(),
+                meta.minRowId(),
+                meta.maxRowId(),
+                meta.extraFiles(),
+                meta.minTotalBuckets(),
+                meta.maxTotalBuckets());
     }
 
     @Override

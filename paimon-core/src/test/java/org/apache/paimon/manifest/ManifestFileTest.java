@@ -193,6 +193,7 @@ public class ManifestFileTest {
                                     entry.kind().toByteValue(),
                                     entry.partition(),
                                     entry.bucket(),
+                                    entry.totalBuckets(),
                                     entry.level(),
                                     entry.file().schemaId(),
                                     entry.file().firstRowId(),
@@ -210,6 +211,8 @@ public class ManifestFileTest {
         assertThat(result.schemaId()).isEqualTo(sourceMeta.schemaId());
         assertThat(result.minBucket()).isEqualTo(sourceMeta.minBucket());
         assertThat(result.maxBucket()).isEqualTo(sourceMeta.maxBucket());
+        assertThat(result.minTotalBuckets()).isEqualTo(sourceMeta.minTotalBuckets());
+        assertThat(result.maxTotalBuckets()).isEqualTo(sourceMeta.maxTotalBuckets());
         assertThat(result.minLevel()).isEqualTo(sourceMeta.minLevel());
         assertThat(result.maxLevel()).isEqualTo(sourceMeta.maxLevel());
         assertThat(result.minRowId()).isEqualTo(sourceMeta.minRowId());
@@ -246,6 +249,7 @@ public class ManifestFileTest {
                                 source.kind().toByteValue(),
                                 source.partition().copy(),
                                 source.bucket(),
+                                source.totalBuckets(),
                                 source.level(),
                                 source.file().schemaId(),
                                 source.file().firstRowId(),
@@ -863,6 +867,31 @@ public class ManifestFileTest {
 
         assertThat(deleted)
                 .containsExactlyInAnyOrder(firstDelete.identifier(), secondDelete.identifier());
+
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        DEFAULT_PART_TYPE, Collections.singletonList(first.partition()));
+        BucketFilter bucketFilter = new BucketFilter(false, first.bucket(), null, null);
+        Set<FileEntry.Identifier> filteredDeleted =
+                FileEntry.readDeletedEntries(
+                        manifestFile,
+                        Arrays.asList(firstManifest, secondManifest),
+                        2,
+                        partitionFilter,
+                        bucketFilter);
+        List<FileEntry.Identifier> expectedFilteredDeleted =
+                Arrays.asList(firstDelete, secondDelete).stream()
+                        .filter(entry -> partitionFilter.test(entry.partition()))
+                        .filter(
+                                entry ->
+                                        bucketFilter.test(
+                                                entry.partition(),
+                                                entry.bucket(),
+                                                entry.totalBuckets()))
+                        .map(ManifestEntry::identifier)
+                        .collect(Collectors.toList());
+
+        assertThat(filteredDeleted).containsExactlyInAnyOrderElementsOf(expectedFilteredDeleted);
     }
 
     @Test
@@ -1185,6 +1214,8 @@ public class ManifestFileTest {
                 meta.schemaId(),
                 meta.minBucket(),
                 meta.maxBucket(),
+                meta.minTotalBuckets(),
+                meta.maxTotalBuckets(),
                 meta.minLevel(),
                 meta.maxLevel(),
                 meta.minRowId() == null ? -1 : meta.minRowId(),

@@ -70,6 +70,7 @@ public class ManifestFileSorter {
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
+        final boolean forceRewrite;
         final boolean runMergeOptimizeEnabled;
         final ManifestSortKey sortKey;
         final RowType partitionType;
@@ -90,6 +91,7 @@ public class ManifestFileSorter {
 
         CompactionContext(
                 boolean fullCompaction,
+                boolean forceRewrite,
                 boolean runMergeOptimizeEnabled,
                 ManifestSortKey sortKey,
                 RowType partitionType,
@@ -99,6 +101,7 @@ public class ManifestFileSorter {
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
+            this.forceRewrite = forceRewrite;
             this.runMergeOptimizeEnabled = runMergeOptimizeEnabled;
             this.sortKey = sortKey;
             this.partitionType = partitionType;
@@ -155,10 +158,12 @@ public class ManifestFileSorter {
             @Nullable IOManager ioManager)
             throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
+        boolean sortBucketFirst = options.manifestSortBucketFirst();
         boolean runMergeOptimizeEnabled = options.manifestMergeOptimizeEnabled();
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
         long fullCompactionThreshold = options.manifestFullCompactionThresholdSize().getBytes();
+        boolean forceRewrite = options.manifestSortForceRewrite();
         long maxRewriteSize = options.manifestSortMaxRewriteSize();
         int maxSizeAmplificationPercent = options.maxSizeAmplificationPercent();
         int sortedRunSizeRatio = options.sortedRunSizeRatio();
@@ -173,11 +178,13 @@ public class ManifestFileSorter {
                         manifestFile,
                         partitionType,
                         sortPartitionField,
+                        sortBucketFirst,
                         options.dataEvolutionEnabled(),
                         runMergeOptimizeEnabled,
                         suggestedMetaSize,
                         suggestedMinMetaCount,
                         fullCompactionThreshold,
+                        forceRewrite,
                         maxRewriteSize,
                         maxSizeAmplificationPercent,
                         sortedRunSizeRatio,
@@ -192,6 +199,7 @@ public class ManifestFileSorter {
                 manifestFile,
                 partitionType,
                 sortPartitionField,
+                sortBucketFirst,
                 options.dataEvolutionEnabled(),
                 runMergeOptimizeEnabled,
                 suggestedMetaSize,
@@ -215,11 +223,13 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             RowType partitionType,
             String sortPartitionField,
+            boolean sortBucketFirst,
             boolean dataEvolutionEnabled,
             boolean runMergeOptimizeEnabled,
             long suggestedMetaSize,
             int suggestedMinMetaCount,
             long fullCompactionThreshold,
+            boolean forceRewrite,
             long maxRewriteSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
@@ -227,7 +237,9 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Check if full compaction threshold is met
-        if (!reachesFullCompactionThreshold(input, suggestedMetaSize, fullCompactionThreshold)) {
+        if (!forceRewrite
+                && !reachesFullCompactionThreshold(
+                        input, suggestedMetaSize, fullCompactionThreshold)) {
             return Optional.empty();
         }
         // Step 2: Prepare compaction context
@@ -235,9 +247,11 @@ public class ManifestFileSorter {
                 prepareCompaction(
                         input,
                         true,
+                        forceRewrite,
                         manifestFile,
                         partitionType,
                         sortPartitionField,
+                        sortBucketFirst,
                         dataEvolutionEnabled,
                         runMergeOptimizeEnabled,
                         suggestedMetaSize,
@@ -248,6 +262,9 @@ public class ManifestFileSorter {
         try {
             List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
             List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
+            if (forceRewrite) {
+                pickedRuns = new ArrayList<>(levelRuns);
+            }
 
             if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
                 LOG.debug(
@@ -277,9 +294,24 @@ public class ManifestFileSorter {
             }
             pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
 
-            // Step 4: Split into sections and merge small adjacent sections
-            List<Section> sections = splitIntoSections(pickedFiles, ctx);
-            sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+            // Step 4: Split into sections and merge small adjacent sections. A forced rewrite
+            // intentionally uses one global section so entries with the same partition but from
+            // different already-compacted manifests can be clustered by the secondary sort key.
+            List<Section> sections;
+            if (forceRewrite) {
+                long totalSize = 0L;
+                boolean hasDefaultCompactFile = false;
+                for (ManifestFileMeta file : pickedFiles) {
+                    totalSize += file.fileSize();
+                    hasDefaultCompactFile |= ctx.isMarkedForDefaultCompaction(file);
+                }
+                sections =
+                        Collections.singletonList(
+                                new Section(pickedFiles, totalSize, hasDefaultCompactFile));
+            } else {
+                sections = splitIntoSections(pickedFiles, ctx);
+                sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+            }
 
             LOG.info(
                     "Manifest sort full compact: pickedFiles={}, sections={}.",
@@ -321,6 +353,7 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             RowType partitionType,
             String sortPartitionField,
+            boolean sortBucketFirst,
             boolean dataEvolutionEnabled,
             boolean runMergeOptimizeEnabled,
             long suggestedMetaSize,
@@ -336,9 +369,11 @@ public class ManifestFileSorter {
                 prepareCompaction(
                         input,
                         false,
+                        false,
                         manifestFile,
                         partitionType,
                         sortPartitionField,
+                        sortBucketFirst,
                         dataEvolutionEnabled,
                         runMergeOptimizeEnabled,
                         suggestedMetaSize,
@@ -450,9 +485,11 @@ public class ManifestFileSorter {
     private static CompactionContext prepareCompaction(
             List<ManifestFileMeta> input,
             boolean fullCompaction,
+            boolean forceRewrite,
             ManifestFile manifestFile,
             RowType partitionType,
             String sortPartitionField,
+            boolean sortBucketFirst,
             boolean dataEvolutionEnabled,
             boolean runMergeOptimizeEnabled,
             long suggestedMetaSize,
@@ -464,7 +501,13 @@ public class ManifestFileSorter {
         boolean useRunMergeOptimize = rowIdSort && runMergeOptimizeEnabled;
 
         // Step 1: Resolve sort key. Data evolution tables prefer RowID ranges when available.
-        ManifestSortKey sortKey = createSortKey(rowIdSort, sortPartitionField, partitionType);
+        ManifestSortKey sortKey =
+                createSortKey(
+                        dataEvolutionEnabled,
+                        input,
+                        sortPartitionField,
+                        partitionType,
+                        sortBucketFirst);
 
         // Step 2: Classify manifests into LSM files and collect delete entries.
         ClassifyResult classification =
@@ -489,6 +532,7 @@ public class ManifestFileSorter {
 
         return new CompactionContext(
                 fullCompaction,
+                forceRewrite,
                 useRunMergeOptimize,
                 sortKey,
                 partitionType,
@@ -1069,7 +1113,9 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Skip rewrite for single file not in delete-range.
-        if (section.size() == 1 && !ctx.defaultCompactFiles.getOrDefault(section.get(0), false)) {
+        if (section.size() == 1
+                && !ctx.forceRewrite
+                && !ctx.defaultCompactFiles.getOrDefault(section.get(0), false)) {
             output.addUnchanged(section.get(0));
             return;
         }
@@ -1183,14 +1229,42 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> input,
             String sortPartitionField,
             RowType partitionType) {
+        return createSortKey(dataEvolutionEnabled, input, sortPartitionField, partitionType, false);
+    }
+
+    static ManifestSortKey createSortKey(
+            boolean dataEvolutionEnabled,
+            List<ManifestFileMeta> input,
+            String sortPartitionField,
+            RowType partitionType,
+            boolean sortBucketFirst) {
+        if (dataEvolutionEnabled && sortBucketFirst) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "'%s' is not supported when '%s' is enabled.",
+                            CoreOptions.MANIFEST_SORT_BUCKET_FIRST.key(),
+                            CoreOptions.DATA_EVOLUTION_ENABLED.key()));
+        }
+
         return createSortKey(
                 dataEvolutionEnabled && ManifestFileMeta.allContainsRowId(input),
                 sortPartitionField,
-                partitionType);
+                partitionType,
+                sortBucketFirst,
+                sortBucketFirst
+                        && input.stream()
+                                .allMatch(
+                                        meta ->
+                                                meta.minBucket() != null
+                                                        && meta.maxBucket() != null));
     }
 
     private static ManifestSortKey createSortKey(
-            boolean rowIdSort, String sortPartitionField, RowType partitionType) {
+            boolean rowIdSort,
+            String sortPartitionField,
+            RowType partitionType,
+            boolean sortBucketFirst,
+            boolean compareManifestBuckets) {
         if (rowIdSort) {
             // RowID sorting uses the configured partition field as the primary key when specified,
             // otherwise it uses the full partition row to preserve partition locality. It then
@@ -1219,7 +1293,12 @@ public class ManifestFileSorter {
         RecordComparator fieldComparator =
                 CodeGenUtils.newRecordComparator(
                         partitionType.getFieldTypes(), new int[] {sortFieldIndex});
-        return new PartitionSortKey(fieldComparator, partitionType, sortFieldIndex);
+        return new PartitionSortKey(
+                fieldComparator,
+                partitionType,
+                sortFieldIndex,
+                sortBucketFirst,
+                compareManifestBuckets);
     }
 
     private static int[] createPartitionSortFields(
@@ -1282,36 +1361,62 @@ public class ManifestFileSorter {
         private final RowType externalSortRowType;
         private final int[] externalSortKeyFields;
         private final int sortFieldNum;
+        private final boolean compareManifestBuckets;
 
         private PartitionSortKey(
-                RecordComparator fieldComparator, RowType partitionType, int sortFieldIndex) {
+                RecordComparator fieldComparator,
+                RowType partitionType,
+                int sortFieldIndex,
+                boolean sortBucketFirst,
+                boolean compareManifestBuckets) {
             this.fieldComparator = fieldComparator;
+            this.compareManifestBuckets = compareManifestBuckets;
             DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
             this.sortFieldGetter = InternalRow.createFieldGetter(sortFieldType, sortFieldIndex);
-            this.sortFieldNum = 3;
+            this.sortFieldNum = 4;
             this.externalSortRowType =
                     DataTypes.ROW(
                             sortFieldType,
+                            DataTypes.INT(),
                             DataTypes.TINYINT(),
                             DataTypes.STRING(),
                             ManifestEntry.MANIFEST_ROW_TYPE);
-            this.externalSortKeyFields = createSequentialFields(sortFieldNum);
+            this.externalSortKeyFields =
+                    sortBucketFirst ? new int[] {1, 0, 2, 3} : createSequentialFields(sortFieldNum);
         }
 
         @Override
         public int compareMin(ManifestFileMeta a, ManifestFileMeta b) {
+            if (compareManifestBuckets) {
+                int bucketComparison = Integer.compare(a.minBucket(), b.minBucket());
+                if (bucketComparison != 0) {
+                    return bucketComparison;
+                }
+            }
             return fieldComparator.compare(
                     a.partitionStats().minValues(), b.partitionStats().minValues());
         }
 
         @Override
         public int compareMax(ManifestFileMeta a, ManifestFileMeta b) {
+            if (compareManifestBuckets) {
+                int bucketComparison = Integer.compare(a.maxBucket(), b.maxBucket());
+                if (bucketComparison != 0) {
+                    return bucketComparison;
+                }
+            }
             return fieldComparator.compare(
                     a.partitionStats().maxValues(), b.partitionStats().maxValues());
         }
 
         @Override
         public boolean isAfterMax(ManifestFileMeta file, ManifestFileMeta maxFile) {
+            if (compareManifestBuckets) {
+                int bucketComparison = Integer.compare(file.minBucket(), maxFile.maxBucket());
+                if (bucketComparison != 0) {
+                    return bucketComparison > 0;
+                }
+            }
             return fieldComparator.compare(
                             file.partitionStats().minValues(), maxFile.partitionStats().maxValues())
                     >= 0;
@@ -1331,13 +1436,14 @@ public class ManifestFileSorter {
         public void replaceExternalSortRow(
                 GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow) {
             row.setField(0, sortFieldGetter.getFieldOrNull(entry.partition()));
-            row.setField(1, entry.kind().toByteValue());
+            row.setField(1, entry.bucket());
+            row.setField(2, entry.kind().toByteValue());
             row.setField(
-                    2,
+                    3,
                     entry instanceof ProjectedManifestEntry
                             ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
-            row.setField(3, binaryManifestRow);
+            row.setField(4, binaryManifestRow);
         }
 
         @Override

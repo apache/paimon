@@ -27,6 +27,8 @@ import javax.annotation.Nullable;
 /** Filter for bucket. */
 public class BucketFilter {
 
+    private static final int MAX_ENUMERATED_BUCKETS = 10_000;
+
     private final boolean onlyReadRealBuckets;
     private final @Nullable Integer specifiedBucket;
     private final @Nullable Filter<Integer> bucketFilter;
@@ -76,5 +78,51 @@ public class BucketFilter {
         }
         return totalAwareBucketFilter == null
                 || totalAwareBucketFilter.test(partition, bucket, totalBucket);
+    }
+
+    /** Conservatively tests whether a manifest's bucket ranges can contain a matching entry. */
+    public boolean mayContain(ManifestFileMeta manifest) {
+        Integer minBucket = manifest.minBucket();
+        Integer maxBucket = manifest.maxBucket();
+        if (minBucket == null || maxBucket == null) {
+            return true;
+        }
+        if (onlyReadRealBuckets && maxBucket < 0) {
+            return false;
+        }
+        if (specifiedBucket != null
+                && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
+            return false;
+        }
+        if (bucketFilter != null
+                && rangeIsReasonable(minBucket, maxBucket)
+                && !anyBucketMatches(minBucket, maxBucket)) {
+            return false;
+        }
+        if (totalAwareBucketFilter instanceof ManifestBucketFilter) {
+            Integer minTotalBuckets = manifest.minTotalBuckets();
+            Integer maxTotalBuckets = manifest.maxTotalBuckets();
+            if (minTotalBuckets != null && maxTotalBuckets != null) {
+                return ((ManifestBucketFilter) totalAwareBucketFilter)
+                        .mayContain(minBucket, maxBucket, minTotalBuckets, maxTotalBuckets);
+            }
+        }
+        return true;
+    }
+
+    private boolean anyBucketMatches(int minBucket, int maxBucket) {
+        for (int bucket = minBucket; ; bucket++) {
+            if (bucketFilter.test(bucket)) {
+                return true;
+            }
+            if (bucket == maxBucket) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    private static boolean rangeIsReasonable(int min, int max) {
+        return max >= min && (long) max - min < MAX_ENUMERATED_BUCKETS;
     }
 }

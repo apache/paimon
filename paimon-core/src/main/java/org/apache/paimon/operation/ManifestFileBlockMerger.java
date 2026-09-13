@@ -742,6 +742,7 @@ final class ManifestFileBlockMerger {
                     entry.kind().toByteValue(),
                     partition,
                     entry.bucket(),
+                    entry.totalBuckets(),
                     file.level(),
                     file.schemaId(),
                     file.nonNullFirstRowId(),
@@ -751,6 +752,7 @@ final class ManifestFileBlockMerger {
                     entry.kind().toByteValue(),
                     partition,
                     entry.bucket(),
+                    entry.totalBuckets(),
                     file.level(),
                     file.schemaId(),
                     file.rowCount());
@@ -771,6 +773,8 @@ final class ManifestFileBlockMerger {
         private long schemaId = Long.MIN_VALUE;
         private int minBucket = Integer.MAX_VALUE;
         private int maxBucket = Integer.MIN_VALUE;
+        private int minTotalBuckets = Integer.MAX_VALUE;
+        private int maxTotalBuckets = Integer.MIN_VALUE;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
         private long minRowId = Long.MAX_VALUE;
@@ -817,6 +821,9 @@ final class ManifestFileBlockMerger {
             int bucket = entry.bucket();
             minBucket = Math.min(minBucket, bucket);
             maxBucket = Math.max(maxBucket, bucket);
+            int totalBuckets = entry.totalBuckets();
+            minTotalBuckets = Math.min(minTotalBuckets, totalBuckets);
+            maxTotalBuckets = Math.max(maxTotalBuckets, totalBuckets);
             int level = file.level();
             minLevel = Math.min(minLevel, level);
             maxLevel = Math.max(maxLevel, level);
@@ -864,6 +871,8 @@ final class ManifestFileBlockMerger {
                             schemaId,
                             minBucket,
                             maxBucket,
+                            minTotalBuckets,
+                            maxTotalBuckets,
                             minLevel,
                             maxLevel,
                             hasRowIds ? minRowId : -1,
