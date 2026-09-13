@@ -976,35 +976,76 @@ public class CastExecutorTest {
     }
 
     @Test
-    public void testStringToArrayPreservesQuotedSeparator() {
+    public void testStringToArrayQuotingAndEscaping() {
         ArrayType arrayType = new ArrayType(DataTypes.STRING());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // quotes group a token across the separator and do not survive into the value
         compareCastResult(
-                CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType),
+                cast,
                 BinaryString.fromString("[\"a,b\", c]"),
                 new GenericArray(
                         new Object[] {
                             BinaryString.fromString("a,b"), BinaryString.fromString("c")
                         }));
 
-        // an empty quoted token is dropped like in the map rule: empty-string elements
-        // are not expressible in this mini-language
+        // quoting is how an empty string is written, so the element must be kept
         compareCastResult(
-                CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType),
+                cast,
                 BinaryString.fromString("[\"\", a]"),
-                new GenericArray(new Object[] {BinaryString.fromString("a")}));
+                new GenericArray(
+                        new Object[] {BinaryString.fromString(""), BinaryString.fromString("a")}));
+
+        // an unquoted null is the null element; a quoted one is the four-character string
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[null, \"null\"]"),
+                new GenericArray(new Object[] {null, BinaryString.fromString("null")}));
+
+        // a backslash escapes the next character and is itself syntax
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[a\\,b, c]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("a,b"), BinaryString.fromString("c")
+                        }));
     }
 
     @Test
-    public void testStringToRowPreservesQuotedSeparator() {
+    public void testStringToRowQuotingAndEscaping() {
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "f0", DataTypes.STRING()),
                         DataTypes.FIELD(1, "f1", DataTypes.INT()));
-        GenericRow expected = GenericRow.of(BinaryString.fromString("a,b"), 2);
+        CastExecutor<BinaryString, InternalRow> cast =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
         compareCastResult(
-                CastExecutors.resolve(VarCharType.STRING_TYPE, rowType),
+                cast,
                 BinaryString.fromString("{\"a,b\", 2}"),
-                expected);
+                GenericRow.of(BinaryString.fromString("a,b"), 2));
+
+        // an empty quoted field stays a field, so the field count still matches
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{\"\", 2}"),
+                GenericRow.of(BinaryString.fromString(""), 2));
+
+        // a quoted null is the string, an unquoted one is SQL NULL
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{\"null\", 2}"),
+                GenericRow.of(BinaryString.fromString("null"), 2));
+        compareCastResult(cast, BinaryString.fromString("{null, 2}"), GenericRow.of(null, 2));
+
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{a\\,b, 2}"),
+                GenericRow.of(BinaryString.fromString("a,b"), 2));
     }
 
     @Test
