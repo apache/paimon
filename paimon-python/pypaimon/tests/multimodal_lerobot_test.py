@@ -407,6 +407,10 @@ class LeRobotValidationTest(unittest.TestCase):
             "tasks": ["pick"],
             "stats": {"action": {"mean": [1.0]}},
         }
+        missing_episodes = dict(metadata)
+        missing_episodes.pop("episodes")
+        with self.assertRaisesRegex(ValueError, "must define episodes"):
+            Reader(missing_episodes)
         reader = Reader(
             metadata,
             delta_timestamps={"action": [-0.1, 0.0, 0.1]},
@@ -435,6 +439,23 @@ class LeRobotValidationTest(unittest.TestCase):
             sample["action"], torch.tensor([0.0, 1.0, 2.0]))
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
+        dataset.return_uint8 = True
+        self.assertTrue(reader.return_uint8)
+        with self.assertRaisesRegex(TypeError, "return_uint8"):
+            dataset.return_uint8 = 1
+
+        wrong_schema = reader.schema.set(
+            reader.schema.get_field_index("action"),
+            pa.field("action", pa.int64()),
+        )
+        with patch.object(reader, "read_indices") as read:
+            read.return_value = pa.Table.from_pylist(
+                [{name: rows[0][name] for name in info["features"]}],
+                schema=wrong_schema,
+            )
+            with self.assertRaisesRegex(
+                    ValueError, "field action expects float, found int64"):
+                dataset[0]
         dataset.close()
         self.assertTrue(reader.closed)
 

@@ -130,9 +130,8 @@ class PaimonDatasetReader(ABC):
     def read_indices(self, indices, columns):
         """Return one row per requested absolute index as a PyArrow Table.
 
-        ``indices`` are unique; result order is unrestricted. Returned rows
-        must contain every requested column without missing or duplicate
-        indices.
+        ``indices`` are unique; result order is unrestricted. Result columns
+        must match ``schema`` and contain every requested index exactly once.
         """
 
     def _validate_physical_metadata(self):
@@ -216,6 +215,11 @@ class PaimonDatasetReader(ABC):
     def _init_episodes(self, episodes):
         self._episode_ranges = _episode_ranges(
             self.meta, self._total_frames, self._total_episodes)
+        if (self._episode_ranges is None
+                and (self._total_frames or self._total_episodes)):
+            raise ValueError(
+                "LeRobot metadata must define episodes for a non-empty "
+                "dataset.")
         self._episode_ends = [end for _, end in self._episode_ranges] \
             if self._episode_ranges is not None else None
         self.episodes = _selected_episodes(episodes, self._total_episodes)
@@ -493,6 +497,7 @@ class PaimonDatasetReader(ABC):
             rows,
             projection,
             indices,
+            self.schema,
             self._validation_context,
             self.tolerance_s,
             self._features,
@@ -634,6 +639,16 @@ class PaimonLeRobotDataset:
 
     def __getitems__(self, indices):
         return self.reader.get_items(indices)
+
+    @property
+    def return_uint8(self):
+        return self.reader.return_uint8
+
+    @return_uint8.setter
+    def return_uint8(self, value):
+        if not isinstance(value, bool):
+            raise TypeError("return_uint8 must be a boolean.")
+        self.reader.return_uint8 = value
 
     def set_image_transforms(self, image_transforms):
         self.reader.set_image_transforms(image_transforms)
@@ -1041,8 +1056,8 @@ def _validate_reader_schema(expected_schema, actual_schema, source):
 
 
 def _read_reader_rows(
-        reader, projection, indices, validation_context, tolerance_s,
-        features):
+        reader, projection, indices, expected_schema, validation_context,
+        tolerance_s, features):
     values = reader.read_indices(tuple(indices), tuple(projection))
     if not isinstance(values, pa.Table):
         raise TypeError(
@@ -1052,6 +1067,13 @@ def _read_reader_rows(
         raise ValueError(
             "PaimonDatasetReader result is missing fields: %s"
             % sorted(missing))
+    for name in projection:
+        expected_type = expected_schema.field(name).type
+        actual_type = values.schema.field(name).type
+        if actual_type != expected_type:
+            raise ValueError(
+                "PaimonDatasetReader field %s expects %s, found %s."
+                % (name, expected_type, actual_type))
     rows = _arrow_rows(values.select(projection), features)
     expected = set(indices)
     result = {}
