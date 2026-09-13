@@ -34,9 +34,19 @@ import java.util.LinkedHashMap;
  */
 class FileSizeMemo {
 
-    static final int MAX_ENTRIES = 65536;
+    private static final int MAX_ENTRIES = 65536;
 
     private final LinkedHashMap<String, Long> sizes = new LinkedHashMap<>(64, 0.75f, true);
+
+    /** Read through a method, not the constant: a constant is inlined into the test's bytecode. */
+    static int maxEntries() {
+        return MAX_ENTRIES;
+    }
+
+    /** Entry count, so a test can observe the bound without reading an entry. */
+    int size() {
+        return sizes.size();
+    }
 
     long get(String filePath) {
         Long size = sizes.get(filePath);
