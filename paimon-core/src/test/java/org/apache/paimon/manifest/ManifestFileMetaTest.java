@@ -2534,7 +2534,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestA.minLevel(),
                         manifestA.maxLevel(),
                         manifestA.minRowId(),
-                        manifestA.maxRowId()));
+                        manifestA.maxRowId(),
+                        null,
+                        null));
 
         // Manifest B: partitions [5, 15] - overlaps with A
         List<ManifestEntry> entriesB = new ArrayList<>();
@@ -2555,7 +2557,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestB.minLevel(),
                         manifestB.maxLevel(),
                         manifestB.minRowId(),
-                        manifestB.maxRowId()));
+                        manifestB.maxRowId(),
+                        null,
+                        null));
 
         // Manifest C: partitions [10, 20] - overlaps with B
         List<ManifestEntry> entriesC = new ArrayList<>();
@@ -2576,7 +2580,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestC.minLevel(),
                         manifestC.maxLevel(),
                         manifestC.minRowId(),
-                        manifestC.maxRowId()));
+                        manifestC.maxRowId(),
+                        null,
+                        null));
 
         // Set small budget to force split
         Options testOptions = new Options();

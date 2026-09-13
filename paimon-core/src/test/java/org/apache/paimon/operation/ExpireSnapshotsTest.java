@@ -534,6 +534,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 null,
+                null,
                 extraFiles);
     }
 
@@ -942,6 +943,8 @@ public class ExpireSnapshotsTest {
                         1,
                         SimpleStats.EMPTY_STATS,
                         0,
+                        null,
+                        null,
                         null,
                         null,
                         null,
