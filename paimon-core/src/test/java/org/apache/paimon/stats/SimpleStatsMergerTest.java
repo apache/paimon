@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -107,6 +108,24 @@ public class SimpleStatsMergerTest {
         assertThat(merged.nullCounts().getLong(1)).isEqualTo(0L);
     }
 
+    @Test
+    public void testMergeBinaryBoundsWithUnsignedOrdering() {
+        for (DataType binaryType : Arrays.asList(DataTypes.BINARY(1), DataTypes.BYTES())) {
+            RowType rowType = RowType.of(binaryType);
+            SimpleStats lower = binaryStats(rowType, new byte[] {0x7f}, 1L);
+            SimpleStats upper = binaryStats(rowType, new byte[] {(byte) 0x80}, 2L);
+
+            assertBinaryStats(
+                    SimpleStatsMerger.merge(Arrays.asList(lower, upper), rowType),
+                    new byte[] {0x7f},
+                    new byte[] {(byte) 0x80});
+            assertBinaryStats(
+                    SimpleStatsMerger.merge(Arrays.asList(upper, lower), rowType),
+                    new byte[] {0x7f},
+                    new byte[] {(byte) 0x80});
+        }
+    }
+
     private static SimpleStats stats(
             int min0, int max0, long null0, int min1, int max1, long null1) {
         InternalRowSerializer serializer = new InternalRowSerializer(ROW_TYPE);
@@ -129,5 +148,20 @@ public class SimpleStatsMergerTest {
                 serializer.toBinaryRow(GenericRow.of(min0, min1)).copy(),
                 serializer.toBinaryRow(GenericRow.of(max0, max1)).copy(),
                 BinaryArray.fromLongArray(new Long[] {null0, null1}));
+    }
+
+    private static SimpleStats binaryStats(RowType rowType, byte[] value, long nullCount) {
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        return new SimpleStats(
+                serializer.toBinaryRow(GenericRow.of(value)).copy(),
+                serializer.toBinaryRow(GenericRow.of(value)).copy(),
+                BinaryArray.fromLongArray(new Long[] {nullCount}));
+    }
+
+    private static void assertBinaryStats(
+            SimpleStats stats, byte[] expectedMin, byte[] expectedMax) {
+        assertThat(stats.minValues().getBinary(0)).isEqualTo(expectedMin);
+        assertThat(stats.maxValues().getBinary(0)).isEqualTo(expectedMax);
+        assertThat(stats.nullCounts().getLong(0)).isEqualTo(3L);
     }
 }

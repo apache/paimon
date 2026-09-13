@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -364,6 +365,71 @@ public class AppendOnlyTableCompactionTest {
                                 new PredicateBuilder(appendOnlyFileStoreTable.rowType())
                                         .greaterOrEqual(0, 5));
         assertThat(readIds(filtered)).containsExactlyInAnyOrder(5, 6, 7, 8, 9, 10);
+    }
+
+    @Test
+    public void testRowGroupCopyFastPathMergesBinaryBounds() throws Exception {
+        FileIO fileIO = new LocalFileIO();
+        path = new org.apache.paimon.fs.Path(tempDir.resolve("binary-bounds").toString());
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("payload", DataTypes.BYTES());
+        schemaBuilder.option("file.format", "parquet");
+        schemaBuilder.option("append.compaction.row-group-copy.enabled", "true");
+        schemaBuilder.option("compaction.min.file-num", "3");
+        schemaBuilder.option("bucket", "-1");
+        tableSchema = new FileSystemSchemaManager(fileIO, path).createTable(schemaBuilder.build());
+        snapshotManager = newSnapshotManager(fileIO, path);
+        recreate();
+
+        byte[][] payloads = {new byte[] {0x02}, new byte[] {0x01}, new byte[] {0x03}};
+        List<CommitMessage> messages = new ArrayList<>();
+        List<DataFileMeta> inputFiles = new ArrayList<>();
+        StreamTableWrite writer = appendOnlyFileStoreTable.newStreamWriteBuilder().newWrite();
+        for (int i = 0; i < payloads.length; i++) {
+            writer.write(GenericRow.of(i, payloads[i]));
+            List<CommitMessage> fileMessages = writer.prepareCommit(true, i);
+            messages.addAll(fileMessages);
+            fileMessages.stream()
+                    .map(CommitMessageImpl.class::cast)
+                    .flatMap(message -> message.newFilesIncrement().newFiles().stream())
+                    .forEach(inputFiles::add);
+        }
+        assertThat(inputFiles).hasSize(payloads.length);
+        commit(messages);
+
+        AppendCompactTask task = new AppendCompactTask(BinaryRow.EMPTY_ROW, inputFiles);
+        commit(Collections.singletonList(task.doCompact(appendOnlyFileStoreTable, write)));
+
+        List<ManifestEntry> entries = appendOnlyFileStoreTable.store().newScan().plan().files();
+        assertThat(entries).hasSize(1);
+        DataFileMeta compacted = entries.get(0).file();
+        assertThat(compacted.valueStats().minValues().getBinary(1)).isEqualTo(new byte[] {0x01});
+        assertThat(compacted.valueStats().maxValues().getBinary(1)).isEqualTo(new byte[] {0x03});
+
+        DataFilePathFactory pathFactory =
+                appendOnlyFileStoreTable
+                        .store()
+                        .pathFactory()
+                        .createDataFilePathFactory(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET);
+        try (ParquetFileReader reader =
+                getParquetReader(
+                        appendOnlyFileStoreTable.fileIO(),
+                        pathFactory.toPath(compacted),
+                        compacted.fileSize(),
+                        appendOnlyFileStoreTable.coreOptions().toConfiguration())) {
+            assertThat(reader.getFooter().getBlocks()).hasSize(payloads.length);
+        }
+
+        assertThat(readIds(filteredByPayload(new byte[] {0x01}))).containsExactly(1);
+        assertThat(readIds(filteredByPayload(new byte[] {0x03}))).containsExactly(2);
+    }
+
+    private ReadBuilder filteredByPayload(byte[] payload) {
+        return appendOnlyFileStoreTable
+                .newReadBuilder()
+                .withFilter(
+                        new PredicateBuilder(appendOnlyFileStoreTable.rowType()).equal(1, payload));
     }
 
     private List<Integer> readIds(ReadBuilder readBuilder) throws Exception {

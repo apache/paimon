@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SortUtil;
 
 import javax.annotation.Nullable;
 
@@ -133,6 +134,11 @@ public class SimpleStatsMerger {
         if (current == null) {
             return candidate;
         }
+        if (current instanceof byte[] && candidate instanceof byte[]) {
+            return SortUtil.compareBinary((byte[]) current, (byte[]) candidate) <= 0
+                    ? current
+                    : candidate;
+        }
         if (current instanceof Comparable && candidate instanceof Comparable) {
             Comparable<Object> currentComparable = (Comparable<Object>) current;
             return currentComparable.compareTo(candidate) <= 0 ? current : candidate;
@@ -147,6 +153,11 @@ public class SimpleStatsMerger {
         }
         if (current == null) {
             return candidate;
+        }
+        if (current instanceof byte[] && candidate instanceof byte[]) {
+            return SortUtil.compareBinary((byte[]) current, (byte[]) candidate) >= 0
+                    ? current
+                    : candidate;
         }
         if (current instanceof Comparable && candidate instanceof Comparable) {
             Comparable<Object> currentComparable = (Comparable<Object>) current;
