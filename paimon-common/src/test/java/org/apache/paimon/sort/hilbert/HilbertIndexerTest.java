@@ -101,9 +101,9 @@ public class HilbertIndexerTest {
     }
 
     /**
-     * At 8 dimensions the index fills 63 bytes, so the top half of the space carries
-     * BigInteger's sign byte and spills to 64. Truncating that back to 63 does not merely lose
-     * resolution: the leading zero makes a large index sort below a smaller one.
+     * At 8 dimensions the index fills 63 bytes, so the top half of the space carries BigInteger's
+     * sign byte and spills to 64. Truncating that back to 63 does not merely lose resolution: the
+     * leading zero makes a large index sort below a smaller one.
      */
     @Test
     public void testEightDimensionKeysOrderLikeTheirIndex() {
