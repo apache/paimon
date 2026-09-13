@@ -24,6 +24,8 @@ import math
 import operator
 import os
 import sys
+from collections import OrderedDict
+from functools import partial
 
 import pyarrow as pa
 
@@ -42,6 +44,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _validate_lerobot_schema,
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
+from pypaimon.multimodal.video import VideoFrameCollator
 from pypaimon.read.query_auth_split import QueryAuthSplit
 
 
@@ -78,7 +81,7 @@ class PaimonLeRobotDataset:
     LeRobot metadata is resolved from the Paimon table group and remains
     available through :attr:`meta`.
 
-    Set ``return_uint8=True`` to keep 8-bit images in their decoded
+    Set ``return_uint8=True`` to keep 8-bit visual frames in their decoded
     ``torch.uint8`` representation instead of normalizing them to float32.
     Higher-bit-depth images retain the existing float32 behavior.
     """
@@ -93,6 +96,7 @@ class PaimonLeRobotDataset:
             delta_timestamps=None,
             tolerance_s=1e-4,
             blob_parallelism=16,
+            video_backend=None,
             return_uint8=False):
         if sys.version_info < (3, 10):
             raise RuntimeError(
@@ -109,6 +113,10 @@ class PaimonLeRobotDataset:
             raise ValueError("tolerance_s must be finite and non-negative.")
         self.blob_parallelism = _positive_int(
             blob_parallelism, "blob_parallelism")
+        if video_backend not in (None, "torchcodec", "pyav"):
+            raise ValueError(
+                "video_backend must be None, 'torchcodec', or 'pyav'.")
+        self.video_backend = video_backend
         if not isinstance(return_uint8, bool):
             raise TypeError("return_uint8 must be a boolean.")
         self.return_uint8 = return_uint8
@@ -130,15 +138,11 @@ class PaimonLeRobotDataset:
             name for name, feature in self._features.items()
             if feature.get("dtype") == "image"
         ]
-        video_keys = [
+        self._video_keys = [
             name for name, feature in self._features.items()
             if feature.get("dtype") == "video"
         ]
-        if video_keys:
-            raise NotImplementedError(
-                "PaimonLeRobotDataset currently supports image-backed "
-                "features only; video features are not yet supported: %s"
-                % video_keys)
+        self._visual_keys = self._image_keys + self._video_keys
 
         self._total_frames = int(
             _metadata_member(
@@ -230,6 +234,18 @@ class PaimonLeRobotDataset:
             self._read_table, snapshot, splits)
         self._validation_context = validation_context
         self._file_io = self._read_table.file_io
+        self._video_collators = [
+            VideoFrameCollator(
+                self._read_table,
+                video_column=key,
+                decoder_factory=partial(
+                    _open_video_decoder, backend=self.video_backend),
+                decode_fn=_decode_video_frame,
+                output_column=key,
+                collate_fn=_identity,
+            )
+            for key in self._video_keys
+        ]
         self._task_names = validation_context["task_names"]
         self._subtask_names = validation_context["subtask_names"]
         self._delta_projection = None
@@ -319,20 +335,29 @@ class PaimonLeRobotDataset:
                     self._image_keys,
                     self.blob_parallelism,
                 )
-                converted = {
-                    position: _torch_row(
-                        row, self._features, self.return_uint8)
-                    for position, row in base_rows.items()
-                }
-                converted.update({
-                    position: _torch_row(
-                        row, self._features, self.return_uint8)
-                    for position, row in delta_rows.items()
-                })
+                _decode_image_rows(
+                    row_groups,
+                    self._image_keys,
+                    self._features,
+                    self.return_uint8,
+                )
                 break
             except OSError:
                 if attempt + 1 == _IMAGE_READ_ATTEMPTS:
                     raise
+
+        _decode_video_rows(
+            row_groups, getattr(self, "_video_collators", ()))
+        converted = {
+            position: _torch_row(
+                row, self._features, self.return_uint8)
+            for position, row in base_rows.items()
+        }
+        converted.update({
+            position: _torch_row(
+                row, self._features, self.return_uint8)
+            for position, row in delta_rows.items()
+        })
 
         import torch
         duplicates = _duplicate_indices(plans)
@@ -350,10 +375,33 @@ class PaimonLeRobotDataset:
                 ])
             item.update(plan["padding"])
             if self.image_transforms is not None:
-                for key in self._image_keys:
+                for key in self._visual_keys:
                     item[key] = self.image_transforms(item[key])
             result.append(item)
         return result
+
+    def close(self):
+        first_error = None
+        locator = getattr(self, "_frame_locator", None)
+        if locator is not None:
+            try:
+                locator.close()
+            except Exception as error:
+                first_error = error
+        for collator in getattr(self, "_video_collators", ()):
+            try:
+                collator.close()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _read_rows(
             self, indices, projection, splits=None, needs_filter=True):
@@ -1086,6 +1134,15 @@ def _resolve_image_blobs(
             row[key] = body
 
 
+def _decode_image_rows(row_groups, image_keys, features, return_uint8):
+    for rows in row_groups:
+        for row in rows.values():
+            for key in image_keys:
+                if key in row:
+                    row[key] = _image_tensor(
+                        row[key], features[key], return_uint8=return_uint8)
+
+
 def _image_blob_sources(row_groups, image_keys):
     return [
         (row, key, row[key])
@@ -1118,8 +1175,11 @@ def _torch_row(row, features, return_uint8=False):
         if key not in result:
             continue
         value = result[key]
-        if feature.get("dtype") == "image":
+        if feature.get("dtype") == "image" and not torch.is_tensor(value):
             result[key] = _image_tensor(
+                value, feature, return_uint8=return_uint8)
+        elif feature.get("dtype") == "video":
+            result[key] = _video_tensor(
                 value, feature, return_uint8=return_uint8)
         elif feature.get("dtype") != "string" and not torch.is_tensor(value):
             dtype = getattr(torch, _TORCH_DTYPE_NAMES[feature.get("dtype")])
@@ -1162,6 +1222,201 @@ def _image_tensor(payload, feature, return_uint8=False):
     # Preserve high-bit-depth and floating-point images in native units.
     tensor = tensor.float()
     return tensor.div_(255) if normalize else tensor
+
+
+def _video_tensor(frame, feature, return_uint8=False):
+    import torch
+
+    if not torch.is_tensor(frame):
+        raise ValueError("LeRobot video decoder must return a Torch tensor.")
+    expected_shape = _feature_shape(feature, "video")
+    if len(expected_shape) != 3:
+        raise ValueError("LeRobot video feature must have three dimensions.")
+    names = feature.get("names") or []
+    output_shape = expected_shape if names and names[0] in (
+        "channel", "channels"
+    ) else expected_shape[2:] + expected_shape[:2]
+    if tuple(frame.shape) != output_shape:
+        raise ValueError(
+            "LeRobot video frame has shape %s, expected %s."
+            % (tuple(frame.shape), output_shape)
+        )
+    if frame.dtype == torch.uint8 and not return_uint8:
+        return frame.float().div_(255)
+    return frame
+
+
+def _open_video_decoder(stream, backend=None):
+    if backend in (None, "torchcodec"):
+        try:
+            return _open_torchcodec_decoder(stream)
+        except (ImportError, OSError, RuntimeError):
+            if backend == "torchcodec":
+                raise
+            stream.seek(0)
+    return _PyAVVideoDecoder(stream)
+
+
+def _open_torchcodec_decoder(stream):
+    try:
+        from torchcodec.decoders import VideoDecoder
+    except (ImportError, RuntimeError) as error:
+        raise ImportError(
+            "Video-backed PaimonLeRobotDataset requires TorchCodec from "
+            "'pypaimon[lerobot]'."
+        ) from error
+    try:
+        return VideoDecoder(stream, seek_mode="exact")
+    except TypeError:
+        # TorchCodec 0.2 accepts bytes but not seekable file-like objects.
+        stream.seek(0)
+        return VideoDecoder(stream.read(), seek_mode="exact")
+
+
+class _PyAVVideoDecoder:
+
+    # Reuse common overlapping delta windows without retaining a whole video.
+    _FRAME_CACHE_SIZE = 8
+
+    def __init__(self, stream):
+        try:
+            import av
+        except ImportError as error:
+            raise ImportError(
+                "Video-backed PaimonLeRobotDataset requires PyAV from "
+                "'pypaimon[lerobot]'."
+            ) from error
+        self._container = av.open(stream)
+        self._stream = self._container.streams.video[0]
+        self._next_index = 0
+        self._timestamps = []
+        self._keyframes = []
+        self._cache = OrderedDict()
+        self._frames = iter(self._container.decode(self._stream))
+
+    def __getitem__(self, index):
+        index = operator.index(index)
+        if index < 0:
+            raise IndexError("Video frame index %d is out of range." % index)
+        frame = self._cache.pop(index, None)
+        if frame is not None:
+            self._cache[index] = frame
+            return self._tensor(frame)
+
+        indexed = (
+            index > 0 and not self._timestamps
+            and self._index_packets()
+        )
+        at_frontier = self._next_index == len(self._timestamps)
+        if indexed:
+            self._seek(index)
+        elif index != self._next_index and not (
+                at_frontier and index >= self._next_index):
+            self._seek(index)
+        try:
+            while True:
+                frame = next(self._frames)
+                if frame.pts is None:
+                    continue
+                timestamp = frame.pts * (
+                    frame.time_base or self._stream.time_base)
+                position = bisect.bisect_left(self._timestamps, timestamp)
+                if (
+                    position < len(self._timestamps)
+                    and self._timestamps[position] == timestamp
+                ):
+                    frame_index = position
+                elif self._next_index == len(self._timestamps):
+                    frame_index = self._next_index
+                    self._timestamps.append(timestamp)
+                    if frame.key_frame:
+                        self._keyframes.append(frame_index)
+                else:
+                    continue
+                self._next_index = frame_index + 1
+                self._remember(frame_index, frame)
+                if frame_index == index:
+                    return self._tensor(frame)
+                if frame_index > index:
+                    break
+        except StopIteration as error:
+            raise IndexError(
+                "Video frame index %d is out of range." % index
+            ) from error
+        raise IndexError("Video frame index %d is out of range." % index)
+
+    def _index_packets(self):
+        entries = []
+        for packet in self._container.demux(self._stream):
+            if (packet.pts is None
+                    or getattr(packet, "is_discard", False)):
+                continue
+            timestamp = packet.pts * (
+                packet.time_base or self._stream.time_base)
+            entries.append((timestamp, packet.is_keyframe))
+        if not entries:
+            self._container.seek(
+                0, backward=True, any_frame=False, stream=self._stream)
+            self._frames = iter(self._container.decode(self._stream))
+            return False
+        entries.sort(key=lambda entry: entry[0])
+        self._timestamps = [timestamp for timestamp, unused in entries]
+        self._keyframes = [
+            index for index, (unused, keyframe) in enumerate(entries)
+            if keyframe
+        ]
+        return True
+
+    def _seek(self, index):
+        position = bisect.bisect_right(self._keyframes, index)
+        anchor = self._keyframes[position - 1] if position else 0
+        timestamp = self._timestamps[anchor]
+        self._container.seek(
+            round(timestamp / self._stream.time_base),
+            backward=True,
+            any_frame=False,
+            stream=self._stream,
+        )
+        self._next_index = None
+        self._frames = iter(self._container.decode(self._stream))
+
+    def _remember(self, index, frame):
+        self._cache.pop(index, None)
+        self._cache[index] = frame
+        if len(self._cache) > self._FRAME_CACHE_SIZE:
+            self._cache.popitem(last=False)
+
+    @staticmethod
+    def _tensor(frame):
+        import numpy as np
+        import torch
+        array = np.array(frame.to_ndarray(format="rgb24"), copy=True)
+        return torch.from_numpy(array).permute(2, 0, 1)
+
+    def close(self):
+        self._container.close()
+
+
+def _decode_video_frame(decoder, frame_index, unused_row):
+    return decoder[frame_index]
+
+
+def _identity(values):
+    return values
+
+
+def _decode_video_rows(row_groups, collators):
+    for collator in collators:
+        for rows in row_groups:
+            indices = [
+                index for index, row in rows.items()
+                if collator.video_column in row
+            ]
+            if not indices:
+                continue
+            decoded = collator([rows[index] for index in indices])
+            for index, row in zip(indices, decoded):
+                rows[index] = row
 
 
 def _normalize_index(index, size):
