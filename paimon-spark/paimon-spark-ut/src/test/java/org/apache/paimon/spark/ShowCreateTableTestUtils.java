@@ -21,9 +21,11 @@ package org.apache.paimon.spark;
 import org.apache.spark.sql.SparkSession;
 
 /** Helpers for asserting on {@code SHOW CREATE TABLE} output across Spark versions. */
-public class ShowCreateTableTestUtils {
+public final class ShowCreateTableTestUtils {
 
     private static final String EXPLICIT_BINARY_COLLATION = " COLLATE UTF8_BINARY";
+
+    private ShowCreateTableTestUtils() {}
 
     /** Runs {@code SHOW CREATE TABLE} and returns its output via {@link #stripBinaryCollation}. */
     public static String showCreateTable(SparkSession spark, String table) {
@@ -44,9 +46,14 @@ public class ShowCreateTableTestUtils {
      * run against every supported Spark version from one copy of the source, so they assert on the
      * output with the marker removed rather than branching on the version.
      *
-     * <p>Only the binary collation is stripped. A column carrying a real collation, say {@code
-     * STRING COLLATE UTF8_LCASE}, still shows up, so an assertion cannot be fooled into accepting
-     * the wrong collation.
+     * <p>Only use this on a Paimon-managed table, and not to assert on collation itself. Text
+     * removal cannot tell 4.2's added marker from a column the test declared {@code COLLATE
+     * UTF8_BINARY} on purpose, because the two render identically; and the match is not anchored at
+     * a word boundary, so the real collation {@code UTF8_BINARY_RTRIM} would be truncated to {@code
+     * _RTRIM}. Neither case can arise for a Paimon table, whose columns lose any collation in both
+     * directions of {@code SparkTypeUtils}, but a non-Paimon table in the session catalog (a {@code
+     * USING PARQUET} table under {@code spark_catalog}, say) keeps whatever Spark parsed and would
+     * hit both. Another collation such as {@code UTF8_LCASE} passes through untouched.
      */
     public static String stripBinaryCollation(String showCreateTableOutput) {
         return showCreateTableOutput.replace(EXPLICIT_BINARY_COLLATION, "");

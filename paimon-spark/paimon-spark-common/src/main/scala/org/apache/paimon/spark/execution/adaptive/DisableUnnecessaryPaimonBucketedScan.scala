@@ -154,6 +154,11 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
    * pinned by a query rather than by this string: see `BucketedTableQueryTest`'s "join - negative
    * case", whose `t1 JOIN t5` (equal bucket counts, different input partition counts) is the shape
    * that reaches `GroupPartitionsExec`.
+   *
+   * `paimon-spark-4.0` and `paimon-spark-4.1` fork this file under the same FQCN and deliberately
+   * omit this case: the class does not exist on those baselines, so the check would be a dead
+   * string compare. Those two copies were otherwise byte-identical to this one, so keep any further
+   * edit here in sync with them unless it is likewise 4.2-only.
    */
   private def consumesBucketPartitioning(plan: SparkPlan): Boolean =
     plan.getClass.getName == "org.apache.spark.sql.execution.datasources.v2.GroupPartitionsExec"

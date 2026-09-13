@@ -79,6 +79,11 @@ import org.apache.spark.sql.execution.exchange.{Exchange, ShuffleExchangeLike}
  * The idea of [[hasInterestingPartitionOrOrder]] is inspired from "interesting order" in
  * the paper "Access Path Selection in a Relational Database Management System"
  * (https://dl.acm.org/doi/10.1145/582095.582099).
+ *
+ * This is a fork of `paimon-spark-common`'s copy for this baseline: that file minus the
+ * `GroupPartitionsExec` case, which only exists on Spark 4.2, where `EnsureRequirements` can
+ * insert that node. Here the check would be a dead string compare. Everything else is
+ * intentionally identical, so mirror any edit made in `paimon-spark-common`.
  */
 // spotless:on
 object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
