@@ -157,6 +157,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withBucketFilter(Filter<Integer> bucketFilter) {
+        manifestsReader.withBucketFilter(bucketFilter);
         this.bucketFilter = bucketFilter;
         return this;
     }
@@ -164,6 +165,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withTotalAwareBucketFilter(
             TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
+        manifestsReader.withTotalAwareBucketFilter(totalAwareBucketFilter);
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }

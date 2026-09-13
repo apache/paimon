@@ -570,6 +570,7 @@ public class LocalOrphanFilesCleanTest {
                         meta.maxLevel(),
                         meta.minRowId(),
                         meta.maxRowId(),
+                        null,
                         Collections.singletonList(extraFile)));
         Pair<String, Long> newManifestList = manifestList.write(manifests);
         ObjectNode node =
