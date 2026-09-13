@@ -95,12 +95,13 @@ public abstract class FileFormat {
 
     protected Options getIdentifierPrefixOptions(Options options) {
         Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
+        // match against the identifier as written so the suffix is sliced at an offset the key
+        // actually has: lower-casing can lengthen a string, and U+0130 lower-cases to two chars
+        String prefix = formatIdentifier + ".";
+        String lowerCasePrefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            // match case-insensitively on the original key: lowercasing can change a string's
-            // length (ROOT maps 'İ' to two characters), and the suffix is sliced by prefix length
             if (key.regionMatches(true, 0, prefix, 0, prefix.length())) {
-                result.put(prefix + key.substring(prefix.length()), options.get(key));
+                result.put(lowerCasePrefix + key.substring(prefix.length()), options.get(key));
             }
         }
         return new Options(result);
