@@ -97,6 +97,16 @@ except ImportError:
     av = None
 
 
+class _ManualDatasetReader(pmm.PaimonDatasetReader):
+
+    @property
+    def schema(self):
+        raise NotImplementedError
+
+    def read_indices(self, indices, columns):
+        raise NotImplementedError
+
+
 def _replaced_contract(field, old, new):
     description = field.metadata[b"description"].decode("utf-8")
     if old not in description:
@@ -325,7 +335,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 pmm.PaimonLeRobotDataset(Mock())
             load.assert_not_called()
 
-    def test_dataset_reads_one_batch_from_logical_source(self):
+    def test_dataset_reads_one_batch_from_custom_reader(self):
         try:
             import torch
         except ImportError as error:
@@ -363,16 +373,12 @@ class LeRobotValidationTest(unittest.TestCase):
             for index in range(3)
         }
 
-        class Source(pmm.LeRobotDatasetSource):
+        class Reader(pmm.PaimonDatasetReader):
 
-            def __init__(self, metadata):
-                self._metadata = metadata
+            def __init__(self, metadata, **kwargs):
                 self.calls = []
                 self.closed = False
-
-            @property
-            def metadata(self):
-                return self._metadata
+                super().__init__(metadata, **kwargs)
 
             @property
             def schema(self):
@@ -386,6 +392,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 ], schema=self.schema)
 
             def close(self):
+                super().close()
                 self.closed = True
 
         metadata = {
@@ -402,16 +409,19 @@ class LeRobotValidationTest(unittest.TestCase):
             "tasks": ["pick"],
             "stats": {"action": {"mean": [1.0]}},
         }
-        source = Source(metadata)
-        dataset = pmm.PaimonLeRobotDataset(
-            source,
+        reader = Reader(
+            metadata,
             delta_timestamps={"action": [-0.1, 0.0, 0.1]},
         )
+        dataset = pmm.PaimonLeRobotDataset(reader)
 
+        self.assertIsInstance(dataset.reader, pmm.PaimonDatasetReader)
+        self.assertIsNone(dataset.reader.absolute_to_relative_idx)
+        self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
         sample, _ = dataset.__getitems__([1, 2])
 
         self.assertEqual([((0, 1, 2), tuple(info["features"]))],
-                         source.calls)
+                         reader.calls)
         self.assertIsNone(dataset.tag_name)
         self.assertEqual("dataset-version-12", dataset.meta.revision)
         self.assertEqual((2,), dataset.features["observation.state"]["shape"])
@@ -426,7 +436,7 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual([False, False, False],
                          sample["action_is_pad"].tolist())
         dataset.close()
-        self.assertTrue(source.closed)
+        self.assertTrue(reader.closed)
 
     def test_metadata_json_preserves_nested_values(self):
         values = {
@@ -735,7 +745,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "L", np.full((4, 5), 80 + index, np.uint8)),
             })
 
-        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset = object.__new__(_ManualDatasetReader)
         dataset._total_frames = 2
         dataset.episodes = None
         dataset._selected_ranges = None
@@ -795,7 +805,7 @@ class LeRobotValidationTest(unittest.TestCase):
             "observation.image": descriptor,
         }]
 
-        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset = object.__new__(_ManualDatasetReader)
         dataset._total_frames = 1
         dataset.episodes = None
         dataset._selected_ranges = None
@@ -3039,8 +3049,8 @@ class LeRobotImportTest(unittest.TestCase):
             return original_plan(scan)
 
         with patch.object(TableScan, "plan", new=counted_plan), patch.object(
-                dataset, "_read_rows",
-                wraps=dataset._read_rows) as read, patch(
+                dataset.reader, "_read_rows",
+                wraps=dataset.reader._read_rows) as read, patch(
                 "pypaimon.multimodal.blob_read.fetch_blob_bodies",
                 wraps=fetch_blob_bodies) as fetch:
             last, first = dataset.__getitems__([4, 0])

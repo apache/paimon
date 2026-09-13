@@ -29,8 +29,10 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
-from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
-from pypaimon.multimodal.lerobot.dataset_source import LeRobotDatasetSource
+from pypaimon.multimodal.lerobot.dataset import (
+    PaimonDatasetReader,
+    PaimonLeRobotDataset,
+)
 from pypaimon.multimodal.rosbag import (
     RosbagLoadResult,
     RosbagSource,
@@ -64,11 +66,11 @@ __all__ = [
     "BlobStore",
     "Hdf5File",
     "Hdf5LoadResult",
-    "LeRobotDatasetSource",
     "MultimodalConnection",
     "MultimodalTable",
     "NoSuchKey",
     "ObjectInfo",
+    "PaimonDatasetReader",
     "PaimonLeRobotDataset",
     "PutObjectResult",
     "RosbagLoadResult",

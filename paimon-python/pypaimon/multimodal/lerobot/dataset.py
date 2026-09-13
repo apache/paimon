@@ -23,6 +23,7 @@ import json
 import math
 import operator
 import sys
+from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
 from functools import partial
@@ -36,10 +37,7 @@ from pypaimon.multimodal.lerobot.metadata import (
     _validate_tag_name,
 )
 from pypaimon.multimodal.lerobot.loader import _DECLARED_NUMERIC_RANGES
-from pypaimon.multimodal.lerobot.dataset_source import (
-    LeRobotDatasetSource,
-    _PaimonTableDatasetSource,
-)
+from pypaimon.multimodal.lerobot.reader import _PaimonTableFrameReader
 from pypaimon.multimodal.lerobot.schema import (
     _feature_shape,
     _require_v3,
@@ -77,10 +75,10 @@ _CONTROL_FEATURES = frozenset({
 })
 
 
-class PaimonLeRobotDataset:
-    """Map-style LeRobot reader backed by indexed Paimon reads.
+class PaimonDatasetReader(ABC):
+    """Read-side implementation for Paimon-backed LeRobot datasets.
 
-    The input is a Paimon table group or :class:`LeRobotDatasetSource`.
+    Subclasses provide a logical Arrow schema and batched ``read_indices``.
     Resolved LeRobot metadata remains available through :attr:`meta`.
 
     Set ``return_uint8=True`` to keep 8-bit visual frames in their decoded
@@ -90,7 +88,7 @@ class PaimonLeRobotDataset:
 
     def __init__(
             self,
-            table,
+            meta,
             *,
             tag_name=None,
             episodes=None,
@@ -99,18 +97,10 @@ class PaimonLeRobotDataset:
             tolerance_s=1e-4,
             blob_parallelism=16,
             video_backend=None,
-            return_uint8=False):
+            return_uint8=False,
+            _resolved_meta=False):
         _require_dataset_python()
-        if isinstance(table, LeRobotDatasetSource):
-            if tag_name is not None:
-                raise ValueError(
-                    "tag_name is managed by a custom source and must be None.")
-            source = table
-            metadata = _source_metadata(source.metadata)
-            raw_table = None
-        else:
-            source = None
-            raw_table, metadata = _load_dataset(table, tag_name)
+        metadata = meta if _resolved_meta else _reader_metadata(meta)
         info = self._init_dataset(
             metadata,
             tag_name,
@@ -122,10 +112,31 @@ class PaimonLeRobotDataset:
             video_backend,
             return_uint8,
         )
-        if source is None:
-            self._init_paimon_source(raw_table, metadata, info)
-        else:
-            self._init_source(source, info, False)
+        schema = self.schema
+        if not isinstance(schema, pa.Schema):
+            raise TypeError(
+                "PaimonDatasetReader.schema must be a pyarrow.Schema.")
+        projection, validation_context, subtasks = \
+            self._init_frame_contract(
+                schema, info, self._validate_physical_metadata())
+        rows = self._open_frame_rows(projection)
+        self._set_frame_rows(
+            rows, projection, validation_context, subtasks)
+
+    @property
+    @abstractmethod
+    def schema(self):
+        """Return the logical frame schema as :class:`pyarrow.Schema`."""
+
+    @abstractmethod
+    def read_indices(self, indices, columns):
+        """Return requested logical frame rows as a :class:`pyarrow.Table`."""
+
+    def _validate_physical_metadata(self):
+        return False
+
+    def _open_frame_rows(self, projection):
+        return None
 
     def _init_dataset(
             self,
@@ -232,40 +243,22 @@ class PaimonLeRobotDataset:
         if self._delta_indices and self._episode_ranges is None:
             raise ValueError("delta_timestamps requires episode metadata.")
 
-    def _init_paimon_source(self, raw_table, metadata, info):
-        target_schema = _target_schema(raw_table)
-        projection, validation_context, subtasks = \
-            self._init_frame_contract(target_schema, info, True)
-        source = _PaimonTableDatasetSource(
-            raw_table, metadata, projection, self._total_frames)
-        self._set_source(
-            source, projection, validation_context, subtasks)
-
-    def _init_source(self, source, info, validate_metadata):
-        schema = getattr(source, "schema", None)
-        if not isinstance(schema, pa.Schema):
-            raise TypeError(
-                "LeRobotDatasetSource.schema must be a pyarrow.Schema.")
-        projection, validation_context, subtasks = \
-            self._init_frame_contract(schema, info, validate_metadata)
-        self._set_source(
-            source, projection, validation_context, subtasks)
-
-    def _set_source(
-            self, source, projection, validation_context, subtasks):
-        self._source = source
-        self._snapshot_id = getattr(source, "snapshot_id", None)
-        self._read_table = getattr(source, "_table", None)
-        self._frame_locator = getattr(source, "_locator", None)
+    def _set_frame_rows(
+            self, rows, projection, validation_context, subtasks):
+        self._frame_rows = rows
+        access = rows if rows is not None else self
+        self._snapshot_id = getattr(access, "snapshot_id", None)
+        self._read_table = getattr(access, "_table", None)
+        self._frame_locator = getattr(access, "_locator", None)
         self._projection = projection
         self._validation_context = validation_context
-        self._file_io = getattr(source, "file_io", None)
+        self._file_io = getattr(access, "file_io", None)
         if self._video_keys and self._file_io is None:
             raise ValueError(
-                "A video-backed LeRobotDatasetSource must expose file_io.")
+                "A video-backed PaimonDatasetReader must expose file_io.")
         self._video_collators = [
             VideoFrameCollator(
-                source,
+                access,
                 video_column=key,
                 decoder_factory=partial(
                     _open_video_decoder, backend=self.video_backend),
@@ -287,7 +280,7 @@ class PaimonLeRobotDataset:
             _validate_lerobot_schema(
                 source_schema, target_schema, self.repo_id)
         else:
-            _validate_source_schema(
+            _validate_reader_schema(
                 source_schema, target_schema, self.repo_id)
         validation_context = _build_frame_validation_context(
             self.meta,
@@ -340,6 +333,26 @@ class PaimonLeRobotDataset:
 
     def __len__(self):
         return self.num_frames
+
+    @property
+    def absolute_to_relative_idx(self):
+        if self._selected_ranges is None:
+            return None
+        result = {}
+        relative = 0
+        for begin, end in self._selected_ranges:
+            for absolute in range(begin, end):
+                result[absolute] = relative
+                relative += 1
+        return result
+
+    def get_item(self, index):
+        """Return one fully assembled frame."""
+        return self[index]
+
+    def get_items(self, indices):
+        """Return fully assembled frames for one batch."""
+        return self.__getitems__(indices)
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -454,11 +467,11 @@ class PaimonLeRobotDataset:
             except Exception as error:
                 if first_error is None:
                     first_error = error
-        source = getattr(self, "_source", None)
-        self._source = None
-        if source is not None:
+        rows = getattr(self, "_frame_rows", None)
+        self._frame_rows = None
+        if rows is not None:
             try:
-                source.close()
+                rows.close()
             except Exception as error:
                 if first_error is None:
                     first_error = error
@@ -474,8 +487,9 @@ class PaimonLeRobotDataset:
     def _read_rows(self, indices, projection):
         if not indices:
             return {}
-        return _read_source_rows(
-            self._source,
+        rows = self._frame_rows if self._frame_rows is not None else self
+        return _read_reader_rows(
+            rows,
             projection,
             indices,
             self._validation_context,
@@ -521,6 +535,121 @@ class PaimonLeRobotDataset:
             "%s(repo_id=%r, episodes=%d, frames=%d, features=%r)"
             % (self.__class__.__name__, self.repo_id, self.num_episodes,
                self.num_frames, list(self.features)))
+
+
+class _PaimonTableDatasetReader(PaimonDatasetReader):
+
+    def __init__(
+            self,
+            table,
+            *,
+            tag_name=None,
+            episodes=None,
+            image_transforms=None,
+            delta_timestamps=None,
+            tolerance_s=1e-4,
+            blob_parallelism=16,
+            video_backend=None,
+            return_uint8=False):
+        self._raw_table, meta = _load_dataset(table, tag_name)
+        super().__init__(
+            meta,
+            tag_name=tag_name,
+            episodes=episodes,
+            image_transforms=image_transforms,
+            delta_timestamps=delta_timestamps,
+            tolerance_s=tolerance_s,
+            blob_parallelism=blob_parallelism,
+            video_backend=video_backend,
+            return_uint8=return_uint8,
+            _resolved_meta=True,
+        )
+
+    @property
+    def schema(self):
+        return _target_schema(self._raw_table)
+
+    def read_indices(self, indices, columns):
+        return self._frame_rows.read_indices(indices, columns)
+
+    def _validate_physical_metadata(self):
+        return True
+
+    def _open_frame_rows(self, projection):
+        return _PaimonTableFrameReader(
+            self._raw_table, projection, self._total_frames)
+
+
+class PaimonLeRobotDataset:
+    """Map-style Dataset facade backed by :class:`PaimonDatasetReader`."""
+
+    def __init__(
+            self,
+            table,
+            *,
+            tag_name=None,
+            episodes=None,
+            image_transforms=None,
+            delta_timestamps=None,
+            tolerance_s=1e-4,
+            blob_parallelism=16,
+            video_backend=None,
+            return_uint8=False):
+        _require_dataset_python()
+        if isinstance(table, PaimonDatasetReader):
+            if (
+                tag_name is not None
+                or episodes is not None
+                or image_transforms is not None
+                or delta_timestamps is not None
+                or tolerance_s != 1e-4
+                or blob_parallelism != 16
+                or video_backend is not None
+                or return_uint8
+            ):
+                raise ValueError(
+                    "Configure Dataset options on PaimonDatasetReader.")
+            self.reader = table
+        else:
+            self.reader = _PaimonTableDatasetReader(
+                table,
+                tag_name=tag_name,
+                episodes=episodes,
+                image_transforms=image_transforms,
+                delta_timestamps=delta_timestamps,
+                tolerance_s=tolerance_s,
+                blob_parallelism=blob_parallelism,
+                video_backend=video_backend,
+                return_uint8=return_uint8,
+            )
+
+    def __len__(self):
+        return len(self.reader)
+
+    def __getitem__(self, index):
+        return self.reader[index]
+
+    def __getitems__(self, indices):
+        return self.reader.get_items(indices)
+
+    def set_image_transforms(self, image_transforms):
+        self.reader.set_image_transforms(image_transforms)
+
+    def clear_image_transforms(self):
+        self.reader.clear_image_transforms()
+
+    def close(self):
+        self.reader.close()
+
+    def __getattr__(self, name):
+        reader = self.__dict__.get("reader")
+        if reader is None:
+            raise AttributeError(name)
+        return getattr(reader, name)
+
+    def __repr__(self):
+        return repr(self.reader).replace(
+            self.reader.__class__.__name__, self.__class__.__name__, 1)
 
 
 class _PaimonLeRobotMetadata:
@@ -589,10 +718,11 @@ class _PaimonLeRobotMetadata:
             return None
 
 
-def _source_metadata(metadata):
+def _reader_metadata(metadata):
     info = _metadata_member(metadata, "info")
     if not isinstance(info, Mapping):
-        raise TypeError("LeRobot source metadata must contain an info map.")
+        raise TypeError(
+            "PaimonDatasetReader metadata must contain an info map.")
     info = dict(info)
     features = info.get("features")
     if isinstance(features, Mapping):
@@ -604,7 +734,7 @@ def _source_metadata(metadata):
                 feature["shape"] = tuple(feature["shape"])
     stats = _metadata_member(metadata, "stats")
     return _PaimonLeRobotMetadata(
-        str(_metadata_member(metadata, "repo_id", "logical-source")),
+        str(_metadata_member(metadata, "repo_id", "custom-reader")),
         _metadata_member(metadata, "revision"),
         info,
         _numpy_stats(stats) if stats is not None else None,
@@ -892,7 +1022,7 @@ def _delta_indices(delta_timestamps, fps, tolerance_s, features):
     return result
 
 
-def _validate_source_schema(expected_schema, actual_schema, source):
+def _validate_reader_schema(expected_schema, actual_schema, source):
     for expected_field in expected_schema:
         target_index = actual_schema.get_field_index(expected_field.name)
         if target_index < 0:
@@ -905,17 +1035,17 @@ def _validate_source_schema(expected_schema, actual_schema, source):
                    target_type))
 
 
-def _read_source_rows(
-        source, projection, indices, validation_context, tolerance_s,
+def _read_reader_rows(
+        reader, projection, indices, validation_context, tolerance_s,
         features):
-    values = source.read_indices(tuple(indices), tuple(projection))
+    values = reader.read_indices(tuple(indices), tuple(projection))
     if not isinstance(values, pa.Table):
         raise TypeError(
-            "LeRobotDatasetSource.read_indices() must return a pyarrow.Table.")
+            "PaimonDatasetReader.read_indices() must return a pyarrow.Table.")
     missing = set(projection) - set(values.column_names)
     if missing:
         raise ValueError(
-            "LeRobotDatasetSource result is missing fields: %s"
+            "PaimonDatasetReader result is missing fields: %s"
             % sorted(missing))
     rows = _arrow_rows(values.select(projection), features)
     expected = set(indices)
@@ -924,7 +1054,7 @@ def _read_source_rows(
         index = _control_index(row, "index", -1)
         if index not in expected or index in result:
             raise ValueError(
-                "LeRobotDatasetSource returned an unexpected or duplicate "
+                "PaimonDatasetReader returned an unexpected or duplicate "
                 "index: %d." % index)
         _validate_control_row(
             index, row, validation_context, tolerance_s)
@@ -932,7 +1062,7 @@ def _read_source_rows(
     missing = expected - set(result)
     if missing:
         raise RuntimeError(
-            "LeRobotDatasetSource did not return indices %s."
+            "PaimonDatasetReader did not return indices %s."
             % sorted(missing))
     return result
 

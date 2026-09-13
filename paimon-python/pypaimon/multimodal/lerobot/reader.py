@@ -15,49 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Logical frame sources used by :class:`PaimonLeRobotDataset`."""
+"""Indexed frame-row reader used by :class:`PaimonDatasetReader`."""
 
 import os
-from abc import ABC, abstractmethod
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.multimodal.table import _target_schema, _time_travel_table
+from pypaimon.multimodal.table import _time_travel_table
 from pypaimon.read.query_auth_split import QueryAuthSplit
 
 
-class LeRobotDatasetSource(ABC):
-    """Data and metadata source for logical LeRobot frame rows.
+class _PaimonTableFrameReader:
+    """Read logical frame rows from one indexed Paimon table."""
 
-    Implementations may resolve one logical row from multiple Paimon tables.
-    Image values must be encoded bytes or BLOB descriptors. Video values must
-    be serialized ``VideoFrameDescriptor`` instances. Descriptor-backed
-    sources expose their resolved ``file_io``.
-    """
-
-    @property
-    @abstractmethod
-    def metadata(self):
-        """Return LeRobot metadata for this source."""
-
-    @property
-    @abstractmethod
-    def schema(self):
-        """Return the logical frame schema as :class:`pyarrow.Schema`."""
-
-    @abstractmethod
-    def read_indices(self, indices, columns):
-        """Return requested rows as a :class:`pyarrow.Table`."""
-
-    def close(self):
-        """Release reader resources."""
-
-
-class _PaimonTableDatasetSource(LeRobotDatasetSource):
-    """Default source for one indexed Paimon frames table."""
-
-    def __init__(self, raw_table, metadata, projection, total_frames):
-        self._metadata = metadata
-        self._schema = _target_schema(raw_table)
+    def __init__(self, raw_table, projection, total_frames):
         self._table, self.snapshot_id, splits = _indexed_read_table(
             raw_table, projection)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
@@ -68,14 +38,6 @@ class _PaimonTableDatasetSource(LeRobotDatasetSource):
                 % (snapshot.next_row_id, total_frames))
         self.file_io = self._table.file_io
         self._locator = _FrameLocator(self._table, snapshot, splits)
-
-    @property
-    def metadata(self):
-        return self._metadata
-
-    @property
-    def schema(self):
-        return self._schema
 
     def read_indices(self, indices, columns):
         splits, needs_filter = self._locator.locate(indices)
