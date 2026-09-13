@@ -62,8 +62,8 @@ public class ManifestFileMeta {
                             new DataField(
                                     12,
                                     "_EXTRA_FILES",
-                                    new ArrayType(
-                                            true, new VarCharType(false, Integer.MAX_VALUE)))));
+                                    new ArrayType(true, new VarCharType(false, Integer.MAX_VALUE))),
+                            new DataField(13, "_TOTAL_BUCKETS", new IntType(true))));
 
     private final String fileName;
     private final long fileSize;
@@ -78,6 +78,7 @@ public class ManifestFileMeta {
     private final @Nullable Long minRowId;
     private final @Nullable Long maxRowId;
     private final @Nullable List<String> extraFiles;
+    private final @Nullable Integer totalBuckets;
 
     public ManifestFileMeta(
             String fileName,
@@ -105,6 +106,7 @@ public class ManifestFileMeta {
                 maxLevel,
                 minRowId,
                 maxRowId,
+                null,
                 null);
     }
 
@@ -122,6 +124,38 @@ public class ManifestFileMeta {
             @Nullable Long minRowId,
             @Nullable Long maxRowId,
             @Nullable List<String> extraFiles) {
+        this(
+                fileName,
+                fileSize,
+                numAddedFiles,
+                numDeletedFiles,
+                partitionStats,
+                schemaId,
+                minBucket,
+                maxBucket,
+                minLevel,
+                maxLevel,
+                minRowId,
+                maxRowId,
+                extraFiles,
+                null);
+    }
+
+    public ManifestFileMeta(
+            String fileName,
+            long fileSize,
+            long numAddedFiles,
+            long numDeletedFiles,
+            SimpleStats partitionStats,
+            long schemaId,
+            @Nullable Integer minBucket,
+            @Nullable Integer maxBucket,
+            @Nullable Integer minLevel,
+            @Nullable Integer maxLevel,
+            @Nullable Long minRowId,
+            @Nullable Long maxRowId,
+            @Nullable List<String> extraFiles,
+            @Nullable Integer totalBuckets) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.numAddedFiles = numAddedFiles;
@@ -135,6 +169,7 @@ public class ManifestFileMeta {
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
         this.extraFiles = extraFiles;
+        this.totalBuckets = totalBuckets;
     }
 
     public String fileName() {
@@ -189,6 +224,10 @@ public class ManifestFileMeta {
         return extraFiles;
     }
 
+    public @Nullable Integer totalBuckets() {
+        return totalBuckets;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof ManifestFileMeta)) {
@@ -207,7 +246,8 @@ public class ManifestFileMeta {
                 && Objects.equals(maxLevel, that.maxLevel)
                 && Objects.equals(minRowId, that.minRowId)
                 && Objects.equals(maxRowId, that.maxRowId)
-                && Objects.equals(extraFiles, that.extraFiles);
+                && Objects.equals(extraFiles, that.extraFiles)
+                && Objects.equals(totalBuckets, that.totalBuckets);
     }
 
     @Override
@@ -225,13 +265,14 @@ public class ManifestFileMeta {
                 maxLevel,
                 minRowId,
                 maxRowId,
-                extraFiles);
+                extraFiles,
+                totalBuckets);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s, %s}",
+                "{%s, %d, %d, %d, %s, %d, %s, %s, %s, %s, %s, %s, %s, %s}",
                 fileName,
                 fileSize,
                 numAddedFiles,
@@ -244,7 +285,8 @@ public class ManifestFileMeta {
                 maxLevel,
                 minRowId,
                 maxRowId,
-                extraFiles);
+                extraFiles,
+                totalBuckets);
     }
 
     // ----------------------- Serialization -----------------------------

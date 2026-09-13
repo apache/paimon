@@ -142,6 +142,7 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                 manifestType.getField(ManifestEntry.KIND),
                                 manifestType.getField(ManifestEntry.PARTITION),
                                 manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
                                 manifestType
                                         .getField(ManifestEntry.FILE)
                                         .newType(
