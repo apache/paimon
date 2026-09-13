@@ -226,3 +226,25 @@ Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
 to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
 either decoder.
+
+For logical frames assembled from multiple tables, implement one batched
+reader instead of copying them into a LeRobot table group:
+
+```python
+from pypaimon.multimodal import LeRobotFrameReader, PaimonLeRobotDataset
+
+class Frames(LeRobotFrameReader):
+    schema = logical_frame_schema
+
+    def read_indices(self, indices, columns):
+        return resolve_frame_rows(indices, columns)  # pyarrow.Table
+
+dataset = PaimonLeRobotDataset.from_reader(Frames(), metadata)
+```
+
+`metadata` contains `info`, `episodes`, `tasks`, and optional `stats`,
+`subtasks`, `repo_id`, and `revision`. The reader must bind its source tables
+to stable snapshots and resolve all requested indices in one Arrow table.
+Image values are encoded bytes. The Dataset retains episode selection, delta
+windows, padding, transforms, and Torch conversion. Logical video readers are
+not yet supported.

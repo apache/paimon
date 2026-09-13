@@ -24,7 +24,9 @@ import math
 import operator
 import os
 import sys
+from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Mapping
 from functools import partial
 
 import pyarrow as pa
@@ -75,6 +77,27 @@ _CONTROL_FEATURES = frozenset({
 })
 
 
+class LeRobotFrameReader(ABC):
+    """Batch reader for logical LeRobot frame rows.
+
+    Implementations may resolve one logical row from multiple Paimon tables.
+    Image values must be encoded bytes. Readers used by DataLoader workers
+    must be picklable.
+    """
+
+    @property
+    @abstractmethod
+    def schema(self):
+        """Return the logical frame schema as :class:`pyarrow.Schema`."""
+
+    @abstractmethod
+    def read_indices(self, indices, columns):
+        """Return requested rows as a :class:`pyarrow.Table`."""
+
+    def close(self):
+        """Release reader resources."""
+
+
 class PaimonLeRobotDataset:
     """Map-style LeRobot reader backed by indexed Paimon reads.
 
@@ -98,12 +121,62 @@ class PaimonLeRobotDataset:
             blob_parallelism=16,
             video_backend=None,
             return_uint8=False):
-        if sys.version_info < (3, 10):
-            raise RuntimeError(
-                "PaimonLeRobotDataset requires Python 3.10 or newer; "
-                "install and run 'pypaimon[lerobot]' on a supported Python "
-                "version.")
-        raw_table, self.meta = _load_dataset(table, tag_name)
+        _require_dataset_python()
+        raw_table, metadata = _load_dataset(table, tag_name)
+        info = self._init_dataset(
+            metadata,
+            tag_name,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            tolerance_s,
+            blob_parallelism,
+            video_backend,
+            return_uint8,
+        )
+        self._init_reader(raw_table, info)
+
+    @classmethod
+    def from_reader(
+            cls,
+            reader,
+            metadata,
+            *,
+            episodes=None,
+            image_transforms=None,
+            delta_timestamps=None,
+            tolerance_s=1e-4,
+            return_uint8=False):
+        """Build a dataset over a logical, possibly multi-table reader."""
+        _require_dataset_python()
+        dataset = cls.__new__(cls)
+        metadata = _reader_metadata(metadata)
+        info = dataset._init_dataset(
+            metadata,
+            None,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            tolerance_s,
+            1,
+            None,
+            return_uint8,
+        )
+        dataset._init_external_reader(reader, info)
+        return dataset
+
+    def _init_dataset(
+            self,
+            metadata,
+            tag_name,
+            episodes,
+            image_transforms,
+            delta_timestamps,
+            tolerance_s,
+            blob_parallelism,
+            video_backend,
+            return_uint8):
+        self.meta = metadata
         self.tag_name = tag_name
         self.repo_id = self.meta.repo_id
         self.image_transforms = image_transforms
@@ -125,7 +198,7 @@ class PaimonLeRobotDataset:
 
         info = self._init_metadata()
         self._init_episodes(episodes)
-        self._init_reader(raw_table, info)
+        return info
 
     def _init_metadata(self):
         info = dict(_metadata_member(self.meta, "info", {}))
@@ -199,27 +272,8 @@ class PaimonLeRobotDataset:
 
     def _init_reader(self, raw_table, info):
         target_schema = _target_schema(raw_table)
-        table_fields = set(target_schema.names)
-        tasks = _metadata_member(self.meta, "tasks")
-        subtasks = _metadata_member(self.meta, "subtasks")
-        _validate_component_metadata(
-            self._features, self._total_tasks, tasks, subtasks)
-        source_schema = _schema_from_info(info)
-        _validate_lerobot_schema(source_schema, target_schema, self.repo_id)
-        validation_context = _build_frame_validation_context(
-            self.meta,
-            self._episode_ranges,
-            self._fps,
-            tasks,
-            subtasks,
-            source_schema.field("timestamp").type,
-        )
-        projection = list(self._features)
-        missing = set(projection) - table_fields
-        if missing:
-            raise ValueError(
-                "Paimon table is missing LeRobot fields: %s"
-                % sorted(missing))
+        projection, validation_context, subtasks = \
+            self._init_frame_contract(target_schema, info, True)
 
         self._read_table, self._snapshot_id, splits = _indexed_read_table(
             raw_table, projection)
@@ -232,6 +286,7 @@ class PaimonLeRobotDataset:
         self._projection = projection
         self._frame_locator = _FrameLocator(
             self._read_table, snapshot, splits)
+        self._external_reader = None
         self._validation_context = validation_context
         self._file_io = self._read_table.file_io
         self._video_collators = [
@@ -246,6 +301,60 @@ class PaimonLeRobotDataset:
             )
             for key in self._video_keys
         ]
+        self._init_delta_projection(validation_context, subtasks)
+
+    def _init_external_reader(self, reader, info):
+        if self._video_keys:
+            raise ValueError(
+                "LeRobotFrameReader does not support video features.")
+        schema = getattr(reader, "schema", None)
+        if not isinstance(schema, pa.Schema):
+            raise TypeError(
+                "LeRobotFrameReader.schema must be a pyarrow.Schema.")
+        projection, validation_context, subtasks = \
+            self._init_frame_contract(schema, info, False)
+        if not callable(getattr(reader, "read_indices", None)):
+            raise TypeError(
+                "LeRobotFrameReader must define read_indices().")
+        self._read_table = None
+        self._snapshot_id = None
+        self._projection = projection
+        self._frame_locator = None
+        self._external_reader = reader
+        self._validation_context = validation_context
+        self._file_io = None
+        self._video_collators = []
+        self._init_delta_projection(validation_context, subtasks)
+
+    def _init_frame_contract(self, target_schema, info, validate_metadata):
+        tasks = _metadata_member(self.meta, "tasks")
+        subtasks = _metadata_member(self.meta, "subtasks")
+        _validate_component_metadata(
+            self._features, self._total_tasks, tasks, subtasks)
+        source_schema = _schema_from_info(info)
+        if validate_metadata:
+            _validate_lerobot_schema(
+                source_schema, target_schema, self.repo_id)
+        else:
+            _validate_reader_schema(
+                source_schema, target_schema, self.repo_id)
+        validation_context = _build_frame_validation_context(
+            self.meta,
+            self._episode_ranges,
+            self._fps,
+            tasks,
+            subtasks,
+            source_schema.field("timestamp").type,
+        )
+        projection = list(self._features)
+        missing = set(projection) - set(target_schema.names)
+        if missing:
+            raise ValueError(
+                "LeRobot frame schema is missing fields: %s"
+                % sorted(missing))
+        return projection, validation_context, subtasks
+
+    def _init_delta_projection(self, validation_context, subtasks):
         self._task_names = validation_context["task_names"]
         self._subtask_names = validation_context["subtask_names"]
         self._delta_projection = None
@@ -307,9 +416,12 @@ class PaimonLeRobotDataset:
             if position not in unique_frame_index_set
         })
         lookup_indices = sorted(unique_frame_index_set.union(delta_indices))
-        splits, needs_filter = self._frame_locator.locate(lookup_indices)
-        rows = self._read_rows(
-            lookup_indices, self._projection, splits, needs_filter)
+        if getattr(self, "_external_reader", None) is None:
+            splits, needs_filter = self._frame_locator.locate(lookup_indices)
+            rows = self._read_rows(
+                lookup_indices, self._projection, splits, needs_filter)
+        else:
+            rows = self._read_rows(lookup_indices, self._projection)
         base_rows = {
             index: rows[index] for index in unique_frame_indices
         }
@@ -323,28 +435,36 @@ class PaimonLeRobotDataset:
         _attach_task_labels(
             base_rows, self._task_names, self._subtask_names)
         row_groups = [base_rows, delta_rows]
-        image_sources = _image_blob_sources(
-            row_groups, self._image_keys)
-        for attempt in range(_IMAGE_READ_ATTEMPTS):
-            if attempt:
-                _restore_image_blob_sources(image_sources)
-            try:
-                _resolve_image_blobs(
-                    self._file_io,
-                    row_groups,
-                    self._image_keys,
-                    self.blob_parallelism,
-                )
-                _decode_image_rows(
-                    row_groups,
-                    self._image_keys,
-                    self._features,
-                    self.return_uint8,
-                )
-                break
-            except OSError:
-                if attempt + 1 == _IMAGE_READ_ATTEMPTS:
-                    raise
+        if getattr(self, "_external_reader", None) is None:
+            image_sources = _image_blob_sources(
+                row_groups, self._image_keys)
+            for attempt in range(_IMAGE_READ_ATTEMPTS):
+                if attempt:
+                    _restore_image_blob_sources(image_sources)
+                try:
+                    _resolve_image_blobs(
+                        self._file_io,
+                        row_groups,
+                        self._image_keys,
+                        self.blob_parallelism,
+                    )
+                    _decode_image_rows(
+                        row_groups,
+                        self._image_keys,
+                        self._features,
+                        self.return_uint8,
+                    )
+                    break
+                except OSError:
+                    if attempt + 1 == _IMAGE_READ_ATTEMPTS:
+                        raise
+        else:
+            _decode_image_rows(
+                row_groups,
+                self._image_keys,
+                self._features,
+                self.return_uint8,
+            )
 
         _decode_video_rows(
             row_groups, getattr(self, "_video_collators", ()))
@@ -382,6 +502,15 @@ class PaimonLeRobotDataset:
 
     def close(self):
         first_error = None
+        reader = getattr(self, "_external_reader", None)
+        self._external_reader = None
+        if reader is not None:
+            try:
+                close = getattr(reader, "close", None)
+                if callable(close):
+                    close()
+            except Exception as error:
+                first_error = error
         locator = getattr(self, "_frame_locator", None)
         if locator is not None:
             try:
@@ -407,6 +536,16 @@ class PaimonLeRobotDataset:
             self, indices, projection, splits=None, needs_filter=True):
         if not indices:
             return {}
+        external_reader = getattr(self, "_external_reader", None)
+        if external_reader is not None:
+            return _read_external_rows(
+                external_reader,
+                projection,
+                indices,
+                self._validation_context,
+                self.tolerance_s,
+                self._features,
+            )
         return _read_rows_by_index(
             self._read_table,
             projection,
@@ -623,9 +762,39 @@ class _PaimonLeRobotMetadata:
         }
 
     def get_task_index(self, task):
-        if task not in self.tasks.index:
+        if hasattr(self.tasks, "loc"):
+            if task not in self.tasks.index:
+                return None
+            return int(self.tasks.loc[task].task_index)
+        try:
+            return list(self.tasks).index(task)
+        except ValueError:
             return None
-        return int(self.tasks.loc[task].task_index)
+
+
+def _reader_metadata(metadata):
+    info = _metadata_member(metadata, "info")
+    if not isinstance(info, Mapping):
+        raise TypeError("LeRobot reader metadata must contain an info map.")
+    info = dict(info)
+    features = info.get("features")
+    if isinstance(features, Mapping):
+        info["features"] = {
+            name: dict(feature) for name, feature in features.items()
+        }
+        for feature in info["features"].values():
+            if "shape" in feature:
+                feature["shape"] = tuple(feature["shape"])
+    stats = _metadata_member(metadata, "stats")
+    return _PaimonLeRobotMetadata(
+        str(_metadata_member(metadata, "repo_id", "logical-reader")),
+        _metadata_member(metadata, "revision"),
+        info,
+        _numpy_stats(stats) if stats is not None else None,
+        _metadata_member(metadata, "episodes"),
+        _metadata_member(metadata, "tasks"),
+        _metadata_member(metadata, "subtasks"),
+    )
 
 
 def _load_dataset(table, tag_name):
@@ -729,7 +898,8 @@ def _numpy_stats(value):
 
 
 def _metadata_member(metadata, name, default=None):
-    value = getattr(metadata, name, None)
+    value = metadata.get(name) if isinstance(metadata, Mapping) \
+        else getattr(metadata, name, None)
     return default if value is None else value
 
 
@@ -933,6 +1103,51 @@ def _indexed_read_table(raw_table, projection):
 def _index_predicate(table, indices):
     return table.new_read_builder().new_predicate_builder().is_in(
         "index", indices)
+
+
+def _validate_reader_schema(source_schema, reader_schema, source):
+    for source_field in source_schema:
+        target_index = reader_schema.get_field_index(source_field.name)
+        if target_index < 0:
+            continue
+        target_type = reader_schema.field(target_index).type
+        if source_field.type != target_type:
+            raise ValueError(
+                "LeRobot feature %s from %s expects %s, found %s."
+                % (source_field.name, source, source_field.type,
+                   target_type))
+
+
+def _read_external_rows(
+        reader, projection, indices, validation_context, tolerance_s,
+        features):
+    values = reader.read_indices(tuple(indices), tuple(projection))
+    if not isinstance(values, pa.Table):
+        raise TypeError(
+            "LeRobotFrameReader.read_indices() must return a pyarrow.Table.")
+    missing = set(projection) - set(values.column_names)
+    if missing:
+        raise ValueError(
+            "LeRobotFrameReader result is missing fields: %s"
+            % sorted(missing))
+    rows = _arrow_rows(values.select(projection), features)
+    expected = set(indices)
+    result = {}
+    for row in rows:
+        index = _control_index(row, "index", -1)
+        if index not in expected or index in result:
+            raise ValueError(
+                "LeRobotFrameReader returned an unexpected or duplicate "
+                "index: %d." % index)
+        _validate_control_row(
+            index, row, validation_context, tolerance_s)
+        result[index] = row
+    missing = expected - set(result)
+    if missing:
+        raise RuntimeError(
+            "LeRobotFrameReader did not return indices %s."
+            % sorted(missing))
+    return result
 
 
 def _read_rows_by_index(
@@ -1426,6 +1641,14 @@ def _normalize_index(index, size):
     if index < 0 or index >= size:
         raise IndexError("PaimonLeRobotDataset index out of range")
     return index
+
+
+def _require_dataset_python():
+    if sys.version_info < (3, 10):
+        raise RuntimeError(
+            "PaimonLeRobotDataset requires Python 3.10 or newer; "
+            "install and run 'pypaimon[lerobot]' on a supported Python "
+            "version.")
 
 
 def _positive_int(value, name):

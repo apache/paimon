@@ -325,6 +325,105 @@ class LeRobotValidationTest(unittest.TestCase):
                 pmm.PaimonLeRobotDataset(Mock())
             load.assert_not_called()
 
+    def test_dataset_reads_one_batch_from_logical_frame_reader(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        info = {
+            "codebase_version": "v3.0",
+            "total_frames": 3,
+            "total_episodes": 1,
+            "total_tasks": 1,
+            "fps": 10,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "observation.state": {"dtype": "float32", "shape": [2]},
+                "action": {"dtype": "float32", "shape": [1]},
+                "camera.image": {"dtype": "image", "shape": [2, 2, 3]},
+            },
+        }
+        rows = {
+            index: {
+                "index": index,
+                "episode_index": 0,
+                "frame_index": index,
+                "timestamp": index / 10,
+                "task_index": 0,
+                "observation.state": [index, index + 1],
+                "action": float(index),
+                "camera.image": _image_bytes(
+                    np.full((2, 2, 3), index, dtype=np.uint8), None),
+            }
+            for index in range(3)
+        }
+
+        class Reader(pmm.LeRobotFrameReader):
+
+            def __init__(self):
+                self.calls = []
+                self.closed = False
+
+            @property
+            def schema(self):
+                return _schema_from_info(info)
+
+            def read_indices(self, indices, columns):
+                self.calls.append((indices, columns))
+                return pa.Table.from_pylist([
+                    {name: rows[index][name] for name in columns}
+                    for index in indices
+                ], schema=self.schema)
+
+            def close(self):
+                self.closed = True
+
+        reader = Reader()
+        metadata = {
+            "repo_id": "logical/multi-table",
+            "revision": "dataset-version-12",
+            "info": info,
+            "episodes": [{
+                "episode_index": 0,
+                "dataset_from_index": 0,
+                "dataset_to_index": 3,
+                "length": 3,
+                "tasks": ["pick"],
+            }],
+            "tasks": ["pick"],
+            "stats": {"action": {"mean": [1.0]}},
+        }
+        dataset = pmm.PaimonLeRobotDataset.from_reader(
+            reader,
+            metadata,
+            delta_timestamps={"action": [-0.1, 0.0, 0.1]},
+        )
+
+        sample, _ = dataset.__getitems__([1, 2])
+
+        self.assertEqual([((0, 1, 2), tuple(info["features"]))],
+                         reader.calls)
+        self.assertIsNone(dataset.tag_name)
+        self.assertEqual("dataset-version-12", dataset.meta.revision)
+        self.assertEqual((2,), dataset.features["observation.state"]["shape"])
+        self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
+        self.assertEqual(0, dataset.meta.get_task_index("pick"))
+        self.assertEqual("pick", sample["task"])
+        torch.testing.assert_close(
+            sample["observation.state"], torch.tensor([1.0, 2.0]))
+        torch.testing.assert_close(
+            sample["action"], torch.tensor([0.0, 1.0, 2.0]))
+        self.assertEqual([3, 2, 2], list(sample["camera.image"].shape))
+        self.assertEqual([False, False, False],
+                         sample["action_is_pad"].tolist())
+        dataset.close()
+        self.assertTrue(reader.closed)
+
     def test_metadata_json_preserves_nested_values(self):
         values = {
             "name": "机器人",
