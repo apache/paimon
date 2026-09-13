@@ -18,11 +18,13 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.io.DataFileMeta;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -187,6 +189,33 @@ public class BucketedAppendCompactManagerTest {
                 true,
                 toCompact3.subList(3, toCompact3.size() - 1),
                 Collections.singletonList(newFile(2621L, 2630L)));
+    }
+
+    @Test
+    public void testFullCompactTaskFiltersInterleavedLargeFiles() throws Exception {
+        long targetFileSize = 1024L;
+        DataFileMeta large1 = newFile(1L, 2048L);
+        DataFileMeta small1 = newFile(2049L, 2100L);
+        DataFileMeta large2 = newFile(2101L, 4148L);
+        DataFileMeta small2 = newFile(4149L, 4200L);
+        DataFileMeta large3 = newFile(4201L, 6248L);
+        DataFileMeta small3 = newFile(6249L, 6300L);
+        List<DataFileMeta> inputs = Arrays.asList(large1, small1, large2, small2, large3, small3);
+
+        List<DataFileMeta> rewriterSaw = new ArrayList<>();
+        BucketedAppendCompactManager.CompactRewriter rewriter =
+                files -> {
+                    rewriterSaw.addAll(files);
+                    return Collections.emptyList();
+                };
+
+        BucketedAppendCompactManager.FullCompactTask task =
+                new BucketedAppendCompactManager.FullCompactTask(
+                        null, inputs, targetFileSize, false, rewriter, null);
+        CompactResult result = task.call();
+
+        assertThat(rewriterSaw).containsExactly(small1, small2, small3);
+        assertThat(result.before()).containsExactly(small1, small2, small3);
     }
 
     private void innerTest(
