@@ -66,7 +66,8 @@ class TurkishLocaleParsingTest {
 
     @Test
     void rowKindFromLowerCaseShortString() {
+        // "+i" is the only short string this can catch: Turkish differs from ROOT on 'i' and
+        // 'I' alone, so "-d" or "-u" would pass whichever conversion the code uses
         assertThat(RowKind.fromShortString("+i")).isEqualTo(RowKind.INSERT);
-        assertThat(RowKind.fromShortString("-d")).isEqualTo(RowKind.DELETE);
     }
 }

@@ -97,7 +97,9 @@ public abstract class FileFormat {
         Map<String, String> result = new HashMap<>();
         String prefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            if (key.toLowerCase(Locale.ROOT).startsWith(prefix)) {
+            // match case-insensitively on the original key: lowercasing can change a string's
+            // length (ROOT maps 'İ' to two characters), and the suffix is sliced by prefix length
+            if (key.regionMatches(true, 0, prefix, 0, prefix.length())) {
                 result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }
