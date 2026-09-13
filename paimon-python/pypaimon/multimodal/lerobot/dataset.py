@@ -560,7 +560,7 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
             blob_parallelism=16,
             video_backend=None,
             return_uint8=False):
-        self._raw_table, meta = _load_dataset(table, tag_name)
+        self._frames_table, meta = _load_dataset(table, tag_name)
         super().__init__(
             meta,
             tag_name=tag_name,
@@ -576,7 +576,7 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
 
     @property
     def schema(self):
-        return _target_schema(self._raw_table)
+        return _target_schema(self._frames_table)
 
     def read_indices(self, indices, columns):
         return self._frame_rows.read_indices(indices, columns)
@@ -585,8 +585,12 @@ class _PaimonTableDatasetReader(PaimonDatasetReader):
         return True
 
     def _open_frame_rows(self, projection):
-        return _PaimonTableFrameReader(
-            self._raw_table, projection, self._total_frames)
+        rows = _PaimonTableFrameReader(self._frames_table, projection)
+        if rows.num_rows != self._total_frames:
+            raise ValueError(
+                "Paimon table has %d rows but metadata declares %d frames."
+                % (rows.num_rows, self._total_frames))
+        return rows
 
 
 class PaimonLeRobotDataset:

@@ -27,15 +27,12 @@ from pypaimon.read.query_auth_split import QueryAuthSplit
 class _PaimonTableFrameReader:
     """Read logical frame rows from one indexed Paimon table."""
 
-    def __init__(self, raw_table, projection, total_frames):
+    def __init__(self, frames_table, projection):
         self._table, self.snapshot_id, splits = _indexed_read_table(
-            raw_table, projection)
+            frames_table, projection)
         snapshot = self._table.snapshot_manager().get_snapshot_by_id(
             self.snapshot_id)
-        if snapshot.next_row_id != total_frames:
-            raise ValueError(
-                "Paimon table has %d rows but metadata declares %d frames."
-                % (snapshot.next_row_id, total_frames))
+        self.num_rows = snapshot.next_row_id
         self.file_io = self._table.file_io
         self._locator = _FrameLocator(self._table, snapshot, splits)
 

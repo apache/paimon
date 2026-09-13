@@ -233,21 +233,24 @@ Subclass `PaimonDatasetReader` for a custom logical frame layout:
 from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset
 
 class CustomDatasetReader(PaimonDatasetReader):
-    def __init__(self, version, **kwargs):
-        self._version = version
-        super().__init__(version.lerobot_metadata, **kwargs)
+    def __init__(self, metadata, source, **kwargs):
+        self._source = source
+        self.file_io = getattr(source, "file_io", None)
+        super().__init__(metadata, **kwargs)
 
     @property
     def schema(self):
-        return logical_frame_schema
+        return self._source.schema
 
     def read_indices(self, indices, columns):
-        return resolve_frame_rows(indices, columns)  # pyarrow.Table
+        return self._source.read_indices(indices, columns)
 
-reader = CustomDatasetReader(version, delta_timestamps=delta_timestamps)
+reader = CustomDatasetReader(
+    metadata, source, delta_timestamps=delta_timestamps
+)
 dataset = PaimonLeRobotDataset(reader)
 ```
 
-`PaimonDatasetReader` batches logical row reads and reuses the standard
-Episode, delta-window, media, and Torch handling. Readers returning media
-descriptors must set `file_io` before calling `super().__init__`.
+`source` exposes `schema`, `read_indices`, and optional `file_io`.
+`PaimonDatasetReader` reuses the standard Episode, delta-window, media, and
+Torch handling.
