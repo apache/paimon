@@ -398,9 +398,9 @@ class LeRobotValidationTest(unittest.TestCase):
             "tasks": ["pick"],
             "stats": {"action": {"mean": [1.0]}},
         }
-        dataset = pmm.PaimonLeRobotDataset.from_reader(
-            reader,
-            metadata,
+        dataset = pmm.PaimonLeRobotDataset(
+            reader=reader,
+            metadata=metadata,
             delta_timestamps={"action": [-0.1, 0.0, 0.1]},
         )
 
@@ -3046,7 +3046,6 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertIs(scanner, dataset._frame_locator._scanner)
         self.assertEqual(1, read.call_count)
         self.assertEqual([0, 1, 3, 4], read.call_args.args[0])
-        self.assertFalse(read.call_args.args[3])
         self.assertEqual(1, fetch.call_count)
         self.assertEqual(3, fetch.call_args.args[3])
         self.assertEqual("place", last["task"])

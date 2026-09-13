@@ -17,10 +17,8 @@
 """LeRobot Dataset v3 integration for multimodal Paimon tables."""
 
 from pypaimon.multimodal.lerobot.api import load_from_lerobot
-from pypaimon.multimodal.lerobot.dataset import (
-    LeRobotFrameReader,
-    PaimonLeRobotDataset,
-)
+from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
+from pypaimon.multimodal.lerobot.reader import LeRobotFrameReader
 from pypaimon.multimodal.lerobot.writer import PaimonLeRobotWriter
 
 

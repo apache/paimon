@@ -238,10 +238,13 @@ class CustomFrameReader(LeRobotFrameReader):
     def read_indices(self, indices, columns):
         return resolve_frame_rows(indices, columns)  # pyarrow.Table
 
-dataset = PaimonLeRobotDataset.from_reader(CustomFrameReader(), metadata)
+dataset = PaimonLeRobotDataset(
+    reader=CustomFrameReader(),
+    metadata=metadata,
+)
 ```
 
 `LeRobotFrameReader` is a logical row contract, not a physical `frames` table.
 It may query any tables. `metadata` separately supplies `info`, `episodes`,
-`tasks`, and optional `stats` and `subtasks`. Logical video readers are not yet
-supported.
+`tasks`, and optional `stats` and `subtasks`. Descriptor-backed media readers
+also expose `file_io`.

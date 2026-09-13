@@ -29,10 +29,8 @@ from pypaimon.multimodal.hdf5 import (
     Hdf5File,
     Hdf5LoadResult,
 )
-from pypaimon.multimodal.lerobot.dataset import (
-    LeRobotFrameReader,
-    PaimonLeRobotDataset,
-)
+from pypaimon.multimodal.lerobot.dataset import PaimonLeRobotDataset
+from pypaimon.multimodal.lerobot.reader import LeRobotFrameReader
 from pypaimon.multimodal.rosbag import (
     RosbagLoadResult,
     RosbagSource,
