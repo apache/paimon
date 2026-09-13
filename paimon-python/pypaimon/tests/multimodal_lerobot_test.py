@@ -443,6 +443,13 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertTrue(reader.return_uint8)
         with self.assertRaisesRegex(TypeError, "return_uint8"):
             dataset.return_uint8 = 1
+        image_transforms = Mock()
+        dataset.image_transforms = image_transforms
+        self.assertIs(image_transforms, reader.image_transforms)
+        dataset.image_transforms = None
+        self.assertIsNone(reader.image_transforms)
+        with self.assertRaisesRegex(TypeError, "image_transforms"):
+            dataset.image_transforms = 1
 
         wrong_schema = reader.schema.set(
             reader.schema.get_field_index("action"),

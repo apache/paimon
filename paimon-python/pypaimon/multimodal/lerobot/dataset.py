@@ -650,6 +650,14 @@ class PaimonLeRobotDataset:
             raise TypeError("return_uint8 must be a boolean.")
         self.reader.return_uint8 = value
 
+    @property
+    def image_transforms(self):
+        return self.reader.image_transforms
+
+    @image_transforms.setter
+    def image_transforms(self, value):
+        self.reader.set_image_transforms(value)
+
     def set_image_transforms(self, image_transforms):
         self.reader.set_image_transforms(image_transforms)
 
