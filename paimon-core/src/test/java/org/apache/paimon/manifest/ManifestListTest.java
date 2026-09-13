@@ -101,7 +101,12 @@ public class ManifestListTest {
         ManifestList manifestList = createManifestList(tempDir.toString());
         List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
-        assertThat(actualMetas).allSatisfy(meta -> assertThat(meta.extraFiles()).isNull());
+        assertThat(actualMetas)
+                .allSatisfy(
+                        meta -> {
+                            assertThat(meta.extraFiles()).isNull();
+                            assertThat(meta.totalBuckets()).isNull();
+                        });
     }
 
     @Test
@@ -113,7 +118,12 @@ public class ManifestListTest {
         ManifestList legacyManifestList = createLegacyManifestListPaimon10();
         List<ManifestFileMeta> actualMetas = legacyManifestList.read(manifestListName);
         assertThat(actualMetas).isEqualTo(getLegacyMetaPaimon10(metas));
-        assertThat(actualMetas).allSatisfy(meta -> assertThat(meta.extraFiles()).isNull());
+        assertThat(actualMetas)
+                .allSatisfy(
+                        meta -> {
+                            assertThat(meta.extraFiles()).isNull();
+                            assertThat(meta.totalBuckets()).isNull();
+                        });
     }
 
     private ManifestList createLegacyManifestListPaimon10() {
@@ -184,7 +194,8 @@ public class ManifestListTest {
                             meta.maxLevel(),
                             meta.minRowId(),
                             meta.maxRowId(),
-                            extraFiles));
+                            extraFiles,
+                            meta.totalBuckets()));
         }
         return metas;
     }

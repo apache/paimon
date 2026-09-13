@@ -77,4 +77,29 @@ public class BucketFilter {
         return totalAwareBucketFilter == null
                 || totalAwareBucketFilter.test(partition, bucket, totalBucket);
     }
+
+    /** Conservatively tests whether a manifest's bucket metadata can contain a matching entry. */
+    public boolean mayContain(ManifestFileMeta manifest) {
+        Integer minBucket = manifest.minBucket();
+        Integer maxBucket = manifest.maxBucket();
+        if (minBucket == null || maxBucket == null) {
+            return true;
+        }
+        if (onlyReadRealBuckets && maxBucket < 0) {
+            return false;
+        }
+        if (specifiedBucket != null
+                && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
+            return false;
+        }
+        if (totalAwareBucketFilter instanceof ManifestBucketFilter) {
+            Integer totalBuckets = manifest.totalBuckets();
+            if (minBucket < 0 || totalBuckets == null || totalBuckets <= 0) {
+                return true;
+            }
+            return ((ManifestBucketFilter) totalAwareBucketFilter)
+                    .mayContain(minBucket, maxBucket, totalBuckets);
+        }
+        return true;
+    }
 }

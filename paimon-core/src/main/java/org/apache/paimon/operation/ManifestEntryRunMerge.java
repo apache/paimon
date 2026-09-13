@@ -630,6 +630,8 @@ final class ManifestEntryRunMerge {
             private long schemaId = Long.MIN_VALUE;
             private int minBucket = Integer.MAX_VALUE;
             private int maxBucket = Integer.MIN_VALUE;
+            private @Nullable Integer totalBuckets;
+            private boolean totalBucketsKnown = true;
             private int minLevel = Integer.MAX_VALUE;
             private int maxLevel = Integer.MIN_VALUE;
             private long minRowId = Long.MAX_VALUE;
@@ -650,6 +652,7 @@ final class ManifestEntryRunMerge {
                 int bucket = entry.bucket();
                 minBucket = Math.min(minBucket, bucket);
                 maxBucket = Math.max(maxBucket, bucket);
+                collectTotalBuckets(entry.totalBuckets());
                 int level = entry.file().level();
                 minLevel = Math.min(minLevel, level);
                 maxLevel = Math.max(maxLevel, level);
@@ -665,11 +668,27 @@ final class ManifestEntryRunMerge {
                         schemaId,
                         minBucket,
                         maxBucket,
+                        totalBucketsKnown ? totalBuckets : null,
                         minLevel,
                         maxLevel,
                         minRowId,
                         maxRowId,
                         partitionStats.finish(partitionStatsConverter));
+            }
+
+            private void collectTotalBuckets(int candidate) {
+                if (!totalBucketsKnown) {
+                    return;
+                }
+                if (candidate <= 0) {
+                    totalBucketsKnown = false;
+                    totalBuckets = null;
+                } else if (totalBuckets == null) {
+                    totalBuckets = candidate;
+                } else if (totalBuckets != candidate) {
+                    totalBucketsKnown = false;
+                    totalBuckets = null;
+                }
             }
         }
 
