@@ -62,11 +62,24 @@ public class RangeBitmapFileIndexTest {
     public void testChunkSizeBeyondIntRangeRejected() {
         VarCharType varCharType = new VarCharType();
 
-        // a chunk size beyond int range must fail with a clear validation message instead of
-        // silently truncating to a negative int and crashing inside the writer
-        Options oversized = new Options();
-        oversized.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2g");
-        assertThatThrownBy(() -> new RangeBitmapFileIndex(varCharType, oversized).createWriter())
+        // "2g" narrows to a negative int, which crashes on the writer's first chunk allocation
+        Options negativeAfterNarrowing = new Options();
+        negativeAfterNarrowing.setString(RangeBitmapFileIndex.CHUNK_SIZE, "2g");
+        assertThatThrownBy(
+                        () ->
+                                new RangeBitmapFileIndex(varCharType, negativeAfterNarrowing)
+                                        .createWriter())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("chunk-size");
+
+        // "4g" narrows to 0, which is the case worth guarding: it does not crash at all, it
+        // gives every key its own chunk and builds a silently bloated index
+        Options zeroAfterNarrowing = new Options();
+        zeroAfterNarrowing.setString(RangeBitmapFileIndex.CHUNK_SIZE, "4g");
+        assertThatThrownBy(
+                        () ->
+                                new RangeBitmapFileIndex(varCharType, zeroAfterNarrowing)
+                                        .createWriter())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("chunk-size");
 
