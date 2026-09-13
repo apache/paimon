@@ -232,13 +232,13 @@ Use a frame reader when one logical frame is assembled from multiple tables:
 ```python
 from pypaimon.multimodal import LeRobotFrameReader, PaimonLeRobotDataset
 
-class Frames(LeRobotFrameReader):
+class MultiTableFrameReader(LeRobotFrameReader):
     schema = logical_frame_schema
 
     def read_indices(self, indices, columns):
         return resolve_frame_rows(indices, columns)  # pyarrow.Table
 
-dataset = PaimonLeRobotDataset.from_reader(Frames(), metadata)
+dataset = PaimonLeRobotDataset.from_reader(MultiTableFrameReader(), metadata)
 ```
 
 `LeRobotFrameReader` is a logical row contract, not a physical `frames` table.
