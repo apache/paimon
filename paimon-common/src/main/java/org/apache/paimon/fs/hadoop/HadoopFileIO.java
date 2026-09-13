@@ -39,6 +39,7 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
@@ -309,7 +310,15 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
          */
         public void skipFully(long bytes) throws IOException {
             while (bytes > 0) {
-                bytes -= in.skip(bytes);
+                long skipped = in.skip(bytes);
+                if (skipped <= 0) {
+                    // a blocking stream returning 0 from skip means EOF; looping here
+                    // would spin forever instead of failing the read
+                    throw new EOFException(
+                            String.format(
+                                    "Unexpected end of stream while skipping %s bytes.", bytes));
+                }
+                bytes -= skipped;
             }
         }
     }
