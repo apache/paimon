@@ -91,7 +91,7 @@ class PaimonDatasetReader(ABC):
             self,
             meta,
             *,
-            schema,
+            schema=None,
             file_io=None,
             episodes=None,
             image_transforms=None,
@@ -103,10 +103,9 @@ class PaimonDatasetReader(ABC):
             _resolved_meta=False):
         _require_dataset_python()
         metadata = meta if _resolved_meta else _reader_metadata(meta)
-        if not isinstance(schema, pa.Schema):
+        if schema is not None and not isinstance(schema, pa.Schema):
             raise TypeError(
                 "PaimonDatasetReader schema must be a pyarrow.Schema.")
-        self.schema = schema
         self.file_io = file_io
         info = self._init_dataset(
             metadata,
@@ -118,6 +117,8 @@ class PaimonDatasetReader(ABC):
             video_backend,
             return_uint8,
         )
+        schema = schema if schema is not None else _schema_from_info(info)
+        self.schema = schema
         projection, validation_context, subtasks = \
             self._init_frame_contract(
                 schema, info, self._validate_physical_metadata())

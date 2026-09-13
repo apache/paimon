@@ -237,7 +237,6 @@ class CustomDatasetReader(PaimonDatasetReader):
         self._source = source
         super().__init__(
             metadata,
-            schema=source.schema,
             file_io=getattr(source, "file_io", None),
             **kwargs,
         )
@@ -251,6 +250,6 @@ reader = CustomDatasetReader(
 dataset = PaimonLeRobotDataset(reader)
 ```
 
-`source` exposes `schema`, `read_indices`, and optional `file_io`.
-`PaimonDatasetReader` reuses the standard Episode, delta-window, media, and
-Torch handling.
+`source` exposes `read_indices` and optional `file_io`. Pass
+`schema=source.schema` for eager schema validation. `PaimonDatasetReader`
+reuses the standard Episode, delta-window, media, and Torch handling.

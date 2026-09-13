@@ -380,8 +380,7 @@ class LeRobotValidationTest(unittest.TestCase):
             def __init__(self, metadata, **kwargs):
                 self.calls = []
                 self.closed = False
-                super().__init__(
-                    metadata, schema=_schema_from_info(info), **kwargs)
+                super().__init__(metadata, **kwargs)
 
             def read_indices(self, indices, columns):
                 self.calls.append((indices, columns))
@@ -417,6 +416,7 @@ class LeRobotValidationTest(unittest.TestCase):
         dataset = pmm.PaimonLeRobotDataset(reader)
 
         self.assertIsInstance(dataset.reader, pmm.PaimonDatasetReader)
+        self.assertEqual(_schema_from_info(info), dataset.reader.schema)
         self.assertIsNone(dataset.reader.absolute_to_relative_idx)
         self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
         sample, _ = dataset.__getitems__([1, 2])
