@@ -296,6 +296,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private byte kind;
         private BinaryRow partition;
         private int bucket;
+        private int totalBuckets;
         private int level;
         private long schemaId;
         private boolean hasRowId;
@@ -306,6 +307,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 byte kind,
                 BinaryRow partition,
                 int bucket,
+                int totalBuckets,
                 int level,
                 long schemaId,
                 long firstRowId,
@@ -313,6 +315,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.kind = kind;
             this.partition = partition;
             this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
             this.level = level;
             this.schemaId = schemaId;
             this.hasRowId = true;
@@ -325,12 +328,14 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 byte kind,
                 BinaryRow partition,
                 int bucket,
+                int totalBuckets,
                 int level,
                 long schemaId,
                 long rowCount) {
             this.kind = kind;
             this.partition = partition;
             this.bucket = bucket;
+            this.totalBuckets = totalBuckets;
             this.level = level;
             this.schemaId = schemaId;
             this.hasRowId = false;
@@ -348,6 +353,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private final long schemaId;
         private final int minBucket;
         private final int maxBucket;
+        private final @Nullable Integer totalBuckets;
         private final int minLevel;
         private final int maxLevel;
         private final long minRowId;
@@ -360,6 +366,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 long schemaId,
                 int minBucket,
                 int maxBucket,
+                @Nullable Integer totalBuckets,
                 int minLevel,
                 int maxLevel,
                 long minRowId,
@@ -370,6 +377,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             this.schemaId = schemaId;
             this.minBucket = minBucket;
             this.maxBucket = maxBucket;
+            this.totalBuckets = totalBuckets;
             this.minLevel = minLevel;
             this.maxLevel = maxLevel;
             this.minRowId = minRowId;
@@ -396,9 +404,11 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private long schemaId = Long.MIN_VALUE;
         private int minBucket = Integer.MAX_VALUE;
         private int maxBucket = Integer.MIN_VALUE;
+        private @Nullable Integer totalBuckets;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
         private boolean bucketStatsKnown = true;
+        private boolean totalBucketsKnown = true;
         private boolean levelStatsKnown = true;
         private @Nullable RowIdStats rowIdStats = new RowIdStats();
         private boolean closed;
@@ -473,6 +483,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, entry.file().schemaId());
             minBucket = Math.min(minBucket, entry.bucket());
             maxBucket = Math.max(maxBucket, entry.bucket());
+            collectTotalBuckets(entry.totalBuckets());
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
             if (rowIdStats != null) {
@@ -500,6 +511,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, entry.schemaId);
             minBucket = Math.min(minBucket, entry.bucket);
             maxBucket = Math.max(maxBucket, entry.bucket);
+            collectTotalBuckets(entry.totalBuckets);
             minLevel = Math.min(minLevel, entry.level);
             maxLevel = Math.max(maxLevel, entry.level);
             if (rowIdStats != null) {
@@ -517,6 +529,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             schemaId = Math.max(schemaId, metadata.schemaId);
             minBucket = Math.min(minBucket, metadata.minBucket);
             maxBucket = Math.max(maxBucket, metadata.maxBucket);
+            collectTotalBuckets(metadata.totalBuckets);
             minLevel = Math.min(minLevel, metadata.minLevel);
             maxLevel = Math.max(maxLevel, metadata.maxLevel);
             if (rowIdStats != null) {
@@ -538,6 +551,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 minBucket = Math.min(minBucket, manifest.minBucket());
                 maxBucket = Math.max(maxBucket, manifest.maxBucket());
             }
+            collectTotalBuckets(manifest.totalBuckets());
             if (manifest.minLevel() == null || manifest.maxLevel() == null) {
                 levelStatsKnown = false;
             } else {
@@ -553,6 +567,21 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
 
             collectCopiedPartitionStats(manifest.partitionStats());
+        }
+
+        private void collectTotalBuckets(@Nullable Integer candidate) {
+            if (!totalBucketsKnown) {
+                return;
+            }
+            if (candidate == null || candidate <= 0) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            } else if (totalBuckets == null) {
+                totalBuckets = candidate;
+            } else if (!totalBuckets.equals(candidate)) {
+                totalBucketsKnown = false;
+                totalBuckets = null;
+            }
         }
 
         private void collectCopiedPartitionStats(SimpleStats partitionStats) {
@@ -709,7 +738,9 @@ public final class ManifestAvroWriter implements AutoCloseable {
                     levelStatsKnown ? minLevel : null,
                     levelStatsKnown ? maxLevel : null,
                     rowIdStats == null ? null : rowIdStats.minRowId,
-                    rowIdStats == null ? null : rowIdStats.maxRowId);
+                    rowIdStats == null ? null : rowIdStats.maxRowId,
+                    null,
+                    totalBucketsKnown ? totalBuckets : null);
         }
     }
 

@@ -193,6 +193,7 @@ public class ManifestFileTest {
                                     entry.kind().toByteValue(),
                                     entry.partition(),
                                     entry.bucket(),
+                                    entry.totalBuckets(),
                                     entry.level(),
                                     entry.file().schemaId(),
                                     entry.file().firstRowId(),
@@ -210,6 +211,7 @@ public class ManifestFileTest {
         assertThat(result.schemaId()).isEqualTo(sourceMeta.schemaId());
         assertThat(result.minBucket()).isEqualTo(sourceMeta.minBucket());
         assertThat(result.maxBucket()).isEqualTo(sourceMeta.maxBucket());
+        assertThat(result.totalBuckets()).isEqualTo(sourceMeta.totalBuckets());
         assertThat(result.minLevel()).isEqualTo(sourceMeta.minLevel());
         assertThat(result.maxLevel()).isEqualTo(sourceMeta.maxLevel());
         assertThat(result.minRowId()).isEqualTo(sourceMeta.minRowId());
@@ -246,6 +248,7 @@ public class ManifestFileTest {
                                 source.kind().toByteValue(),
                                 source.partition().copy(),
                                 source.bucket(),
+                                source.totalBuckets(),
                                 source.level(),
                                 source.file().schemaId(),
                                 source.file().firstRowId(),
@@ -289,10 +292,40 @@ public class ManifestFileTest {
         ManifestFileMeta result = writer.result().get(0);
         assertThat(result.minBucket()).isNull();
         assertThat(result.maxBucket()).isNull();
+        assertThat(result.totalBuckets()).isNull();
         assertThat(result.minLevel()).isNull();
         assertThat(result.maxLevel()).isNull();
         assertThat(result.partitionStats()).isEqualTo(source.partitionStats());
         assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
+    void testTotalBucketsAggregateStats() throws Exception {
+        ManifestEntry source = gen.next();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+
+        ManifestEntry add =
+                ManifestEntry.create(
+                        FileKind.ADD, source.partition(), source.bucket(), 8, source.file());
+        ManifestEntry delete =
+                ManifestEntry.create(
+                        FileKind.DELETE, source.partition(), source.bucket(), 8, source.file());
+        assertThat(writeSingleManifest(manifestFile, Arrays.asList(add, delete)).totalBuckets())
+                .isEqualTo(8);
+
+        ManifestEntry different =
+                ManifestEntry.create(
+                        FileKind.ADD, source.partition(), source.bucket(), 16, source.file());
+        assertThat(writeSingleManifest(manifestFile, Arrays.asList(add, different)).totalBuckets())
+                .isNull();
+
+        ManifestEntry nonPositive =
+                ManifestEntry.create(
+                        FileKind.DELETE, source.partition(), source.bucket(), 0, source.file());
+        assertThat(
+                        writeSingleManifest(manifestFile, Arrays.asList(add, nonPositive))
+                                .totalBuckets())
+                .isNull();
     }
 
     @Test
@@ -1185,6 +1218,7 @@ public class ManifestFileTest {
                 meta.schemaId(),
                 meta.minBucket(),
                 meta.maxBucket(),
+                meta.totalBuckets(),
                 meta.minLevel(),
                 meta.maxLevel(),
                 meta.minRowId() == null ? -1 : meta.minRowId(),
