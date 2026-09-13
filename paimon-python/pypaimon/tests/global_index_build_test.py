@@ -621,7 +621,7 @@ class GlobalIndexBuildTest(
         self._write_arrow(table, pa.table(
             {'embedding': [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]}, schema=schema))
         snapshot_id = table.snapshot_manager().get_latest_snapshot().id
-        original_write = VindexVectorIndexWriter.write
+        original_write = VindexVectorIndexWriter.write_batch
         original_batches = TableRead._arrow_batch_generator
         temp_paths = []
         closed = []
@@ -629,7 +629,7 @@ class GlobalIndexBuildTest(
 
         def failing_write(writer, vector, row_id):
             original_write(writer, vector, row_id)
-            if row_id == 1:
+            if 1 in row_id.to_pylist():
                 temp_paths.extend([writer._row_id_temp_path, writer._vector_temp_path])
                 raise RuntimeError('injected write failure')
 
@@ -643,7 +643,7 @@ class GlobalIndexBuildTest(
             generators.append(generator)
             return generator
 
-        with patch.object(VindexVectorIndexWriter, 'write', failing_write), \
+        with patch.object(VindexVectorIndexWriter, 'write_batch', failing_write), \
                 patch.object(TableRead, '_arrow_batch_generator', tracked_batches):
             with self.assertRaisesRegex(RuntimeError, 'injected write failure'):
                 table.create_global_index('embedding', index_type='ivf-flat', options={
@@ -1276,6 +1276,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 [], [], Mock(), self.read, '/unused')
 
     def test_batches_are_written_before_reading_the_next_batch(self):
+        self.builder._index_type = 'lucene'
         written = []
 
         def write(value, row_id):
@@ -1301,6 +1302,31 @@ class GenericIndexStreamingTest(unittest.TestCase):
         self.writer.close.assert_called_once()
         self.read.to_arrow.assert_not_called()
 
+    def test_vector_batches_are_bounded_and_written_before_next_read(self):
+        written = []
+
+        def write_batch(vectors, row_ids):
+            self.assertLessEqual(len(row_ids), 2)
+            self.events.append('write batch')
+            written.extend(zip(vectors.to_pylist(), row_ids.to_pylist()))
+
+        self.writer.write_batch.side_effect = write_batch
+        with patch('pypaimon.globalindex.create_global_index.ADD_BATCH_SIZE', 2):
+            self._build([
+                self._batch([], []),
+                self._batch([[9.0], [10.0], None, [12.0]], [9, 10, 11, 12]),
+                self._batch([[19.0], [20.0]], [19, 20]),
+            ])
+        self.assertEqual([([10.0], 0), (None, 1), ([12.0], 2), ([19.0], 9)], written)
+        self.assertEqual([
+            'read', 'read', 'write batch', 'write batch', 'read',
+            'write batch', 'reader closed',
+        ], self.events)
+        self.writer.write.assert_not_called()
+        self.writer.finish.assert_called_once()
+        self.writer.close.assert_called_once()
+        self.read.to_arrow.assert_not_called()
+
     def test_empty_input_does_not_create_a_writer(self):
         for batches in ([], [self._batch([], [])]):
             with self.subTest(batches=len(batches)):
@@ -1316,7 +1342,7 @@ class GenericIndexStreamingTest(unittest.TestCase):
                 if failure == 'create':
                     self.builder._create_generic_index_writer.side_effect = error
                 elif failure in ('write', 'finish'):
-                    getattr(self.writer, failure).side_effect = error
+                    getattr(self.writer, 'write_batch' if failure == 'write' else failure).side_effect = error
 
                 def batches():
                     yield self._batch([[10.0]], [10])

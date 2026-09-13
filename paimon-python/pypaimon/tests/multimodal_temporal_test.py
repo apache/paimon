@@ -17,11 +17,13 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
+import numpy as np
 import pyarrow as pa
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
@@ -147,6 +149,941 @@ class MultimodalTemporalTest(unittest.TestCase):
             {90: 1, 110: 2},
             {row["event_time"]: row["value"] for row in rows},
         )
+
+    def test_linear_interpolation_stays_in_group_without_extrapolation(self):
+        anchors = self._table("linear_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 5},
+            {"episode_id": 1, "event_time": 10},
+            {"episode_id": 1, "event_time": 20},
+            {"episode_id": 2, "event_time": 5},
+        ])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0},
+            {"episode_id": 1, "event_time": 10, "value": 20},
+            {"episode_id": 1, "event_time": 10, "value": 30},
+            {"episode_id": 2, "event_time": 0, "value": 100},
+            {"episode_id": 2, "event_time": 10, "value": 120},
+        ])
+
+        result = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id", tolerance=5,
+        )
+        rows = sorted(
+            result.to_list(),
+            key=lambda row: (row["episode_id"], row["event_time"]),
+        )
+
+        self.assertIsInstance(result, pmm.TemporalAlignment)
+        self.assertEqual(pa.float64(), result.schema.field("value").type)
+        self.assertEqual([10.0, 30.0, None, 110.0], [
+            row["value"] for row in rows
+        ])
+
+    def test_window_join_stays_in_group_and_skips_nulls(self):
+        anchors = self._table("window_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+            "label": pa.string(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 10},
+            {"episode_id": 2, "event_time": 10},
+            {"episode_id": 3, "event_time": 10},
+        ])
+        samples.add([
+            {"episode_id": 1, "event_time": 5,
+             "value": 1, "label": "a"},
+            {"episode_id": 1, "event_time": 10,
+             "value": None, "label": None},
+            {"episode_id": 1, "event_time": 15,
+             "value": 5, "label": "c"},
+            {"episode_id": 2, "event_time": 10,
+             "value": 100, "label": "z"},
+        ])
+
+        result = pmm.join_window(
+            anchors.scan(),
+            samples.scan().select(["value", "label"]),
+            on="event_time",
+            by="episode_id",
+            preceding=5,
+            following=5,
+            aggregations={
+                "average": ("value", "mean"),
+                "minimum": ("value", "min"),
+                "maximum": ("value", "max"),
+                "first_label": ("label", "first"),
+                "last_label": ("label", "last"),
+                "valid_count": ("label", "count"),
+            },
+        )
+        rows = sorted(result.to_list(), key=lambda row: row["episode_id"])
+
+        self.assertIsInstance(result, pmm.TemporalAlignment)
+        self.assertEqual(pa.float64(), result.schema.field("average").type)
+        self.assertEqual(pa.string(), result.schema.field("first_label").type)
+        self.assertEqual(pa.int64(), result.schema.field("valid_count").type)
+        self.assertEqual(
+            (3.0, 1, 5, "a", "c", 2),
+            tuple(rows[0][name] for name in (
+                "average", "minimum", "maximum", "first_label",
+                "last_label", "valid_count")),
+        )
+        self.assertEqual(100.0, rows[1]["average"])
+        self.assertIsNone(rows[2]["average"])
+        self.assertEqual(0, rows[2]["valid_count"])
+
+    def test_window_join_supports_asymmetric_timestamp_bounds(self):
+        anchors = self._table("window_timestamp_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+        })
+        samples = self._table("window_timestamp_samples", {
+            "episode_id": pa.int32(),
+            "captured_at": pa.timestamp("ms"),
+            "value": pa.float32(),
+        })
+        anchor = datetime(2026, 9, 1, 12, 0, 0)
+        anchors.add([{"episode_id": 1, "event_time": anchor}])
+        samples.add([
+            {"episode_id": 1,
+             "captured_at": anchor + timedelta(milliseconds=offset),
+             "value": value}
+            for offset, value in ((-11, 100.0), (-10, 1.0),
+                                  (0, 2.0), (5, 3.0), (6, 100.0))
+        ])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", right_on="captured_at", by="episode_id",
+            preceding=timedelta(milliseconds=10),
+            following=timedelta(milliseconds=5),
+            aggregations={"value": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual(2.0, row["value"])
+
+        right_closed = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", right_on="captured_at", by="episode_id",
+            preceding=timedelta(milliseconds=10),
+            following=timedelta(milliseconds=5),
+            aggregations={"value": "mean"},
+            closed="right",
+        ).to_list()[0]
+        self.assertEqual(2.5, right_closed["value"])
+
+    def test_window_join_preserves_subunit_timestamp_bounds(self):
+        anchors = self._table("window_subunit_timestamp_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+        })
+        samples = self._table("window_subunit_timestamp_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+            "value": pa.int32(),
+        })
+        anchor = datetime(2026, 9, 1, 12, 0, 0)
+        anchors.add([{"episode_id": 1, "event_time": anchor}])
+        samples.add([
+            {"episode_id": 1,
+             "event_time": anchor + timedelta(milliseconds=offset),
+             "value": offset}
+            for offset in (-1, 0, 1)
+        ])
+
+        exact = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=timedelta(microseconds=500),
+            following=timedelta(0), closed="right",
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+        open_window = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=timedelta(microseconds=1_500),
+            following=timedelta(microseconds=1_500), closed="neither",
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+
+        self.assertEqual(1, exact["matches"])
+        self.assertEqual(3, open_window["matches"])
+
+    def test_window_join_normalizes_numpy_float_bounds(self):
+        anchors = self._table("window_numpy_float_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        samples = self._table("window_numpy_float_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.int32(),
+        })
+        timestamp = 1_700_000_000.001
+        anchors.add([{"episode_id": 1, "event_time": timestamp}])
+        samples.add([{
+            "episode_id": 1, "event_time": timestamp, "value": 7,
+        }])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=0, following=np.float32(0),
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+
+        self.assertEqual(1, row["matches"])
+
+    def test_window_join_keeps_numeric_bounds_exact_for_integer_time(self):
+        anchors = self._table("window_integer_bound_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_integer_bound_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        timestamp = 1_700_000_000_000_000_001
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1], "event_time": [timestamp],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1, 1],
+            "event_time": [timestamp - 1, timestamp, timestamp + 1],
+            "value": [1, 2, 3],
+        }))
+
+        for preceding, following in (
+                (0.0, 0.0), (0.125, 0.125),
+                (np.int64(0), 0), (0, np.int64(0)),
+                (np.int64(0), np.int64(0))):
+            with self.subTest(preceding=preceding, following=following):
+                row = pmm.join_window(
+                    anchors.scan(), samples.scan().select("value"),
+                    on="event_time", by="episode_id",
+                    preceding=preceding, following=following,
+                    aggregations={
+                        "matches": ("value", "count"),
+                        "first_value": ("value", "first"),
+                    },
+                ).to_list()[0]
+
+                self.assertEqual(1, row["matches"])
+                self.assertEqual(2, row["first_value"])
+
+    def test_window_join_clips_bounds_to_integer_time_range(self):
+        anchors = self._table("window_range_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_range_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        minimum, maximum = -(1 << 63), (1 << 63) - 1
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 2], "event_time": [minimum, maximum],
+        }))
+        times = {1: [minimum, minimum + 1], 2: [maximum - 1, maximum]}
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1, 2, 2],
+            "event_time": times[1] + times[2],
+            "value": [1, 2, 3, 4],
+        }))
+
+        for preceding, following in ((0, 0), (0, 1), (1, 0), (1, 1)):
+            for closed in ("both", "left", "right", "neither"):
+                with self.subTest(
+                        preceding=preceding, following=following,
+                        closed=closed):
+                    rows = pmm.join_window(
+                        anchors.scan(), samples.scan().select("value"),
+                        on="event_time", by="episode_id",
+                        preceding=preceding, following=following,
+                        closed=closed,
+                        aggregations={"matches": ("value", "count")},
+                    ).to_list()
+                    for row in rows:
+                        left = row["event_time"] - preceding
+                        right = row["event_time"] + following
+                        expected = sum(
+                            (time >= left if closed in ("both", "left")
+                             else time > left)
+                            and (time <= right if closed in ("both", "right")
+                                 else time < right)
+                            for time in times[row["episode_id"]]
+                        )
+                        self.assertEqual(expected, row["matches"])
+
+    def test_window_join_prunes_unaggregated_right_columns(self):
+        anchors = self._table("window_projection_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_projection_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "payload": pa.struct([
+                pa.field("unused_nested", pa.int32()),
+                pa.field("value", pa.int32()),
+            ]),
+            "unused": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1,
+            "event_time": 10,
+            "payload": {"value": 7, "unused_nested": 8},
+            "unused": "not read",
+        }])
+        payload_reads = []
+        original = FormatPyArrowReader._read_parquet_row_group_batches
+
+        def tracked(reader, row_group, columns):
+            if columns is not None and "payload" in columns:
+                payload_reads.append(tuple(columns))
+            yield from original(reader, row_group, columns)
+
+        with mock.patch.object(
+                FormatPyArrowReader,
+                "_read_parquet_row_group_batches", tracked):
+            row = pmm.join_window(
+                anchors.scan(),
+                samples.scan().select(["payload.value", "unused"]),
+                on="event_time", by="episode_id", preceding=0,
+                aggregations={"payload_value": "mean"},
+            ).to_list()[0]
+
+        self.assertEqual(7.0, row["payload_value"])
+        self.assertTrue(payload_reads)
+        self.assertNotIn("unused", {
+            name for columns in payload_reads for name in columns
+        })
+
+    def test_window_join_preserves_nested_projection_aliases_when_pruned(self):
+        anchors = self._table("window_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1,
+            "event_time": 10,
+            "a_b": 3,
+            "a": {"b": 7},
+        }])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select(["a_b", "a.b"]),
+            on="event_time", by="episode_id", preceding=0,
+            aggregations={"nested_mean": ("a_b__0", "mean")},
+        ).to_list()[0]
+
+        self.assertEqual(7.0, row["nested_mean"])
+
+    def test_window_join_preserves_masked_alias_types_when_pruned(self):
+        anchors = self._table("window_masked_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_masked_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [10, 20],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1], "event_time": [10],
+            "a_b": [3],
+            "a": pa.array([{"b": 7}],
+                          type=pa.struct([pa.field("b", pa.int32())])),
+        }))
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({
+                "name": "CAST",
+                "fieldRef": {"index": 2, "name": "a_b", "type": "INT"},
+                "type": "STRING",
+            })},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        for projection, source in (
+                (["a_b"], "a_b"), (["a.b", "a_b"], "a_b__0")):
+            with self.subTest(projection=projection):
+                result = pmm.join_window(
+                    anchors.scan(), samples.scan().select(projection),
+                    on="event_time", by="episode_id", preceding=0,
+                    aggregations={
+                        "first_value": (source, "first"),
+                        "last_value": (source, "last"),
+                    },
+                ).to_arrow()
+                for name in ("first_value", "last_value"):
+                    self.assertEqual(pa.string(), result[name].type)
+                    self.assertEqual(["3", None], result[name].to_pylist())
+
+            for operation in ("mean", "min", "max"):
+                with self.subTest(projection=projection, operation=operation):
+                    with self.assertRaisesRegex(
+                            TypeError, "requires an integer or floating"):
+                        pmm.join_window(
+                            anchors.scan(), samples.scan().select(projection),
+                            on="event_time", by="episode_id", preceding=0,
+                            aggregations={"value": (source, operation)},
+                        ).to_arrow()
+
+    def test_window_join_matches_masks_by_original_nested_path(self):
+        anchors = self._table("window_nested_mask_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_nested_mask_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1, "event_time": 10,
+            "a_b": 3, "a": {"b": 7},
+        }])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({"name": "NULL"})},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select(["a_b", "a.b"]),
+            on="event_time", by="episode_id", preceding=0,
+            aggregations={"nested_mean": ("a_b__0", "mean")},
+        ).to_list()[0]
+
+        self.assertEqual(7.0, row["nested_mean"])
+
+    def test_window_mean_uses_masked_numeric_alias_type_when_pruned(self):
+        anchors = self._table("window_numeric_alias_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_numeric_alias_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.string(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [10, 20],
+        }))
+        samples.add(pa.Table.from_pydict({
+            "episode_id": [1, 1], "event_time": [9, 11],
+            "a_b": ["6", "10"],
+            "a": pa.array([{"b": 1}, {"b": 2}],
+                          type=pa.struct([pa.field("b", pa.int32())])),
+        }))
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({
+                "name": "CAST",
+                "fieldRef": {"index": 2, "name": "a_b", "type": "STRING"},
+                "type": "DOUBLE",
+            })},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        for projection, source in (
+                (["a_b"], "a_b"), (["a.b", "a_b"], "a_b__0")):
+            with self.subTest(projection=projection):
+                result = pmm.join_window(
+                    anchors.scan(), samples.scan().select(projection),
+                    on="event_time", by="episode_id", preceding=1, following=1,
+                    aggregations={"value": (source, "mean")},
+                ).to_arrow()
+                self.assertEqual(pa.float64(), result["value"].type)
+                self.assertEqual([8.0, None], result["value"].to_pylist())
+
+    def test_window_mean_avoids_numeric_overflow_and_integer_rounding(self):
+        anchors = self._table("window_numeric_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_numeric_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "integer_value": pa.int64(),
+            "float_value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 1}])
+        samples.add([
+            {"episode_id": 1, "event_time": 0,
+             "integer_value": -(1 << 63),
+             "float_value": sys.float_info.max},
+            {"episode_id": 1, "event_time": 2,
+             "integer_value": (1 << 63) - 1,
+             "float_value": sys.float_info.max},
+        ])
+
+        row = pmm.join_window(
+            anchors.scan(),
+            samples.scan().select(["integer_value", "float_value"]),
+            on="event_time", by="episode_id", preceding=1, following=1,
+            aggregations={
+                "integer_value": "mean",
+                "float_value": "mean",
+            },
+        ).to_list()[0]
+
+        self.assertEqual(-0.5, row["integer_value"])
+        self.assertEqual(sys.float_info.max, row["float_value"])
+
+    def test_window_mean_preserves_finite_float_cancellation(self):
+        anchors = self._table("window_float_mean_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_float_mean_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 1}])
+        samples.add([
+            {"episode_id": 1, "event_time": 0, "value": 1e16},
+            {"episode_id": 1, "event_time": 2, "value": -1e16 + 2},
+        ])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id", preceding=1, following=1,
+            aggregations={"value": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual(1.0, row["value"])
+
+    def test_window_join_can_follow_an_asof_join(self):
+        anchors = self._table("window_chain_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        images = self._table("window_chain_images", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "image": pa.string(),
+        })
+        imu = self._table("window_chain_imu", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "acceleration": pa.float32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        images.add([{"episode_id": 1, "event_time": 9, "image": "frame"}])
+        imu.add([
+            {"episode_id": 1, "event_time": 8, "acceleration": 1.0},
+            {"episode_id": 1, "event_time": 10, "acceleration": 3.0},
+        ])
+
+        row = pmm.join_asof(
+            anchors.scan(), images.scan().select("image"),
+            on="event_time", by="episode_id", direction="nearest",
+        ).join_window(
+            imu.scan().select("acceleration"),
+            preceding=2,
+            aggregations={"acceleration": "mean"},
+        ).to_list()[0]
+
+        self.assertEqual("frame", row["image"])
+        self.assertEqual(2.0, row["acceleration"])
+
+    def test_window_join_validates_options(self):
+        table = self._table("window_validation", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+            "text": pa.string(),
+        })
+
+        def scan():
+            return table.scan().select("value")
+
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            pmm.join_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=-1, aggregations={"value": "mean"})
+        with self.assertRaisesRegex(ValueError, "Unsupported aggregation"):
+            pmm.join_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"value": "median"})
+        with self.assertRaisesRegex(ValueError, "closed must be"):
+            pmm.join_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"value": "mean"},
+                closed="middle")
+        with self.assertRaisesRegex(ValueError, "missing aggregation columns"):
+            pmm.join_window(
+                scan(), scan(), on="event_time", by="episode_id",
+                preceding=1, aggregations={"missing": "mean"})
+        with self.assertRaisesRegex(
+                TypeError, "requires an integer or floating"):
+            pmm.join_window(
+                scan(), table.scan().select("text"),
+                on="event_time", by="episode_id", preceding=1,
+                aggregations={"text": "mean"}).to_arrow()
+
+    def test_linear_interpolation_preserves_an_exact_infinite_float(self):
+        anchors = self._table("linear_exact_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_exact_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        states.add([{
+            "episode_id": 1, "event_time": 10, "value": float("inf")
+        }])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(float("inf"), row["value"])
+
+    def test_linear_interpolation_requires_both_neighbors_in_tolerance(self):
+        anchors = self._table("linear_tolerance_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_tolerance_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 9}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0.0},
+            {"episode_id": 1, "event_time": 10, "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id", tolerance=8,
+        ).to_list()[0]
+
+        self.assertIsNone(row["value"])
+
+    def test_linear_interpolation_supports_fixed_size_numeric_lists(self):
+        vector = pa.list_(pa.float32(), 2)
+        anchors = self._table("linear_vector_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_vector_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "state": vector,
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "state": [0.0, 10.0]},
+            {"episode_id": 1, "event_time": 10, "state": [10.0, 20.0]},
+        ])
+
+        result = pmm.interpolate(
+            anchors.scan(), states.scan().select("state"),
+            on="event_time", by="episode_id",
+        )
+
+        self.assertEqual(vector, result.schema.field("state").type)
+        self.assertEqual([5.0, 15.0], result.to_list()[0]["state"])
+
+    def test_linear_interpolation_preserves_bigint_precision(self):
+        anchors = self._table("linear_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int64(),
+            "extreme": pa.int64(),
+        })
+        anchors.add([
+            {"episode_id": 1, "event_time": 1},
+            {"episode_id": 1, "event_time": 2},
+        ])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": (1 << 53) + 1, "extreme": -(1 << 63)},
+            {"episode_id": 1, "event_time": 4,
+             "value": (1 << 53) + 3, "extreme": (1 << 63) - 1},
+        ])
+
+        rows = pmm.interpolate(
+            anchors.scan(), states.scan().select(["value", "extreme"]),
+            on="event_time", by="episode_id",
+        ).to_list()
+
+        by_time = {row["event_time"]: row for row in rows}
+        self.assertEqual(float((1 << 53) + 2), by_time[1]["value"])
+        self.assertEqual(-0.5, by_time[2]["extreme"])
+
+    def test_linear_interpolation_scales_extreme_float_time_axis(self):
+        anchors = self._table("linear_extreme_time_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_extreme_time_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 0.0}])
+        states.add([
+            {"episode_id": 1, "event_time": -sys.float_info.max,
+             "value": 0.0},
+            {"episode_id": 1, "event_time": sys.float_info.max,
+             "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_preserves_float_time_differences(self):
+        anchors = self._table("linear_nearby_time_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_nearby_time_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.float64(),
+        })
+        base = 1_700_000_000.0
+        step = 2 ** -21
+        anchors.add([{"episode_id": 1, "event_time": base + step}])
+        states.add([
+            {"episode_id": 1, "event_time": base, "value": 0.0},
+            {"episode_id": 1, "event_time": base + 2 * step,
+             "value": 10.0},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_float_time_preserves_bigint_interpolation_precision(self):
+        anchors = self._table("linear_float_bigint_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        states = self._table("linear_float_bigint_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.int64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 2.0}])
+        states.add([
+            {"episode_id": 1, "event_time": 0.0,
+             "value": -(1 << 63)},
+            {"episode_id": 1, "event_time": 3.0,
+             "value": 1 << 62},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+
+    def test_linear_interpolation_handles_extreme_float_payloads(self):
+        anchors = self._table("linear_extreme_value_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_extreme_value_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.float64(),
+            "infinite": pa.float64(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0,
+             "value": -sys.float_info.max, "infinite": float("inf")},
+            {"episode_id": 1, "event_time": 10,
+             "value": sys.float_info.max, "infinite": float("inf")},
+        ])
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select(["value", "infinite"]),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(0.0, row["value"])
+        self.assertEqual(float("inf"), row["infinite"])
+
+    def test_linear_interpolation_uses_effective_masked_payload_type(self):
+        anchors = self._table("linear_masked_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_masked_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.string(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": "0"},
+            {"episode_id": 1, "event_time": 10, "value": "10"},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "STRING",
+                },
+                "type": "DOUBLE",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        row = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        ).to_list()[0]
+
+        self.assertEqual(5.0, row["value"])
+
+    def test_linear_interpolation_rejects_masked_non_numeric_payload(self):
+        anchors = self._table("linear_invalid_mask_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        states = self._table("linear_invalid_mask_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.int32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "value": 0},
+            {"episode_id": 1, "event_time": 10, "value": 10},
+        ])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"value": json.dumps({
+                "name": "CAST",
+                "fieldRef": {
+                    "index": 2, "name": "value", "type": "INT",
+                },
+                "type": "STRING",
+            })},
+        )
+        states.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        aligned = pmm.interpolate(
+            anchors.scan(), states.scan().select("value"),
+            on="event_time", by="episode_id",
+        )
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+            aligned.to_arrow()
+
+    def test_linear_interpolation_rejects_decimal_payloads(self):
+        anchors = self._table("linear_invalid_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        decimals = self._table("linear_invalid_decimals", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "value": pa.decimal128(10, 2),
+        })
+
+        with self.assertRaisesRegex(TypeError, "requires integer or floating"):
+            pmm.interpolate(
+                anchors.scan(), decimals.scan().select("value"),
+                on="event_time", by="episode_id",
+            ).to_arrow()
+
+    def test_linear_interpolation_can_follow_an_asof_join(self):
+        anchors = self._table("linear_chain_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        images = self._table("linear_chain_images", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "image": pa.string(),
+        })
+        states = self._table("linear_chain_states", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "state": pa.float32(),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 5}])
+        images.add([{"episode_id": 1, "event_time": 4, "image": "frame"}])
+        states.add([
+            {"episode_id": 1, "event_time": 0, "state": 0.0},
+            {"episode_id": 1, "event_time": 10, "state": 10.0},
+        ])
+
+        row = pmm.join_asof(
+            anchors.scan(), images.scan().select("image"),
+            on="event_time", by="episode_id",
+            direction="nearest", tolerance=2,
+        ).interpolate(
+            states.scan().select("state"), tolerance=5,
+        ).to_list()[0]
+
+        self.assertEqual("frame", row["image"])
+        self.assertEqual(5.0, row["state"])
 
     def test_alignment_can_return_matched_timestamp(self):
         anchors = self._table("timestamp_output_anchors", {
@@ -919,7 +1856,7 @@ class MultimodalTemporalTest(unittest.TestCase):
         }])
 
         with self.assertRaisesRegex(
-                ValueError, "join_asof.*incremental"):
+                ValueError, "Temporal alignment.*incremental"):
             pmm.join_asof(
                 anchors.scan(), source.scan().select("value"),
                 on="event_time", by="episode_id",
@@ -1256,7 +2193,7 @@ class MultimodalTemporalTest(unittest.TestCase):
                     pa.chunked_array([chunk for _ in row_ids])
                 ], schema=schema)
 
-        aligned = object.__new__(temporal.AsOfJoin)
+        aligned = object.__new__(temporal.TemporalAlignment)
         aligned._anchor_schema = schema
         aligned._sources = ()
         rows = [{temporal._ROW_ID: value} for value in range(2)]
