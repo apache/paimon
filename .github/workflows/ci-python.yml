@@ -16,19 +16,13 @@
 # limitations under the License.
 ################################################################################
 
-name: Python Check Code Style and Test
+name: CI / Python
 
 on:
-  push:
-    paths:
-      - 'paimon-python/**'
-      - '!**/*.md'
-      - '.github/workflows/paimon-python-checks.yml'
-  pull_request:
-    paths:
-      - 'paimon-python/**'
-      - '!**/*.md'
-      - '.github/workflows/paimon-python-checks.yml'
+  workflow_call:
+
+permissions:
+  contents: read
 
 env:
   JDK_VERSION: 8
@@ -37,13 +31,11 @@ env:
   PYPAIMON_RUST_REV: be5456e96b326939570b6ef5d63acddda3311c4f
 
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   # Lint + test on selected versions only (3.6 / 3.7 low end, 3.10 / 3.11 / 3.12 / 3.13 current), not every Python version.
-  lint-python:
+  test:
+    name: Tests / Python ${{ matrix.python-version }}
+    timeout-minutes: 90
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
@@ -60,6 +52,14 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.m2/repository
+          key: ci-maven-python-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ci-maven-python-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Set up Maven
         uses: stCarolas/setup-maven@v5
@@ -116,7 +116,8 @@ jobs:
       - name: Build Java
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B -ntp clean install -DskipTests
+          mvn -T 2C -B -ntp install -DskipTests \
+            -pl paimon-core,paimon-lance,paimon-vortex/paimon-vortex-format,paimon-full-text,paimon-lumina,paimon-vector -am
 
       - name: Install Python dependencies
         shell: bash
@@ -184,7 +185,9 @@ jobs:
           fi
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
-  torch_test:
+  torch:
+    name: PyTorch / Python 3.10
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     container: "python:3.10-slim"
 
@@ -219,7 +222,9 @@ jobs:
           ./paimon-python/dev/lint-python.sh -i pytest_torch
 
   # One job: check dev/requirements.txt on each Python version in sequence, then Ray version test on 3.10.
-  requirement_version_compatible_test:
+  compatibility:
+    name: Requirements and Ray compatibility
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
