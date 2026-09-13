@@ -20,6 +20,7 @@ package org.apache.paimon.fs.hadoop;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.io.EOFException;
 import java.lang.reflect.Constructor;
@@ -28,9 +29,11 @@ import java.lang.reflect.Method;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -43,7 +46,11 @@ class HadoopFileIOSkipFullyTest {
     @Test
     void skipFullyThrowsWhenTheStreamReallyEnds() throws Exception {
         FSDataInputStream in = mock(FSDataInputStream.class);
-        when(in.skip(anyLong())).thenReturn(0L);
+        // a caller that reads a 0 as no progress asks again, forever. Fail on the second call so
+        // this test reports that rather than hanging the fork, which has no timeout to save it.
+        when(in.skip(anyLong()))
+                .thenReturn(0L)
+                .thenThrow(new AssertionError("skip was called again after returning 0"));
         // the read probe is what distinguishes EOF from a transient zero
         when(in.read()).thenReturn(-1);
 
@@ -54,13 +61,19 @@ class HadoopFileIOSkipFullyTest {
     @Test
     void skipFullyContinuesAfterATransientZero() throws Exception {
         FSDataInputStream in = mock(FSDataInputStream.class);
-        // 0 first, then progress: the old loop threw here, and before that it spun
+        // 0 first, then progress. The fail-fast revision threw here; the loop before it did not
+        // probe at all, so the read is what pins this case.
         when(in.skip(anyLong())).thenReturn(0L, 4095L);
         when(in.read()).thenReturn(7);
 
         assertThatCode(() -> skipFully(in, 4096L)).doesNotThrowAnyException();
-        // the probe consumed one byte, so only the remaining 4095 are skipped
-        verify(in).read();
+        // the probe consumed one byte, so the second skip asks for the remaining 4095, and that
+        // is the whole conversation: an in-order verify alone would allow extra probes
+        InOrder inOrder = inOrder(in);
+        inOrder.verify(in).skip(4096L);
+        inOrder.verify(in).read();
+        inOrder.verify(in).skip(4095L);
+        verifyNoMoreInteractions(in);
     }
 
     @Test

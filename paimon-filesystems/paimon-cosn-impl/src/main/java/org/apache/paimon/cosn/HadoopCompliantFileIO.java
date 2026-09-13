@@ -215,9 +215,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
          * @param bytes the number of bytes to skip.
          */
         public void skipFully(long bytes) throws IOException {
-            // hadoop's helper probes with read() before calling it EOF, because skip may return
-            // 0 without being at the end. The loop this replaces treated that 0 as progress and
-            // spun forever.
+            // hadoop's helper probes with read() before calling it EOF, because skip may return 0
+            // without being at the end. The loop this replaces subtracted that 0 and asked again.
             IOUtils.skipFully(in, bytes);
         }
     }
