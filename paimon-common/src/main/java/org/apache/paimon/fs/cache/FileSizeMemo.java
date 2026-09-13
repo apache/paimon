@@ -34,7 +34,7 @@ import java.util.LinkedHashMap;
  */
 class FileSizeMemo {
 
-    private static final int MAX_ENTRIES = 65536;
+    static final int MAX_ENTRIES = 65536;
 
     private final LinkedHashMap<String, Long> sizes = new LinkedHashMap<>(64, 0.75f, true);
 
