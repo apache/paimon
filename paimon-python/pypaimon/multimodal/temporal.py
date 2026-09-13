@@ -732,6 +732,8 @@ def _window_bound_key(name, value, data_type):
     if isinstance(value, bool) or not isinstance(value, (Real, timedelta)):
         raise TypeError(
             "%s must be numeric or datetime.timedelta." % name)
+    if isinstance(value, Real):
+        value = _python_scalar(value)
     if isinstance(value, Integral):
         value = int(value)
     if (isinstance(value, Real) and not isinstance(value, Integral)
@@ -1088,8 +1090,10 @@ class _RowIdFetcher:
             projected_builder.read_type())
         projected_paths = projected_builder._nested_name_paths()
         if projected_paths is not None:
+            table_names = set(_table_schema(query).names)
             for field, path in zip(projected_schema, projected_paths):
-                if field.name in masking and field.name != path[0]:
+                if (field.name in masking and field.name != path[0]
+                        and field.name not in table_names):
                     raise ValueError(
                         "Temporal alignment cannot safely apply column "
                         "masking to nested projection %r."
@@ -1481,7 +1485,15 @@ def _time_search_keys(values, data_type):
 def _time_tolerance_key(tolerance, data_type):
     if tolerance is None or not pa.types.is_timestamp(data_type):
         return tolerance
-    return pa.scalar(tolerance, type=pa.duration(data_type.unit)).value
+    microseconds = (
+        (tolerance.days * 24 * 60 * 60 + tolerance.seconds) * 1_000_000
+        + tolerance.microseconds
+    )
+    divisors = {"s": 1_000_000, "ms": 1_000, "us": 1}
+    if data_type.unit == "ns":
+        return microseconds * 1_000
+    exact = Fraction(microseconds, divisors[data_type.unit])
+    return exact.numerator if exact.denominator == 1 else exact
 
 
 def _python_scalar(value):

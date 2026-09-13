@@ -288,6 +288,68 @@ class MultimodalTemporalTest(unittest.TestCase):
         ).to_list()[0]
         self.assertEqual(2.5, right_closed["value"])
 
+    def test_window_join_preserves_subunit_timestamp_bounds(self):
+        anchors = self._table("window_subunit_timestamp_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+        })
+        samples = self._table("window_subunit_timestamp_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.timestamp("ms"),
+            "value": pa.int32(),
+        })
+        anchor = datetime(2026, 9, 1, 12, 0, 0)
+        anchors.add([{"episode_id": 1, "event_time": anchor}])
+        samples.add([
+            {"episode_id": 1,
+             "event_time": anchor + timedelta(milliseconds=offset),
+             "value": offset}
+            for offset in (-1, 0, 1)
+        ])
+
+        exact = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=timedelta(microseconds=500),
+            following=timedelta(0), closed="right",
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+        open_window = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=timedelta(microseconds=1_500),
+            following=timedelta(microseconds=1_500), closed="neither",
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+
+        self.assertEqual(1, exact["matches"])
+        self.assertEqual(3, open_window["matches"])
+
+    def test_window_join_normalizes_numpy_float_bounds(self):
+        anchors = self._table("window_numpy_float_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+        })
+        samples = self._table("window_numpy_float_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.float64(),
+            "value": pa.int32(),
+        })
+        timestamp = 1_700_000_000.001
+        anchors.add([{"episode_id": 1, "event_time": timestamp}])
+        samples.add([{
+            "episode_id": 1, "event_time": timestamp, "value": 7,
+        }])
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select("value"),
+            on="event_time", by="episode_id",
+            preceding=0, following=np.float32(0),
+            aggregations={"matches": ("value", "count")},
+        ).to_list()[0]
+
+        self.assertEqual(1, row["matches"])
+
     def test_window_join_keeps_numeric_bounds_exact_for_integer_time(self):
         anchors = self._table("window_integer_bound_anchors", {
             "episode_id": pa.int32(),
@@ -498,6 +560,37 @@ class MultimodalTemporalTest(unittest.TestCase):
                             on="event_time", by="episode_id", preceding=0,
                             aggregations={"value": (source, operation)},
                         ).to_arrow()
+
+    def test_window_join_matches_masks_by_original_nested_path(self):
+        anchors = self._table("window_nested_mask_anchors", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+        })
+        samples = self._table("window_nested_mask_samples", {
+            "episode_id": pa.int32(),
+            "event_time": pa.int64(),
+            "a_b": pa.int32(),
+            "a": pa.struct([pa.field("b", pa.int32())]),
+        })
+        anchors.add([{"episode_id": 1, "event_time": 10}])
+        samples.add([{
+            "episode_id": 1, "event_time": 10,
+            "a_b": 3, "a": {"b": 7},
+        }])
+        auth = TableQueryAuthResult(
+            filter=None,
+            column_masking={"a_b": json.dumps({"name": "NULL"})},
+        )
+        samples.raw_table.catalog_environment.table_query_auth = (
+            lambda options, identifier: lambda select: auth)
+
+        row = pmm.join_window(
+            anchors.scan(), samples.scan().select(["a_b", "a.b"]),
+            on="event_time", by="episode_id", preceding=0,
+            aggregations={"nested_mean": ("a_b__0", "mean")},
+        ).to_list()[0]
+
+        self.assertEqual(7.0, row["nested_mean"])
 
     def test_window_mean_uses_masked_numeric_alias_type_when_pruned(self):
         anchors = self._table("window_numeric_alias_anchors", {
