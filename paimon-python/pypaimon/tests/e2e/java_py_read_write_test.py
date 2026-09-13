@@ -1582,6 +1582,34 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 [expected, None, None, None],
             )
 
+    def test_read_shared_shredding_map_written_by_java(self):
+        expected = [
+            {'hot': 10, 'warm': 20, 'overflow': 30},
+            {'hot': None, 'new': 40},
+            {},
+            None,
+            {'late': 50, 'hot': 60},
+        ]
+        for file_format in ('parquet', 'orc'):
+            with self.subTest(file_format=file_format):
+                table = self.catalog.get_table(
+                    'default.shared_shredding_map_java_test_{}'.format(
+                        file_format))
+                read_builder = table.new_read_builder()
+                result = read_builder.new_read().to_arrow(
+                    read_builder.new_scan().plan().splits())
+                result = table_sort_by(result, 'id')
+
+                self.assertTrue(
+                    pa.types.is_map(result.schema.field('metrics').type))
+                self.assertEqual([1, 2, 3, 4, 5],
+                                 result.column('id').to_pylist())
+                self.assertEqual(
+                    expected,
+                    [None if value is None else dict(value)
+                     for value in result.column('metrics').to_pylist()],
+                )
+
     def test_write_map_blob_for_java(self):
         map_blob_type = pa.map_(pa.int32(), pa.large_binary())
         boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())
