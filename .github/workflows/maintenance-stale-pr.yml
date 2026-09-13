@@ -19,7 +19,7 @@
 #
 # See dev@paimon.apache.org "Stale PR cleanup for Paimon" thread.
 
-name: Stale PR reminder
+name: Maintenance / Stale PR reminder
 
 on:
   schedule:

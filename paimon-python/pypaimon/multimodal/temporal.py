@@ -18,6 +18,7 @@
 
 from bisect import bisect_left, bisect_right
 from datetime import timedelta
+from fractions import Fraction
 import json
 import math
 from numbers import Integral, Real
@@ -69,6 +70,21 @@ def interpolate(left, right, *, on, by, tolerance=None,
     return TemporalAlignment(left, on=on, by=by).interpolate(
         right,
         tolerance=tolerance,
+        right_on=right_on,
+        suffix=suffix,
+    )
+
+
+def join_window(left, right, *, on, by, preceding, aggregations,
+                following=None, closed="both", right_on=None,
+                suffix="_right") -> "TemporalAlignment":
+    """Join and aggregate right values in each left row's time window."""
+    return TemporalAlignment(left, on=on, by=by).join_window(
+        right,
+        preceding=preceding,
+        following=following,
+        aggregations=aggregations,
+        closed=closed,
         right_on=right_on,
         suffix=suffix,
     )
@@ -140,6 +156,25 @@ class TemporalAlignment:
         )
         return self._append(source)
 
+    def join_window(self, right, *, preceding, aggregations,
+                    following=None, closed="both", right_on=None,
+                    suffix="_right") -> "TemporalAlignment":
+        """Append a right-side window join with aggregation."""
+        position = len(self._sources) + 1
+        source = _WindowJoinRight(
+            "right source %d" % position,
+            right,
+            self._on,
+            self._by,
+            preceding,
+            following,
+            aggregations,
+            closed,
+            right_on,
+            suffix,
+        )
+        return self._append(source)
+
     def _append(self, source):
         result = object.__new__(TemporalAlignment)
         result._anchor = self._anchor
@@ -168,7 +203,8 @@ class TemporalAlignment:
         for source in self._sources:
             source.plan()
             source_fetchers.append(
-                _RowIdFetcher(source.query, row_group_cache))
+                _RowIdFetcher(
+                    source.query, row_group_cache, source._fetch_names))
         schema = self._output_schema(anchor_fetcher.schema, source_fetchers)
         self.schema = schema
 
@@ -250,11 +286,9 @@ class TemporalAlignment:
                 source.payload_schema if source_fetchers is None
                 else source_fetchers[position].schema
             )
-            for name in source.payload_schema.names:
-                field = source.output_field(
-                    payload_schema.field(name),
-                    effective=source_fetchers is not None,
-                )
+            for field in source.output_fields(
+                    payload_schema,
+                    effective=source_fetchers is not None):
                 output_name = field.name
                 if output_name in names:
                     output_name += source.suffix
@@ -333,6 +367,7 @@ class _AsOfJoinRight:
             field for field, path in zip(schema, paths)
             if tuple(path) not in excluded
         ])
+        self._fetch_names = None
         self._index = None
 
     def plan(self):
@@ -372,6 +407,12 @@ class _AsOfJoinRight:
     @staticmethod
     def output_field(field, effective=True):
         return field
+
+    def output_fields(self, payload_schema, effective=True):
+        return [
+            self.output_field(payload_schema.field(name), effective)
+            for name in self.payload_schema.names
+        ]
 
     def build_arrays(self, anchor_rows, fetcher):
         matches = [self.match(row) for row in anchor_rows]
@@ -482,6 +523,235 @@ class _LinearInterpolationRight(_AsOfJoinRight):
             array.validate()
             arrays.append(array)
         return arrays
+
+
+class _WindowJoinRight(_AsOfJoinRight):
+
+    _SUPPORTED_AGGREGATIONS = {
+        "count", "first", "last", "max", "mean", "min",
+    }
+
+    def __init__(self, label, query, anchor_on, by, preceding, following,
+                 aggregations, closed, right_on, suffix):
+        super().__init__(
+            label, query, anchor_on, by, "nearest", None,
+            right_on, suffix)
+        self._preceding_key = _window_bound_key(
+            "preceding", preceding, self.time_type)
+        if following is None:
+            following = (
+                timedelta(0) if pa.types.is_timestamp(self.time_type) else 0)
+        self._following_key = _window_bound_key(
+            "following", following, self.time_type)
+        if closed not in ("both", "left", "neither", "right"):
+            raise ValueError(
+                "closed must be 'both', 'left', 'right', or 'neither'.")
+        self.closed = closed
+        self.aggregations = _normalize_aggregations(
+            aggregations, self.payload_schema, self.label,
+            self._SUPPORTED_AGGREGATIONS)
+        source_names = {
+            specification[1] for specification in self.aggregations
+        }
+        self._fetch_names = tuple(
+            field.name for field in self.payload_schema
+            if field.name in source_names)
+        self.payload_schema = pa.schema([
+            field for field in self.payload_schema
+            if field.name in source_names
+        ], metadata=self.payload_schema.metadata)
+
+    def output_fields(self, payload_schema, effective=True):
+        fields = []
+        for output_name, source_name, aggregation in self.aggregations:
+            source = payload_schema.field(source_name)
+            try:
+                output_type = _aggregate_output_type(
+                    source.type, aggregation)
+            except TypeError:
+                if effective:
+                    raise
+                output_type = source.type
+            fields.append(pa.field(
+                output_name, output_type, nullable=True,
+                metadata=source.metadata))
+        return fields
+
+    def match(self, anchor_row):
+        key = tuple(anchor_row[name] for name in self.by)
+        bounds = self._index.get(key)
+        if bounds is None:
+            return []
+        target = anchor_row[_TIME_KEY]
+        start, end = bounds
+        left = target - self._preceding_key
+        right = target + self._following_key
+        if (pa.types.is_integer(self.time_type)
+                or pa.types.is_timestamp(self.time_type)):
+            first_key = (
+                math.ceil(left)
+                if self.closed in ("both", "left")
+                else math.floor(left) + 1
+            )
+            last_key = (
+                math.floor(right)
+                if self.closed in ("both", "right")
+                else math.ceil(right) - 1
+            )
+            # Avoid comparing NumPy keys with out-of-range Python integers.
+            first_key = max(first_key, _python_scalar(self._time_keys[start]))
+            last_key = min(last_key, _python_scalar(self._time_keys[end - 1]))
+            if first_key > last_key:
+                return []
+            first = bisect_left(
+                self._time_keys, first_key, start, end)
+            last = bisect_right(
+                self._time_keys, last_key, first, end)
+        else:
+            first = (
+                bisect_left(self._time_keys, left, start, end)
+                if self.closed in ("both", "left")
+                else bisect_right(self._time_keys, left, start, end)
+            )
+            last = (
+                bisect_right(self._time_keys, right, first, end)
+                if self.closed in ("both", "right")
+                else bisect_left(self._time_keys, right, first, end)
+            )
+        return [self._row_ids[index].as_py()
+                for index in range(first, last)]
+
+    def build_arrays(self, anchor_rows, fetcher):
+        matches = [self.match(row) for row in anchor_rows]
+        unique_ids = list(dict.fromkeys(
+            row_id for match in matches for row_id in match))
+        values = fetcher.fetch(unique_ids)
+        positions = {
+            row_id: index for index, row_id in enumerate(unique_ids)
+        }
+        indices = [
+            [positions[row_id] for row_id in match]
+            for match in matches
+        ]
+        arrays = []
+        for _, source_name, aggregation in self.aggregations:
+            effective = fetcher.schema.field(source_name)
+            output_type = _aggregate_output_type(
+                effective.type, aggregation)
+            arrays.append(pa.array([
+                _aggregate_values(
+                    values[source_name], row_indices, aggregation)
+                for row_indices in indices
+            ], type=output_type))
+        return arrays
+
+
+def _normalize_aggregations(aggregations, schema, label, supported):
+    if not isinstance(aggregations, dict) or not aggregations:
+        raise ValueError("aggregations must be a non-empty dict.")
+    normalized = []
+    missing = []
+    for output_name, specification in aggregations.items():
+        if not isinstance(output_name, str) or not output_name:
+            raise ValueError(
+                "Aggregation output names must be non-empty strings.")
+        if isinstance(specification, str):
+            source_name = output_name
+            aggregation = specification
+        elif isinstance(specification, tuple) and len(specification) == 2:
+            source_name, aggregation = specification
+        else:
+            raise ValueError(
+                "Aggregation %r must be an operation or a "
+                "(source column, operation) pair." % output_name)
+        if not isinstance(source_name, str) or not source_name:
+            raise ValueError(
+                "Aggregation source columns must be non-empty strings.")
+        if source_name not in schema.names:
+            missing.append(source_name)
+        if not isinstance(aggregation, str) or aggregation not in supported:
+            raise ValueError(
+                "Unsupported aggregation %r for output %r; expected one of "
+                "%r." % (aggregation, output_name, sorted(supported)))
+        normalized.append((output_name, source_name, aggregation))
+    if missing:
+        raise ValueError(
+            "%s is missing aggregation columns %r." % (label, missing))
+    return tuple(normalized)
+
+
+def _aggregate_output_type(data_type, aggregation):
+    if aggregation == "count":
+        return pa.int64()
+    if aggregation in ("first", "last"):
+        return data_type
+    if not (pa.types.is_integer(data_type)
+            or pa.types.is_floating(data_type)):
+        raise TypeError(
+            "Window %s aggregation requires an integer or floating-point "
+            "scalar column; got %s." % (aggregation, data_type))
+    if aggregation == "mean":
+        return pa.float64()
+    return data_type
+
+
+def _aggregate_values(values, indices, aggregation):
+    if not indices:
+        return 0 if aggregation == "count" else None
+    selected = pc.take(values, pa.array(indices, type=pa.int64()))
+    if aggregation == "count":
+        return pc.count(selected).as_py()
+    if aggregation == "mean":
+        items = [item for item in selected.to_pylist()
+                 if item is not None]
+        if not items:
+            return None
+        if pa.types.is_integer(values.type):
+            return sum(items) / len(items)
+        if not all(math.isfinite(item) for item in items):
+            return pc.mean(selected).as_py()
+        try:
+            return math.fsum(items) / len(items)
+        except OverflowError:
+            pass
+        scale = max(abs(item) for item in items)
+        if scale == 0:
+            return 0.0
+        return (math.fsum(item / scale for item in items) / len(items)) * scale
+    if aggregation == "min":
+        return pc.min(selected).as_py()
+    if aggregation == "max":
+        return pc.max(selected).as_py()
+    items = selected.to_pylist()
+    if aggregation == "first":
+        return next((item for item in items if item is not None), None)
+    return next((item for item in reversed(items) if item is not None), None)
+
+
+def _window_bound_key(name, value, data_type):
+    if isinstance(value, bool) or not isinstance(value, (Real, timedelta)):
+        raise TypeError(
+            "%s must be numeric or datetime.timedelta." % name)
+    if isinstance(value, Real):
+        value = _python_scalar(value)
+    if isinstance(value, Integral):
+        value = int(value)
+    if (isinstance(value, Real) and not isinstance(value, Integral)
+            and not math.isfinite(value)):
+        raise ValueError("%s must be finite." % name)
+    zero = timedelta(0) if isinstance(value, timedelta) else 0
+    if value < zero:
+        raise ValueError("%s must be non-negative." % name)
+    _validate_tolerance(value, data_type)
+    if pa.types.is_integer(data_type) and not isinstance(value, Integral):
+        try:
+            exact = Fraction(value)
+        except TypeError:
+            exact = Fraction(float(value))
+        if exact.denominator == 1:
+            return exact.numerator
+        return exact
+    return _time_tolerance_key(value, data_type)
 
 
 def _validate_join_options(direction, tolerance, right_on, suffix):
@@ -769,13 +1039,29 @@ def _validate_metadata(query, metadata, key_columns):
 
 class _RowIdFetcher:
 
-    def __init__(self, query, row_group_cache):
+    def __init__(self, query, row_group_cache, output_names=None):
         _validate_pinned_tag(query)
-        self._schema = _query_schema(query)
+        query_schema, query_paths = _query_schema_and_paths(query)
+        visible_projection = query._effective_projection()
+        if output_names is None:
+            self._schema = query_schema
+            visible_paths = query_paths
+        else:
+            output_names = set(output_names)
+            selected = [
+                (field, path)
+                for field, path in zip(query_schema, query_paths)
+                if field.name in output_names
+            ]
+            self._schema = pa.schema(
+                [field for field, unused in selected],
+                metadata=query_schema.metadata,
+            )
+            visible_paths = [path for unused, path in selected]
+            visible_projection = [".".join(path) for path in visible_paths]
         table = query._table.copy_without_time_travel({
             CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true",
         })
-        visible_projection = query._effective_projection()
         plan_builder = table.new_read_builder()
         if visible_projection is not None:
             plan_projection = visible_projection
@@ -804,8 +1090,10 @@ class _RowIdFetcher:
             projected_builder.read_type())
         projected_paths = projected_builder._nested_name_paths()
         if projected_paths is not None:
+            table_names = set(_table_schema(query).names)
             for field, path in zip(projected_schema, projected_paths):
-                if field.name in masking and field.name != path[0]:
+                if (field.name in masking and field.name != path[0]
+                        and field.name not in table_names):
                     raise ValueError(
                         "Temporal alignment cannot safely apply column "
                         "masking to nested projection %r."
@@ -847,10 +1135,6 @@ class _RowIdFetcher:
             builder.read_type())
         effective_schema = _effective_masked_schema(
             physical_schema, masking)
-        visible_paths = (
-            None if self._name_paths is None
-            else self._name_paths[:len(self._schema)]
-        )
         self._schema = _project_effective_schema(
             self._schema, visible_paths, effective_schema, masking)
         self._fetch_schema = _project_effective_schema(
@@ -936,7 +1220,11 @@ class _RowIdFetcher:
             )
         take = pa.array(
             [positions[row_id] for row_id in row_ids], type=pa.int64())
-        return arrow.select(self._schema.names).take(take)
+        visible = pa.Table.from_arrays(
+            [arrow.column(index) for index in range(len(self._schema))],
+            schema=self._schema,
+        )
+        return visible.take(take)
 
     def _find_splits(self, ranges):
         split_indices = set()
@@ -1197,7 +1485,15 @@ def _time_search_keys(values, data_type):
 def _time_tolerance_key(tolerance, data_type):
     if tolerance is None or not pa.types.is_timestamp(data_type):
         return tolerance
-    return pa.scalar(tolerance, type=pa.duration(data_type.unit)).value
+    microseconds = (
+        (tolerance.days * 24 * 60 * 60 + tolerance.seconds) * 1_000_000
+        + tolerance.microseconds
+    )
+    divisors = {"s": 1_000_000, "ms": 1_000, "us": 1}
+    if data_type.unit == "ns":
+        return microseconds * 1_000
+    exact = Fraction(microseconds, divisors[data_type.unit])
+    return exact.numerator if exact.denominator == 1 else exact
 
 
 def _python_scalar(value):
