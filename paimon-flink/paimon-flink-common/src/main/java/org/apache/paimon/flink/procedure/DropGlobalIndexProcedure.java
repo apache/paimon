@@ -46,6 +46,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -112,7 +113,7 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
 
         // Normalize index type
-        final String indexTypeLower = indexType.toLowerCase().trim();
+        final String indexTypeLower = indexType.toLowerCase(Locale.ROOT).trim();
 
         // Get latest snapshot
         Snapshot snapshot =

@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -78,8 +79,8 @@ public class PaimonMetaHook implements HiveMetaHook {
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
-        table.setDbName(table.getDbName().toLowerCase());
-        table.setTableName(table.getTableName().toLowerCase());
+        table.setDbName(table.getDbName().toLowerCase(Locale.ROOT));
+        table.setTableName(table.getTableName().toLowerCase(Locale.ROOT));
         String location = LocationKeyExtractor.getPaimonLocation(conf, table);
         Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
         if (location == null) {
@@ -115,7 +116,7 @@ public class PaimonMetaHook implements HiveMetaHook {
                 .forEachRemaining(
                         fieldSchema ->
                                 schemaBuilder.column(
-                                        fieldSchema.getName().toLowerCase(),
+                                        fieldSchema.getName().toLowerCase(Locale.ROOT),
                                         toPaimonType(fieldSchema.getType()),
                                         fieldSchema.getComment()));
         // partition columns
@@ -128,7 +129,7 @@ public class PaimonMetaHook implements HiveMetaHook {
                     .forEachRemaining(
                             fieldSchema ->
                                     schemaBuilder.column(
-                                            fieldSchema.getName().toLowerCase(),
+                                            fieldSchema.getName().toLowerCase(Locale.ROOT),
                                             toPaimonType(fieldSchema.getType()),
                                             fieldSchema.getComment()));
 

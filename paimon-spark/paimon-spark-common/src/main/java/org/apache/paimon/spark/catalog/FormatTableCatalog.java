@@ -50,13 +50,15 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /** Catalog supports format table. */
 public interface FormatTableCatalog {
 
     default boolean isFormatTable(@Nullable String provide) {
-        return provide != null && SparkSource.FORMAT_NAMES().contains(provide.toLowerCase());
+        return provide != null
+                && SparkSource.FORMAT_NAMES().contains(provide.toLowerCase(Locale.ROOT));
     }
 
     default Table toSparkFormatTable(Identifier ident, FormatTable formatTable) {
