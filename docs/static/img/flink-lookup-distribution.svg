@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">How lookup data is distributed</title>
+<desc id="desc">Normal lookup replicates the full dimension table to each task. Shuffle lookup routes input records by bucket so each task stores only its assigned subset. Shuffle requires Flink 2.0 or later, fixed buckets, and join keys containing all bucket keys.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="538" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">How lookup data is distributed</text>
+<text x="28" y="77" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Example: three lookup tasks enrich records using the same dimension table.</text>
+<rect x="28" y="100" width="440" height="344" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="135" font-size="24" fill="#2463b4" font-weight="700" text-anchor="start">Normal lookup</text>
+<rect x="100" y="157" width="296" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="116" y="189" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Incoming records</text>
+<text x="116" y="211" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Orders keyed by customer ID</text>
+<path d="M 248 235 V 262 H 108 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="44" y="290" width="128" height="115" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="108" y="320" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">Task 1</text>
+<text x="108" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Full table</text>
+<text x="108" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">local copy</text>
+<path d="M 248 235 V 262 H 248 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="184" y="290" width="128" height="115" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="248" y="320" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">Task 2</text>
+<text x="248" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Full table</text>
+<text x="248" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">local copy</text>
+<path d="M 248 235 V 262 H 388 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="324" y="290" width="128" height="115" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="388" y="320" font-size="20" fill="#2463b4" font-weight="700" text-anchor="middle">Task 3</text>
+<text x="388" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Full table</text>
+<text x="388" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">local copy</text>
+<text x="46" y="431" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Each task stores all dimension rows.</text>
+<rect x="492" y="100" width="440" height="344" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="510" y="135" font-size="24" fill="#10705d" font-weight="700" text-anchor="start">Shuffle lookup</text>
+<rect x="564" y="157" width="296" height="76" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="580" y="189" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">Incoming records</text>
+<text x="580" y="211" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Orders keyed by customer ID</text>
+<path d="M 712 235 V 262 H 572 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="508" y="290" width="128" height="115" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="572" y="320" font-size="20" fill="#10705d" font-weight="700" text-anchor="middle">Task 1</text>
+<text x="572" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Subset 1</text>
+<text x="572" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">by bucket</text>
+<path d="M 712 235 V 262 H 712 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="648" y="290" width="128" height="115" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="712" y="320" font-size="20" fill="#10705d" font-weight="700" text-anchor="middle">Task 2</text>
+<text x="712" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Subset 2</text>
+<text x="712" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">by bucket</text>
+<path d="M 712 235 V 262 H 852 V 287" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="788" y="290" width="128" height="115" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="852" y="320" font-size="20" fill="#10705d" font-weight="700" text-anchor="middle">Task 3</text>
+<text x="852" y="354" font-size="17" fill="#172b4d" font-weight="400" text-anchor="middle">Subset 3</text>
+<text x="852" y="381" font-size="16" fill="#526277" font-weight="400" text-anchor="middle">by bucket</text>
+<text x="510" y="431" font-size="17" fill="#526277" font-weight="400" text-anchor="start">Route records to the assigned bucket tasks.</text>
+<text x="28" y="478" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Shuffle: Flink 2.0+ · fixed-bucket table · join keys include every bucket key.</text>
+<text x="28" y="508" font-size="18" fill="#526277" font-weight="400" text-anchor="start">A running query service provides another lookup path; see Query Service.</text>
+</g>
+</svg>

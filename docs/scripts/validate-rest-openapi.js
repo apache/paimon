@@ -275,8 +275,11 @@ function validateCatalogOpenApi() {
     requestOptions.description.includes('partitionSpecs') &&
       requestOptions.description.toLowerCase().includes('position') &&
       requestOptions.description.toLowerCase().includes('same length') &&
-      requestOptions.description.toLowerCase().includes('empty object'),
-    'CreatePartitionsRequest.partitionOptions must document positional alignment and empty options',
+      requestOptions.description.toLowerCase().includes('empty object') &&
+      requestOptions.description.includes('replaceStatistics=true') &&
+      requestOptions.description.includes('partitionStatistics') &&
+      requestOptions.description.toLowerCase().includes('default directory'),
+    'CreatePartitionsRequest.partitionOptions must document alignment and returns to the default directory',
   );
   contract.requireProperties('Partition', ['options']);
   contract.requireProperties('ConfigResponse', ['defaults', 'overrides']);

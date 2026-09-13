@@ -25,8 +25,11 @@ under the License.
 
 # Manage Tags
 
-Just like Java API of Paimon, you can create a [tag](../maintenance/manage-tags) based on a snapshot. The tag will maintain the manifests and data files of the snapshot. 
-A typical usage is creating tags daily, then you can maintain the historical data of each day for batch reading.
+A [tag](../maintenance/manage-tags) retains a snapshot and its referenced manifests
+and data files. Use tags to keep a dataset version available for batch reads or
+training. The examples assume a `catalog` from [Catalogs and Tables](./catalogs).
+For separate writable histories, see [Branches and Rollback](./branches).
+
 ## Create and Delete Tag
 
 You can create a tag with given name and snapshot ID, and delete a tag with given name.
@@ -34,9 +37,9 @@ You can create a tag with given name and snapshot ID, and delete a tag with give
 ```python
 
 table = catalog.get_table('database_name.table_name')
-table.create_tag("tag2", snapshot_id=2)  # create tag2 based on snapshot 2
-table.create_tag("tag2")  # create tag2 based on latest snapshot
-table.delete_tag("tag2")  # delete tag2
+table.create_tag("snapshot_2", snapshot_id=2)  # requires snapshot 2 to exist
+table.create_tag("latest_data")  # retain the latest snapshot under another name
+table.delete_tag("snapshot_2")
 ```
 
 If snapshot_id unset, snapshot_id defaults to the latest.

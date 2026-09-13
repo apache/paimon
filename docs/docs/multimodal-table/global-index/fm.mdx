@@ -35,26 +35,20 @@ blocks instead of downloading the complete container. If locating matches would 
 index declines the predicate so the normal data path can scan the source values and preserve exact
 results.
 
+For shared build, refresh, and coverage behavior, see
+[Manage Global Indexes](./manage-indexes).
+
 ## Create a Global FM Index
 
-Create the index on a Data Evolution table with row tracking enabled:
+Create and populate the [shared example table](../global-index#prerequisites),
+then index its `content` column:
 
 ```sql
 CALL sys.create_global_index(
-    table => 'db.documents',
+    table => 'db.my_table',
     index_column => 'content',
     index_type => 'fm',
     options => 'fm-index.partition-row-count=100000'
-);
-```
-
-Drop it with the same index type:
-
-```sql
-CALL sys.drop_global_index(
-    table => 'db.documents',
-    index_column => 'content',
-    index_type => 'fm'
 );
 ```
 
@@ -68,17 +62,29 @@ normal batch scan uses the FM index automatically. For example, Spark pushes dow
 
 ```sql
 SELECT id, content
-FROM documents
-WHERE content LIKE '%needle%';
+FROM my_table
+WHERE content LIKE '%paimon%';
 ```
 
 Results are exact inside every indexed row range. A table-wide global-index query can still omit
 matches in row ranges that have never been indexed; rebuild the index for newly appended ranges or
-use the visibility callback described on the Global Index page.
+choose a suitable [search mode](./manage-indexes#coverage-and-freshness).
+The [visibility callback](./manage-indexes#wait-for-index-visibility) can wait for
+a separate index-building job to cover committed data; it does not build indexes.
 
 For a primary-key table, configure `pk-fm.index.columns` instead. Primary-key FM indexes follow
 data compaction and scan uncovered files through the ordinary data path, so partial coverage does
 not make `CONTAINS` results incomplete. See [Primary-Key Indexes](../../primary-key-table/global-index).
+
+## Drop the Index
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'fm'
+);
+```
 
 ## Options
 

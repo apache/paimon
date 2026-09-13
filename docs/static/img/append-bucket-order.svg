@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="416" viewBox="0 0 900 416" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Bucket-scoped streaming order</title>
+<desc id="desc">Within one partition, bucket 0 and bucket 1 each contain commits 1, 2, and 3. The reader for each bucket follows its append order. Independent readers have no ordering guarantee relative to one another.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="414" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Append order is local to a bucket</text>
+<text x="28" y="74" font-size="18" fill="#526277" font-weight="400" text-anchor="start">One partition · bucket-append-ordered = true · earlier appends read first</text>
+<rect x="28" y="110" width="650" height="112" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="47" y="143" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">Bucket 0</text>
+<rect x="162" y="128" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="230" y="155" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 1</text>
+<text x="230" y="185" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">A, B</text>
+<path d="M 298 166 H 323" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="331" y="128" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="399" y="155" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 2</text>
+<text x="399" y="185" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">C, D</text>
+<path d="M 467 166 H 492" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="500" y="128" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="568" y="155" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 3</text>
+<text x="568" y="185" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">E, F</text>
+<path d="M 669 166 H 718" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="726" y="122" width="146" height="88" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/><text x="799.0" y="156" font-size="19" fill="#087f6e" font-weight="700" text-anchor="middle">Reader 1</text><text x="799.0" y="186" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">independent</text>
+<rect x="28" y="241" width="650" height="112" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="47" y="274" font-size="20" fill="#172b4d" font-weight="700" text-anchor="start">Bucket 1</text>
+<rect x="162" y="259" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="230" y="286" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 1</text>
+<text x="230" y="316" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">G, H</text>
+<path d="M 298 297 H 323" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="331" y="259" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="399" y="286" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 2</text>
+<text x="399" y="316" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">I, J</text>
+<path d="M 467 297 H 492" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="500" y="259" width="136" height="76" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="568" y="286" font-size="17" fill="#2463b4" font-weight="700" text-anchor="middle">Commit 3</text>
+<text x="568" y="316" font-size="20" fill="#172b4d" font-weight="400" text-anchor="middle">K, L</text>
+<path d="M 669 297 H 718" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="726" y="253" width="146" height="88" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/><text x="799.0" y="287" font-size="19" fill="#087f6e" font-weight="700" text-anchor="middle">Reader 2</text><text x="799.0" y="317" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">independent</text>
+<text x="28" y="393" font-size="18" fill="#526277" font-weight="400" text-anchor="start">No cross-bucket order: records from the two readers can interleave downstream.</text>
+</g>
+</svg>

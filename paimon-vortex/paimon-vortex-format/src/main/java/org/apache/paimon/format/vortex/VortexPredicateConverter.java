@@ -180,13 +180,26 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
 
     private static Expression toTimestampLiteral(
             Timestamp ts, int precision, @Nullable String timeZone) {
+        // The literal carries the precision of the engine that produced it, the file carries the
+        // precision of the column. When the literal does not land exactly on the column's grain,
+        // no single rounding direction is right for every operator, so refuse to push it down and
+        // let the caller drop the leaf instead.
         if (precision == 0) {
+            if (ts.getNanoOfMillisecond() != 0 || ts.getMillisecond() % 1000 != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond() / 1000, Expression.TimeUnit.SECONDS, timeZone);
         } else if (precision <= 3) {
+            if (ts.getNanoOfMillisecond() != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond(), Expression.TimeUnit.MILLISECONDS, timeZone);
         } else if (precision <= 6) {
+            if (ts.getNanoOfMillisecond() % 1000 != 0) {
+                return null;
+            }
             return Expression.literalTimestamp(
                     ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000,
                     Expression.TimeUnit.MICROSECONDS,

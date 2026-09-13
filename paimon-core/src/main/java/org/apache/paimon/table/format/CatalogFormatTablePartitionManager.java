@@ -161,9 +161,9 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
             @Nullable List<PartitionStatistics> statistics,
             boolean replaceStatistics,
             @Nullable List<Map<String, String>> partitionOptions) {
-        validatePartitionOptions(partitionOptions, partitions);
         Map<Map<String, String>, PartitionStatistics> statisticsBySpec =
                 validateAndIndexStatistics(statistics, partitions);
+        validatePartitionOptions(partitionOptions, partitions);
         if (partitions.isEmpty()) {
             return;
         }

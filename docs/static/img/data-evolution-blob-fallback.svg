@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="413" viewBox="0 0 900 413" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">BLOB: a placeholder preserves; NULL replaces</title>
+<desc id="desc">For row 0, a newer placeholder falls back to old image A. For row 1, newer explicit NULL overrides old image B. For row 2, new image Z overrides old image C. The reader stops at the first non-placeholder value, even when that value is NULL.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="411" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">BLOB: a placeholder preserves; NULL replaces</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">For each row, inspect BLOB versions from newest to oldest.</text>
+<rect x="28" y="103" width="88" height="43" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.0" y="131" font-size="18" font-weight="700" text-anchor="middle" fill="#172b4d">Row ID</text>
+<rect x="116" y="103" width="225" height="43" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="228.5" y="131" font-size="18" font-weight="700" text-anchor="middle" fill="#172b4d">Newer version</text>
+<rect x="341" y="103" width="199" height="43" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="440.5" y="131" font-size="18" font-weight="700" text-anchor="middle" fill="#172b4d">Older version</text>
+<rect x="540" y="103" width="152" height="43" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="616.0" y="131" font-size="18" font-weight="700" text-anchor="middle" fill="#172b4d">Result</text>
+<rect x="692" y="103" width="180" height="43" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="782.0" y="131" font-size="18" font-weight="700" text-anchor="middle" fill="#172b4d">Why?</text>
+<rect x="28" y="146" width="88" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.0" y="181" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">0</text>
+<rect x="116" y="146" width="225" height="57" rx="0" fill="#f1eafa" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="228.5" y="181" font-size="19" font-weight="700" text-anchor="middle" fill="#7140ad">PLACEHOLDER</text>
+<rect x="341" y="146" width="199" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="440.5" y="181" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">image A</text>
+<rect x="540" y="146" width="152" height="57" rx="0" fill="#f1eafa" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="616.0" y="181" font-size="19" font-weight="700" text-anchor="middle" fill="#7140ad">image A</text>
+<rect x="692" y="146" width="180" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="782.0" y="181" font-size="18" font-weight="400" text-anchor="middle" fill="#172b4d">fall back</text>
+<rect x="28" y="203" width="88" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.0" y="238" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">1</text>
+<rect x="116" y="203" width="225" height="57" rx="0" fill="#fff0f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="228.5" y="238" font-size="19" font-weight="700" text-anchor="middle" fill="#b42332">NULL</text>
+<rect x="341" y="203" width="199" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="440.5" y="238" font-size="19" font-weight="400" text-anchor="middle" fill="#526277">image B</text>
+<rect x="540" y="203" width="152" height="57" rx="0" fill="#fff0f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="616.0" y="238" font-size="19" font-weight="700" text-anchor="middle" fill="#b42332">NULL</text>
+<rect x="692" y="203" width="180" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="782.0" y="238" font-size="18" font-weight="400" text-anchor="middle" fill="#172b4d">stop at NULL</text>
+<rect x="28" y="260" width="88" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.0" y="295" font-size="19" font-weight="400" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="116" y="260" width="225" height="57" rx="0" fill="#f1eafa" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="228.5" y="295" font-size="19" font-weight="700" text-anchor="middle" fill="#7140ad">image Z</text>
+<rect x="341" y="260" width="199" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="440.5" y="295" font-size="19" font-weight="400" text-anchor="middle" fill="#526277">image C</text>
+<rect x="540" y="260" width="152" height="57" rx="0" fill="#f1eafa" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="616.0" y="295" font-size="19" font-weight="700" text-anchor="middle" fill="#7140ad">image Z</text>
+<rect x="692" y="260" width="180" height="57" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="782.0" y="295" font-size="18" font-weight="400" text-anchor="middle" fill="#172b4d">use new value</text>
+<rect x="28" y="343" width="844" height="45" rx="8" fill="#f1eafa" stroke="#f1eafa" stroke-width="1.5"/>
+<text x="44" y="370" font-size="18" font-weight="400" text-anchor="start" fill="#7140ad">Only a placeholder falls back. An explicit NULL is already the new value.</text>
+</g>
+</svg>

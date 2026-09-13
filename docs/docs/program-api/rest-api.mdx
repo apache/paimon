@@ -1,6 +1,6 @@
 ---
-title: "REST API"
-sidebar_position: 1
+title: "REST Java Client"
+sidebar_position: 7
 ---
 
 import Stable from '@site/src/components/Stable';
@@ -25,9 +25,17 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# REST API
+# REST Java Client
 
-This is Java API for [REST](../concepts/rest/).
+`RESTApi` is a Java client for the [Paimon REST catalog](../concepts/rest/). Use it to issue catalog
+metadata requests without bringing in the full table read/write bundle.
+
+| What you need | API or reference |
+| --- | --- |
+| List and manage catalog objects from Java | `RESTApi`, shown below |
+| Load a `Table` and read or write rows | [Java API](java-api) with a REST catalog |
+| Implement an HTTP client or catalog server | [REST API specification](../concepts/rest/rest-api) |
+| Administrative endpoints | [Management API](../concepts/rest/management-api) |
 
 ## Dependency
 
@@ -53,7 +61,11 @@ Or download the jar file:
 
 </Unstable>
 
-## RESTApi
+## Connect and list tables {#restapi}
+
+Set the server URI, warehouse identifier, and authentication options. The warehouse value is
+interpreted by the server; it is not necessarily a filesystem path. The example uses the bearer
+token provider, whose configuration value is spelled `bear`.
 
 ```java
 import org.apache.paimon.options.Options;
@@ -74,14 +86,14 @@ public class RESTApiExample {
         Options options = new Options();
         options.set(URI, "<catalog server url>");
         options.set(WAREHOUSE, "my_instance_name");
-        setBearToken(options); // or setDlfToken
+        setBearerToken(options); // or setDlfToken
 
         RESTApi api = new RESTApi(options);
         List<String> tables = api.listTables("my_database");
         System.out.println(tables);
     }
 
-    private static void setBearToken(Options options) {
+    private static void setBearerToken(Options options) {
         options.set(TOKEN_PROVIDER, "bear");
         options.set(TOKEN, "<token>");
     }
@@ -94,4 +106,13 @@ public class RESTApiExample {
 }
 ```
 
-See more methods in `'RESTApi'`.
+## Authentication and table access
+
+See [bearer authentication](../concepts/rest/bear) or [DLF authentication](../concepts/rest/dlf)
+for provider configuration. Supply credentials through your application's configuration; the
+placeholders above illustrate the option names.
+
+To use the full table API, add the [Java bundle](java-api#dependency) and create a catalog with
+`metastore=rest`, the server `uri`, `warehouse`, and the same authentication options. See
+[REST catalog configuration](../concepts/rest/) for an example. Loading table metadata and reading
+its data files are separate operations, so configure storage access as required by the catalog.

@@ -1,0 +1,160 @@
+---
+title: "Video Frame Storage"
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Video Frame Storage
+
+Store one logical row per frame while keeping complete encoded videos as the
+physical payload. Use ordinary [BLOB storage](./blob) when each row contains an
+independent image, audio clip, or binary object.
+
+![Logical frame rows reference complete encoded videos in a self-contained pack; the run index maps row positions to video payloads and frame ordinals.](/img/multimodal-video-pack.svg)
+
+## Create a Video Table
+
+Use `video-frame-field` when the logical table has one row per frame while the physical storage
+and decoding unit is a complete encoded video. The comma-separated option also marks each named
+SQL `BYTES` or `BINARY` column as a BLOB column. It selects the dedicated `.video` format; the
+ordinary `.blob` version and layout are not changed.
+
+<Tabs groupId="video-create">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+CREATE TABLE video_frames (
+    episode_id BIGINT,
+    camera_front BYTES,
+    camera_wrist BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'video-frame-field' = 'camera_front,camera_wrist'
+);
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+CREATE TABLE video_frames (
+    episode_id BIGINT,
+    camera_front BINARY,
+    camera_wrist BINARY
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'video-frame-field' = 'camera_front,camera_wrist'
+);
+```
+
+</TabItem>
+
+</Tabs>
+
+Creating the table does not ingest or decode video files. Use the
+[PyPaimon video ingestion API](../pypaimon/video#video-frame-storage)
+to write complete videos and their logical frame rows.
+
+## Descriptors and Physical Layout
+
+Each logical value is a `VideoFrameDescriptor`: its URI range identifies one complete encoded
+video and its frame ordinal selects a frame inside that video. On write, a `.video` data region
+concatenates raw video payloads without ordinary BLOB entry wrappers. Four embedded delta-varint
+indexes record physical video lengths, logical run lengths, run-to-video references, and the first
+frame ordinal of each run. Consecutive frames therefore need one run entry rather than one index
+entry per row. NULL and data-evolution placeholders use negative run references.
+
+## Reuse, Rolling, and Compaction
+
+Physical reuse uses exact payload descriptor identity (URI, offset, and length), not a content
+hash. It is local to each `.video` file: every pack is self-contained and never points at payloads
+owned by another Paimon data file. A pack can contain multiple MP4 payloads. After a size or row
+target is reached, rolling waits for the current physical video group to end, making the target
+soft for large videos. A later commit or an earlier roll can store another physical copy of the
+same source video. For multi-camera tables, payload boundaries may be nested across fields as long
+as every transition is an episode boundary. Once a target is reached within an episode, normal,
+BLOB, and vector rolling is deferred until the next payload boundary and all active writers close
+together. The resulting file group remains row-aligned and a single large episode may exceed the
+configured target.
+
+When BLOB compaction is enabled, it byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
+and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
+file contains only application columns such as `episode_id`, state, and action. Paimon stores the
+frame mapping in the `.video` descriptor/index path.
+`blob-compaction.enabled` defaults to `false`; ordinary normal-file compaction can
+leave the video packs unchanged. See [Data Evolution Maintenance](./data-evolution-maintenance#ordinary-compaction).
+
+## Requirements and Limitations
+
+- Append-only tables only; primary-key tables continue to use managed BLOB storage.
+- Every configured field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use
+  `.blob`.
+- Non-null writes must be exact descriptor-backed `BlobRef` values containing a
+  `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
+- Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not
+  store PTS values or parse codec/container metadata.
+- A `BlobConsumer` callback is not supported for the video field.
+
+## Read Frames
+
+A frame descriptor identifies the encoded video and the frame to decode. It does
+not contain decoded image pixels. Read behavior differs by API:
+
+| API | How to obtain frame descriptors |
+| --- | --- |
+| Flink and Spark SQL | Set `blob-as-descriptor=true`. With `false`, the SQL adapter materializes the complete encoded video payload for each selected frame row. |
+| PyPaimon reads of `.video` fields | Return serialized `VideoFrameDescriptor` values even when `blob-as-descriptor=false`. |
+| Java internal-row API | `row.getBlob(position)` returns a descriptor-backed `BlobRef`; call `toDescriptor()` to access the frame descriptor. `toData()` reads the complete video payload. |
+
+After ingesting data, query descriptors without loading a complete video for every row:
+
+<Tabs groupId="video-read">
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+SELECT episode_id, camera_front, camera_wrist
+FROM video_frames /*+ OPTIONS('blob-as-descriptor'='true') */;
+```
+
+</TabItem>
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+ALTER TABLE video_frames SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+SELECT episode_id, camera_front, camera_wrist FROM video_frames;
+```
+
+This table property remains enabled for subsequent SQL reads.
+
+</TabItem>
+
+</Tabs>
+
+For Python ingestion and PyTorch `DataLoader` usage, including decoder-session reuse in workers,
+see [PyPaimon Multimodal API: Video Frame Storage](../pypaimon/video#video-frame-storage).

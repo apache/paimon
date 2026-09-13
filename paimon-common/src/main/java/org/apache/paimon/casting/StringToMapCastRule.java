@@ -181,7 +181,10 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
 
         for (char c : content.toCharArray()) {
             if (escaped) {
+                // an escaped character is taken literally: it must survive in the
+                // entry instead of being dropped together with its backslash
                 escaped = false;
+                current.append(c);
                 continue;
             } else if (c == '\\') {
                 escaped = true;

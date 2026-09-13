@@ -362,10 +362,10 @@ case class PaimonFormatTable(table: FormatTable)
   }
 
   /**
-   * Resolves DROP requests from one validated view of the catalog registry. The boolean array is
-   * aligned with the requests and tells callers which complete specs are registered; partial-spec
-   * entries are not used for existence reporting. The returned partitions are the deduplicated
-   * registered leaves covered by all requests.
+   * Resolves DROP requests from one view of the catalog registry, with every partition validated on
+   * its own. The boolean array is aligned with the requests and tells callers which complete specs
+   * are registered; partial-spec entries are not used for existence reporting. The returned
+   * partitions are the deduplicated registered leaves covered by all requests.
    */
   private[spark] def resolveFormatTablePartitionsForDrop(
       partitionNames: Array[Array[String]],
@@ -385,7 +385,12 @@ case class PaimonFormatTable(table: FormatTable)
     requested.foreach(spec => resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
     val manager = requirePartitionManager()
     val registry = manager.listPartitions(Collections.emptyMap[String, String](), null)
-    FormatTablePartitionRegistryValidator.validatePartitionLocations(
+    // A drop unregisters partitions and deletes default-location directories; a custom location is
+    // never probed or deleted. Every partition still has to say where it lives - a location inside
+    // the table directory could name a directory this drop deletes - but two partitions that claim
+    // each other's data elsewhere do not change what this drop removes, and refusing them here
+    // would leave that pair with no way out: dropping one of the two is how it is repaired.
+    FormatTablePartitionRegistryValidator.validateEachPartitionLocation(
       registry,
       table.partitionKeys(),
       new Path(table.location()),

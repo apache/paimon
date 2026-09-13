@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Map;
 
 /**
  * A Computed column's value is computed from input columns. Only expression with at most two inputs
@@ -34,10 +35,12 @@ public class ComputedColumn implements Serializable {
 
     private final String columnName;
     private final Expression expression;
+    private final boolean caseSensitive;
 
-    public ComputedColumn(String columnName, Expression expression) {
+    public ComputedColumn(String columnName, Expression expression, boolean caseSensitive) {
         this.columnName = columnName;
         this.expression = expression;
+        this.caseSensitive = caseSensitive;
     }
 
     public String columnName() {
@@ -60,5 +63,33 @@ public class ComputedColumn implements Serializable {
             return null;
         }
         return expression.eval(input);
+    }
+
+    /**
+     * Evaluates this column against a source record. The referenced field is matched by exact name,
+     * or ignoring case when the catalog is case-insensitive (record keys keep the case of the
+     * source system).
+     */
+    @Nullable
+    public String evalFromRecord(Map<String, String> rowData) {
+        return eval(referencedValue(rowData));
+    }
+
+    @Nullable
+    private String referencedValue(Map<String, String> rowData) {
+        String reference = fieldReference();
+        if (reference == null) {
+            return null;
+        }
+        String value = rowData.get(reference);
+        if (caseSensitive || rowData.containsKey(reference)) {
+            return value;
+        }
+        for (Map.Entry<String, String> entry : rowData.entrySet()) {
+            if (reference.equalsIgnoreCase(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 }

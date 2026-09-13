@@ -141,17 +141,28 @@ class MultimodalConnection:
             *,
             batch_size: int = 1024,
             options=None,
-            source_options=None):
+            source_options=None,
+            tag_name=None) -> None:
         """Import LeRobot Dataset v3 into a new Paimon table group."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
-        return load_from_lerobot(
+        load_from_lerobot(
             self,
             table_name,
             source,
             batch_size=batch_size,
             options=options,
             source_options=source_options,
+            tag_name=tag_name,
         )
+
+    def create_lerobot_tag(self, table_name: str, tag_name: str):
+        """Pin all LeRobot components; pause group writes until this returns.
+
+        Returns component snapshot IDs. Use the tag only after success and
+        retain it on every component for the lifetime of a training run.
+        """
+        from pypaimon.multimodal.lerobot.metadata import create_lerobot_tag
+        return create_lerobot_tag(self, table_name, tag_name)
 
     def load_from_rosbag(
             self,

@@ -45,9 +45,13 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -62,6 +66,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator.largeFileThreshold;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -90,6 +95,82 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
+    public void testLargeFileRatioOptions() {
+        assertThat(new CoreOptions(new Options()).dataEvolutionCompactionLargeFileRatio())
+                .isEqualTo(2.0d);
+        for (double ratio : new double[] {1.0d, 1.15d, Double.MAX_VALUE}) {
+            Options options = new Options();
+            options.set(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO, ratio);
+            assertThat(new CoreOptions(options).dataEvolutionCompactionLargeFileRatio())
+                    .isEqualTo(ratio);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            doubles = {
+                0.0d,
+                0.99d,
+                -1.0d,
+                Double.NaN,
+                Double.NEGATIVE_INFINITY,
+                Double.POSITIVE_INFINITY
+            })
+    public void testRejectsInvalidLargeFileRatio(double ratio) {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO, ratio);
+        assertThatThrownBy(() -> new CoreOptions(options).dataEvolutionCompactionLargeFileRatio())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key());
+    }
+
+    @Test
+    public void testLargeFileThresholdPreservesByteBoundaries() {
+        // Direct double multiplication rounds 100 * 1.15 below 115.
+        assertThat(largeFileThreshold(100L, 1.15d)).isEqualTo(115L);
+        assertThat(largeFileThreshold(3L, 1.5d)).isEqualTo(4L);
+        assertThat(largeFileThreshold((1L << 53) + 1, 1.0d)).isEqualTo((1L << 53) + 1);
+        assertThat(largeFileThreshold(Long.MAX_VALUE / 2, 2.0d)).isEqualTo(Long.MAX_VALUE - 1);
+        assertThat(largeFileThreshold(Long.MAX_VALUE / 2 + 1, 2.0d)).isEqualTo(Long.MAX_VALUE);
+        assertThat(largeFileThreshold(Long.MAX_VALUE, 1.0d)).isEqualTo(Long.MAX_VALUE);
+        assertThat(largeFileThreshold(100L, Double.MAX_VALUE)).isEqualTo(Long.MAX_VALUE);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1.0,100", "1.15,115", "1.5,150", "3.0,300"})
+    public void testCustomLargeFileRatioUsesIndividualPhysicalFileSize(
+            double ratio, long threshold) {
+        long versionSize = threshold * 3 / 4;
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("below.parquet", 0L, 10L, 0, threshold - 1),
+                        makeEntryWithSize("boundary.parquet", 10L, 10L, 0, threshold),
+                        makeEntryWithSize("base.parquet", 20L, 10L, 0, 10L),
+                        makeEntryWithSize("large-update.parquet", 20L, 10L, 1, threshold + 1),
+                        makeEntryWithSize("version1.parquet", 30L, 10L, 0, versionSize),
+                        makeEntryWithSize("version2.parquet", 30L, 10L, 1, versionSize),
+                        makeBlobEntry("large.blob", 0L, 10L, 1000L),
+                        makeVectorStoreEntry("large.vector.lance", 10L, 10L, 1000L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false,
+                        false,
+                        largeFileThreshold(100L, ratio),
+                        100L,
+                        100L,
+                        1000L,
+                        10L,
+                        schemaId -> null,
+                        null);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(2).file(), entries.get(3).file());
+    }
+
+    @Test
     public void testCompactPlannerSingleFile() {
         // Single file should not produce compaction tasks
         List<ManifestEntry> entries = new ArrayList<>();
@@ -102,6 +183,74 @@ public class DataEvolutionCompactCoordinatorTest {
         List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
 
         assertThat(tasks).isEmpty();
+    }
+
+    @Test
+    public void testSplitLargeFilesUsesPhysicalSizeAndIncludesColumnUpdates() {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("below.parquet", 0L, 10L, 0, 199L),
+                        makeEntryWithSize("boundary.parquet", 10L, 10L, 0, 200L),
+                        makeEntryWithSize("large.parquet", 20L, 10L, 0, 201L),
+                        makeEntryWithSize("update.parquet", 20L, 10L, 1, 10L));
+        for (boolean enabled : new boolean[] {false, true}) {
+            DataEvolutionCompactCoordinator.CompactPlanner planner =
+                    new DataEvolutionCompactCoordinator.CompactPlanner(
+                            false,
+                            false,
+                            enabled ? 200L : Long.MAX_VALUE,
+                            100L,
+                            100L,
+                            1000L,
+                            10L,
+                            schemaId -> null,
+                            null);
+            List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+            if (enabled) {
+                assertThat(tasks).hasSize(1);
+                assertThat(tasks.get(0).compactBefore())
+                        .containsExactly(entries.get(2).file(), entries.get(3).file());
+            } else {
+                assertThat(tasks).isEmpty();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDoNotSplitInsideDedicatedFile(boolean vector) {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("large.parquet", 0L, 10L, 0, 1000L),
+                        vector
+                                ? makeVectorStoreEntry("whole.vector.lance", 0L, 10L, 10L)
+                                : makeBlobEntry("whole.blob", 0L, 10L, 10L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
+
+        assertThat(planner.compactPlan(entries)).isEmpty();
+    }
+
+    @Test
+    public void testSplitLargeFilesAndMergeSmallFilesKeepDedicatedFiles() {
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        makeEntryWithSize("large.parquet", 0L, 10L, 0, 201L),
+                        makeEntryWithSize("small1.parquet", 10L, 10L, 0, 20L),
+                        makeEntryWithSize("small2.parquet", 20L, 10L, 0, 20L),
+                        makeBlobEntry("original.blob", 0L, 5L, 1000L),
+                        makeVectorStoreEntry("original.vector.lance", 5L, 5L, 1000L));
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                new DataEvolutionCompactCoordinator.CompactPlanner(
+                        false, false, 200L, 100L, 100L, 1L, 2L, schemaId -> null, null);
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(2);
+        assertThat(tasks.get(0).compactBefore()).containsExactly(entries.get(0).file());
+        assertThat(tasks.get(1).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
     }
 
     @Test
@@ -876,6 +1025,7 @@ public class DataEvolutionCompactCoordinatorTest {
         return new DataEvolutionCompactCoordinator.CompactPlanner(
                 true,
                 false,
+                Long.MAX_VALUE,
                 targetFileSize,
                 targetFileSize,
                 openFileCost,
@@ -912,7 +1062,11 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        files,
+                        Arrays.asList(
+                                new Range(0L, 49L), new Range(50L, 149L), new Range(150L, 199L)));
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -971,6 +1125,76 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThatThrownBy(() -> new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("contiguous row range");
+    }
+
+    @Test
+    public void testPlanNormalOutputRangesAtDedicatedBoundaries() {
+        List<DataFileMeta> files =
+                Collections.singletonList(createDataFileMeta("file.parquet", 100, 10, 0, 1000));
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(BinaryRow.EMPTY_ROW, files);
+        assertThat(task.planOutputRanges(400))
+                .containsExactly(new Range(100, 103), new Range(104, 107), new Range(108, 109));
+
+        task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        files,
+                        Arrays.asList(
+                                new Range(105, 107), new Range(103, 106), new Range(108, 109)));
+        // A cut after 103 lies inside overlapping dedicated files and moves to 107.
+        // The adjacent dedicated file starting at 108 must not prevent this boundary.
+        assertThat(task.planOutputRanges(400))
+                .containsExactly(new Range(100, 107), new Range(108, 109));
+        // A cut immediately before a dedicated file is also safe.
+        assertThat(task.planOutputRanges(300))
+                .containsExactly(new Range(100, 102), new Range(103, 107), new Range(108, 109));
+    }
+
+    @Test
+    public void testPlanNormalOutputRangesUsesLogicalRowCountAcrossVersions() {
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Arrays.asList(
+                                createDataFileMeta("base.parquet", 100, 10, 0, 400),
+                                createDataFileMeta("update.parquet", 100, 10, 1, 600)));
+        assertThat(task.planOutputRanges(500))
+                .containsExactly(new Range(100, 104), new Range(105, 109));
+    }
+
+    @Test
+    public void testPlanNormalOutputRangesAvoidsSizeAndRowIdOverflow() {
+        DataEvolutionNormalCompactTask task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Arrays.asList(
+                                createDataFileMeta(
+                                        "base.parquet", Long.MAX_VALUE - 10, 10, 0, Long.MAX_VALUE),
+                                createDataFileMeta(
+                                        "update.parquet",
+                                        Long.MAX_VALUE - 10,
+                                        10,
+                                        1,
+                                        Long.MAX_VALUE)));
+        assertThat(task.planOutputRanges(Long.MAX_VALUE))
+                .containsExactly(
+                        new Range(Long.MAX_VALUE - 10, Long.MAX_VALUE - 6),
+                        new Range(Long.MAX_VALUE - 5, Long.MAX_VALUE - 1));
+        task =
+                new DataEvolutionNormalCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Collections.singletonList(
+                                createDataFileMeta(
+                                        "last.parquet",
+                                        Long.MAX_VALUE - 9,
+                                        10,
+                                        0,
+                                        Long.MAX_VALUE)));
+        assertThat(task.planOutputRanges(Long.MAX_VALUE / 2))
+                .containsExactly(
+                        new Range(Long.MAX_VALUE - 9, Long.MAX_VALUE - 5),
+                        new Range(Long.MAX_VALUE - 4, Long.MAX_VALUE));
     }
 
     @Test

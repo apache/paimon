@@ -23,7 +23,10 @@ import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,6 +41,47 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
     @Test
     void testFormatIdentifier() {
         assertThat(new ManifestFileMetaSerializer().toRow(object()).getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    void testExtraFiles() throws IOException {
+        ManifestFileMeta original = object();
+        assertThat(original.extraFiles()).isNull();
+
+        ManifestFileMetaSerializer serializer = new ManifestFileMetaSerializer();
+        for (List<String> extraFiles :
+                Arrays.asList(
+                        null,
+                        Collections.<String>emptyList(),
+                        Arrays.asList("extra-1", "extra-2"))) {
+            ManifestFileMeta meta =
+                    new ManifestFileMeta(
+                            original.fileName(),
+                            original.fileSize(),
+                            original.numAddedFiles(),
+                            original.numDeletedFiles(),
+                            original.partitionStats(),
+                            original.schemaId(),
+                            original.minBucket(),
+                            original.maxBucket(),
+                            original.minLevel(),
+                            original.maxLevel(),
+                            original.minRowId(),
+                            original.maxRowId(),
+                            extraFiles);
+
+            ManifestFileMeta fromRow = serializer.fromRow(serializer.toRow(meta));
+            ManifestFileMeta fromBytes = serializer.deserializeFromBytes(meta.toBytes());
+            assertThat(fromRow).isEqualTo(meta);
+            assertThat(fromBytes).isEqualTo(meta).hasSameHashCodeAs(meta);
+            assertThat(fromRow.extraFiles()).isEqualTo(extraFiles);
+            assertThat(fromBytes.extraFiles()).isEqualTo(extraFiles);
+            if (extraFiles == null) {
+                assertThat(meta).isEqualTo(original).hasSameHashCodeAs(original);
+            } else {
+                assertThat(meta).isNotEqualTo(original);
+            }
+        }
     }
 
     @Override

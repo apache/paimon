@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="490" viewBox="0 0 900 490" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Incremental clustering selects a subset of files</title>
+<desc id="desc">An illustrative run selects new files A, B, and C at level 0 together with an eligible existing level 1 run. It sorts and merges that set into files D and E. An unselected higher-level run is reused without rewriting. Actual selections and output levels depend on the planner.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="898" height="488" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="42" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Cluster the selected files; keep the rest</text>
+<text x="28" y="74" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Illustrative incremental run within one partition</text>
+<text x="28" y="113" font-size="17" fill="#526277" font-weight="700" text-anchor="start">BEFORE</text>
+<text x="632" y="113" font-size="17" fill="#526277" font-weight="700" text-anchor="start">AFTER</text>
+<rect x="28" y="130" width="255" height="192" rx="8" fill="#fff8ea" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="46" y="159" font-size="20" fill="#93600b" font-weight="700" text-anchor="start">Selected for this run</text>
+<text x="46" y="190" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Level 0 · new files</text>
+<rect x="46" y="204" width="64" height="42" rx="8" fill="#ffffff" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="78" y="232" font-size="20" fill="#93600b" font-weight="700" text-anchor="middle">A</text>
+<rect x="121" y="204" width="64" height="42" rx="8" fill="#ffffff" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="153" y="232" font-size="20" fill="#93600b" font-weight="700" text-anchor="middle">B</text>
+<rect x="196" y="204" width="64" height="42" rx="8" fill="#ffffff" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="228" y="232" font-size="20" fill="#93600b" font-weight="700" text-anchor="middle">C</text>
+<rect x="46" y="264" width="219" height="40" rx="8" fill="#ffffff" stroke="#ddbf7c" stroke-width="1.5"/>
+<text x="155" y="291" font-size="18" fill="#93600b" font-weight="400" text-anchor="middle">Level 1 · existing run</text>
+<rect x="353" y="178" width="200" height="106" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/><text x="453.0" y="212" font-size="19" fill="#2463b4" font-weight="700" text-anchor="middle">Sort + merge</text><text x="453.0" y="242" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">clustering columns</text>
+<path d="M 283 230 H 345" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 553 230 H 624" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="632" y="157" width="240" height="152" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="752" y="188" font-size="20" fill="#087f6e" font-weight="700" text-anchor="middle">New clustered run</text>
+<rect x="650" y="207" width="92" height="48" rx="8" fill="#ffffff" stroke="#087f6e" stroke-width="1.5"/>
+<text x="696" y="238" font-size="18" fill="#087f6e" font-weight="400" text-anchor="middle">File D</text>
+<rect x="758" y="207" width="96" height="48" rx="8" fill="#ffffff" stroke="#087f6e" stroke-width="1.5"/>
+<text x="806" y="238" font-size="18" fill="#087f6e" font-weight="400" text-anchor="middle">File E</text>
+<text x="752" y="286" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Target-sized output files</text>
+<rect x="28" y="355" width="255" height="69" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="155" y="385" font-size="19" fill="#172b4d" font-weight="700" text-anchor="middle">Higher-level run</text>
+<text x="155" y="409" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Not selected</text>
+<path d="M 283 390 H 624" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="452" y="375" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">No rewrite</text>
+<rect x="632" y="355" width="240" height="69" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="752" y="385" font-size="19" fill="#172b4d" font-weight="700" text-anchor="middle">Same higher-level run</text>
+<text x="752" y="409" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Reused in the new snapshot</text>
+<text x="28" y="466" font-size="17" fill="#526277" font-weight="400" text-anchor="start">A full job can also skip already-clustered units. Output levels depend on the planner.</text>
+</g>
+</svg>

@@ -24,17 +24,37 @@ under the License.
 
 # Schema
 
-The version of the schema file starts from 0 and currently retains all versions of the schema. There may be old files
-that rely on the old schema version, so its deletion should be done with caution.
+A schema file defines the fields, keys, and options of a table at a particular schema ID. Readers
+use schema IDs in [snapshots](./snapshot) and [data file metadata](./manifest#data-file-metadata)
+to interpret records written before or after a schema change.
 
-Schema File is JSON, it includes:
+## Schema ID and Format Version
 
-1. fields: data field list, data field contains `id`, `name`, `type`, field id is used to support schema evolution.
-2. partitionKeys: field name list, partition definition of the table, it cannot be modified.
-3. primaryKeys: field name list, primary key definition of the table, it cannot be modified.
-4. options: map<string, string>, no ordered, options of the table, including a lot of capabilities and optimizations.
+These two numbers serve different purposes:
+
+- **`id`** identifies a table schema. IDs start at `0`; an update creates a new schema ID.
+- **`version`** identifies the schema JSON format. The current format version is `3`.
+
+In the default layout, schema ID `0` is stored in `schema/schema-0`. A file named `schema-3`
+does not imply format version `3`.
+
+## JSON Fields
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `version` | Integer | Schema JSON format version. See [Compatibility](#compatibility). |
+| `id` | Long | Schema ID, used in the file name and metadata references. |
+| `fields` | Array of DataField | Ordered table fields, including stable field IDs. |
+| `highestFieldId` | Integer | Highest field ID allocated, including nested fields; used when allocating IDs for new fields. |
+| `partitionKeys` | Array of strings | Names of the partition fields. |
+| `primaryKeys` | Array of strings | Names of the primary-key fields; empty for a table without a primary key. |
+| `options` | Map of strings to strings | Table options. Map entry order has no meaning. |
+| `comment` | String, optional | Table comment. |
+| `timeMillis` | Long | Schema creation time in milliseconds since the Unix epoch. |
 
 ## Example
+
+This example is schema ID `0`, serialized with format version `3`:
 
 ```json
 {
@@ -68,37 +88,50 @@ Schema File is JSON, it includes:
 }
 ```
 
+
 ## Compatibility
 
-For old versions:
-- version 1: should put `bucket -> 1` to options if there is no `bucket` key.
-- version 1 & 2: should put `file.format -> orc` to options if there is no `file.format` key.
+Older schema files can omit options whose defaults have since changed. Readers preserve their
+original behavior when decoding those schemas:
+
+| Schema format | Missing field or option | Reader behavior |
+| --- | --- | --- |
+| No `version` field | `version` | Treat as format version `1`. |
+| Version `1` | `bucket` | Supply `bucket = 1`. |
+| Versions `1` and `2` | `file.format` | Supply `file.format = orc`. |
+| Older files without a timestamp | `timeMillis` | Use `0`. |
+
+These compatibility defaults do not replace options explicitly stored in the schema. New tables
+use current defaults, including Parquet as the default data file format.
 
 ## DataField
 
-DataField represents a column of the table.
+A DataField describes one column, including fields nested inside a row type.
 
-1. id: int, column id, automatic increment, it is used for schema evolution.
-2. name: string, column name.
-3. type: data type, it is very similar to SQL type string.
-4. description: string.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | Integer | Stable field identifier used for schema evolution. |
+| `name` | String | Field name. |
+| `type` | String or JSON type object | Logical type, including nullability and nested type information. |
+| `description` | String, optional | Field comment. |
+| `defaultValue` | String, optional | Stored default value definition. Engine support determines how it is used. |
+
+Primitive types commonly use strings such as `BIGINT NOT NULL`. Nested types need their
+structured type representation. See [Data Types](../data-types) for the logical type reference.
 
 ## Update Schema
 
-Updating the schema should generate a new schema file.
+A schema update writes a new schema file rather than replacing the old definition:
 
-```shell
-warehouse
-└── default.db
-    └── my_table
-        ├── schema
-            ├── schema-0
-            ├── schema-1
-            └── schema-2
+```text
+my_table/
+└── schema/
+    ├── schema-0
+    ├── schema-1
+    └── schema-2
 ```
 
-There is a reference to schema in the snapshot. The schema file with the highest numerical value is usually the latest
-schema file.
-
-Old schema files cannot be directly deleted because there may be old data files that reference old schema files. When
-reading table, it is necessary to rely on them for schema evolution reading.
+The latest schema defines the current table, while existing snapshots and data files can still
+reference earlier schema IDs. Retain schema files that are needed to interpret existing data.
+Use the supported [Flink schema changes](../../flink/sql-alter) or
+[Spark schema changes](../../spark/sql-alter) instead of editing schema JSON directly.

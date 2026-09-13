@@ -95,6 +95,63 @@ class CachingFileIOTest {
     }
 
     @Test
+    void testMemoryModeDoesNotCacheInPlaceOverwrittenFiles() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path consumer = new Path("consumer-1");
+
+        // consumer-* is written in place by overwriteFileUtf8, so it is mutable and bypasses the
+        // cache: each read reaches the delegate and sees the current content.
+        delegate.addFile("consumer-1", "v1cc".getBytes());
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            assertThat(in).isNotInstanceOf(CachingSeekableInputStream.class);
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v1cc");
+        }
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(1);
+
+        delegate.addFile("consumer-1", "v2cc".getBytes());
+        try (SeekableInputStream in = cachingIO.newInputStream(consumer)) {
+            byte[] buf = new byte[4];
+            in.read(buf, 0, 4);
+            assertThat(new String(buf)).isEqualTo("v2cc");
+        }
+        // never cached: the overwrite is visible and the delegate was opened again
+        assertThat(delegate.newInputStreamCallCount("consumer-1")).isEqualTo(2);
+    }
+
+    @Test
+    void testMemoryModeImmutableCacheHitsDoNotRestatDelegate() throws IOException {
+        MockFileIO delegate = new MockFileIO();
+        CachingFileIO cachingIO =
+                newCachingFileIO(
+                        delegate,
+                        new LocalMemoryCacheManager(Long.MAX_VALUE, 64),
+                        EnumSet.of(FileType.META),
+                        64);
+        Path snapshot = new Path("snapshot-1");
+        delegate.addFile("snapshot-1", "0123456789abcdef".getBytes());
+
+        for (int i = 0; i < 3; i++) {
+            try (SeekableInputStream in = cachingIO.newInputStream(snapshot)) {
+                assertThat(readAll(in, 16)).isEqualTo("0123456789abcdef".getBytes());
+            }
+        }
+
+        // An immutable file keeps the path-only memory key: opened once, then served from cache.
+        // Its size is resolved lazily and remembered, so repeated hits do not re-stat the
+        // delegate the way moving getFileStatus onto every open would.
+        assertThat(delegate.newInputStreamCallCount("snapshot-1")).isEqualTo(1);
+        assertThat(delegate.getFileStatusCallCount("snapshot-1")).isEqualTo(1);
+    }
+
+    @Test
     void testCreateBlobPresignedUrlDelegates() throws IOException {
         FileIO delegate = mock(FileIO.class);
         CachingFileIO cachingIO =

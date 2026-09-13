@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="490" viewBox="0 0 900 490" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Update one row; write one column over the full range</title>
+<desc id="desc">An UPDATE sets b to 22 for id 20. The original file N0 contains row IDs 0, 1, and 2. New file N1 contains b values 1, 22, and 3 over the same range. Values 1 and 3 are preserved. N0 remains unchanged and continues to supply id and c.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="488" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Update one row; write one column over the full range</text>
+<rect x="28" y="68" width="844" height="43" rx="6" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="44" y="96" font-size="20" font-weight="700" text-anchor="start" fill="#172b4d">UPDATE t SET b = 22 WHERE id = 20</text>
+<text x="28" y="150" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">N0 · existing file [0, 2]</text>
+<text x="559" y="150" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">N1 · new file [0, 2]</text>
+<rect x="28" y="170" width="89" height="40" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.5" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#526277">Row ID</text>
+<rect x="117" y="170" width="110" height="40" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="172.0" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">id</text>
+<rect x="227" y="170" width="110" height="40" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="282.0" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">b</text>
+<rect x="337" y="170" width="110" height="40" rx="0" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="392.0" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">c</text>
+<rect x="28" y="210" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.5" y="240" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">0</text>
+<rect x="117" y="210" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="172.0" y="240" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">10</text>
+<rect x="227" y="210" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="282.0" y="240" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">1</text>
+<rect x="337" y="210" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="392.0" y="240" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">100</text>
+<rect x="28" y="257" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.5" y="287" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">1</text>
+<rect x="117" y="257" width="110" height="47" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="172.0" y="287" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">20</text>
+<rect x="227" y="257" width="110" height="47" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="282.0" y="287" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="337" y="257" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="392.0" y="287" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">200</text>
+<rect x="28" y="304" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="72.5" y="334" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="117" y="304" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="172.0" y="334" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">30</text>
+<rect x="227" y="304" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="282.0" y="334" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">3</text>
+<rect x="337" y="304" width="110" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="392.0" y="334" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">300</text>
+<path d="M 451 233 L 550 233" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 451 280 L 550 280" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 451 327 L 550 327" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="559" y="170" width="89" height="40" rx="0" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="603.5" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#526277">Row ID</text>
+<rect x="648" y="170" width="90" height="40" rx="0" fill="#fff2d7" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="693.0" y="197" font-size="18" font-weight="700" text-anchor="middle" fill="#9a5200">b</text>
+<rect x="559" y="210" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="603.5" y="240" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">0</text>
+<rect x="648" y="210" width="90" height="47" rx="0" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="693" y="240" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">1</text>
+<text x="752" y="240" font-size="18" font-weight="400" text-anchor="start" fill="#526277">preserved</text>
+<rect x="559" y="257" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="603.5" y="287" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">1</text>
+<rect x="648" y="257" width="90" height="47" rx="0" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="693" y="287" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">22</text>
+<text x="752" y="287" font-size="18" font-weight="400" text-anchor="start" fill="#9a5200">changed</text>
+<rect x="559" y="304" width="89" height="47" rx="0" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="603.5" y="334" font-size="21" font-weight="400" text-anchor="middle" fill="#172b4d">2</text>
+<rect x="648" y="304" width="90" height="47" rx="0" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="693" y="334" font-size="21" font-weight="700" text-anchor="middle" fill="#9a5200">3</text>
+<text x="752" y="334" font-size="18" font-weight="400" text-anchor="start" fill="#526277">preserved</text>
+<text x="28" y="383" font-size="19" font-weight="700" text-anchor="start" fill="#2463b4">N0 stays unchanged.</text>
+<text x="559" y="383" font-size="18" font-weight="700" text-anchor="start" fill="#9a5200">Same 3 positions. Only b is written.</text>
+<rect x="28" y="411" width="844" height="70" rx="8" fill="#eaf2ff" stroke="#eaf2ff" stroke-width="1.5"/>
+<text x="44" y="438" font-size="18" font-weight="400" text-anchor="start" fill="#2463b4">The predicate selects row 1, but N1 must still cover every row ID in [0, 2].</text>
+<text x="44" y="463" font-size="18" font-weight="400" text-anchor="start" fill="#2463b4">Columns id and c continue to come from N0.</text>
+</g>
+</svg>

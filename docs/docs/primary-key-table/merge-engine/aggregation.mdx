@@ -35,7 +35,14 @@ NOTE: Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL Tab
 
 Sometimes users only care about aggregated results. The `aggregation` merge engine aggregates each value field with the latest data one by one under the same primary key according to the aggregate function.
 
-Each field not part of the primary keys can be given an aggregate function, specified by the `fields.<field-name>.aggregate-function` table property, otherwise it will use `last_non_null_value` aggregation as default. For example, consider the following table definition.
+For ordinary non-key fields, Paimon selects the function in this order:
+
+1. `fields.<field-name>.aggregate-function`, when configured for the field.
+2. `fields.default-aggregate-function`, when configured for the table.
+3. `last_non_null_value` otherwise.
+
+Sequence fields use `last_value`; primary-key fields are not value-aggregated.
+The following table keeps the maximum observed price and sums the sales contributions.
 
 <Tabs groupId="aggregation-merge-engine-example">
 
@@ -60,9 +67,29 @@ CREATE TABLE my_table (
 
 Field `price` will be aggregated by the `max` function, and field `sales` will be aggregated by the `sum` function. Given two input records `<1, 23.0, 15>` and `<1, 30.2, 20>`, the final result will be `<1, 30.2, 35>`.
 
+## Streaming Reads
+
+For a stream of complete aggregated rows, use the `lookup` or `full-compaction`
+[changelog producer](../changelog-producer). The `input` producer forwards the input contributions,
+which are not necessarily the aggregated result.
+
 ## Aggregation Functions
 
-Current supported aggregate functions and data types are:
+Choose each function according to the meaning of its input contributions. Replaying a contribution
+can change results such as `sum`; this engine does not deduplicate events by a separate event ID.
+Check [Retraction](#retraction) before accepting `UPDATE_BEFORE` or `DELETE` records.
+
+| Need | Functions or recipe |
+| --- | --- |
+| Numeric aggregation | [sum](#sum), [product](#product), [max](#max), [min](#min), [counting with sum](#count) |
+| Retain a value | [last_value](#last_value), [last_non_null_value](#last_non_null_value), [first_value](#first_value), [first_non_null_value](#first_non_null_value) |
+| Strings and booleans | [listagg](#listagg), [bool_and](#bool_and), [bool_or](#bool_or) |
+| Arrays and maps | [collect](#collect), [merge_map](#merge_map), [merge_map_with_keytime](#merge_map_with_keytime) |
+| Nested rows | [nested_update](#nested_update), [nested_partial_update](#nested_partial_update) |
+| Bitmap union | [rbm32](#rbm32), [rbm64](#rbm64) |
+| Approximate distinct counts | [hll_sketch](#hll_sketch), [theta_sketch](#theta_sketch) |
+
+## Numeric Functions
 
 ### sum
 
@@ -73,15 +100,32 @@ Current supported aggregate functions and data types are:
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
-### count
-  In scenarios where counting rows that match a specific condition is required, you can use the SUM function to achieve this. By expressing a condition as a Boolean value (TRUE or FALSE) and converting it into a numerical value, you can effectively count the rows. In this approach, TRUE is converted to 1, and FALSE is converted to 0.
+### Counting with sum {#count}
 
-  For example, if you have a table orders and want to count the number of rows that meet a specific condition, you can use the following query:
-  ```sql
-  SELECT SUM(CASE WHEN condition THEN 1 ELSE 0 END) AS count
-  FROM orders;
-  ```
+There is no `count` value for `fields.<field-name>.aggregate-function`. To count contributions,
+write `1` for a matching event and `0` for a non-matching event into a field configured with `sum`.
+For example, this Flink SQL table counts paid events per customer:
 
+```sql
+CREATE TABLE customer_counts (
+    customer_id BIGINT,
+    paid_events BIGINT,
+    PRIMARY KEY (customer_id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.paid_events.aggregate-function' = 'sum'
+);
+
+-- customer 1: matching event, non-matching event, matching event
+INSERT INTO customer_counts VALUES (1, 1), (1, 0), (1, 1);
+
+SELECT * FROM customer_counts;
+-- 1, 2
+```
+
+In a pipeline, derive the contribution with `CASE WHEN condition THEN 1 ELSE 0 END` in the input
+query. Replaying an event adds its contribution again; this is a count of contributions, not a
+count of distinct event IDs.
 
 ### max
   The max function identifies and retains the maximum value.
@@ -91,6 +135,8 @@ Current supported aggregate functions and data types are:
   The min function identifies and retains the minimum value.
   It supports BOOLEAN, CHAR, VARCHAR, BINARY, VARBINARY, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
 
+## Value Selection
+
 ### last_value
   The last_value function replaces the previous value with the most recently imported value.
   It supports all data types.
@@ -98,6 +144,16 @@ Current supported aggregate functions and data types are:
 ### last_non_null_value
   The last_non_null_value function replaces the previous value with the latest non-null value.
   It supports all data types.
+
+### first_value
+  The first_value function retains the first value, including null.
+  It supports all data types.
+
+### first_non_null_value
+  The first_non_null_value function selects the first non-null value in a data set.
+  It supports all data types.
+
+## Strings and Booleans
 
 ### listagg
   The listagg function concatenates multiple string values into a single string.
@@ -113,13 +169,157 @@ Current supported aggregate functions and data types are:
   The bool_or function checks if at least one value in a boolean set is true.
   It supports BOOLEAN data type.
 
-### first_value
-  The first_value function retrieves the first null value from a data set.
-  It supports all data types.
+## Collections and Nested Rows
 
-### first_non_null_value
-  The first_non_null_value function selects the first non-null value in a data set.
-  It supports all data types.
+### collect
+  The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
+  It only supports ARRAY type.
+
+### merge_map
+  The merge_map function merge input maps. It only supports MAP type.
+
+### merge_map_with_keytime
+
+  The merge_map_with_keytime function merges input maps with key-level partial updates based on timestamps.
+  Each key in the map carries a string timestamp. During merging, the entry with the greater
+  timestamp in lexicographic order is retained. Use equally padded numeric strings or a consistent
+  sortable date/time format; the implementation reads this field as a string.
+  It only supports `MAP<key_type, ROW<value_field, ts_field>>` type, where the ROW must have at least 2 fields.
+
+  Use `fields.<field-name>.ts-field=<field_name_in_row>` to specify the timestamp field name in the ROW type.
+  If not specified, the last field of the ROW is used as the timestamp by default.
+
+  When merging into an existing map, a null incoming map value removes that key, and an entry
+  with a null timestamp is skipped. The first map is accepted directly when there is no existing
+  accumulator, so do not rely on the first input to remove null entries or null timestamps.
+
+  An example:
+
+  <Tabs groupId="merge-map-with-keytime-example">
+
+<TabItem value="flink" label="Flink">
+
+```sql
+  CREATE TABLE my_table (
+      biz_order_id STRING,
+      key_value_map MAP<STRING, ROW<`value` STRING, `ts` STRING>>,
+      PRIMARY KEY (biz_order_id) NOT ENFORCED
+  ) WITH (
+      'merge-engine' = 'aggregation',
+      'fields.key_value_map.aggregate-function' = 'merge_map_with_keytime',
+      'fields.key_value_map.ts-field' = 'ts'
+  );
+  ```
+
+</TabItem>
+
+</Tabs>
+
+  Given the following input records:
+
+  | biz_order_id | key_value_map |
+  |---|---|
+  | 1 | {'\{'}"product_name": ("iPhone", "100"), "color": ("Black", "100"){'\}'} |
+  | 1 | {'\{'}"product_name": ("iPad", "200"), "price": ("999", "200"){'\}'} |
+  | 1 | {'\{'}"color": ("White", "050"){'\}'} |
+
+  The final result will be:
+  `{"product_name": ("iPad", "200"), "color": ("Black", "100"), "price": ("999", "200")}`
+  Note that `color` remains "Black" because its existing timestamp "100" is greater than the incoming "050".
+
+### nested_update
+  The nested_update function collects multiple rows into one array\<row> (so-called 'nested table'). It supports ARRAY\<ROW> data types.
+
+  Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array\<row>.
+
+  Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
+
+   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
+   - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
+   - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
+
+  Use `fields.<field-name>.nested-sequence-field=seq0,seq1,...` to control the update sequence of a nested table, you must configure `fields.<field-name>.nested-key` when using it.
+
+  Use `fields.<field-name>.count-limit=<Integer>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
+  sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
+  avoid abnormal input.
+
+  An example:
+
+  <Tabs groupId="nested-update-example">
+
+<TabItem value="flink" label="Flink">
+
+```sql
+  -- orders table
+  CREATE TABLE orders (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING
+  );
+
+  -- sub orders that have the same order_id
+  -- belongs to the same order
+  CREATE TABLE sub_orders (
+    order_id BIGINT,
+    sub_order_id INT,
+    product_name STRING,
+    price BIGINT,
+    PRIMARY KEY (order_id, sub_order_id) NOT ENFORCED
+  );
+
+  -- wide table
+  CREATE TABLE order_wide (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING,
+    sub_orders ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>
+  ) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.sub_orders.aggregate-function' = 'nested_update',
+    'fields.sub_orders.nested-key' = 'sub_order_id'
+  );
+
+  -- widen
+  INSERT INTO order_wide
+
+  SELECT
+    order_id,
+    user_name,
+    address,
+    CAST (NULL AS ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>)
+  FROM orders
+
+  UNION ALL
+
+  SELECT
+    order_id,
+    CAST (NULL AS STRING),
+    CAST (NULL AS STRING),
+    ARRAY[ROW(sub_order_id, product_name, price)]
+  FROM sub_orders;
+
+  -- query using UNNEST
+  SELECT order_id, user_name, address, sub_order_id, product_name, price
+  FROM order_wide, UNNEST(sub_orders) AS so(sub_order_id, product_name, price)
+  ```
+
+</TabItem>
+
+</Tabs>
+
+### nested_partial_update
+  The nested_partial_update function collects multiple rows into one array\<row\> (so-called 'nested table'). It supports
+  ARRAY\<ROW\> data types. You need to use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the
+  nested table. The values in each row are written by partial updating some columns.
+
+  Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
+
+   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
+   - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
+   - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
+
+## Bitmap Aggregation
 
 ### rbm32
   The rbm32 function aggregates multiple serialized 32-bit RoaringBitmap into a single RoaringBitmap.
@@ -164,7 +364,7 @@ Current supported aggregate functions and data types are:
   It supports VARBINARY data type which must be serialized 64-bit RoaringBitmap.
 
   Similar to rbm32, but supports 64-bit integers, making it suitable for scenarios with very large integer values
-  or when you need to represent sets with values beyond the 32-bit range (up to 2^31-1).
+  or when identifiers require a 64-bit representation.
 
   **Example:**
 
@@ -200,14 +400,16 @@ The `rbm32` and `rbm64` aggregators work by:
 2. Performing bitwise OR operations to merge the bitmaps
 3. Serializing the result back to VARBINARY format
 
-**Working with RoaringBitmap Functions:**
+<details>
+<summary>Preparing bitmap inputs and implementing Flink UDFs</summary>
 
 Paimon currently does not provide built-in Flink UDFs for bitmap creation. You have two options:
 
 1. Create bitmaps programmatically: in your application code and insert serialized bytes
 2. Create custom Flink UDFs: to convert raw integers to serialized bitmap format
 
-Here are examples of both approaches:
+The examples below illustrate both approaches. SQL names such as `TO_BITMAP`, `FROM_BITMAP`,
+and `BITMAP_CONTAINS` refer to user-supplied functions; they are not built-in Paimon functions.
 
 **Option 1: Programmatic Bitmap Creation (Java/Scala)**
 
@@ -221,10 +423,7 @@ byte[] serialized1 = bitmap1.serialize();
 byte[] serialized2 = bitmap2.serialize();
 byte[] serialized3 = bitmap3.serialize();
 
-INSERT INTO user_page_visits VALUES
-    (1, CAST(x'...' AS VARBINARY)),  -- serialized1 bytes
-    (2, CAST(x'...' AS VARBINARY)),  -- serialized2 bytes
-    (3, CAST(x'...' AS VARBINARY));  -- serialized3 bytes
+// Write serialized1, serialized2, and serialized3 as VARBINARY values through your writer API.
 ```
 
 **Option 2: Custom Flink UDFs**
@@ -306,165 +505,21 @@ public static class BitmapContainsUDF extends ScalarFunction {
 }
 ```
 
-### nested_update
-  The nested_update function collects multiple rows into one array\<row> (so-called 'nested table'). It supports ARRAY\<ROW> data types.
+</details>
 
-  Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array\<row>.
-
-  Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
-
-   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
-   - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
-   - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
-
-  Use `fields.<field-name>.nested-sequence-field=seq0,seq1,...` to control the update sequence of a nested table, you must configure `fields.<field-name>.nested-key` when using it.
-
-  Use `fields.<field-name>.count-limit=<Integer>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
-  sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
-  avoid abnormal input.
-
-  An example:
-
-  <Tabs groupId="nested-update-example">
-
-<TabItem value="flink" label="Flink">
-
-```sql
-  -- orders table
-  CREATE TABLE orders (
-    order_id BIGINT PRIMARY KEY NOT ENFORCED,
-    user_name STRING,
-    address STRING
-  );
-  
-  -- sub orders that have the same order_id 
-  -- belongs to the same order
-  CREATE TABLE sub_orders (
-    order_id BIGINT,
-    sub_order_id INT,
-    product_name STRING,
-    price BIGINT,
-    PRIMARY KEY (order_id, sub_order_id) NOT ENFORCED
-  );
-  
-  -- wide table
-  CREATE TABLE order_wide (
-    order_id BIGINT PRIMARY KEY NOT ENFORCED,
-    user_name STRING,
-    address STRING,
-    sub_orders ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>
-  ) WITH (
-    'merge-engine' = 'aggregation',
-    'fields.sub_orders.aggregate-function' = 'nested_update',
-    'fields.sub_orders.nested-key' = 'sub_order_id'
-  );
-  
-  -- widen
-  INSERT INTO order_wide
-  
-  SELECT 
-    order_id, 
-    user_name,
-    address, 
-    CAST (NULL AS ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>) 
-  FROM orders
-  
-  UNION ALL 
-    
-  SELECT 
-    order_id, 
-    CAST (NULL AS STRING), 
-    CAST (NULL AS STRING), 
-    ARRAY[ROW(sub_order_id, product_name, price)] 
-  FROM sub_orders;
-  
-  -- query using UNNEST
-  SELECT order_id, user_name, address, sub_order_id, product_name, price 
-  FROM order_wide, UNNEST(sub_orders) AS so(sub_order_id, product_name, price)
-  ```
-
-</TabItem>
-
-</Tabs>
-
-### nested_partial_update
-  The nested_partial_update function collects multiple rows into one array\<row\> (so-called 'nested table'). It supports
-  ARRAY\<ROW\> data types. You need to use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the
-  nested table. The values in each row are written by partial updating some columns.
-
-  Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
-
-   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
-   - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
-   - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
-
-
-### collect
-  The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
-  It only supports ARRAY type.
-
-### merge_map
-  The merge_map function merge input maps. It only supports MAP type.
-
-### merge_map_with_keytime
-
-  The merge_map_with_keytime function merges input maps with key-level partial updates based on timestamps.
-  Each key in the map carries its own timestamp, and during merging, only the value with the latest timestamp for each key is retained.
-  It only supports `MAP<key_type, ROW<value_field, ts_field>>` type, where the ROW must have at least 2 fields.
-
-  Use `fields.<field-name>.ts-field=<field_name_in_row>` to specify the timestamp field name in the ROW type.
-  If not specified, the last field of the ROW is used as the timestamp by default.
-
-  When a key's value is null, the key will be removed from the map.
-  When the timestamp field is null, the entry will be skipped.
-
-  An example:
-
-  <Tabs groupId="merge-map-with-keytime-example">
-
-<TabItem value="flink" label="Flink">
-
-```sql
-  CREATE TABLE my_table (
-      biz_order_id STRING,
-      key_value_map MAP\<STRING, ROW\<`value` STRING, `ts` STRING>>,
-      PRIMARY KEY (biz_order_id) NOT ENFORCED
-  ) WITH (
-      'merge-engine' = 'aggregation',
-      'fields.key_value_map.aggregate-function' = 'merge_map_with_keytime',
-      'fields.key_value_map.ts-field' = 'ts'
-  );
-  ```
-
-</TabItem>
-
-</Tabs>
-
-  Given the following input records:
-
-  | biz_order_id | key_value_map |
-  |---|---|
-  | 1 | {'\{'}"product_name": ("iPhone", "100"), "color": ("Black", "100"){'\}'} |
-  | 1 | {'\{'}"product_name": ("iPad", "200"), "price": ("999", "200"){'\}'} |
-  | 1 | {'\{'}"color": ("White", "50"){'\}'} |
-
-  The final result will be:
-  `{"product_name": ("iPad", "200"), "color": ("Black", "100"), "price": ("999", "200")}` 
-  Note that `color` remains "Black" because its existing timestamp "100" is greater than the incoming "50".
-
-### Types of cardinality sketches
+## Types of cardinality sketches
 
  Paimon uses the [Apache DataSketches](https://datasketches.apache.org/) library of stochastic streaming algorithms to implement sketch modules. The DataSketches library includes various types of sketches, each one designed to solve a different sort of problem. Paimon supports HyperLogLog (HLL) and Theta cardinality sketches.
 
-#### HyperLogLog
+### HyperLogLog
 
- The HyperLogLog (HLL) sketch aggregator is a very compact sketch algorithm for approximate distinct counting.  You can also use the HLL aggregator to calculate a union of HLL sketches. 
+ The HyperLogLog (HLL) sketch aggregator is a very compact sketch algorithm for approximate distinct counting.  You can also use the HLL aggregator to calculate a union of HLL sketches.
 
-#### Theta
+### Theta
 
  The Theta sketch is a sketch algorithm for approximate distinct counting with set operations. Theta sketches let you count the overlap between sets, so that you can compute the union, intersection, or set difference between sketch objects.
 
-#### Choosing a sketch type
+### Choosing a sketch type
 
   HLL and Theta sketches both support approximate distinct counting; however, the HLL sketch produces more accurate results and consumes less storage space. Theta sketches are more flexible but require significantly more memory.
 
@@ -472,14 +527,19 @@ When choosing an approximation algorithm for your use case, consider the followi
 
 If your use case entails distinct counting and merging sketch objects, use the HLL sketch.
 If you need to evaluate union, intersection, or difference set operations, use the Theta sketch.
-You cannot merge HLL sketches with Theta sketches.
+You cannot merge HLL sketches with Theta sketches. Paimon's `hll_sketch` and `theta_sketch`
+aggregate functions both perform **union**. Theta intersection and difference operations require
+separate application code or UDFs; they are not operations selectable on `theta_sketch`.
 
-#### hll_sketch
+### hll_sketch
 
 The hll_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
 It supports VARBINARY data type.
 
 An example:
+
+<details>
+<summary>Flink SQL and HLL UDF example</summary>
 
 <Tabs groupId="hll-sketch-example">
 
@@ -491,7 +551,7 @@ An example:
     id INT PRIMARY KEY NOT ENFORCED,
     user_id STRING
   );
-  
+
   -- agg table
   CREATE TABLE UV_AGG (
     id INT PRIMARY KEY NOT ENFORCED,
@@ -500,8 +560,8 @@ An example:
     'merge-engine' = 'aggregation',
     'fields.uv.aggregate-function' = 'hll_sketch'
   );
-  
-  -- Register the following class as a Flink function with the name "HLL_SKETCH" 
+
+  -- Register the following class as a Flink function with the name "HLL_SKETCH"
   -- for example: create TEMPORARY function HLL_SKETCH as  'HllSketchFunction';
   -- which is used to transform input to sketch bytes array:
   --
@@ -518,14 +578,14 @@ An example:
   -- Register the following class as a Flink function with the name "HLL_SKETCH_COUNT"
   -- for example: create TEMPORARY function HLL_SKETCH_COUNT as  'HllSketchCountFunction';
   -- which is used to get cardinality from sketch bytes array:
-  -- 
-  -- public static class HllSketchCountFunction extends ScalarFunction { 
+  --
+  -- public static class HllSketchCountFunction extends ScalarFunction {
   --   public Double eval(byte[] sketchBytes) {
   --     if (sketchBytes == null) {
-  --       return 0d; 
-  --     } 
-  --     return HllSketch.heapify(sketchBytes).getEstimate(); 
-  --   } 
+  --       return 0d;
+  --     }
+  --     return HllSketch.heapify(sketchBytes).getEstimate();
+  --   }
   -- }
   --
   -- Then we can get user cardinality based on the aggregated field.
@@ -536,14 +596,19 @@ An example:
 
 </Tabs>
 
+</details>
 
-#### theta_sketch
+
+### theta_sketch
   The theta_sketch function aggregates multiple serialized Sketch objects into a single Sketch.
   It supports VARBINARY data type.
 
   An example:
 
-  <Tabs groupId="theta-sketch-example">
+  <details>
+<summary>Flink SQL and Theta UDF example</summary>
+
+<Tabs groupId="theta-sketch-example">
 
 <TabItem value="flink" label="Flink">
 
@@ -553,7 +618,7 @@ An example:
     id INT PRIMARY KEY NOT ENFORCED,
     user_id STRING
   );
-  
+
   -- agg table
   CREATE TABLE UV_AGG (
     id INT PRIMARY KEY NOT ENFORCED,
@@ -562,33 +627,33 @@ An example:
     'merge-engine' = 'aggregation',
     'fields.uv.aggregate-function' = 'theta_sketch'
   );
-  
-  -- Register the following class as a Flink function with the name "THETA_SKETCH" 
+
+  -- Register the following class as a Flink function with the name "THETA_SKETCH"
   -- for example: create TEMPORARY function THETA_SKETCH as  'ThetaSketchFunction';
   -- which is used to transform input to sketch bytes array:
   --
-  -- public static class ThetaSketchFunction extends ScalarFunction {'\{'}
-  --   public byte[] eval(String user_id) {'\{'}
+  -- public static class ThetaSketchFunction extends ScalarFunction {
+  --   public byte[] eval(String user_id) {
   --     UpdateSketch updateSketch = UpdateSketch.builder().build();
   --     updateSketch.update(user_id);
   --     return updateSketch.compact().toByteArray();
-  --   {'\}'}
-  -- {'\}'}
+  --   }
+  -- }
   --
   INSERT INTO UV_AGG SELECT id, THETA_SKETCH(user_id) FROM VISITS;
 
   -- Register the following class as a Flink function with the name "THETA_SKETCH_COUNT"
   -- for example: create TEMPORARY function THETA_SKETCH_COUNT as  'ThetaSketchCountFunction';
   -- which is used to get cardinality from sketch bytes array:
-  -- 
-  -- public static class ThetaSketchCountFunction extends ScalarFunction {'\{'} 
-  --   public Double eval(byte[] sketchBytes) {'\{'}
-  --     if (sketchBytes == null) {'\{'}
-  --       return 0d; 
-  --     {'\}'} 
-  --     return Sketches.wrapCompactSketch(Memory.wrap(sketchBytes)).getEstimate(); 
-  --   {'\}'} 
-  -- {'\}'}
+  --
+  -- public static class ThetaSketchCountFunction extends ScalarFunction {
+  --   public Double eval(byte[] sketchBytes) {
+  --     if (sketchBytes == null) {
+  --       return 0d;
+  --     }
+  --     return Sketches.wrapCompactSketch(Memory.wrap(sketchBytes)).getEstimate();
+  --   }
+  -- }
   --
   -- Then we can get user cardinality based on the aggregated field.
   SELECT id, THETA_SKETCH_COUNT(UV) as uv FROM UV_AGG;
@@ -598,20 +663,26 @@ An example:
 
 </Tabs>
 
-:::info
-
-For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer](../changelog-producer). ('input' changelog producer is also supported, but only returns input records.)
-
-:::
+</details>
 
 ## Retraction
 
-Only `sum`, `product`, `collect`, `merge_map`, `nested_update`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
-If you allow some functions to ignore retraction messages, you can configure:
-`'fields.${field_name}.ignore-retract'='true'`.
+By default, `UPDATE_BEFORE` and `DELETE` retract individual field contributions. Only `sum`,
+`product`, `collect`, `merge_map`, `nested_update`, `last_value`, and `last_non_null_value` support
+this behavior. Other functions, including bitmap and sketch aggregators, reject field retractions
+unless `fields.<field-name>.ignore-retract = true` is configured.
 
-The `last_value` and `last_non_null_value` just set field to null when accept retract messages.
+### Delete the Whole Row
+
+Set `aggregation.remove-record-on-delete = true` to remove the whole row on `DELETE`, bypassing
+per-field retraction. The default is `false`. `UPDATE_BEFORE` still retracts individual fields.
+This option cannot be combined with per-field `ignore-retract`.
+
+### Field Retraction Behavior
+
+`last_value` always clears the field on retraction. `last_non_null_value` clears it only when
+the retract record's field is non-null; a null retract leaves the accumulated value unchanged.
+Neither function restores an earlier historical value.
 
 The `product` will return null for retraction message when accumulator is null.
 

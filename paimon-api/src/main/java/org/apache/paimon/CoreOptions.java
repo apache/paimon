@@ -529,6 +529,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The size threshold for triggering full compaction of manifest.");
 
+    public static final ConfigOption<Boolean> MANIFEST_MERGE_SKIP_ON_WRITE_ONLY =
+            key("manifest.merge.skip-on-write-only")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip automatic manifest merging during commit when write-only is true."
+                                    + " This also skips automatic manifest sort rewrite."
+                                    + " Explicit manifest compaction is not affected.");
+
     public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
             key("manifest.merge-min-count")
                     .intType()
@@ -771,7 +780,8 @@ public class CoreOptions implements Serializable {
                     .withFallbackKeys("write.compaction-skip")
                     .withDescription(
                             "If set to true, compactions and snapshot expiration will be skipped. "
-                                    + "This option is used along with dedicated compact jobs.");
+                                    + "This option is used along with dedicated compact jobs. "
+                                    + "Automatic manifest merging is also skipped when manifest.merge.skip-on-write-only is true.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
             key("source.split.target-size")
@@ -865,7 +875,8 @@ public class CoreOptions implements Serializable {
                                     + "Enforced at bundle granularity, so a bundled write may exceed it "
                                     + "by up to one bundle. Only constrains files at write time: "
                                     + "compaction is size-based and may merge into larger files, and "
-                                    + "data-evolution compaction still produces a single file. Bounds "
+                                    + "data-evolution compaction produces a single file unless "
+                                    + "data-evolution.compaction.split-large-files is enabled. Bounds "
                                     + "per-file rows for wide columns to avoid data-evolution OOM. "
                                     + "PyPaimon supports this for data-evolution append tables; its "
                                     + "primary-key, blob and vector writers still fail fast when it "
@@ -1654,6 +1665,20 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
                                     + "dedicated internal streaming scan.");
+
+    public static final ConfigOption<CompactionInitialScanMode>
+            CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE =
+                    key("continuous-compaction.initial-scan-mode")
+                            .enumType(CompactionInitialScanMode.class)
+                            .defaultValue(CompactionInitialScanMode.EARLIEST)
+                            .withDescription(
+                                    "Initial snapshot mode for dedicated streaming compaction. "
+                                            + "When set to 'earliest' (the default), compaction starts from the earliest available snapshot "
+                                            + "if no COMPACT snapshot exists; when a COMPACT snapshot exists, compaction always resumes from the snapshot after it. "
+                                            + "When set to 'latest', the latest snapshot is read in ALL mode "
+                                            + "as the initial baseline and subsequent scans start from the next snapshot. "
+                                            + "The 'latest' mode skips historical snapshot changes and should only be used when historical "
+                                            + "changelog replay is not required.");
 
     @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<BatchScanMode> BATCH_SCAN_MODE =
@@ -2450,7 +2475,7 @@ public class CoreOptions implements Serializable {
                             "Specifies the comparison algorithm used for range partitioning, including 'zorder', 'hilbert', and 'order', "
                                     + "corresponding to the z-order curve algorithm, hilbert curve algorithm, and basic type comparison algorithm, "
                                     + "respectively. When not configured, it will automatically determine the algorithm based on the number of columns "
-                                    + "in 'clustering.by-columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
+                                    + "in 'clustering.columns'. 'order' is used for 1 column, 'zorder' for less than 5 columns, "
                                     + "and 'hilbert' for 5 or more columns.");
 
     public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL =
@@ -2618,6 +2643,31 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to persist source when process merge into action on data evolution table.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES =
+            key("data-evolution.compaction.split-large-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether data-evolution compaction selects normal data files larger than "
+                                    + "data-evolution.compaction.large-file-ratio times target-file-size, "
+                                    + "even below compaction.min.file-num when dedicated-file ranges allow splitting. "
+                                    + "Normal output ranges are estimated from input file sizes and row counts "
+                                    + "toward target-file-size, then adjusted to avoid cutting through any "
+                                    + "BLOB or VECTOR file range. Actual output sizes may differ from the target. "
+                                    + "Row IDs and logical deletions are preserved, and associated "
+                                    + "BLOB and VECTOR files are not rewritten by this option.");
+
+    public static final ConfigOption<Double> DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO =
+            key("data-evolution.compaction.large-file-ratio")
+                    .doubleType()
+                    .defaultValue(2.0d)
+                    .withDescription(
+                            "Size multiplier relative to target-file-size for selecting large normal "
+                                    + "files when data-evolution.compaction.split-large-files is enabled. "
+                                    + "An individual file must strictly exceed this threshold. The value "
+                                    + "must be finite and at least 1.0. This does not change the target "
+                                    + "size of compacted output files.");
 
     public static final ConfigOption<Boolean> DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS =
             key("data-evolution.compaction.rewrite-row-ids")
@@ -3487,6 +3537,10 @@ public class CoreOptions implements Serializable {
                 .changelogMaxDeletes(snapshotExpireLimit())
                 .consumerChangelogOnly(consumerChangelogOnly())
                 .build();
+    }
+
+    public boolean manifestMergeSkipOnWriteOnly() {
+        return options.get(MANIFEST_MERGE_SKIP_ON_WRITE_ONLY);
     }
 
     public int manifestMergeMinCount() {
@@ -4375,6 +4429,19 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTOR_BITMAP64);
     }
 
+    public boolean dataEvolutionCompactionSplitLargeFiles() {
+        return options.get(DATA_EVOLUTION_COMPACTION_SPLIT_LARGE_FILES);
+    }
+
+    public double dataEvolutionCompactionLargeFileRatio() {
+        double ratio = options.get(DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO);
+        checkArgument(
+                Double.isFinite(ratio) && ratio >= 1.0d,
+                "The option %s must be finite and at least 1.0.",
+                DATA_EVOLUTION_COMPACTION_LARGE_FILE_RATIO.key());
+        return ratio;
+    }
+
     public boolean dataEvolutionCompactionRewriteRowIds() {
         return options.get(DATA_EVOLUTION_COMPACTION_REWRITE_ROW_IDS);
     }
@@ -5179,6 +5246,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ChangelogProducer(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Initial snapshot mode for dedicated streaming compaction. */
+    public enum CompactionInitialScanMode implements DescribedEnum {
+        EARLIEST("earliest", "Read snapshots from the earliest available snapshot."),
+        LATEST("latest", "Read the latest snapshot as the initial full baseline.");
+
+        private final String value;
+        private final String description;
+
+        CompactionInitialScanMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

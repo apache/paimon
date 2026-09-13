@@ -18,7 +18,9 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -27,11 +29,21 @@ import org.slf4j.LoggerFactory;
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
 public class ContinuousCompactorStartingScanner extends AbstractStartingScanner {
 
+    private final boolean latestInitialSnapshot;
+
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
     public ContinuousCompactorStartingScanner(SnapshotManager snapshotManager) {
+        this(snapshotManager, CoreOptions.CompactionInitialScanMode.EARLIEST);
+    }
+
+    public ContinuousCompactorStartingScanner(
+            SnapshotManager snapshotManager,
+            CoreOptions.CompactionInitialScanMode initialScanMode) {
         super(snapshotManager);
+        this.latestInitialSnapshot =
+                initialScanMode == CoreOptions.CompactionInitialScanMode.LATEST;
         this.startingSnapshotId = snapshotManager.earliestSnapshotId();
     }
 
@@ -52,6 +64,13 @@ public class ContinuousCompactorStartingScanner extends AbstractStartingScanner 
             }
         }
 
+        if (latestInitialSnapshot) {
+            LOG.debug(
+                    "No compact snapshot found, reading the latest snapshot {} as the initial compaction baseline.",
+                    latestSnapshotId);
+            return StartingScanner.fromPlan(
+                    snapshotReader.withMode(ScanMode.ALL).withSnapshot(latestSnapshotId).read());
+        }
         LOG.debug(
                 "No compact snapshot found, reading from the earliest snapshot {}.",
                 earliestSnapshotId);

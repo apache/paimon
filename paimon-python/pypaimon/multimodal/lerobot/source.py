@@ -32,7 +32,9 @@ import pyarrow.fs as pafs
 import pyarrow.parquet as pq
 
 from pypaimon.common.options import Options
+from pypaimon.common.uri_reader import FileUriReader
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
+from pypaimon.multimodal.lerobot.schema import _video_feature_names
 from pypaimon.multimodal.source_utils import (
     _SourceFileIO,
     _normalize_source_path,
@@ -61,17 +63,37 @@ class _RemoteLeRobotMeta:
 
 class _RemoteEpisodeIndex:
 
-    def __init__(self):
+    def __init__(self, video_fields=()):
         self.starts = array("q")
         self._ends = array("q")
         self._chunk_indices = array("q")
         self._file_indices = array("q")
+        self._video_fields = tuple(video_fields)
+        self._video_indices = {
+            field: (array("q"), array("q"))
+            for field in self._video_fields
+        }
+        self._video_timestamps = {
+            field: (array("d"), array("d"))
+            for field in self._video_fields
+        }
 
-    def append(self, begin, end, chunk_index, file_index):
+    def append(
+            self, begin, end, chunk_index, file_index,
+            video_values=None):
         self.starts.append(begin)
         self._ends.append(end)
         self._chunk_indices.append(chunk_index)
         self._file_indices.append(file_index)
+        video_values = video_values or {}
+        for field in self._video_fields:
+            values = video_values[field]
+            chunk_indices, file_indices = self._video_indices[field]
+            from_timestamps, to_timestamps = self._video_timestamps[field]
+            chunk_indices.append(values[0])
+            file_indices.append(values[1])
+            from_timestamps.append(values[2])
+            to_timestamps.append(values[3])
 
     def __len__(self):
         return len(self.starts)
@@ -81,13 +103,23 @@ class _RemoteEpisodeIndex:
             index += len(self)
         if index < 0 or index >= len(self):
             raise IndexError(index)
-        return {
+        result = {
             "episode_index": index,
             "dataset_from_index": self.starts[index],
             "dataset_to_index": self._ends[index],
+            "length": self._ends[index] - self.starts[index],
             "data/chunk_index": self._chunk_indices[index],
             "data/file_index": self._file_indices[index],
         }
+        for field in self._video_fields:
+            chunk_indices, file_indices = self._video_indices[field]
+            from_timestamps, to_timestamps = self._video_timestamps[field]
+            prefix = "videos/%s/" % field
+            result[prefix + "chunk_index"] = chunk_indices[index]
+            result[prefix + "file_index"] = file_indices[index]
+            result[prefix + "from_timestamp"] = from_timestamps[index]
+            result[prefix + "to_timestamp"] = to_timestamps[index]
+        return result
 
 
 @contextmanager
@@ -197,17 +229,17 @@ def _load_hub_info(source):
             % (source.path, error)) from error
 
 
-def _open_dataset(LeRobotDataset, source):
+def _open_dataset(LeRobotDataset, source, download_videos=False):
     try:
         if source.root is not None:
             return LeRobotDataset(
                 repo_id=source.repo_id,
                 root=source.root,
-                download_videos=False,
+                download_videos=download_videos,
             )
         return LeRobotDataset(
             repo_id=source.repo_id,
-            download_videos=False,
+            download_videos=download_videos,
         )
     except Exception as error:
         raise ValueError(
@@ -215,10 +247,11 @@ def _open_dataset(LeRobotDataset, source):
             % (source.path, error)) from error
 
 
-def _open_resolved_dataset(LeRobotDataset, source, info):
+def _open_resolved_dataset(
+        LeRobotDataset, source, info, download_videos=False):
     if source.file_io is not None:
         return _RemoteLeRobotDataset(source, info)
-    return _open_dataset(LeRobotDataset, source)
+    return _open_dataset(LeRobotDataset, source, download_videos)
 
 
 class _RemoteLeRobotDataset:
@@ -291,35 +324,94 @@ class _RemoteLeRobotDataset:
                 return _read_remote_bytes(self._file_io, source_path)
         return _encode_media_frame(value)
 
+    def video_source(self, video_key, episode):
+        relative_path = self.meta.info["video_path"].format(
+            video_key=video_key,
+            chunk_index=int(episode[
+                "videos/%s/chunk_index" % video_key]),
+            file_index=int(episode[
+                "videos/%s/file_index" % video_key]),
+        )
+        relative_path = _relative_dataset_path(
+            relative_path, "info.video_path")
+        path = _remote_source_path(
+            self.source.path,
+            relative_path,
+            "info.video_path",
+            self._file_io,
+        )
+        status = self._file_io.get_file_status(path)
+        if status.type != pafs.FileType.File \
+                or status.size is None or status.size <= 0:
+            raise ValueError("LeRobot video file is empty: %s" % path)
+        return path, int(status.size)
+
+    @property
+    def video_uri_reader_factory(self):
+        return _SourceUriReaderFactory(self._file_io)
+
     def _load_episodes(self, info):
         episode_count = int(info.get("total_episodes", 0))
         if episode_count == 0:
             return []
         directory = _remote_path(self.source.path, "meta/episodes")
         paths = _remote_parquet_files(self._file_io, directory)
-        episodes = _RemoteEpisodeIndex()
+        video_fields = _video_feature_names(info)
+        selected_columns = list(self._EPISODE_COLUMNS)
+        for field in video_fields:
+            selected_columns.extend([
+                "videos/%s/%s" % (field, suffix)
+                for suffix in (
+                    "chunk_index",
+                    "file_index",
+                    "from_timestamp",
+                    "to_timestamp",
+                )
+            ])
+        episodes = _RemoteEpisodeIndex(video_fields)
         for path in paths:
             table = _read_remote_parquet(
                 self._file_io,
                 path,
-                columns=self._EPISODE_COLUMNS,
+                columns=selected_columns,
             )
-            columns = {
+            control_columns = {
                 name: table.column(name)
                 for name in self._EPISODE_COLUMNS
             }
             for offset in range(table.num_rows):
                 episode_index = int(
-                    columns["episode_index"][offset].as_py())
+                    control_columns["episode_index"][offset].as_py())
                 if episode_index != len(episodes):
                     raise ValueError(
                         "LeRobot Episode metadata must be ordered by "
                         "episode_index.")
                 episodes.append(
-                    int(columns["dataset_from_index"][offset].as_py()),
-                    int(columns["dataset_to_index"][offset].as_py()),
-                    int(columns["data/chunk_index"][offset].as_py()),
-                    int(columns["data/file_index"][offset].as_py()),
+                    int(control_columns[
+                        "dataset_from_index"][offset].as_py()),
+                    int(control_columns[
+                        "dataset_to_index"][offset].as_py()),
+                    int(control_columns[
+                        "data/chunk_index"][offset].as_py()),
+                    int(control_columns[
+                        "data/file_index"][offset].as_py()),
+                    {
+                        field: (
+                            int(table.column(
+                                "videos/%s/chunk_index" % field
+                            )[offset].as_py()),
+                            int(table.column(
+                                "videos/%s/file_index" % field
+                            )[offset].as_py()),
+                            float(table.column(
+                                "videos/%s/from_timestamp" % field
+                            )[offset].as_py()),
+                            float(table.column(
+                                "videos/%s/to_timestamp" % field
+                            )[offset].as_py()),
+                        )
+                        for field in video_fields
+                    },
                 )
         if len(episodes) != episode_count:
             raise ValueError(
@@ -387,6 +479,15 @@ class _RemoteLeRobotDataset:
 
 def _remote_path(root, relative_path):
     return "%s/%s" % (root.rstrip("/"), relative_path.lstrip("/"))
+
+
+class _SourceUriReaderFactory:
+
+    def __init__(self, file_io):
+        self._reader = FileUriReader(file_io)
+
+    def create(self, unused_uri):
+        return self._reader
 
 
 def _pandas_index_column(schema, component):

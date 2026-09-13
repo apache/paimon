@@ -982,6 +982,31 @@ public class CastExecutorTest {
         assertThat(result).containsExactly("1", "abc");
     }
 
+    @Test
+    public void testSplitMapEntriesWithEscapes() {
+        // the escaped separator must survive as a literal instead of vanishing
+        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("a\\,b, c"))
+                .containsExactly("a,b", "c");
+        // an escaped backslash yields one literal backslash
+        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("x\\\\y, z"))
+                .containsExactly("x\\y", "z");
+        // an escaped quote is a literal and does not toggle quote state
+        assertThat(StringToMapCastRule.INSTANCE.splitMapEntries("\"q\\\"z, w\""))
+                .containsExactly("q\"z, w");
+    }
+
+    @Test
+    public void testStringToMapPreservesEscapedCharacters() {
+        Map<Object, Object> expected = new HashMap<>();
+        expected.put(BinaryString.fromString("a,b"), BinaryString.fromString("v\\1"));
+        compareCastResult(
+                CastExecutors.resolve(
+                        VarCharType.STRING_TYPE,
+                        new MapType(DataTypes.STRING(), DataTypes.STRING())),
+                BinaryString.fromString("{a\\,b -> v\\\\1}"),
+                new GenericMap(expected));
+    }
+
     @SuppressWarnings("rawtypes")
     private void compareCastResult(CastExecutor<?, ?> cast, Object input, Object output) {
         assertThat(((CastExecutor) cast).cast(input)).isEqualTo(output);

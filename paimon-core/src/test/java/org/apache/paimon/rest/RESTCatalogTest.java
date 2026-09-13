@@ -81,6 +81,7 @@ import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
@@ -2468,6 +2469,57 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         "schema "
                                 + secondSchemaId
                                 + " is still referenced by snapshots/tags/changelogs");
+    }
+
+    @Test
+    public void testLoadSchema() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_load");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        TableSchema first = local.latest().get();
+
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        TableSchema latest = local.latest().get();
+
+        assertThat(catalog.loadSchema(identifier, "EARLIEST")).contains(first);
+        assertThat(catalog.loadSchema(identifier, "LATEST")).contains(latest);
+        assertThat(catalog.loadSchema(identifier, Long.toString(first.id()))).contains(first);
+        assertThat(catalog.loadSchema(identifier, "9999")).isEmpty();
+        assertThat(catalog.loadSchema(identifier, "invalid-version")).isEmpty();
+    }
+
+    @Test
+    public void testListSchemasPaged() throws Exception {
+        Identifier identifier = Identifier.create("test_list_schemas", "table_paged");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager local = new FileSystemSchemaManager(table.fileIO(), table.location());
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("cc", "dd"), false);
+        catalog.alterTable(identifier, SchemaChange.setOption("ee", "ff"), false);
+
+        List<TableSchema> expected = local.listAll();
+        expected.sort(java.util.Comparator.comparingLong(TableSchema::id).reversed());
+        PagedList<TableSchema> firstPage = catalog.listSchemasPaged(identifier, 2, null);
+        assertThat(firstPage.getElements()).containsExactlyElementsOf(expected.subList(0, 2));
+        assertThat(firstPage.getNextPageToken()).isNotNull();
+
+        PagedList<TableSchema> secondPage =
+                catalog.listSchemasPaged(identifier, 2, firstPage.getNextPageToken());
+        assertThat(secondPage.getElements()).containsExactlyElementsOf(expected.subList(2, 4));
+        assertThat(secondPage.getNextPageToken()).isNull();
+    }
+
+    @Test
+    public void testSchemaMethodsTableNotExist() {
+        Identifier missing = Identifier.create("test_list_schemas", "missing_table");
+        assertThatThrownBy(() -> catalog.loadSchema(missing, "LATEST"))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThatThrownBy(() -> catalog.listSchemasPaged(missing, null, null))
+                .isInstanceOf(Catalog.TableNotExistException.class);
     }
 
     @Test

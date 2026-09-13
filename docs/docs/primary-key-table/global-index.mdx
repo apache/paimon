@@ -37,82 +37,31 @@ Primary-key indexes differ from indexes created with `create_global_index`. A re
 independently for a Data Evolution table. A primary-key index follows the write and compaction
 lifecycle of a primary-key table and addresses rows inside its compact data files.
 
+For a first setup, choose an index family below, check [Requirements](#requirements), and follow
+[Create a Table](#create-a-table). Before using search results in production, review
+[Maintenance and Coverage](#maintenance-and-coverage): the default Vector and Full Text search
+modes omit files without active index coverage.
+
 ## Choose an Index
 
-<Tabs groupId="primary-key-index-family">
+| Index family | Use for | Query path |
+| --- | --- | --- |
+| [BTree](../multimodal-table/global-index/btree) | Selective scalar equality, `IN`, ranges, and null checks | Ordinary batch predicates |
+| [Bitmap](../multimodal-table/global-index/bitmap) | Indexed values such as enum-like dimensions | Ordinary batch predicates |
+| [Multivalue](../multimodal-table/global-index/multivalue) | Element membership in `ARRAY` columns | Supported array predicates |
+| [FM](../multimodal-table/global-index/fm) | Exact substring matches on character columns | A predicate converted to Paimon's `CONTAINS` |
+| [Vector](../multimodal-table/global-index/vector) | Approximate nearest neighbors in `VECTOR<FLOAT>` columns | [Vector Search](#vector-search) |
+| Full Text | Ranked text search on character columns | [Full-Text Search](#full-text-search) |
 
-<TabItem value="btree" label="BTree">
+Scalar and array indexes are used after the connector converts the query expression to a
+supported Paimon predicate. BTree and Bitmap support equality, comparisons, null checks, complement
+predicates, and supported string predicates. Multivalue supports `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`,
+and `ARRAY_CONTAINS_ALL`; null arrays and empty arrays produce no element postings, and array null
+checks use the ordinary scan path.
 
-Use BTree for selective scalar predicates such as equality, `IN`, comparisons, ranges, and null
-checks. Normal Flink, Spark, and Java batch scans apply it automatically; no index-specific query
-API is required.
-
-See [BTree Index](../multimodal-table/global-index/btree) for the built-in format and supported
-data types.
-
-</TabItem>
-
-<TabItem value="bitmap" label="Bitmap">
-
-Use Bitmap for enum-like dimensions, tags, and other columns where compressed bitmaps can evaluate
-equality, `IN`, null checks, complement predicates, and supported string predicates efficiently.
-Normal batch scans apply it automatically.
-
-See [Bitmap Index](../multimodal-table/global-index/bitmap) for predicate and format details.
-
-</TabItem>
-
-<TabItem value="multivalue" label="Multivalue">
-
-Use Multivalue for element-membership predicates on an `ARRAY` column. It stores one compressed
-bitmap posting list per distinct non-null element and accelerates Paimon Core `ARRAY_CONTAINS`,
-`ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates. Null arrays, empty arrays, and null elements
-produce no membership posting; array null checks fall back to the ordinary data path.
-
-The Core predicate and index pushdown are available independently of SQL connectors. A connector
-uses this index after it translates its array-membership expression to the corresponding Paimon
-predicate.
-
-For an append-only or Data Evolution table whose Multivalue index is built independently, see
-[Global Multivalue Index](../multimodal-table/global-index/multivalue).
-
-</TabItem>
-
-<TabItem value="vector" label="Vector">
-
-Use Vector for approximate nearest-neighbor (ANN) Top-K search on embeddings that are updated with
-the primary-key table. The index implementation and distance metric are configured per field, and
-search is exposed through Spark SQL, a Flink procedure, and the Java API.
-
-For an append-only or Data Evolution table whose vector index is built independently, see
-[Global Vector Index](../multimodal-table/global-index/vector).
-
-</TabItem>
-
-<TabItem value="full-text" label="Full Text">
-
-Use Full Text for native ranked search on `CHAR`, `VARCHAR`, or `STRING` content that can be
-updated or deleted with the primary-key table. The fixed `full-text` implementation is selected
-automatically. Search is exposed through Spark SQL, a Flink procedure, and the Java API.
-
-For an append-only or Data Evolution table whose full-text index is built independently, see
-[Global Index](../multimodal-table/global-index).
-
-</TabItem>
-
-<TabItem value="fm" label="FM">
-
-Use FM for exact substring predicates on a `CHAR`, `VARCHAR`, or `STRING` column. Normal batch
-scans apply it automatically after a connector converts a literal substring expression to
-Paimon's `CONTAINS` predicate. Needles of any byte length are supported without choosing a gram
-size.
-
-For an append-only or Data Evolution table whose FM index is built independently, see
-[FM Index](../multimodal-table/global-index/fm).
-
-</TabItem>
-
-</Tabs>
+FM performs exact substring matching without a configured gram size and accepts needles of any
+byte length. Vector and Full Text expose dedicated ranked-search APIs in Spark, Flink, and Java.
+Full Text uses the fixed `full-text` implementation; Vector uses the configured ANN implementation.
 
 Different columns in one table can use different index families. One column can occur in at most
 one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`,
@@ -177,6 +126,58 @@ Exactly one full-text column is currently supported per table.
 </Tabs>
 
 ## Create a Table
+
+### Start with One Index
+
+This example uses a BTree index to accelerate selective filters on `amount`.
+
+<Tabs groupId="primary-key-index-quick-start">
+<TabItem value="flink-sql" label="Flink SQL">
+
+```sql
+CREATE TABLE indexed_orders (
+    id BIGINT,
+    amount DECIMAL(12, 2),
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'pk-btree.index.columns' = 'amount'
+);
+```
+
+</TabItem>
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+CREATE TABLE indexed_orders (
+    id BIGINT,
+    amount DECIMAL(12, 2)
+) USING paimon
+TBLPROPERTIES (
+    'primary-key' = 'id',
+    'bucket' = '8',
+    'deletion-vectors.enabled' = 'true',
+    'pk-btree.index.columns' = 'amount'
+);
+```
+
+</TabItem>
+</Tabs>
+
+Query it with an ordinary predicate:
+
+```sql
+SELECT id, amount FROM indexed_orders WHERE amount BETWEEN 100.00 AND 200.00;
+```
+
+Indexes are built from eligible compacted data. Uncovered files selected by this batch scan
+follow the ordinary data path; see [Maintenance and Coverage](#maintenance-and-coverage).
+
+### Combine Index Families
+
+<details>
+<summary>Example: configure all six index families on different columns</summary>
 
 The following table uses all six families on different columns: Vector for `embedding`, Full Text
 for `content`, FM for `raw_text`, BTree for `amount`, Bitmap for `status`, and Multivalue for
@@ -262,6 +263,8 @@ TBLPROPERTIES (
 Duplicate, empty, unknown, unsupported, or cross-family duplicate columns are rejected during
 schema validation.
 
+</details>
+
 ### Options
 
 | Option | Default | Description |
@@ -326,21 +329,30 @@ Index construction can execute asynchronously inside the writer. A writer which 
 compaction also waits for active index maintenance; a non-blocking writer can complete maintenance
 in a later commit. Coverage can therefore be temporarily partial.
 
-Coverage behavior depends on the index family and search mode. `vector-index.search-mode` and
-`full-text-index.search-mode` default to `fast`. In `fast` mode, primary-key Vector and Full Text
-queries search only data covered by an active index group. Uncovered files are not searched, so
-partial coverage can make results incomplete.
+### Query Behavior with Partial Coverage
 
-- BTree, Bitmap, Multivalue, and FM scans always read uncovered files through the ordinary data path.
-  Partial coverage affects their acceleration, not result completeness. The original predicate and
-  deletion vectors are applied after index pruning.
-- Vector search in `full` or `detail` mode evaluates files without an active ANN group exactly and
-  merges those results with ANN candidates. In the default `fast` mode, those files are omitted.
+Coverage is separate from data visibility: first determine which data files the selected batch
+scan can read, then check which of those files have an active index group.
 
-Primary-key Full Text currently supports only `full-text-index.search-mode = fast`. It searches
-persistent archives and ignores uncovered files; `full` and `detail` are rejected because a
-merge-aware logical-row fallback is not implemented. Consequently, newly appended Level-0 rows
-become full-text searchable only after compaction publishes an eligible data file and archive.
+| Query | Indexed files | Files without an active index group |
+| --- | --- | --- |
+| BTree, Bitmap, Multivalue, or FM predicate | Prune using the index; apply predicates and deletion vectors | Read through the ordinary data path |
+| Vector, `fast` (default) | Search the ANN index | Omitted |
+| Vector, `full` or `detail` | Search the ANN index | Evaluate vectors exactly and merge the candidates |
+| Full Text, `fast` (default and only supported mode) | Search the persistent text index | Omitted |
+
+![For files visible to a batch scan, scalar indexes fall back to scanning uncovered files, Vector fast and Full Text omit them, and Vector full or detail evaluates them exactly.](/img/primary-key-index-coverage.svg)
+
+For ordinary scalar and array predicates, partial coverage affects performance rather than result
+completeness. The original predicate and deletion vectors still apply.
+
+For Vector and Full Text, `fast` can omit matching rows when coverage is incomplete. Vector's
+`full` and `detail` modes cover unindexed files with exact evaluation, but indexed files still use
+ANN search; these modes do not promise an exact global Top-K.
+
+Full Text rejects `full` and `detail` because a merge-aware logical-row fallback is not implemented.
+New Level-0 rows become full-text searchable only after compaction publishes eligible data and its
+persistent text index. A metadata-only level upgrade is not enough.
 
 ## BTree, Bitmap, Multivalue, and FM Queries
 

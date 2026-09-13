@@ -45,11 +45,11 @@ normalization statistics.
 
 ## Run the local pipeline
 
-After downloading RoboMIND, use Python 3.11 or later, install the HDF5 and
-Vortex extras, and provide the source and warehouse directories to one command:
+After downloading RoboMIND, install the HDF5 extra and provide the source and
+warehouse directories to one command:
 
 ```bash
-pip install 'pypaimon[hdf5,vortex]'
+pip install 'pypaimon[hdf5]'
 python -m pypaimon.sample.robomind_agilex \
   --input /data/RoboMIND/h5_agilex_3rgb \
   --warehouse /data/warehouse
@@ -133,10 +133,10 @@ time with that versioned row.
 
 The tables are non-primary-key append tables. Repeating ingestion therefore
 appends duplicate rows by design; it does not mean row-level update/delete is
-disabled. The sample keeps deletion vectors enabled, stores vectors with
-Vortex, and sets `blob-as-descriptor=false` because its transforms emit raw
-image/depth bytes rather than external BLOB descriptors. Parquet data format,
-dynamic bucket mode, and global-index search mode are inherited defaults and
-are not repeated in the sample options.
+disabled. The sample keeps deletion vectors enabled and sets
+`blob-as-descriptor=false` because its transforms emit raw image/depth bytes
+rather than external BLOB descriptors. Parquet data format, dynamic bucket
+mode, and global-index search mode are inherited defaults and are not repeated
+in the sample options.
 
 Run local and Ray modes against separate new warehouses when comparing them.

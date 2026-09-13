@@ -64,6 +64,10 @@ public class BitSet {
         return this.memorySegment;
     }
 
+    int memoryOffset() {
+        return offset;
+    }
+
     MemorySlice getMemorySlice() {
         return new MemorySlice(
                 checkNotNull(memorySegment, "MemorySegment is not set."), offset, byteLength);

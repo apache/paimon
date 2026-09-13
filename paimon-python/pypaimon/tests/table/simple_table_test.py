@@ -52,6 +52,57 @@ class SimpleTableTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    def test_commit_snapshot_properties(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table(
+            'default.test_commit_snapshot_properties', schema, False)
+        table = self.catalog.get_table(
+            'default.test_commit_snapshot_properties')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({
+            'pt': [1],
+            'k': [2],
+            'v': [3],
+        }, schema=self.pa_schema))
+
+        table_commit.commit(
+            table_write.prepare_commit(),
+            snapshot_properties={'source': 'capture'},
+        )
+        table_write.close()
+        table_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual({'source': 'capture'}, snapshot.properties)
+
+    def test_stream_commit_snapshot_properties(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table(
+            'default.test_stream_commit_snapshot_properties', schema, False)
+        table = self.catalog.get_table(
+            'default.test_stream_commit_snapshot_properties')
+        write_builder = table.new_stream_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(pa.Table.from_pydict({
+            'pt': [1],
+            'k': [2],
+            'v': [3],
+        }, schema=self.pa_schema))
+
+        table_commit.commit(
+            table_write.prepare_commit(42),
+            42,
+            snapshot_properties={'checkpoint': '42'},
+        )
+        table_write.close()
+        table_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual({'checkpoint': '42'}, snapshot.properties)
+
     def test_tag_scan(self):
         """
         Test reading from a specific tag.

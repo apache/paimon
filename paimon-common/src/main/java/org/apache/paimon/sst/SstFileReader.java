@@ -20,7 +20,6 @@ package org.apache.paimon.sst;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
-import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -50,6 +49,10 @@ public class SstFileReader implements Closeable {
     private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
+    private boolean hasCompressedBlocks;
+    private boolean loadBloomOnMiss;
+    private long dataBytesWithoutBloom;
+
     public SstFileReader(
             Comparator<MemorySlice> comparator,
             BlockCache blockCache,
@@ -57,8 +60,9 @@ public class SstFileReader implements Closeable {
             @Nullable FileBasedBloomFilter bloomFilter) {
         this.comparator = comparator;
         this.blockCache = blockCache;
-        this.indexBlock = readBlock(indexBlockHandle, true);
         this.bloomFilter = bloomFilter;
+        this.loadBloomOnMiss = bloomFilter != null && bloomFilter.isCacheable();
+        this.indexBlock = readBlock(indexBlockHandle, true);
     }
 
     /**
@@ -69,8 +73,19 @@ public class SstFileReader implements Closeable {
      */
     @Nullable
     public byte[] lookup(byte[] key) throws IOException {
-        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
-            return null;
+        int hash = 0;
+        Boolean bloomMatch = null;
+        if (bloomFilter != null) {
+            hash = MurmurHashUtils.hashBytes(key);
+            bloomMatch = bloomFilter.testHashIfPresent(hash);
+            if (bloomMatch != null) {
+                // Another reader may have admitted a previously rejected filter.
+                loadBloomOnMiss = true;
+                dataBytesWithoutBloom = 0;
+                if (!bloomMatch) {
+                    return null;
+                }
+            }
         }
 
         MemorySlice keySlice = MemorySlice.wrap(key);
@@ -80,8 +95,48 @@ public class SstFileReader implements Closeable {
 
         // if indexIterator does not have a next, it means the key does not exist in this iterator
         if (indexBlockIterator.hasNext()) {
+            BlockHandle handle =
+                    BlockHandle.readBlockHandle(indexBlockIterator.next().getValue().toInput());
+            MemorySlice cachedData = null;
+            boolean bloomProbed = bloomMatch != null;
+            if (bloomFilter != null && bloomMatch == null) {
+                // A missing filter must not cause I/O when the exact data is already resident.
+                cachedData =
+                        blockCache.getBlockSliceIfPresent(
+                                handle.offset(), handle.getFullBlockSize(), false);
+                if (cachedData == null
+                        && (loadBloomOnMiss
+                                || hasCompressedBlocks
+                                || bloomFilter.size() < handle.getFullBlockSize())) {
+                    boolean matches = bloomFilter.testHash(hash);
+                    // Try to warm a filter that fits, but after rejection only reload it when
+                    // its read cost or the saved decompression justifies bypassing the data.
+                    loadBloomOnMiss = bloomFilter.isCached();
+                    dataBytesWithoutBloom = 0;
+                    bloomProbed = true;
+                    if (!matches) {
+                        return null;
+                    }
+                }
+            }
+            BlockReader dataBlock =
+                    cachedData == null
+                            ? readBlock(handle, false)
+                            : createBlockReader(handle, cachedData);
+            if (!bloomProbed
+                    && cachedData == null
+                    && bloomFilter != null
+                    && bloomFilter.isCacheable()) {
+                // Retry after cold data accesses cost as much as a filter read. This allows
+                // recovery from transient rejection without loading Bloom on every miss.
+                dataBytesWithoutBloom += handle.getFullBlockSize();
+                if (dataBytesWithoutBloom >= bloomFilter.size()) {
+                    loadBloomOnMiss = true;
+                    dataBytesWithoutBloom = 0;
+                }
+            }
             // seek the current iterator to the key
-            BlockIterator current = getNextBlock(indexBlockIterator);
+            BlockIterator current = dataBlock.iterator();
             if (current.seekTo(keySlice)) {
                 return current.next().getValue().copyBytes();
             }
@@ -119,41 +174,46 @@ public class SstFileReader implements Closeable {
      * @return The reader of the target block.
      */
     private BlockReader readBlock(BlockHandle blockHandle, boolean index) {
-        // read block trailer
-        MemorySegment trailerData =
-                blockCache.getBlock(
-                        blockHandle.offset() + blockHandle.size(),
-                        BlockTrailer.ENCODED_LENGTH,
-                        b -> b,
-                        true);
-        BlockTrailer blockTrailer =
-                BlockTrailer.readBlockTrailer(MemorySlice.wrap(trailerData).toInput());
-
-        MemorySegment unCompressedBlock =
-                blockCache.getBlock(
+        MemorySlice unCompressedBlock =
+                blockCache.getBlockSlice(
                         blockHandle.offset(),
-                        blockHandle.size(),
-                        bytes -> decompressBlock(bytes, blockTrailer),
+                        blockHandle.getFullBlockSize(),
+                        this::decompressBlock,
                         index);
-        return BlockReader.create(MemorySlice.wrap(unCompressedBlock), comparator);
+        return createBlockReader(blockHandle, unCompressedBlock);
     }
 
-    private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
-        MemorySegment compressed = MemorySegment.wrap(compressedBytes);
+    private BlockReader createBlockReader(BlockHandle blockHandle, MemorySlice unCompressedBlock) {
+        // The writer uses compression only when it reduces the payload size. Comparing sizes
+        // also detects compressed blocks obtained from the shared cache, including the index.
+        if (bloomFilter != null && unCompressedBlock.length() != blockHandle.size()) {
+            hasCompressedBlocks = true;
+        }
+        return BlockReader.create(unCompressedBlock, comparator);
+    }
+
+    private MemorySlice decompressBlock(byte[] blockBytes) {
+        MemorySlice fullBlock = MemorySlice.wrap(blockBytes);
+        int blockSize = blockBytes.length - BlockTrailer.ENCODED_LENGTH;
+        MemorySlice compressed = fullBlock.slice(0, blockSize);
+        BlockTrailer blockTrailer =
+                BlockTrailer.readBlockTrailer(
+                        fullBlock.slice(blockSize, BlockTrailer.ENCODED_LENGTH).toInput());
         int crc32cCode = crc32c(compressed, blockTrailer.getCompressionType());
-        checkArgument(
-                blockTrailer.getCrc32c() == crc32cCode,
-                String.format(
-                        "Expected CRC32C(%d) but found CRC32C(%d)",
-                        blockTrailer.getCrc32c(), crc32cCode));
+        if (blockTrailer.getCrc32c() != crc32cCode) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Expected CRC32C(%d) but found CRC32C(%d)",
+                            blockTrailer.getCrc32c(), crc32cCode));
+        }
 
         // decompress data
         BlockCompressionFactory compressionFactory =
                 BlockCompressionFactory.create(blockTrailer.getCompressionType());
         if (compressionFactory == null) {
-            return compressedBytes;
+            return compressed;
         } else {
-            MemorySliceInput compressedInput = MemorySlice.wrap(compressed).toInput();
+            MemorySliceInput compressedInput = compressed.toInput();
             byte[] uncompressed = new byte[compressedInput.readVarLenInt()];
             BlockDecompressor decompressor = compressionFactory.getDecompressor();
             int uncompressedLength =
@@ -164,7 +224,7 @@ public class SstFileReader implements Closeable {
                             uncompressed,
                             0);
             checkArgument(uncompressedLength == uncompressed.length);
-            return uncompressed;
+            return MemorySlice.wrap(uncompressed);
         }
     }
 
