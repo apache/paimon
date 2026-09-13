@@ -24,5 +24,5 @@ package org.apache.paimon.testutils.junit;
  */
 public class DockerImageVersions {
 
-    public static final String MINIO = "minio/minio:RELEASE.2022-02-07T08-17-33Z";
+    public static final String MINIO = "quay.io/minio/minio:RELEASE.2022-02-07T08-17-33Z";
 }
