@@ -24,5 +24,7 @@ package org.apache.paimon.testutils.junit;
  */
 public class DockerImageVersions {
 
-    public static final String MINIO = "minio/minio:RELEASE.2022-02-07T08-17-33Z";
+    // Pulled from MinIO's own quay.io registry: the Docker Hub minio/minio repository is gone, so
+    // the unqualified name now fails with "pull access denied ... repository does not exist".
+    public static final String MINIO = "quay.io/minio/minio:RELEASE.2022-02-07T08-17-33Z";
 }
