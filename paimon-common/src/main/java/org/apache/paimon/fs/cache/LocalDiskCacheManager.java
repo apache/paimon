@@ -38,7 +38,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** Block-level local disk cache with LRU eviction. Thread-safe. */
 public class LocalDiskCacheManager implements LocalCacheManager {
@@ -50,7 +49,7 @@ public class LocalDiskCacheManager implements LocalCacheManager {
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
-    private final ConcurrentHashMap<String, Long> fileSizeCache = new ConcurrentHashMap<>();
+    private final FileSizeMemo fileSizeMemo = new FileSizeMemo();
 
     // LRU-ordered index: key -> size. Access order so get() moves entry to tail.
     private final LinkedHashMap<String, Long> entryIndex;
@@ -240,12 +239,15 @@ public class LocalDiskCacheManager implements LocalCacheManager {
 
     @Override
     public long getFileSize(String filePath) {
-        Long size = fileSizeCache.get(filePath);
-        return size != null ? size : -1;
+        synchronized (lock) {
+            return fileSizeMemo.get(filePath);
+        }
     }
 
     @Override
     public void putFileSize(String filePath, long size) {
-        fileSizeCache.put(filePath, size);
+        synchronized (lock) {
+            fileSizeMemo.put(filePath, size);
+        }
     }
 }

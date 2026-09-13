@@ -25,20 +25,17 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-/** Block-level in-memory cache with LRU eviction. Thread-safe. */
+/**
+ * In-memory cache with LRU eviction, holding data blocks bounded by total bytes and a {@link
+ * FileSizeMemo} bounded by entry count. Thread-safe.
+ */
 public class LocalMemoryCacheManager implements LocalCacheManager {
-
-    /**
-     * File-size memos are tiny but per-path; bound them so reading millions of distinct files
-     * cannot grow the heap without limit. A dropped memo only costs one extra getFileStatus.
-     */
-    private static final int MAX_FILE_SIZE_ENTRIES = 65536;
 
     private final long maxSizeBytes;
     private final int blockSize;
     private final Object lock = new Object();
     private final LinkedHashMap<BlockKey, byte[]> cache;
-    private final LinkedHashMap<String, Long> fileSizeCache = new LinkedHashMap<>(64, 0.75f, true);
+    private final FileSizeMemo fileSizeMemo = new FileSizeMemo();
 
     private long currentSize;
 
@@ -86,20 +83,14 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
     @Override
     public long getFileSize(String filePath) {
         synchronized (lock) {
-            Long size = fileSizeCache.get(filePath);
-            return size != null ? size : -1;
+            return fileSizeMemo.get(filePath);
         }
     }
 
     @Override
     public void putFileSize(String filePath, long size) {
         synchronized (lock) {
-            fileSizeCache.put(filePath, size);
-            while (fileSizeCache.size() > MAX_FILE_SIZE_ENTRIES) {
-                Iterator<String> it = fileSizeCache.keySet().iterator();
-                it.next();
-                it.remove();
-            }
+            fileSizeMemo.put(filePath, size);
         }
     }
 
@@ -114,7 +105,7 @@ public class LocalMemoryCacheManager implements LocalCacheManager {
                     iterator.remove();
                 }
             }
-            fileSizeCache.keySet().removeIf(filePath -> filePath.startsWith(filePathPrefix));
+            fileSizeMemo.invalidate(filePathPrefix);
         }
     }
 

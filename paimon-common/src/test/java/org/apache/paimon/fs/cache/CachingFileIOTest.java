@@ -214,7 +214,15 @@ class CachingFileIOTest {
 
     @Test
     void fileSizeMemoIsBounded() {
-        LocalMemoryCacheManager cache = new LocalMemoryCacheManager(Long.MAX_VALUE, 64);
+        // both cache managers keep this memo, and either one is picked purely by whether
+        // local-cache.dir is set, so the bound has to hold for both
+        assertFileSizeMemoIsBounded(new LocalMemoryCacheManager(Long.MAX_VALUE, 64));
+        assertFileSizeMemoIsBounded(
+                new LocalDiskCacheManager(
+                        tempDir.resolve("memo-bound").toString(), Long.MAX_VALUE, 64));
+    }
+
+    private static void assertFileSizeMemoIsBounded(LocalCacheManager cache) {
         long entries = 70000;
 
         cache.putFileSize("file-0", 100L);
@@ -225,9 +233,20 @@ class CachingFileIOTest {
         // the oldest memos are evicted; a lost memo only costs one re-stat
         assertThat(cache.getFileSize("file-0")).isEqualTo(-1L);
         assertThat(cache.getFileSize("file-" + entries)).isEqualTo(entries);
-        // invalidation by prefix still works on the bounded map
-        cache.invalidate("file-" + entries);
-        assertThat(cache.getFileSize("file-" + entries)).isEqualTo(-1L);
+    }
+
+    @Test
+    void memoryCacheInvalidatesFileSizeMemoByPrefix() {
+        // only the memory manager overrides invalidate; the disk one inherits the no-op default,
+        // which this PR does not change
+        LocalMemoryCacheManager cache = new LocalMemoryCacheManager(Long.MAX_VALUE, 64);
+        cache.putFileSize("ns/a", 1L);
+        cache.putFileSize("other/a", 2L);
+
+        cache.invalidate("ns/");
+
+        assertThat(cache.getFileSize("ns/a")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("other/a")).isEqualTo(2L);
     }
 
     @Test
