@@ -382,7 +382,10 @@ public final class ManifestAvroReader implements AutoCloseable {
 
         private static void validateFieldType(
                 AvroRecordDecoder decoder, int position, FieldType expectedType) {
-            FieldType actualType = decoder.fieldType(position);
+            FieldType actualType =
+                    expectedType == FieldType.RECORD
+                            ? decoder.nonNullFieldType(position)
+                            : decoder.fieldType(position);
             if (actualType != expectedType) {
                 throw new IllegalArgumentException(
                         String.format(
