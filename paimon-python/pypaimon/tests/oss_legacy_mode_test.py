@@ -50,17 +50,18 @@ def _probe_response(status_code, body):
 class OssLegacyModeTest(unittest.TestCase):
     """Behavior of legacy PyArrow S3FileSystem access to OSS."""
 
-    def _new_file_io(self, legacy):
-        options = Options({
+    def _new_file_io(self, legacy, extra_options=None):
+        options = {
             OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
             OssOptions.OSS_ENDPOINT.key(): "oss-cn-test.example.com",
             OssOptions.OSS_REGION.key(): "cn-test",
             OssOptions.OSS_IMPL.key(): "legacy",
-        })
+        }
+        options.update(extra_options or {})
         with mock.patch.object(
                 PyArrowFileIO, "_initialize_oss_fs", return_value=mock.Mock()):
-            file_io = PyArrowFileIO("oss://test-bucket/", options)
+            file_io = PyArrowFileIO("oss://test-bucket/", Options(options))
         # _legacy_oss_mode() keys off the bucket-in-endpoint flag (PyArrow < 16).
         file_io._oss_bucket_in_endpoint = legacy
         file_io.filesystem = mock.Mock()
@@ -218,23 +219,35 @@ class OssLegacyModeTest(unittest.TestCase):
                 "WHEN_REQUIRED",
                 os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
 
-    def test_pyarrow_22_recursive_delete_uses_concurrent_individual_objects(self):
-        file_io = self._new_file_io(legacy=False)
+    def test_pyarrow_22_recursive_delete_uses_configured_parallelism(self):
+        file_io = self._new_file_io(
+            legacy=False, extra_options={"file-operation.thread-num": "1"})
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
         data_dir = directory.rstrip("/") + "/data"
         data_file = directory.rstrip("/") + "/data/data.parquet"
+        data_file_2 = directory.rstrip("/") + "/data/data-2.parquet"
         file_io.filesystem.get_file_info.side_effect = [
             [_file_info(directory, pafs.FileType.Directory)],
             [
                 _file_info(data_dir, pafs.FileType.Directory),
                 _file_info(data_file, pafs.FileType.File),
+                _file_info(data_file_2, pafs.FileType.File),
             ],
         ]
 
-        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+        executor = mock.MagicMock()
+        executor.__enter__.return_value.map.side_effect = (
+            lambda function, paths: [function(path) for path in paths])
+        with mock.patch(
+                "pypaimon.filesystem.pyarrow_file_io.ThreadPoolExecutor",
+                return_value=executor) as thread_pool:
+            self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
-        file_io.filesystem.delete_file.assert_called_once_with(data_file)
+        thread_pool.assert_called_once_with(max_workers=1)
+        self.assertCountEqual(
+            [mock.call(data_file), mock.call(data_file_2)],
+            file_io.filesystem.delete_file.call_args_list)
         file_io.filesystem.delete_dir_contents.assert_not_called()
         self.assertEqual(
             [mock.call(data_dir), mock.call(directory.rstrip("/"))],
