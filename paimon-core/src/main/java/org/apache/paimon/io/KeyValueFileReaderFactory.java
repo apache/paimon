@@ -49,6 +49,7 @@ import org.apache.paimon.utils.Preconditions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -246,6 +247,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         protected RowType readKeyType;
         protected RowType readValueType;
         @Nullable protected ReadBatchSizer readBatchSizer;
+        @Nullable protected List<DataField> changelogExtraValueFields;
 
         private Builder(
                 FileIO fileIO,
@@ -284,6 +286,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                             extractor,
                             options);
             copy.readBatchSizer = readBatchSizer;
+            copy.changelogExtraValueFields = changelogExtraValueFields;
             return copy;
         }
 
@@ -315,6 +318,12 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public Builder withReadBatchSizer(ReadBatchSizer sizer) {
             this.readBatchSizer = sizer;
+            return this;
+        }
+
+        public Builder withChangelogExtraValueFields(
+                @Nullable List<DataField> changelogExtraValueFields) {
+            this.changelogExtraValueFields = changelogExtraValueFields;
             return this;
         }
 
@@ -365,13 +374,21 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
                 boolean projectKeys, @Nullable List<Predicate> filters) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
+            List<DataField> readValueFields = new ArrayList<>(readValueType.getFields());
+            if (changelogExtraValueFields != null) {
+                readValueFields.addAll(changelogExtraValueFields);
+            }
             List<DataField> readTableFields =
-                    KeyValue.createKeyValueFields(
-                            finalReadKeyType.getFields(), readValueType.getFields());
+                    KeyValue.createKeyValueFields(finalReadKeyType.getFields(), readValueFields);
+            List<DataField> extraFields = changelogExtraValueFields;
             Function<TableSchema, List<DataField>> fieldsExtractor =
                     schema -> {
                         List<DataField> dataKeyFields = extractor.keyFields(schema);
-                        List<DataField> dataValueFields = extractor.valueFields(schema);
+                        List<DataField> dataValueFields =
+                                new ArrayList<>(extractor.valueFields(schema));
+                        if (extraFields != null) {
+                            dataValueFields.addAll(extraFields);
+                        }
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
             return new FormatReaderMapping.Builder(
