@@ -57,6 +57,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
@@ -65,6 +66,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -129,6 +131,40 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         this.schema = schema;
         this.recordLevelExpire = recordLevelExpire;
         this.cacheManager = cacheManager;
+
+        RowType changelogValueType = computeChangelogValueType(valueType, options);
+        if (changelogValueType != null) {
+            writerFactoryBuilder.withChangelogValueType(changelogValueType);
+        }
+    }
+
+    @Nullable
+    private static RowType computeChangelogValueType(RowType valueType, CoreOptions options) {
+        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        if (preserveColumns.isEmpty()) {
+            return null;
+        }
+        List<DataField> fields = new ArrayList<>(valueType.getFields());
+        int nextId = fields.stream().mapToInt(DataField::id).max().orElse(0) + 1;
+        List<String> fieldNames = valueType.getFieldNames();
+        for (String name : preserveColumns) {
+            int idx = fieldNames.indexOf(name);
+            if (idx < 0) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' specified in '%s' not found in value type. Available columns: %s",
+                                name,
+                                CoreOptions.CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA.key(),
+                                fieldNames));
+            }
+            DataField original = fields.get(idx);
+            fields.add(
+                    new DataField(
+                            nextId++,
+                            options.changelogMetadataFieldPrefix() + original.name(),
+                            original.type().copy(true)));
+        }
+        return new RowType(fields);
     }
 
     @Override
@@ -323,11 +359,36 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
                 }
+                List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+                int[] preserveFieldIndices = null;
+                if (!preserveColumns.isEmpty()) {
+                    List<String> fieldNames = valueType.getFieldNames();
+                    preserveFieldIndices =
+                            preserveColumns.stream()
+                                    .mapToInt(
+                                            name -> {
+                                                int idx = fieldNames.indexOf(name);
+                                                if (idx < 0) {
+                                                    throw new IllegalArgumentException(
+                                                            String.format(
+                                                                    "Column '%s' specified in '%s' not found in value type. "
+                                                                            + "Available columns: %s",
+                                                                    name,
+                                                                    CoreOptions
+                                                                            .CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA
+                                                                            .key(),
+                                                                    fieldNames));
+                                                }
+                                                return idx;
+                                            })
+                                    .toArray();
+                }
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
                                 logDedupEqualSupplier.get(),
                                 lookupStrategy,
-                                UserDefinedSeqComparator.create(valueType, options));
+                                UserDefinedSeqComparator.create(valueType, options),
+                                preserveFieldIndices);
             }
             LookupLevels<?> lookupLevels =
                     createLookupLevels(

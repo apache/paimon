@@ -103,6 +103,40 @@ changelog for the same record. It also supports `changelog-producer.ignore-updat
 records and `changelog-producer.ignore-delete` to exclude DELETE (-D) records from changelog files. These options are
 useful when downstream consumers only need the latest state (e.g. upsert sinks) and do not require retraction.
 
+By setting `'changelog-producer.expose-field-as-metadata'` to a comma-separated list of column names,
+the lookup changelog producer stores those columns' values from the incoming event as additional metadata
+columns (`__internal__<column>`) in all changelog records. For retraction records (`-U`, `-D`), the regular
+value columns retain the correct before-image so standard downstream operators (filters, aggregations)
+work correctly, while the metadata columns carry the event values. For forward records (`+I`, `+U`),
+the metadata columns mirror the regular values for schema consistency. Sinks that need the event
+timestamp — such as Cassandra using `WRITETIME` for conflict resolution — can read the metadata columns.
+
+**Note:** The event values come from the *merged result* of the merge function, which equals the raw
+incoming event for the `deduplicate` merge engine but may differ for aggregation merge engines.
+
+This option is only supported by the `lookup` changelog producer.
+
+```sql
+-- Source table with event metadata preservation
+CREATE TABLE my_table (
+    id INT PRIMARY KEY NOT ENFORCED,
+    data STRING,
+    event_ts BIGINT
+) WITH (
+    'changelog-producer' = 'lookup',
+    'sequence.field' = 'event_ts',
+    'changelog-producer.expose-field-as-metadata' = 'event_ts'
+);
+
+-- Sink table reading event metadata
+CREATE TABLE cassandra_sink (
+    id INT,
+    data STRING,
+    event_ts BIGINT,
+    retract_event_ts BIGINT METADATA FROM 'paimon.event.event_ts'
+) WITH (...);
+```
+
 (Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
 important for performance).
 

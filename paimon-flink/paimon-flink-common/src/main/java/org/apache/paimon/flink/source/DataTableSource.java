@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.dataevolution.DataEvolutionRowLevelModificationScanContext;
@@ -31,7 +32,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
+import org.apache.paimon.table.system.ChangelogEventMetadataTable;
 import org.apache.paimon.table.system.RowTrackingTable;
+import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.api.DataTypes;
@@ -47,6 +50,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.plan.stats.ColumnStats;
 import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.utils.TypeConversions;
 
 import javax.annotation.Nullable;
 
@@ -172,24 +176,51 @@ public class DataTableSource extends BaseDataTableSource
                 rowLevelModificationSnapshotId);
     }
 
+    public static final String EVENT_METADATA_PREFIX = "paimon.event.";
+
     public Map<String, DataType> listReadableMetadata() {
-        // Flink calls this after applyRowLevelModificationScan for row-level operations.
-        if (rowLevelModificationSnapshotId == null || !isDataEvolutionTable()) {
-            return Collections.emptyMap();
-        }
         Map<String, DataType> metadata = new LinkedHashMap<>();
-        metadata.put(SpecialFields.ROW_ID.name(), DataTypes.BIGINT().notNull());
+
+        // Row-level modification metadata
+        if (rowLevelModificationSnapshotId != null && isDataEvolutionTable()) {
+            metadata.put(SpecialFields.ROW_ID.name(), DataTypes.BIGINT().notNull());
+        }
+
+        // Event metadata from changelog-producer.expose-field-as-metadata
+        List<String> preserveColumns = eventPreserveColumns();
+        if (!preserveColumns.isEmpty() && table instanceof FileStoreTable) {
+            org.apache.paimon.types.RowType valueType =
+                    ((FileStoreTable) table).schema().logicalRowType();
+            List<String> fieldNames = valueType.getFieldNames();
+            for (String col : preserveColumns) {
+                int idx = fieldNames.indexOf(col);
+                if (idx >= 0) {
+                    DataField field = valueType.getFields().get(idx);
+                    DataType flinkType =
+                            TypeConversions.fromLogicalToDataType(
+                                    LogicalTypeConversion.toLogicalType(field.type().copy(true)));
+                    metadata.put(EVENT_METADATA_PREFIX + col, flinkType.nullable());
+                }
+            }
+        }
+
         return metadata;
     }
 
     public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
         for (String metadataKey : metadataKeys) {
-            if (!SpecialFields.ROW_ID.name().equals(metadataKey)) {
-                throw new UnsupportedOperationException(
-                        "Unsupported Paimon metadata column: " + metadataKey);
+            if (SpecialFields.ROW_ID.name().equals(metadataKey)
+                    || metadataKey.startsWith(EVENT_METADATA_PREFIX)) {
+                continue;
             }
+            throw new UnsupportedOperationException(
+                    "Unsupported Paimon metadata column: " + metadataKey);
         }
         this.metadataKeys = metadataKeys;
+    }
+
+    private List<String> eventPreserveColumns() {
+        return CoreOptions.fromMap(table.options()).changelogExposeFieldAsMetadata();
     }
 
     @Override
@@ -222,7 +253,7 @@ public class DataTableSource extends BaseDataTableSource
     @Override
     protected Table tableForScan() {
         if (rowLevelModificationSnapshotId == null) {
-            return table;
+            return wrapForEventMetadata(table);
         }
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
@@ -236,7 +267,19 @@ public class DataTableSource extends BaseDataTableSource
             fileStoreTable = (FileStoreTable) fileStoreTable.copy(options);
         }
 
-        return metadataKeys.isEmpty() ? fileStoreTable : new RowTrackingTable(fileStoreTable);
+        if (metadataKeys.isEmpty()) {
+            return fileStoreTable;
+        }
+        return new RowTrackingTable(fileStoreTable);
+    }
+
+    private Table wrapForEventMetadata(Table scanTable) {
+        boolean hasEventMetadata =
+                metadataKeys.stream().anyMatch(k -> k.startsWith(EVENT_METADATA_PREFIX));
+        if (hasEventMetadata && scanTable instanceof FileStoreTable) {
+            return new ChangelogEventMetadataTable((FileStoreTable) scanTable);
+        }
+        return scanTable;
     }
 
     @Override
@@ -254,10 +297,23 @@ public class DataTableSource extends BaseDataTableSource
             }
         }
 
+        List<String> preserveColumns = eventPreserveColumns();
         int[][] projection =
                 Arrays.copyOf(physicalProjection, physicalProjection.length + metadataKeys.size());
         for (int i = 0; i < metadataKeys.size(); i++) {
-            projection[physicalProjection.length + i] = new int[] {physicalFieldCount};
+            String key = metadataKeys.get(i);
+            if (key.startsWith(EVENT_METADATA_PREFIX)) {
+                String colName = key.substring(EVENT_METADATA_PREFIX.length());
+                int preserveIdx = preserveColumns.indexOf(colName);
+                if (preserveIdx < 0) {
+                    throw new UnsupportedOperationException(
+                            "Unknown event metadata column: " + key);
+                }
+                projection[physicalProjection.length + i] =
+                        new int[] {physicalFieldCount + preserveIdx};
+            } else {
+                projection[physicalProjection.length + i] = new int[] {physicalFieldCount};
+            }
         }
         return projection;
     }

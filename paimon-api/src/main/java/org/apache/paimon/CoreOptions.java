@@ -1116,6 +1116,35 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA =
+            key("changelog-producer.expose-field-as-metadata")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A comma-separated list of column names whose values from the incoming "
+                                    + "event (merged result) should be stored as additional metadata "
+                                    + "columns in all changelog records. For retraction records (-U, -D), "
+                                    + "the regular value columns retain the correct before-image so "
+                                    + "standard changelog consumers (filters, aggregations) work correctly "
+                                    + "while the event values are available as extra '<prefix><column>' "
+                                    + "columns. For forward records (+I, +U), the metadata columns "
+                                    + "mirror the regular values for schema consistency. These columns "
+                                    + "can be read as Flink metadata columns by sinks that need the "
+                                    + "event timestamp (e.g. Cassandra WRITETIME). "
+                                    + "Only valid when changelog-producer is lookup.");
+
+    public static final ConfigOption<String> CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX =
+            key("changelog-producer.metadata-field-prefix")
+                    .stringType()
+                    .defaultValue("__internal__")
+                    .withDescription(
+                            "The prefix used for naming the extra metadata columns created by "
+                                    + "'changelog-producer.expose-field-as-metadata'. For example, "
+                                    + "with the default prefix '__internal__' and a preserved column "
+                                    + "'event_ts', the metadata column is named '__internal__event_ts'. "
+                                    + "Change this if the default prefix conflicts with existing "
+                                    + "column names.");
+
     public static final ConfigOption<Boolean> TABLE_READ_SEQUENCE_NUMBER_ENABLED =
             key("table-read.sequence-number.enabled")
                     .booleanType()
@@ -3912,6 +3941,20 @@ public class CoreOptions implements Serializable {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
                 .orElse(Collections.emptyList());
+    }
+
+    public List<String> changelogExposeFieldAsMetadata() {
+        return options.getOptional(CHANGELOG_PRODUCER_EXPOSE_FIELD_AS_METADATA)
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .collect(Collectors.toList()))
+                .orElse(Collections.emptyList());
+    }
+
+    public String changelogMetadataFieldPrefix() {
+        return options.get(CHANGELOG_PRODUCER_METADATA_FIELD_PREFIX);
     }
 
     public boolean tableReadSequenceNumberEnabled() {
