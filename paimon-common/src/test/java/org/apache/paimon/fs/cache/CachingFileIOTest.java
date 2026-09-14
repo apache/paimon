@@ -213,6 +213,44 @@ class CachingFileIOTest {
     }
 
     @Test
+    void fileSizeMemoIsBounded() {
+        // both cache managers keep this memo, and either one is picked purely by whether
+        // local-cache.dir is set, so the bound has to hold for both
+        assertFileSizeMemoIsBounded(new LocalMemoryCacheManager(Long.MAX_VALUE, 64));
+        assertFileSizeMemoIsBounded(
+                new LocalDiskCacheManager(
+                        tempDir.resolve("memo-bound").toString(), Long.MAX_VALUE, 64));
+    }
+
+    private static void assertFileSizeMemoIsBounded(LocalCacheManager cache) {
+        // more puts than the bound, so eviction has to run. FileSizeMemoTest pins the count and
+        // the eviction order; this only checks that the manager routes through a bounded memo.
+        long entries = FileSizeMemo.maxEntries() + 1024L;
+
+        cache.putFileSize("file-0", 100L);
+        for (long i = 1; i <= entries; i++) {
+            cache.putFileSize("file-" + i, i);
+        }
+
+        assertThat(cache.getFileSize("file-0")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("file-" + entries)).isEqualTo(entries);
+    }
+
+    @Test
+    void memoryCacheInvalidatesFileSizeMemoByPrefix() {
+        // only the memory manager overrides invalidate; the disk one inherits the no-op default,
+        // which this PR does not change
+        LocalMemoryCacheManager cache = new LocalMemoryCacheManager(Long.MAX_VALUE, 64);
+        cache.putFileSize("ns/a", 1L);
+        cache.putFileSize("other/a", 2L);
+
+        cache.invalidate("ns/");
+
+        assertThat(cache.getFileSize("ns/a")).isEqualTo(-1L);
+        assertThat(cache.getFileSize("other/a")).isEqualTo(2L);
+    }
+
+    @Test
     void testMetaFileIsCached() throws IOException {
         byte[] data = "snapshot data".getBytes();
         MockFileIO delegate = new MockFileIO();
