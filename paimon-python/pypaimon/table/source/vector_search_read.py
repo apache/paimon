@@ -682,16 +682,15 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             for batch in batch_reader:
                 row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
-                vectors = batch.column(self._vector_column.name).to_pylist()
-                for row_id, stored in zip(row_ids, vectors):
-                    if stored is None:
-                        continue
-                    stored_vector = _to_vector_list(stored)
-                    for query, heap in zip(self._query_vectors, heaps):
-                        _check_vector_dimension(query, stored_vector)
-                        _offer_score(
-                            heap, self._limit, row_id,
-                            _compute_score(query, stored_vector, metric))
+                vectors = batch.column(self._vector_column.name)
+                for start, query_index, scores in _iter_arrow_batch_scores(
+                    vectors, self._query_vectors, metric
+                ):
+                    heap = heaps[query_index]
+                    block_row_ids = row_ids[start:start + len(scores)]
+                    for row_id, score in zip(block_row_ids, scores):
+                        if score is not None:
+                            _offer_score(heap, self._limit, row_id, score)
                 del batch, row_ids, vectors
         return [_scored_result(heap) for heap in heaps]
 
@@ -898,29 +897,11 @@ def _score_block_size(query):
 
 
 def _iter_arrow_scores(vectors, query, metric):
-    import numpy as np
-    import pyarrow as pa
-
     block_size = _score_block_size(query)
     for start in range(0, len(vectors), block_size):
         block = vectors.slice(start, block_size)
-        if isinstance(block, pa.ChunkedArray):
-            block = block.combine_chunks()
-        dtype = block.type
-        scores = None
-        if (pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or
-                pa.types.is_fixed_size_list(dtype)) and not block.null_count:
-            flat = block.flatten()
-            if pa.types.is_float32(flat.type) and not flat.null_count:
-                if pa.types.is_fixed_size_list(dtype):
-                    regular = dtype.list_size == len(query)
-                else:
-                    offsets = block.offsets.to_numpy(zero_copy_only=False)
-                    regular = bool(np.all(np.diff(offsets) == len(query)))
-                if regular and len(query):
-                    matrix = flat.to_numpy(zero_copy_only=False).astype(np.float64).reshape(
-                        len(block), len(query))
-                    scores = _compute_scores(query, matrix, metric)
+        matrix = _arrow_score_matrix(block, len(query))
+        scores = None if matrix is None else _compute_scores(query, matrix, metric)
         if scores is None:
             for vector in block.to_pylist():
                 if vector is None:
@@ -931,6 +912,78 @@ def _iter_arrow_scores(vectors, query, metric):
                     yield _compute_score(query, vector, metric)
         else:
             yield from scores
+
+
+def _iter_arrow_batch_scores(vectors, queries, metric):
+    """Yield vectorized scores for one Arrow batch without expanding its rows.
+
+    The float64 row matrix is materialized once per bounded block and reused for
+    every query. Only the scratch matrix for the active query is retained, so
+    memory does not grow with the number of queries.
+    """
+    import numpy as np
+
+    if not queries:
+        return
+    block_size = min(_score_block_size(query) for query in queries)
+    dimension = len(queries[0])
+    fast_queries = metric in ("l2", "cosine", "inner_product")
+    if fast_queries:
+        for query in queries:
+            try:
+                query_array = np.asarray(query, dtype=np.float64)
+            except (ValueError, TypeError, OverflowError):
+                fast_queries = False
+                break
+            if (query_array.ndim != 1 or len(query_array) != dimension or
+                    not dimension or not np.isfinite(query_array).all()):
+                fast_queries = False
+                break
+
+    for start in range(0, len(vectors), block_size):
+        block = vectors.slice(start, block_size)
+        matrix = _arrow_score_matrix(block, dimension) if fast_queries else None
+        if matrix is not None and not np.isfinite(matrix).all():
+            matrix = None
+        if matrix is None:
+            rows = block.to_pylist()
+            for query_index, query in enumerate(queries):
+                yield start, query_index, _score_rows(rows, query, metric)
+            continue
+
+        last_query = len(queries) - 1
+        for query_index, query in enumerate(queries):
+            # Scoring mutates its owned matrix. Reuse the original for the last
+            # query and keep only one scratch copy for every preceding query.
+            working = matrix if query_index == last_query else matrix.copy()
+            scores = _compute_scores(query, working, metric)
+            assert scores is not None
+            yield start, query_index, scores
+
+
+def _arrow_score_matrix(vectors, dimension):
+    """Return one regular float32 Arrow vector block as owned float64 rows."""
+    import numpy as np
+    import pyarrow as pa
+
+    if isinstance(vectors, pa.ChunkedArray):
+        vectors = vectors.combine_chunks()
+    dtype = vectors.type
+    if not ((pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or
+             pa.types.is_fixed_size_list(dtype)) and not vectors.null_count):
+        return None
+    flat = vectors.flatten()
+    if not pa.types.is_float32(flat.type) or flat.null_count:
+        return None
+    if pa.types.is_fixed_size_list(dtype):
+        regular = dtype.list_size == dimension
+    else:
+        offsets = vectors.offsets.to_numpy(zero_copy_only=False)
+        regular = bool(np.all(np.diff(offsets) == dimension))
+    if not regular or not dimension:
+        return None
+    return flat.to_numpy(zero_copy_only=False).astype(np.float64).reshape(
+        len(vectors), dimension)
 
 
 def _score_rows(vectors, query, metric):
