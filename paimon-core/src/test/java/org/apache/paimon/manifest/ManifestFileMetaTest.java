@@ -1446,26 +1446,29 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 .isTrue();
     }
 
-    @Test
-    public void testManifestSortWithSpillableExternalSortBuffer() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testManifestSortWithSpillableExternalSortBuffer(boolean bucketFirst) {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int manifest = 0; manifest < 4; manifest++) {
             List<ManifestEntry> entries = new ArrayList<>();
             for (int i = 0; i < 80; i++) {
                 int partition = manifest % 2 == 0 ? 79 - i : i;
+                int bucket = Math.floorMod(manifest * 31 + i * 17, 4);
                 entries.add(
-                        makeEntry(
-                                true,
+                        makeBucketEntry(
                                 String.format(
                                         "spill-manifest-%02d-entry-%03d-payload-padding-%040d",
                                         manifest, i, i),
-                                partition));
+                                partition,
+                                bucket));
             }
             input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
         }
 
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set(CoreOptions.MANIFEST_SORT_BUCKET_FIRST, bucketFirst);
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("page-size", "1kb");
         testOptions.set("sort-spill-buffer-size", "4kb");
@@ -1479,15 +1482,25 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         CoreOptions.fromMap(testOptions.toMap()));
 
         assertEquivalentEntries(input, merged);
-        for (ManifestFileMeta meta : merged) {
-            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
-            for (int i = 1; i < entries.size(); i++) {
-                int prevPartition = entries.get(i - 1).partition().getInt(0);
-                int currPartition = entries.get(i).partition().getInt(0);
-                assertThat(currPartition)
-                        .as("Entries within a manifest should be sorted after spill")
-                        .isGreaterThanOrEqualTo(prevPartition);
+        List<ManifestEntry> entries = readEntries(merged);
+        for (int i = 1; i < entries.size(); i++) {
+            ManifestEntry previous = entries.get(i - 1);
+            ManifestEntry current = entries.get(i);
+            int comparison = 0;
+            if (bucketFirst) {
+                comparison = Integer.compare(previous.bucket(), current.bucket());
             }
+            if (comparison == 0) {
+                comparison =
+                        Integer.compare(
+                                previous.partition().getInt(0), current.partition().getInt(0));
+            }
+            if (comparison == 0) {
+                comparison = previous.file().fileName().compareTo(current.file().fileName());
+            }
+            assertThat(comparison)
+                    .as("Entries should use the configured sort order after spill")
+                    .isLessThanOrEqualTo(0);
         }
     }
 
