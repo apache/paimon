@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
@@ -49,6 +50,9 @@ class LegacyOssDirectoryListingError(RuntimeError):
     """Raised when legacy PyArrow OSS cannot enumerate a directory."""
 
 
+_OSS_DIRECTORY_MARKER = ".paimon-dir-marker"
+
+
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
@@ -58,6 +62,7 @@ class PyArrowFileIO(FileIO):
         # goes into endpoint_override, so keys must omit it (init + path share
         # this flag so they can't drift).
         self._pyarrow_gte_16 = parse(pyarrow.__version__) >= parse("16.0.0")
+        self._pyarrow_gte_22 = parse(pyarrow.__version__) >= parse("22.0.0")
         self._oss_bucket_in_endpoint = not self._pyarrow_gte_16
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
@@ -192,6 +197,12 @@ class PyArrowFileIO(FileIO):
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
+        # Recent AWS SDKs enable streaming checksum trailers for PutObject.
+        # OSS does not implement that wire format, so request checksums only
+        # when the API requires them. Respect an explicit process setting;
+        # this setting is process-wide for AWS SDK clients.
+        os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
+
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
             # When explicit credentials are provided, disable the EC2 Instance Metadata
             # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
@@ -451,6 +462,9 @@ class PyArrowFileIO(FileIO):
             return False
 
         if file_info.type == pafs.FileType.Directory:
+            if (self._is_oss and not self._use_jindo
+                    and not self._legacy_oss_mode()):
+                return self._delete_oss_directory(path_str, recursive)
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
@@ -464,6 +478,46 @@ class PyArrowFileIO(FileIO):
         else:
             self.filesystem.delete_file(path_str)
         return True
+
+    def _delete_oss_directory(self, path_str: str, recursive: bool) -> bool:
+        if recursive and not self._pyarrow_gte_22:
+            self.filesystem.delete_dir_contents(path_str)
+            return True
+
+        selector = pafs.FileSelector(
+            path_str, recursive=recursive, allow_not_found=True)
+        file_infos = self.filesystem.get_file_info(selector)
+        if not recursive:
+            contents = [
+                info for info in file_infos
+                if info.base_name != _OSS_DIRECTORY_MARKER
+            ]
+            if contents:
+                raise OSError(f"Directory {path_str} is not empty")
+        files = [
+            info.path for info in file_infos
+            if info.type == pafs.FileType.File
+        ]
+        if files:
+            with ThreadPoolExecutor(max_workers=min(16, len(files))) as executor:
+                list(executor.map(self.filesystem.delete_file, files))
+        if recursive:
+            directories = sorted(
+                (info.path for info in file_infos
+                 if info.type == pafs.FileType.Directory),
+                key=lambda item: item.count("/"),
+                reverse=True,
+            )
+            for directory in directories:
+                self._delete_oss_directory_marker(directory)
+        self._delete_oss_directory_marker(path_str)
+        return True
+
+    def _delete_oss_directory_marker(self, path_str: str):
+        try:
+            self.filesystem.delete_dir(path_str.rstrip("/"))
+        except FileNotFoundError:
+            pass
 
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
@@ -479,6 +533,15 @@ class PyArrowFileIO(FileIO):
             # the parent directory; object stores need no directories. Only
             # validate that the real bucket exists.
             self._check_legacy_bucket_exists()
+            return True
+
+        if self._is_oss and not self._use_jindo:
+            # PyArrow's S3 create_dir performs HeadBucket first. OSS roles can
+            # allow object IO while denying that bucket-level operation. A
+            # child marker gives the path directory semantics without it.
+            marker_path = path_str.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
+            marker_stream = self.filesystem.open_output_stream(marker_path)
+            marker_stream.close()
             return True
 
         self.filesystem.create_dir(path_str, recursive=True)

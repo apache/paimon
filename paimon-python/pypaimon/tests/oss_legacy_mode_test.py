@@ -15,12 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Unit tests for the OSS bucket-in-endpoint mode (PyArrow < 16) of PyArrowFileIO.
+"""Unit tests for PyArrow-backed OSS compatibility modes.
 
-See ``PyArrowFileIO._legacy_oss_mode`` for why bucket-level operations
-must be guarded in this mode. No real OSS access is required.
+No real OSS access is required.
 """
 
+import os
 import unittest
 from unittest import mock
 
@@ -31,6 +31,7 @@ from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.pyarrow_file_io import (
     LegacyOssDirectoryListingError,
     PyArrowFileIO,
+    _OSS_DIRECTORY_MARKER,
 )
 
 
@@ -48,7 +49,7 @@ def _probe_response(status_code, body):
 
 
 class OssLegacyModeTest(unittest.TestCase):
-    """Behavior of PyArrowFileIO when OSS runs on PyArrow < 16."""
+    """Behavior of legacy PyArrow S3FileSystem access to OSS."""
 
     def _new_file_io(self, legacy):
         options = Options({
@@ -193,14 +194,108 @@ class OssLegacyModeTest(unittest.TestCase):
             file_io.mkdirs(TABLE_PATH)
         file_io.filesystem.create_dir.assert_not_called()
 
-    def test_modern_mkdirs_still_creates_dir(self):
+    def test_modern_mkdirs_writes_marker_without_create_dir(self):
         file_io = self._new_file_io(legacy=False)
         file_io.filesystem.get_file_info.return_value = [
             _file_info("test-bucket/db-uuid.db/tbl-uuid", pafs.FileType.NotFound)]
+        marker_stream = mock.Mock()
+        file_io.filesystem.open_output_stream.return_value = marker_stream
 
         self.assertTrue(file_io.mkdirs(TABLE_PATH))
 
-        file_io.filesystem.create_dir.assert_called_once()
+        file_io.filesystem.create_dir.assert_not_called()
+        file_io.filesystem.open_output_stream.assert_called_once_with(
+            file_io.to_filesystem_path(TABLE_PATH).rstrip("/")
+            + "/" + _OSS_DIRECTORY_MARKER)
+        marker_stream.close.assert_called_once_with()
+
+    def test_oss_initialization_disables_optional_checksum_trailers(self):
+        options = Options({
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-test.example.com",
+            OssOptions.OSS_REGION.key(): "cn-test",
+            OssOptions.OSS_IMPL.key(): "legacy",
+        })
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+            PyArrowFileIO("oss://test-bucket/", options)
+            self.assertEqual(
+                "WHEN_REQUIRED",
+                os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
+
+    def test_pyarrow_22_recursive_delete_uses_concurrent_individual_objects(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        marker = directory.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
+        data_dir = directory.rstrip("/") + "/data"
+        data_file = directory.rstrip("/") + "/data/data.parquet"
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+            [
+                _file_info(marker, pafs.FileType.File),
+                _file_info(data_dir, pafs.FileType.Directory),
+                _file_info(data_file, pafs.FileType.File),
+            ],
+        ]
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        self.assertCountEqual(
+            [
+                mock.call(marker),
+                mock.call(data_file),
+            ],
+            file_io.filesystem.delete_file.call_args_list)
+        file_io.filesystem.delete_dir_contents.assert_not_called()
+        self.assertEqual(
+            [mock.call(data_dir), mock.call(directory.rstrip("/"))],
+            file_io.filesystem.delete_dir.call_args_list)
+
+    def test_pre_pyarrow_22_recursive_delete_keeps_native_batch(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = False
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+        ]
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
+        file_io.filesystem.delete_file.assert_not_called()
+
+    def test_modern_non_recursive_delete_removes_empty_marker(self):
+        file_io = self._new_file_io(legacy=False)
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        marker = directory.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+            [_file_info(marker, pafs.FileType.File)],
+        ]
+
+        self.assertTrue(file_io.delete(TABLE_PATH))
+
+        self.assertEqual(
+            [mock.call(marker)],
+            file_io.filesystem.delete_file.call_args_list)
+        file_io.filesystem.delete_dir.assert_called_once_with(
+            directory.rstrip("/"))
+
+    def test_modern_non_recursive_delete_rejects_non_empty_directory(self):
+        file_io = self._new_file_io(legacy=False)
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        data_file = directory.rstrip("/") + "/data.parquet"
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+            [_file_info(data_file, pafs.FileType.File)],
+        ]
+
+        with self.assertRaisesRegex(OSError, "is not empty"):
+            file_io.delete(TABLE_PATH)
+
+        file_io.filesystem.delete_file.assert_not_called()
 
     def test_file_io_pickle_roundtrip_recreates_lock(self):
         """The probe lock must not break pickling (FileIO travels to Ray or
