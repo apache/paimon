@@ -2031,6 +2031,16 @@ public class SchemaValidation {
                     option.key());
         }
 
+        CoreOptions.ManifestSortOrder sortOrder = options.manifestSortOrder();
+        checkArgument(
+                sortOrder == null || !options.dataEvolutionEnabled(),
+                "Explicit manifest sort order is not supported for data evolution tables.");
+        checkArgument(
+                sortOrder != CoreOptions.ManifestSortOrder.BUCKET_FIRST
+                        || options.bucket() > 0
+                        || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                "Manifest sort order 'bucket-first' requires a bucketed table.");
+
         if (options.manifestSortEnabled()) {
             if (!options.dataEvolutionEnabled()) {
                 checkArgument(

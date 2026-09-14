@@ -179,6 +179,15 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                                 + "`manifest_sort_order` => 'partition-first')"))
                 .hasStackTraceContaining(
                         "'manifest_sort_order' cannot be used with 'manifest_sort_enabled=false'.");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.compact_manifest("
+                                                + "`table` => 'default.T_INVALID', "
+                                                + "`manifest_sort_order` => 'bucket-first')"))
+                .hasStackTraceContaining(
+                        "Manifest sort order 'bucket-first' requires a bucketed table.");
     }
 
     @Test
