@@ -304,6 +304,16 @@ budgets. This option controls index I/O, not shard search or native compute
 threads.
 
 
+# Native vector index training
+
+The native vector index writer submits training vectors in bounded batches.
+`<index-type>.train.sample-ratio` (or its field-level override) still selects
+the same evenly spaced non-null vectors in the same order. Native training
+receives the final corpus size for automatic IVF sizing. This bounds Python
+training buffers; native training and index construction have their own
+memory requirements.
+
+
 # Vector fallback scoring and refinement
 
 Raw vector fallback and refinement score regular FLOAT vectors in bounded
