@@ -299,6 +299,56 @@ class MapSelectedKeyProjectionTest(unittest.TestCase):
             result.column('attributes').to_pylist(),
         )
 
+    def test_projects_map_blob_keys(self):
+        map_type = pa.map_(pa.string(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', map_type),
+        ])
+        self.catalog.create_table(
+            'default.map_blob',
+            Schema.from_pyarrow_schema(
+                pa_schema,
+                options={
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true',
+                },
+            ),
+            False,
+        )
+        table = self.catalog.get_table('default.map_blob')
+        data = pa.Table.from_arrays([
+            pa.array([1, 2, 3, 4], type=pa.int32()),
+            pa.array([
+                [('k', b'hello'), ('v', b'world')],
+                [('k', None)],
+                [],
+                None,
+            ], type=map_type),
+        ], schema=pa_schema)
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(data)
+        builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        full = self._read(table, ['payload']).column('payload').to_pylist()
+        selected = self._read(
+            table, ["payload['k']", "payload['missing']"])
+
+        self.assertEqual(
+            [b'hello', None, None, None],
+            selected.column('payload_k').to_pylist(),
+        )
+        self.assertEqual(
+            [None, None, None, None],
+            selected.column('payload_missing').to_pylist(),
+        )
+        self.assertEqual(
+            [None if row is None else dict(row).get('k') for row in full],
+            selected.column('payload_k').to_pylist(),
+        )
+
     def test_projects_map_key_after_column_rename(self):
         self._write_table('renamed', {})
         self.catalog.alter_table(
