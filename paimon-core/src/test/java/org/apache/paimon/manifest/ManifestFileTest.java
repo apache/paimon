@@ -37,6 +37,8 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FailingFileIO;
@@ -627,11 +629,14 @@ public class ManifestFileTest {
     }
 
     @ParameterizedTest
-    @MethodSource("reorderedManifestFieldOrders")
-    void testAvroReaderSupportsReorderedWriterFields(int[] fieldOrder, boolean reorderNestedFields)
-            throws Exception {
+    @MethodSource("manifestWriterSchemas")
+    void testAvroReaderSupportsReorderedWriterFields(
+            int[] fieldOrder, boolean reorderNestedFields, boolean nullableFile) throws Exception {
         List<ManifestEntry> entries = generateData();
         RowType writerType = reorderedManifestType(fieldOrder, reorderNestedFields);
+        if (nullableFile) {
+            writerType = nullableFileType(writerType);
+        }
         Path path = new Path(new Path(tempDir.toUri()), "reordered-manifest.avro");
         LocalFileIO fileIO = LocalFileIO.create();
         ManifestEntrySerializer serializer = new ManifestEntrySerializer();
@@ -647,7 +652,9 @@ public class ManifestFileTest {
         }
 
         boolean rawCopySupported =
-                !reorderNestedFields && Arrays.equals(fieldOrder, new int[] {0, 1, 2, 3, 4, 5});
+                !nullableFile
+                        && !reorderNestedFields
+                        && Arrays.equals(fieldOrder, new int[] {0, 1, 2, 3, 4, 5});
         List<InternalRow> retained = new ArrayList<>();
         try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
                 CloseableIterator<InternalRow> rows =
@@ -736,10 +743,110 @@ public class ManifestFileTest {
         }
     }
 
+    @Test
+    void testNullableFileRecordWithManifestCache() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(new Path(tempDir.toString()), "manifest/nullable-manifest.avro");
+        fileIO.mkdirs(path.getParent());
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer =
+                        avro.createWriterFactory(nullableFileType(ManifestEntry.MANIFEST_ROW_TYPE))
+                                .create(out, "zstd")) {
+            for (ManifestEntry entry : entries) {
+                writer.addElement(serializer.toRow(entry));
+            }
+        }
+
+        SegmentsCache<Path> cache =
+                new SegmentsCache<>(32 * 1024, new MemorySize(4 * 1024 * 1024), 1024 * 1024);
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE, cache);
+        assertThat(manifestFile.read(path.getName())).containsExactlyInAnyOrderElementsOf(entries);
+        assertThat(cache.getIfPresents(path)).isNotNull();
+        assertThat(manifestFile.read(path.getName())).containsExactlyInAnyOrderElementsOf(entries);
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidManifestFieldTypes")
+    void testRejectsInvalidManifestFieldTypes(String fieldName, DataType fieldType)
+            throws Exception {
+        RowType writerType =
+                new RowType(
+                        false,
+                        ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
+                                .map(
+                                        field ->
+                                                field.name().equals(fieldName)
+                                                        ? field.newType(fieldType)
+                                                        : field)
+                                .collect(Collectors.toList()));
+        GenericRow row = (GenericRow) new ManifestEntrySerializer().toRow(gen.next());
+        if (ManifestEntry.FILE.equals(fieldName)) {
+            row.setField(writerType.getFieldIndex(fieldName), 42);
+        }
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(new Path(tempDir.toUri()), "invalid-field.avro");
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer = avro.createWriterFactory(writerType).create(out, "zstd")) {
+            writer.addElement(row);
+        }
+
+        for (RowType projectedType :
+                Arrays.asList(
+                        ManifestEntry.MANIFEST_ROW_TYPE,
+                        ManifestEntry.MANIFEST_ROW_TYPE.project(ManifestEntry.KIND))) {
+            try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                    CloseableIterator<InternalRow> rows = reader.read(projectedType, null, null)) {
+                assertThatThrownBy(rows::hasNext)
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining(
+                                "Unexpected Manifest Avro type for field " + fieldName);
+            }
+        }
+    }
+
+    private static Stream<Arguments> invalidManifestFieldTypes() {
+        return Stream.of(
+                Arguments.of(ManifestEntry.FILE, DataTypes.INT().notNull()),
+                Arguments.of(ManifestEntry.FILE, DataTypes.INT()),
+                Arguments.of(ManifestEntry.BUCKET, DataTypes.INT()),
+                Arguments.of("_VERSION", DataTypes.INT()),
+                Arguments.of(
+                        ManifestEntry.PARTITION,
+                        ManifestEntry.MANIFEST_ROW_TYPE
+                                .getField(ManifestEntry.PARTITION)
+                                .type()
+                                .copy(true)));
+    }
+
+    private static RowType nullableFileType(RowType type) {
+        return new RowType(
+                type.isNullable(),
+                type.getFields().stream()
+                        .map(
+                                field ->
+                                        ManifestEntry.FILE.equals(field.name())
+                                                ? field.newType(field.type().copy(true))
+                                                : field)
+                        .collect(Collectors.toList()));
+    }
+
+    private static Stream<Arguments> manifestWriterSchemas() {
+        return reorderedManifestFieldOrders()
+                .flatMap(
+                        arguments ->
+                                Stream.of(
+                                        Arguments.of(arguments.get()[0], arguments.get()[1], false),
+                                        Arguments.of(
+                                                arguments.get()[0], arguments.get()[1], true)));
+    }
+
     private static Stream<Arguments> reorderedManifestFieldOrders() {
         return Stream.of(
                         new int[] {0, 1, 2, 3, 4, 5},
                         new int[] {0, 5, 1, 2, 3, 4},
+                        new int[] {1, 2, 3, 4, 5, 0},
                         new int[] {5, 4, 3, 2, 1, 0},
                         new int[] {3, 0, 5, 1, 4, 2},
                         new int[] {1, 0, 2, 4, 3, 5})
