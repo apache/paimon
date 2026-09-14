@@ -1547,16 +1547,51 @@ def _identity(values):
 
 def _decode_video_rows(row_groups, collators):
     for collator in collators:
+        locations = []
         for rows in row_groups:
-            indices = [
-                index for index, row in rows.items()
+            locations.extend(
+                (rows, index) for index, row in rows.items()
                 if collator.video_column in row
-            ]
-            if not indices:
-                continue
-            decoded = collator([rows[index] for index in indices])
-            for index, row in zip(indices, decoded):
+            )
+        if locations:
+            input_rows = [rows[index] for rows, index in locations]
+            decoded = _decode_unique_video_rows(collator, input_rows)
+            for (rows, index), row in zip(locations, decoded):
                 rows[index] = row
+
+
+def _decode_unique_video_rows(collator, rows):
+    unique = OrderedDict()
+    keys = []
+    for row in rows:
+        raw = row[collator.video_column]
+        if hasattr(raw, "as_py"):
+            raw = raw.as_py()
+        try:
+            key = None if raw is None else bytes(raw)
+        except (TypeError, ValueError):
+            key = object()
+        keys.append(key)
+        unique.setdefault(key, row)
+
+    decoded = collator(list(unique.values()))
+    values = {
+        key: row[collator.output_column]
+        for key, row in zip(unique, decoded)
+    }
+    result = []
+    emitted = set()
+    for row, key in zip(rows, keys):
+        output = dict(row)
+        value = values[key]
+        if key in emitted:
+            clone = getattr(value, "clone", None)
+            if callable(clone):
+                value = clone()
+        emitted.add(key)
+        output[collator.output_column] = value
+        result.append(output)
+    return result
 
 
 def _normalize_index(index, size):

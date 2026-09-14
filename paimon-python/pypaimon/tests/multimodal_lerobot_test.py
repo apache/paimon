@@ -47,6 +47,7 @@ from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
     _PyAVVideoDecoder,
     _arrow_rows,
+    _decode_video_rows,
     _image_tensor,
     _index_names,
     _open_video_decoder,
@@ -143,6 +144,59 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    def test_video_rows_are_decoded_in_one_batch(self):
+        class Collator:
+
+            video_column = "camera"
+            output_column = "camera"
+
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, rows):
+                self.calls.append(rows)
+                return [dict(row, camera="decoded") for row in rows]
+
+        collator = Collator()
+        base = {2: {"camera": "base"}, 3: {"action": 3}}
+        delta = {1: {"camera": "delta"}}
+
+        _decode_video_rows([base, delta], [collator])
+
+        self.assertEqual(1, len(collator.calls))
+        self.assertEqual(["base", "delta"], [
+            row["camera"] for row in collator.calls[0]
+        ])
+        self.assertEqual("decoded", base[2]["camera"])
+        self.assertEqual("decoded", delta[1]["camera"])
+        self.assertEqual(3, base[3]["action"])
+
+    def test_duplicate_video_frames_are_decoded_once(self):
+        class Collator:
+
+            video_column = "camera"
+            output_column = "camera"
+
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, rows):
+                self.calls.append(rows)
+                return [dict(row, camera="decoded") for row in rows]
+
+        collator = Collator()
+        base = {2: {"camera": b"same", "action": 2}}
+        delta = {1: {"camera": b"same", "action": 1}}
+
+        _decode_video_rows([base, delta], [collator])
+
+        self.assertEqual(1, len(collator.calls))
+        self.assertEqual(1, len(collator.calls[0]))
+        self.assertEqual("decoded", base[2]["camera"])
+        self.assertEqual("decoded", delta[1]["camera"])
+        self.assertEqual(2, base[2]["action"])
+        self.assertEqual(1, delta[1]["action"])
 
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,

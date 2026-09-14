@@ -94,6 +94,47 @@ class VideoFrameCollatorTest(unittest.TestCase):
         )
         self.assertEqual(descriptors[0], result[0]["video"])
 
+    def test_decodes_each_video_in_frame_order_and_restores_rows(self):
+        descriptors = [
+            self._descriptor("a.mp4", b"video-a", frame)
+            for frame in (9, 1, 4)
+        ]
+        descriptor_b = self._descriptor("b.mp4", b"video-b", 5)
+        calls = []
+
+        class Decoder:
+
+            def __init__(self, stream):
+                self.name = stream.read()
+
+            def decode(self, frame_index):
+                calls.append((self.name, frame_index))
+                return frame_index
+
+        collator = VideoFrameCollator(
+            self.table,
+            video_column="video",
+            decoder_factory=Decoder,
+            decode_fn=lambda decoder, frame, row: decoder.decode(frame),
+            collate_fn=lambda rows: rows,
+        )
+        try:
+            result = collator([
+                {"video": descriptors[0]},
+                {"video": descriptors[1]},
+                {"video": descriptors[2]},
+                {"video": descriptor_b},
+            ])
+        finally:
+            collator.close()
+
+        self.assertEqual(
+            [(b"video-a", 1), (b"video-a", 4), (b"video-a", 9),
+             (b"video-b", 5)],
+            calls,
+        )
+        self.assertEqual([9, 1, 4, 5], [row["frame"] for row in result])
+
     def test_evicts_least_recently_used_decoder(self):
         descriptors = [
             self._descriptor("episode-%d.mp4" % index, bytes([index]), index)
