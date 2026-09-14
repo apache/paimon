@@ -1547,16 +1547,18 @@ def _identity(values):
 
 def _decode_video_rows(row_groups, collators):
     for collator in collators:
+        targets = []
+        input_rows = []
         for rows in row_groups:
-            indices = [
-                index for index, row in rows.items()
-                if collator.video_column in row
-            ]
-            if not indices:
-                continue
-            decoded = collator([rows[index] for index in indices])
-            for index, row in zip(indices, decoded):
-                rows[index] = row
+            for index, row in rows.items():
+                if collator.video_column in row:
+                    targets.append((rows, index))
+                    input_rows.append(row)
+        if not input_rows:
+            continue
+        decoded = collator(input_rows)
+        for (rows, index), row in zip(targets, decoded):
+            rows[index] = row
 
 
 def _normalize_index(index, size):
