@@ -199,14 +199,17 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         @Nullable private final RecordEqualiser valueEqualiser;
         private final LookupStrategy lookupStrategy;
         @Nullable private final UserDefinedSeqComparator userDefinedSeqComparator;
+        @Nullable private final int[] preserveFieldIndices;
 
         public LookupMergeFunctionWrapperFactory(
                 @Nullable RecordEqualiser valueEqualiser,
                 LookupStrategy lookupStrategy,
-                @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
+                @Nullable UserDefinedSeqComparator userDefinedSeqComparator,
+                @Nullable int[] preserveFieldIndices) {
             this.valueEqualiser = valueEqualiser;
             this.lookupStrategy = lookupStrategy;
             this.userDefinedSeqComparator = userDefinedSeqComparator;
+            this.preserveFieldIndices = preserveFieldIndices;
         }
 
         @Override
@@ -227,7 +230,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                     valueEqualiser,
                     lookupStrategy,
                     deletionVectorsMaintainer,
-                    userDefinedSeqComparator);
+                    userDefinedSeqComparator,
+                    preserveFieldIndices);
         }
     }
 

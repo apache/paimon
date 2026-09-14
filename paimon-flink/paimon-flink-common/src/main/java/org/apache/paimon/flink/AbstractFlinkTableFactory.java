@@ -99,7 +99,10 @@ public abstract class AbstractFlinkTableFactory
         }
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
-        } else if (CoreOptions.fromMap(table.options()).dataEvolutionEnabled()) {
+        } else if (CoreOptions.fromMap(table.options()).dataEvolutionEnabled()
+                || !CoreOptions.fromMap(table.options())
+                        .changelogExposeFieldAsMetadata()
+                        .isEmpty()) {
             return new DataEvolutionDataTableSource(
                     context.getObjectIdentifier(), table, unbounded, context);
         } else {
