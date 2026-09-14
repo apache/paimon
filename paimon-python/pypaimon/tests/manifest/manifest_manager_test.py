@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from io import BytesIO
 
 import fastavro
@@ -268,6 +269,36 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         )
         return entry
 
+    def test_manifest_bucket_and_level_stats(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry('a', bucket=2),
+                   self._create_manifest_entry('b', bucket=6)]
+        entries[0].file.level = 3
+        entries[1].file.level = 1
+        entries[1].kind = 1
+        for totals, expected in [([8, 8], 8), ([8, 16], None),
+                                 ([0, 8], None), ([8, -1], None)]:
+            with self.subTest(totals=totals):
+                for entry, total in zip(entries, totals):
+                    entry.total_buckets = total
+                metas = manager.rolling_write(entries, 1024 * 1024, 'bucket-stats')
+                self.assertEqual(len(metas), 1)
+                meta = metas[0]
+                self.assertEqual((meta.min_bucket, meta.max_bucket), (2, 6))
+                self.assertEqual((meta.min_level, meta.max_level), (1, 3))
+                self.assertEqual((meta.num_added_files, meta.num_deleted_files), (1, 1))
+                self.assertEqual(meta.total_buckets, expected)
+
+    def test_rolling_manifest_bucket_stats_are_per_file(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry(str(i), bucket=i) for i in range(4)]
+        for entry in entries:
+            entry.total_buckets = 8
+        metas = manager.rolling_write(entries, 1, 'rolling-bucket-stats')
+        self.assertEqual(len(metas), len(entries))
+        self.assertEqual([(m.min_bucket, m.max_bucket, m.total_buckets) for m in metas],
+                         [(i, i, 8) for i in range(4)])
+
     def test_filter_applied_after_read(self):
         manager = self._make_manager()
 
@@ -466,6 +497,36 @@ class ManifestListManagerTest(_ManifestManagerSetup):
             partition_stats=SimpleStats.empty_stats(), schema_id=0,
         )
         manager.write(name, [meta])
+
+    def test_bucket_and_level_stats_round_trip(self):
+        manager = self._make_manager()
+        legacy_meta = ManifestFileMeta(
+            'legacy', 1024, 1, 0, SimpleStats.empty_stats(), 0,
+            10, 109, ['extra'])
+        meta = replace(legacy_meta, file_name='new', min_bucket=0, max_bucket=7,
+                       min_level=0, max_level=3, total_buckets=8)
+        manager.write('stats-list', [legacy_meta, meta])
+        actual = manager.read('stats-list')
+        fields = ['min_bucket', 'max_bucket', 'min_level', 'max_level',
+                  'min_row_id', 'max_row_id', 'total_buckets', 'extra_files']
+        for expected, restored in zip([legacy_meta, meta], actual):
+            self.assertEqual([getattr(restored, f) for f in fields],
+                             [getattr(expected, f) for f in fields])
+
+        with manager.file_io.new_input_stream(f'{manager.manifest_path}/stats-list') as stream:
+            data = stream.read()
+        reader = fastavro.reader(BytesIO(data))
+        self.assertEqual([f['name'] for f in reader.writer_schema['fields']][7:],
+                         ['_MIN_BUCKET', '_MAX_BUCKET', '_MIN_LEVEL', '_MAX_LEVEL',
+                          '_MIN_ROW_ID', '_MAX_ROW_ID', '_TOTAL_BUCKETS', '_EXTRA_FILES'])
+        self.assertEqual([r['_VERSION'] for r in reader], [2, 2])
+        legacy_schema = reader.writer_schema
+        legacy_schema['fields'] = [f for f in legacy_schema['fields']
+                                   if f['name'] not in {'_MIN_BUCKET', '_MAX_BUCKET',
+                                                        '_MIN_LEVEL', '_MAX_LEVEL', '_TOTAL_BUCKETS'}]
+        records = list(fastavro.reader(BytesIO(data), reader_schema=legacy_schema))
+        self.assertEqual([r['_MIN_ROW_ID'] for r in records], [10, 10])
+        self.assertEqual([r['_EXTRA_FILES'] for r in records], [['extra'], ['extra']])
 
     def test_extra_files_round_trip(self):
         manager = self._make_manager()
