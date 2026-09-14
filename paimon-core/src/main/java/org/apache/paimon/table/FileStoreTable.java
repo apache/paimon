@@ -139,6 +139,13 @@ public interface FileStoreTable extends DataTable {
 
     TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
+    /**
+     * Creates a new write with a custom {@link RowKeyExtractor}. This is useful for scenarios such
+     * as rescaling where the bucket assignment logic needs to be overridden.
+     */
+    TableWriteImpl<?> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor);
+
     /** Creates a fixed-bucket merge-tree write for a postpone-bucket batch write. */
     default TableWriteImpl<?> newPostponeFixedBucketWrite(
             String commitUser, @Nullable Integer writeId) {

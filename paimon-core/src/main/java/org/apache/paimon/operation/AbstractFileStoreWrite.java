@@ -40,6 +40,7 @@ import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -149,6 +150,15 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Override
     public FileStoreWrite<T> withWriteRestore(WriteRestore writeRestore) {
         this.restore = writeRestore;
+        return this;
+    }
+
+    @Override
+    public FileStoreWrite<T> withPartitionBucketMapping(
+            PartitionBucketMapping partitionBucketMapping) {
+        if (restore instanceof FileSystemWriteRestore) {
+            ((FileSystemWriteRestore) restore).withPartitionBucketMapping(partitionBucketMapping);
+        }
         return this;
     }
 
@@ -503,7 +513,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     partition, totalBuckets, buckets.values().iterator().next().totalBuckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, totalBuckets));
+                bucket,
+                k -> createWriterContainer(partition.copy(), bucket, totalBuckets, true, true));
     }
 
     private Map<Integer, WriterContainer<T>> getWriterContainers(BinaryRow partition) {
@@ -520,16 +531,20 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     public WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
-        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck);
+        return createWriterContainer(partition, bucket, numBuckets, !ignoreNumBucketCheck, false);
     }
 
     private WriterContainer<T> createWriterContainer(
             BinaryRow partition, int bucket, int totalBuckets) {
-        return createWriterContainer(partition, bucket, totalBuckets, true);
+        return createWriterContainer(partition, bucket, totalBuckets, true, true);
     }
 
     private WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean strictBucketCount) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -554,7 +569,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         if (!actualIgnorePreviousFiles) {
             restored =
                     scanExistingFileMetas(
-                            partition, bucket, expectedTotalBuckets, validateNumBuckets);
+                            partition,
+                            bucket,
+                            expectedTotalBuckets,
+                            validateNumBuckets,
+                            strictBucketCount);
         }
 
         DynamicBucketIndexMaintainer indexMaintainer =
@@ -647,7 +666,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(
-            BinaryRow partition, int bucket, int expectedTotalBuckets, boolean validateNumBuckets) {
+            BinaryRow partition,
+            int bucket,
+            int expectedTotalBuckets,
+            boolean validateNumBuckets,
+            boolean strictBucketCount) {
         Supplier<String> partInfo =
                 () ->
                         partitionType.getFieldCount() > 0
@@ -674,8 +697,33 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo.get(), bucket),
                     e);
         }
-        if (restored.totalBuckets() != null && validateNumBuckets) {
-            checkNumBuckets(partInfo.get(), expectedTotalBuckets, restored.totalBuckets());
+        Integer restoredTotalBuckets = restored.totalBuckets();
+        if (restoredTotalBuckets != null
+                && validateNumBuckets
+                && expectedTotalBuckets != restoredTotalBuckets) {
+            if (partitionType.getFieldCount() > 0
+                    && options.bucketPerPartitionCountEnabled()
+                    && !strictBucketCount) {
+                if (bucket >= restoredTotalBuckets) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Trying to write bucket %d to %s, but the partition only has %d "
+                                            + "buckets (table default: %d). Recompute the bucket using the "
+                                            + "partition's bucket count, or rescale the partition via "
+                                            + "INSERT OVERWRITE.",
+                                    bucket,
+                                    partInfo.get(),
+                                    restoredTotalBuckets,
+                                    expectedTotalBuckets));
+                }
+                LOG.info(
+                        "{} uses {} buckets (expected: {}). Accepting per-partition bucket count.",
+                        partInfo.get(),
+                        restoredTotalBuckets,
+                        expectedTotalBuckets);
+            } else {
+                checkNumBuckets(partInfo.get(), expectedTotalBuckets, restoredTotalBuckets);
+            }
         }
         return restored;
     }
