@@ -208,7 +208,7 @@ class ReadBuilder:
         return paths
 
 
-def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
+def _build_explain_result(table, scan: TableScan, plan, stats: Optional[ScanStats],
                           predicate, projection, limit, verbose: bool) -> ExplainResult:
     """Translate one (Plan, ScanStats) pair into an ExplainResult."""
     splits: List[Split] = plan.splits()
@@ -216,8 +216,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
     table_schema = table.table_schema
     bucket_mode_str = _safe_bucket_mode(table)
 
-    # stats is None when planned natively (pypaimon_rust): no manifest pruning
-    # funnel is tracked, so the split-level signals below are all we can report.
+    # Native plans expose split metadata without Python pruning counters.
     native_planned = stats is None
     if native_planned:
         partition_pruning = bucket_pruning = file_skipping = None

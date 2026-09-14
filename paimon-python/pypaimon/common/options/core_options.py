@@ -638,6 +638,13 @@ class CoreOptions:
         .with_description("Whether to enable deletion vectors.")
     )
 
+    INDEX_FILE_IN_DATA_FILE_DIR: ConfigOption[bool] = (
+        ConfigOptions.key("index-file-in-data-file-dir")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to store bucket index files in the data file directory.")
+    )
+
     SCAN_NATIVE_PLAN_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("scan.native-plan.enabled")
         .boolean_type()
@@ -1483,6 +1490,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def index_file_in_data_file_dir(self, default=None):
+        return self.options.get(CoreOptions.INDEX_FILE_IN_DATA_FILE_DIR, default)
 
     def native_plan_enabled(self, default=None):
         return self.options.get(CoreOptions.SCAN_NATIVE_PLAN_ENABLED, default)

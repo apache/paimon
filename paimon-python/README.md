@@ -31,6 +31,56 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# Native scan planning
+
+PyPaimon can plan splits with the optional `pypaimon-rust` package while retaining
+the Python reader:
+
+```python
+native_table = table.copy({"scan.native-plan.enabled": "true"})
+builder = native_table.new_read_builder()
+plan = builder.new_scan().plan()
+rows = builder.new_read().to_arrow(plan.splits())
+explanation = builder.explain()
+print(explanation.native_planned)
+```
+
+The adapter checks the installed binding's capabilities and falls back to the
+Python planner for unsupported scans. New bindings preserve `plan.snapshot_id`
+even when pruning removes every split. Native explain output includes snapshot
+and split metadata; native pruning counters are not exposed.
+
+Explicit row ranges on data-evolution tables require `ReadBuilder.with_row_ranges()`.
+Watermark time travel requires Rust 0.4 or newer. Branch reads require the
+branch-aware binding exposing `Table.branch()`, and the resolved branch is
+checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
+which includes schema-aware decoding of Python-written index manifests and
+legacy bucket-index path compatibility. The reader honors explicit paths, then
+bucket paths, and can read older Python files placed in `table/index`.
+New Python writes honor `index-file-in-data-file-dir` and retain explicit paths
+when Python and Java partition-directory formatting differs. Older releases
+and prereleases before 0.4.0 use the Python planner for deletion vectors.
+When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
+package version checks cannot distinguish local builds with identical versions.
+
+Append scans support `with_shard()` and `with_slice()`; primary-key scans support
+bucket-based `with_shard()`. Data-evolution position selection requires the
+binding's `TableScan.with_row_position_slice()` and `with_row_position_shard()`.
+Selection occurs before reader filtering and deletion vectors, so surviving row
+counts can differ between shards. Limits are applied after shard/slice selection.
+
+Timestamp incremental scans require `ReadBuilder.new_incremental_scan()`.
+Python resolves `(start_timestamp, end_timestamp]` to snapshot IDs; Rust combines
+the selected APPEND deltas into one plan, including merging primary-key versions
+across commits. Other commit kinds are excluded, and the ending snapshot supplies
+snapshot metadata and deletion vectors even if it contributes no APPEND files.
+
+Chunk shuffle, query authorization, first-row merge, deletion-vector merge-on-read,
+dynamic or cross-partition primary-key buckets, and scored or primary-key
+global-index results still use the Python planner. Rust also rejects floating-point
+partition-directory formatting; these scans fall back to Python. Native planning
+remains optional and is disabled by default.
+
 # Load LeRobot Dataset v3
 
 Install the optional dependency, then import a local directory, FileIO URI, or

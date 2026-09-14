@@ -75,12 +75,16 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
             try:
                 index_file = entry.index_file
                 file_name = index_file.file_name
-                path = (
-                    index_file.external_path
-                    or table.path_factory()
-                    .global_index_path_factory()
-                    .to_path(file_name)
-                )
+                if index_file.index_type == 'DELETION_VECTORS':
+                    path = table.path_factory().bucket_index_path(
+                        tuple(entry.partition.values), entry.bucket, index_file, table.file_io)
+                else:
+                    path = (
+                        index_file.external_path
+                        or table.path_factory()
+                        .global_index_path_factory()
+                        .to_path(file_name)
+                    )
                 table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(

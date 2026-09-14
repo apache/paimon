@@ -169,6 +169,13 @@ class SplitOrderTest(unittest.TestCase):
             [file.file_name for file in splits[0].files],
         )
 
+    def test_disjoint_slice_and_row_ranges_are_terminal_empty(self):
+        generator = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=1024, open_file_cost=0,
+            row_ranges=[Range(7, 8)],
+        ).with_slice(0, 2)
+        self.assertEqual(generator.create_splits([self._entry('base.parquet', 1)]), [])
+
     def test_slice_and_shard_preserve_blob_manifest_order(self):
         entries = [
             self._entry('a.blob', 1),

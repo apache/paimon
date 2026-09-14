@@ -28,6 +28,14 @@ def _is_null_or_whitespace_only(value) -> bool:
     return len(s) == 0 or s.isspace()
 
 
+def _escape_partition_component(value: str) -> str:
+    # Java PartitionPathUtils.CHAR_TO_ESCAPE (spaces and Unicode stay as-is).
+    escape_chars = "\"#%'*/:=?\\{}[]^"
+    return ''.join('%{:02X}'.format(ord(char))
+                   if ord(char) < 32 or ord(char) == 127 or char in escape_chars else char
+                   for char in value)
+
+
 class FileStorePathFactory:
     MANIFEST_PATH = "manifest"
     MANIFEST_PREFIX = "manifest-"
@@ -98,7 +106,7 @@ class FileStorePathFactory:
             return f"{self._root}/{self.data_file_path_directory}"
         return self._root
 
-    def relative_bucket_path(self, partition: Tuple, bucket: int) -> str:
+    def relative_bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
         bucket_name = str(bucket)
         if bucket == BucketMode.POSTPONE_BUCKET.value:
             bucket_name = "postpone"
@@ -113,7 +121,10 @@ class FileStorePathFactory:
                 if _is_null_or_whitespace_only(val):
                     val = self.default_part_value
                 else:
-                    val = str(val)
+                    val = str(val).lower() if canonical_partition and isinstance(val, bool) else str(val)
+                if canonical_partition:
+                    field_name = _escape_partition_component(field_name)
+                    val = _escape_partition_component(val)
                 partition_parts.append(f"{field_name}={val}")
             if partition_parts:
                 relative_parts = partition_parts + relative_parts
@@ -124,8 +135,8 @@ class FileStorePathFactory:
 
         return "/".join(relative_parts)
 
-    def bucket_path(self, partition: Tuple, bucket: int) -> str:
-        relative_path = self.relative_bucket_path(partition, bucket)
+    def bucket_path(self, partition: Tuple, bucket: int, canonical_partition: bool = False) -> str:
+        relative_path = self.relative_bucket_path(partition, bucket, canonical_partition)
         return f"{self._root}/{relative_path}"
 
     def create_external_path_provider(
@@ -148,6 +159,44 @@ class FileStorePathFactory:
             self.global_index_root_path(),
             self.global_index_external_path is not None,
         )
+
+    def new_bucket_index_path(self, partition: Tuple, bucket: int, file_name: str) -> Tuple[str, bool]:
+        """Return a new bucket index's path and whether to persist its external location."""
+        if self.index_file_in_data_file_dir:
+            external = self.create_external_path_provider(partition, bucket)
+            if external is not None:
+                return external.get_next_external_data_path(file_name), True
+            # Python data directories historically use str(value) without
+            # escaping. Record the actual location when Java renders it
+            # differently, so its readers can find the DV beside those files.
+            return (f"{self.bucket_path(partition, bucket)}/{file_name}",
+                    self._partition_path_requires_explicit_location(partition))
+        factory = self.global_index_path_factory()
+        return factory.to_path(file_name), factory.is_external_path()
+
+    def _partition_path_requires_explicit_location(self, partition: Tuple) -> bool:
+        # FLOAT/DOUBLE formatting can differ from Python's float repr, and
+        # this factory does not carry field types to distinguish the two.
+        return (any(isinstance(value, float) for value in partition)
+                or self.relative_bucket_path(partition, 0) != self.relative_bucket_path(partition, 0, True))
+
+    def bucket_index_path(self, partition: Tuple, bucket: int, index_file, file_io=None) -> str:
+        """Resolve an existing bucket index, including the legacy Python DV layout."""
+        if index_file.external_path:
+            return index_file.external_path
+        legacy_path = f"{self.index_path()}/{index_file.file_name}"
+        if not self.index_file_in_data_file_dir:
+            return legacy_path
+        path = f"{self.bucket_path(partition, bucket, True)}/{index_file.file_name}"
+        # Older Python DV writers ignored the option. Prefer the Java location
+        # when present, and use the old directory only for an existing DV file.
+        if file_io is not None and index_file.index_type == 'DELETION_VECTORS' and not file_io.exists(path):
+            python_path = f"{self.bucket_path(partition, bucket)}/{index_file.file_name}"
+            if python_path != path and file_io.exists(python_path):
+                return python_path
+            if file_io.exists(legacy_path):
+                return legacy_path
+        return path
 
 
 class IndexPathFactory:

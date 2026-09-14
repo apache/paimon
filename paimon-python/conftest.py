@@ -61,7 +61,8 @@ def enable_native_plan(request, monkeypatch):
     if (not _native_plan_enabled()
             or request.node.get_closest_marker("python_plan") is not None
             or request.path.name in (
-                "native_plan_test.py", "native_plan_integration_test.py")):
+                "native_plan_test.py", "native_plan_integration_test.py",
+                "native_plan_capabilities_test.py")):
         yield
         return
 

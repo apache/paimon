@@ -16,6 +16,7 @@
 # under the License.
 
 import heapq
+import math
 from dataclasses import dataclass
 from functools import cmp_to_key
 from typing import Callable, List
@@ -41,9 +42,20 @@ class IntervalPartition:
     def __init__(self, input_files: List[DataFileMeta]):
         self.files = input_files.copy()
         self.key_comparator = default_key_comparator
-        self.files.sort(key=cmp_to_key(self._compare_files))
+        # Manifest FLOAT/DOUBLE values decode to Python float. Match the native
+        # planner's conservative fallback for NaN boundaries: all files share
+        # one section, but each file remains a separate merge input.
+        self.has_nan_key = any(
+            isinstance(value, float) and math.isnan(value)
+            for file in self.files
+            for key in (file.min_key, file.max_key) if key is not None
+            for value in key.values)
+        if not self.has_nan_key:
+            self.files.sort(key=cmp_to_key(self._compare_files))
 
     def partition(self) -> List[List[SortedRun]]:
+        if self.has_nan_key:
+            return [[SortedRun(files=[file]) for file in self.files]]
         result = []
         section: List[DataFileMeta] = []
         bound = None
@@ -116,6 +128,13 @@ def default_key_comparator(key1: GenericRow, key2: GenericRow) -> int:
             return -1
         if val2 is None:
             return 1
+        # Preserve Java's ordering of signed zeros in composite key bounds.
+        # NaN bounds take the conservative path before this comparator is used.
+        if (isinstance(val1, float) and isinstance(val2, float)
+                and val1 == 0.0 and val2 == 0.0):
+            sign1, sign2 = math.copysign(1.0, val1), math.copysign(1.0, val2)
+            if sign1 != sign2:
+                return -1 if sign1 < sign2 else 1
         if val1 < val2:
             return -1
         elif val1 > val2:

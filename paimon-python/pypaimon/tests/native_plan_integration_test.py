@@ -23,7 +23,9 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.read.native_plan import native_family_search_modes_available
+from pypaimon.read.native_plan import (
+    native_family_search_modes_available, native_method_available,
+)
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
 
@@ -96,7 +98,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._assert_matches('pk_t')
 
     def test_pk_equal_to_partition_key_falls_back(self):
-        # Empty trimmed PK: native would skip merge and return duplicates -> must fall back.
+        # Rust rejects empty trimmed PK schemas; Python must retain its supported behavior.
         self.cat.create_table('default.pkpart_t', Schema.from_pyarrow_schema(
             self.schema, partition_keys=['k'], primary_keys=['k'], options={'bucket': '1'}), False)
         self._write('pkpart_t', [{'k': 1, 'v': 'a1'}, {'k': 2, 'v': 'b1'}])
@@ -433,17 +435,43 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.snapshot_id, normal.snapshot_id)
         self.assertIn('native', str(native))   # render shows the Planner line
 
-    def test_empty_table_explain_reflects_python_fallback(self):
+    @unittest.skipUnless(native_method_available('Plan', 'snapshot_id'),
+                         "pypaimon_rust snapshot metadata API not installed")
+    def test_native_explain_reports_split_metadata_without_pruning_counters(self):
+        self.cat.create_table(
+            'default.explain_metadata_t', Schema.from_pyarrow_schema(
+                self.schema, options={'metadata.stats-mode': 'full'}), False)
+        self._write('explain_metadata_t', [{'k': 1, 'v': 'a'}])
+        self._write('explain_metadata_t', [{'k': 8, 'v': 'b'}])
+        table = self.cat.get_table('default.explain_metadata_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        builder = table.new_read_builder()
+        builder.with_filter(builder.new_predicate_builder().equal('k', 8))
+        result = builder.explain()
+        self.assertTrue(result.native_planned)
+        self.assertEqual(result.snapshot_id, 2)
+        self.assertEqual(result.split_count, 1)
+        self.assertEqual(result.file_count, 1)
+        self.assertIn('pruning not tracked', str(result))
+        self.assertIsNone(result.file_skipping)
+        builder.with_filter(builder.new_predicate_builder().equal('k', 99))
+        empty = builder.explain()
+        self.assertTrue(empty.native_planned)
+        self.assertEqual(empty.snapshot_id, 2)
+        self.assertEqual(empty.split_count, 0)
+
+    def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(
             'default.empty_t', Schema.from_pyarrow_schema(self.schema), False)
         normal = self.cat.get_table('default.empty_t').new_read_builder().explain()
-        fallback = self.cat.get_table('default.empty_t').copy(
+        native = self.cat.get_table('default.empty_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
 
-        self.assertFalse(fallback.native_planned)
-        self.assertEqual(fallback.snapshot_id, normal.snapshot_id)
-        self.assertEqual(fallback.split_count, 0)
-        self.assertNotIn('Planner:', str(fallback))
+        self.assertEqual(native.native_planned,
+                         native_method_available('Plan', 'snapshot_id'))
+        self.assertEqual(native.snapshot_id, normal.snapshot_id)
+        self.assertEqual(native.split_count, 0)
+        self.assertEqual('Planner:' in str(native), native.native_planned)
 
 
 if __name__ == '__main__':
