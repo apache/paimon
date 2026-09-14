@@ -126,6 +126,9 @@ Compact manifest files.
 - `manifest_sort_enabled` (`BOOLEAN`, optional): whether to use manifest sort rewrite for this invocation.
 - `manifest_sort_partition_field` (`STRING`, optional): partition field used to sort manifest entries. Defaults to the first partition field.
 - `manifest_sort_max_rewrite_size` (`STRING`, optional): maximum manifest size rewritten by one sort pass.
+When manifest sort is enabled, `compact_manifest` performs a full sort using the layout selected
+from the table options. The existing `manifest_sort_max_rewrite_size` limit still controls the
+amount of manifest data rewritten in one invocation.
 
 ```sql
 CALL sys.compact_manifest(`table` => 'default.T');

@@ -1430,21 +1430,17 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testManifestSortCompactManifestRespectsCompactionThresholds() {
+    public void testManifestSortCompactManifestUsesFullCompactionThresholds() {
         Options options = new Options();
         options.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
         options.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
         options.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
 
         CoreOptions compactOptions =
-                FileStoreCommitImpl.manifestCompactionOptions(
-                        new CoreOptions(options),
-                        Collections.emptyList(),
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE);
+                FileStoreCommitImpl.manifestCompactionOptions(new CoreOptions(options));
 
-        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
-        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())
-                .isEqualTo(Long.MAX_VALUE);
+        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(1);
+        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes()).isEqualTo(1);
     }
 
     @Test

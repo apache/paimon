@@ -71,6 +71,7 @@ public class ManifestFileSorter {
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
+        final boolean fullSort;
         final boolean runMergeOptimizeEnabled;
         final ManifestSortKey sortKey;
         final RowType partitionType;
@@ -91,6 +92,7 @@ public class ManifestFileSorter {
 
         CompactionContext(
                 boolean fullCompaction,
+                boolean fullSort,
                 boolean runMergeOptimizeEnabled,
                 ManifestSortKey sortKey,
                 RowType partitionType,
@@ -100,6 +102,7 @@ public class ManifestFileSorter {
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
+            this.fullSort = fullSort;
             this.runMergeOptimizeEnabled = runMergeOptimizeEnabled;
             this.sortKey = sortKey;
             this.partitionType = partitionType;
@@ -153,7 +156,8 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             RowType partitionType,
             CoreOptions options,
-            @Nullable IOManager ioManager)
+            @Nullable IOManager ioManager,
+            boolean fullSort)
             throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
         boolean bucketed = options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET;
@@ -181,6 +185,7 @@ public class ManifestFileSorter {
                         suggestedMetaSize,
                         suggestedMinMetaCount,
                         fullCompactionThreshold,
+                        fullSort,
                         maxRewriteSize,
                         maxSizeAmplificationPercent,
                         sortedRunSizeRatio,
@@ -225,6 +230,7 @@ public class ManifestFileSorter {
             long suggestedMetaSize,
             int suggestedMinMetaCount,
             long fullCompactionThreshold,
+            boolean fullSort,
             long maxRewriteSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
@@ -232,7 +238,9 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Check if full compaction threshold is met
-        if (!reachesFullCompactionThreshold(input, suggestedMetaSize, fullCompactionThreshold)) {
+        if (!fullSort
+                && !reachesFullCompactionThreshold(
+                        input, suggestedMetaSize, fullCompactionThreshold)) {
             return Optional.empty();
         }
         // Step 2: Prepare compaction context
@@ -240,6 +248,7 @@ public class ManifestFileSorter {
                 prepareCompaction(
                         input,
                         true,
+                        fullSort,
                         manifestFile,
                         partitionType,
                         sortPartitionField,
@@ -253,7 +262,8 @@ public class ManifestFileSorter {
                         manifestReadParallelism);
         try {
             List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
-            List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
+            List<ManifestAdjacentSortedRun> pickedRuns =
+                    fullSort ? new ArrayList<>(levelRuns) : ctx.pickedRuns;
 
             if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
                 LOG.debug(
@@ -283,9 +293,22 @@ public class ManifestFileSorter {
             }
             pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
 
-            // Step 4: Split into sections and merge small adjacent sections
-            List<Section> sections = splitIntoSections(pickedFiles, ctx);
-            sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+            // Step 4: A full sort uses one global section so entries from all existing runs can be
+            // clustered using the layout selected from the table options.
+            List<Section> sections;
+            if (fullSort) {
+                long totalSize = 0L;
+                boolean hasDefaultCompactFile = false;
+                for (ManifestFileMeta file : pickedFiles) {
+                    totalSize += file.fileSize();
+                    hasDefaultCompactFile |= ctx.isMarkedForDefaultCompaction(file);
+                }
+                sections = new ArrayList<>();
+                sections.add(new Section(pickedFiles, totalSize, hasDefaultCompactFile));
+            } else {
+                sections = splitIntoSections(pickedFiles, ctx);
+                sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+            }
 
             LOG.info(
                     "Manifest sort full compact: pickedFiles={}, sections={}.",
@@ -342,6 +365,7 @@ public class ManifestFileSorter {
         CompactionContext ctx =
                 prepareCompaction(
                         input,
+                        false,
                         false,
                         manifestFile,
                         partitionType,
@@ -458,6 +482,7 @@ public class ManifestFileSorter {
     private static CompactionContext prepareCompaction(
             List<ManifestFileMeta> input,
             boolean fullCompaction,
+            boolean fullSort,
             ManifestFile manifestFile,
             RowType partitionType,
             String sortPartitionField,
@@ -500,6 +525,7 @@ public class ManifestFileSorter {
 
         return new CompactionContext(
                 fullCompaction,
+                fullSort,
                 useRunMergeOptimize,
                 sortKey,
                 partitionType,
@@ -862,15 +888,17 @@ public class ManifestFileSorter {
         for (int i = 0; i < sections.size(); i++) {
             Section section = sections.get(i);
 
-            // A single-file section is always handled directly, regardless of the budget.
-            if (section.files.size() == 1) {
+            // Preserve the ordinary-compaction shortcut: an unchanged singleton must not consume
+            // the sort rewrite limit. Explicit full sort intentionally rewrites the singleton.
+            if (!ctx.fullSort && section.files.size() == 1) {
                 rewriteSection(
                         section.files,
                         output,
                         sortNewFiles,
                         ctx,
                         manifestFile,
-                        manifestReadParallelism);
+                        manifestReadParallelism,
+                        false);
                 continue;
             }
 
@@ -886,7 +914,8 @@ public class ManifestFileSorter {
                             sortNewFiles,
                             ctx,
                             manifestFile,
-                            manifestReadParallelism);
+                            manifestReadParallelism,
+                            true);
                 } else {
                     // Phase 1b: first overflow -- split the section at the budget boundary,
                     // rewrite the affordable head, and append the remaining tail back for later
@@ -966,7 +995,8 @@ public class ManifestFileSorter {
             }
         }
 
-        rewriteSection(headFiles, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
+        rewriteSection(
+                headFiles, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism, true);
 
         if (tailFiles.isEmpty()) {
             return null;
@@ -1044,7 +1074,8 @@ public class ManifestFileSorter {
                         sortNewFiles,
                         ctx,
                         manifestFile,
-                        manifestReadParallelism);
+                        manifestReadParallelism,
+                        false);
                 candidates.clear();
                 candidatesSize = 0;
             }
@@ -1058,7 +1089,8 @@ public class ManifestFileSorter {
                         sortNewFiles,
                         ctx,
                         manifestFile,
-                        manifestReadParallelism);
+                        manifestReadParallelism,
+                        false);
             } else {
                 output.addAllUnchanged(candidates);
             }
@@ -1077,10 +1109,13 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> sortNewFiles,
             CompactionContext ctx,
             ManifestFile manifestFile,
-            @Nullable Integer manifestReadParallelism)
+            @Nullable Integer manifestReadParallelism,
+            boolean allowFullRewrite)
             throws Exception {
         // Skip rewrite for single file not in delete-range.
-        if (section.size() == 1 && !ctx.defaultCompactFiles.getOrDefault(section.get(0), false)) {
+        if (section.size() == 1
+                && !(allowFullRewrite && ctx.fullSort)
+                && !ctx.defaultCompactFiles.getOrDefault(section.get(0), false)) {
             output.addUnchanged(section.get(0));
             return;
         }

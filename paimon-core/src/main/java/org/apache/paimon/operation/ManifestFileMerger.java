@@ -58,6 +58,16 @@ public class ManifestFileMerger {
             RowType partitionType,
             CoreOptions options,
             @Nullable IOManager ioManager) {
+        return merge(input, manifestFile, partitionType, options, ioManager, false);
+    }
+
+    static List<ManifestFileMeta> merge(
+            List<ManifestFileMeta> input,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            CoreOptions options,
+            @Nullable IOManager ioManager,
+            boolean fullCompaction) {
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
@@ -66,7 +76,13 @@ public class ManifestFileMerger {
             // partition fields for manifest sort rewrite.
             if (canUseManifestSort(input, partitionType, options)) {
                 return ManifestFileSorter.trySortCompaction(
-                        input, newFilesForAbort, manifestFile, partitionType, options, ioManager);
+                        input,
+                        newFilesForAbort,
+                        manifestFile,
+                        partitionType,
+                        options,
+                        ioManager,
+                        fullCompaction);
             }
 
             if (options.manifestMergeOptimizeEnabled()) {
