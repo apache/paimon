@@ -431,6 +431,20 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Variant: decimals with trailing zeros under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // 10.0 and 100.00 strip to a negative scale, which used to fail inferred-shredding writes
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":10.0,"whole":100.00}')),
+          | (2, parse_json('{"price":20.5,"whole":7}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'double'), variant_get(v, '$.whole', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, 10.0, 100L), Row(2, 20.5, 7L)))
+  }
+
   test("Paimon Variant: read and write variant with null value") {
     withTable("source_tbl", "target_tbl") {
       sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
