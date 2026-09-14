@@ -759,6 +759,7 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          "Equal on PK still narrows to the writer's bucket "
                          "even when AND'd with a non-bucket-key predicate")
 
+    @pytest.mark.python_plan
     def test_manifest_bucket_pruning_skips_file_reads(self):
         table = self._create_pk_table('manifest_bucket_pruning')
         for i in range(self.NUM_BUCKETS):
