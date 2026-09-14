@@ -454,6 +454,7 @@ These table options affect global index build and read behavior:
 | `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
+| `global-index.build.parallelism` | `1` | Number of shards built concurrently by the local PyPaimon builder. Each shard may use native worker threads, so increase this value conservatively. |
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
 | `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
 | `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
