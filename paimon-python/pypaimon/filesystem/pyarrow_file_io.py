@@ -456,9 +456,9 @@ class PyArrowFileIO(FileIO):
             return False
 
         if file_info.type == pafs.FileType.Directory:
-            if (self._is_oss and not self._use_jindo
-                    and not self._legacy_oss_mode()):
-                return self._delete_oss_directory(path_str, recursive)
+            if (recursive and self._is_oss and not self._use_jindo
+                    and self._pyarrow_gte_22):
+                return self._delete_oss_directory(path_str)
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
@@ -473,17 +473,10 @@ class PyArrowFileIO(FileIO):
             self.filesystem.delete_file(path_str)
         return True
 
-    def _delete_oss_directory(self, path_str: str, recursive: bool) -> bool:
-        if recursive and not self._pyarrow_gte_22:
-            self.filesystem.delete_dir_contents(path_str)
-            self.filesystem.delete_dir(path_str)
-            return True
-
+    def _delete_oss_directory(self, path_str: str) -> bool:
         selector = pafs.FileSelector(
-            path_str, recursive=recursive, allow_not_found=True)
+            path_str, recursive=True, allow_not_found=True)
         file_infos = self.filesystem.get_file_info(selector)
-        if not recursive and file_infos:
-            raise OSError(f"Directory {path_str} is not empty")
         files = [
             info.path for info in file_infos
             if info.type == pafs.FileType.File
@@ -491,15 +484,14 @@ class PyArrowFileIO(FileIO):
         if files:
             with ThreadPoolExecutor(max_workers=min(16, len(files))) as executor:
                 list(executor.map(self.filesystem.delete_file, files))
-        if recursive:
-            directories = sorted(
-                (info.path for info in file_infos
-                 if info.type == pafs.FileType.Directory),
-                key=lambda item: item.count("/"),
-                reverse=True,
-            )
-            for directory in directories:
-                self._delete_oss_directory_marker(directory)
+        directories = sorted(
+            (info.path for info in file_infos
+             if info.type == pafs.FileType.Directory),
+            key=lambda item: item.count("/"),
+            reverse=True,
+        )
+        for directory in directories:
+            self._delete_oss_directory_marker(directory)
         self._delete_oss_directory_marker(path_str)
         return True
 
