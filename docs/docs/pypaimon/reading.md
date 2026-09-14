@@ -56,18 +56,18 @@ read_builder = read_builder.with_filter(predicate_5)
 
 See [Predicate](./reading#predicate) for all supported filters and building methods. Filter by `_ROW_ID`: see [Data Evolution](./data-evolution#filter-by-_row_id).
 
-Use `with_projection()` for columns, nested `ROW` fields, and literal
-`MAP<STRING, ...>` keys:
+Project a MAP subkey with `with_projection()`:
 
 ```python
 read_builder = read_builder.with_projection([
-    'id', 'profile.name', "attributes['key.with.dots']"
+    'id', "attributes['subkey']"
 ])
 ```
 
-Use `.` for `ROW` fields and `['...']` for literal MAP keys, so dots inside a
-key are not split as a `ROW` path. Shared-shredding MAP files prune unselected
-keys; other layouts read the full MAP and extract the key.
+Nested `ROW` fields use dot notation, such as `profile.name`. MAP subkeys use
+bracket notation; a dot inside the quotes is part of the key, not a nested
+path. Shared-shredding MAP files prune unselected keys; other layouts read the
+full MAP and extract the key.
 
 Limitations:
 
