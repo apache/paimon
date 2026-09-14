@@ -86,6 +86,34 @@ class MapSelectedKeyProjectionTest(unittest.TestCase):
             result.column('attributes_first').to_pylist(),
         )
 
+    def test_row_format_map_key_with_schema_evolution(self):
+        for evolution in ('rename', 'value_type'):
+            with self.subTest(evolution=evolution):
+                name = 'row_format_' + evolution
+                self._write_table(
+                    name,
+                    {'file.format': 'row'},
+                    value_type=pa.int32(),
+                )
+                identifier = 'default.' + name
+                if evolution == 'rename':
+                    change = SchemaChange.rename_column(
+                        'attributes', 'renamed_attributes')
+                    projection = "renamed_attributes['first']"
+                else:
+                    change = SchemaChange.update_column_type(
+                        ['attributes', 'value'], AtomicType('BIGINT'))
+                    projection = "attributes['first']"
+                self.catalog.alter_table(identifier, [change], False)
+
+                result = self._read(
+                    self.catalog.get_table(identifier), [projection])
+
+                self.assertEqual(
+                    [10, None, None], result.column(0).to_pylist())
+                if evolution == 'value_type':
+                    self.assertEqual(pa.int64(), result.schema.field(0).type)
+
     def test_projects_map_key_with_row_tracking_fields(self):
         table = self._write_table('row_tracking_fields', {
             'row-tracking.enabled': 'true',

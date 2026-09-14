@@ -165,7 +165,11 @@ class DataFileBatchReader(RecordBatchReader):
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
-        self.data_field_map = {field.name: field for field in fields}
+        source_fields = (
+            file_data_fields if file_data_fields is not None else fields)
+        self._file_data_field_map = {
+            field.name: field for field in source_fields
+        }
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
@@ -228,6 +232,30 @@ class DataFileBatchReader(RecordBatchReader):
             names.append(target_field.name)
         return pa.RecordBatch.from_arrays(arrays, names=names)
 
+    def _assemble_selected_map_keys(
+            self, record_batch: RecordBatch) -> RecordBatch:
+        columns = list(record_batch.columns)
+        fields = list(record_batch.schema)
+        changed = False
+        for index, field in enumerate(fields):
+            data_field = self._file_data_field_map.get(field.name)
+            if (data_field is None
+                    or not is_map_selected_keys_field(data_field)
+                    or not pa.types.is_map(columns[index].type)):
+                continue
+            value_type = PyarrowFieldParser.from_paimon_type(
+                data_field.type.fields[0].type)
+            columns[index] = assemble_normal_map_selected_keys(
+                columns[index],
+                map_selected_keys(data_field.description),
+                value_type)
+            fields[index] = pa.field(
+                field.name, columns[index].type, nullable=field.nullable)
+            changed = True
+        if not changed:
+            return record_batch
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
+
     def _align_array_by_id(self, array, file_type, target_type):
         """Return *array* converted to *target_type*, matching ROW sub-fields by
         field id (reorder, pad missing with NULL, follow renames, cast changed
@@ -288,6 +316,7 @@ class DataFileBatchReader(RecordBatchReader):
             record_batch = self.format_reader.read_arrow_batch()
         if record_batch is None:
             return None
+        record_batch = self._assemble_selected_map_keys(record_batch)
         record_batch = self._normalize_batch(record_batch)
 
         if self.partition_info is None and self.index_mapping is None:
@@ -372,16 +401,6 @@ class DataFileBatchReader(RecordBatchReader):
         out_arrays = []
         out_fields = []
         for name, array in zip(names, arrays):
-            data_field = self.data_field_map.get(name)
-            if (data_field is not None
-                    and is_map_selected_keys_field(data_field)
-                    and pa.types.is_map(array.type)):
-                value_type = PyarrowFieldParser.from_paimon_type(
-                    data_field.type.fields[0].type)
-                array = assemble_normal_map_selected_keys(
-                    array,
-                    map_selected_keys(data_field.description),
-                    value_type)
             target_field = self.schema_map.get(name)
             if target_field is None:
                 target_field = pa.field(name, array.type)
