@@ -154,11 +154,15 @@ jobs:
               python -m pip install "./paimon-python[sql]"
             fi
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
-            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
-              # Vortex requires pyarrow >= 17, while Pypaimon recommends pyarrow < 20.
+            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
               python -m pip install vortex-data==0.70.0 pyarrow==18.1.0
+            elif python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"; then
+              python -m pip install vortex-data==0.70.0 pyarrow==23.0.0
             fi
             python -m pip install 'paimon-mosaic>=0.1.0'
+            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"; then
+              python -c "import pyarrow; assert pyarrow.__version__ == '23.0.0', pyarrow.__version__"
+            fi
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
               python -m pip check
             fi
