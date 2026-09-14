@@ -136,11 +136,10 @@ class FileIOTest(unittest.TestCase):
             # first key segment and corrupt the parent directory).
             mock_fs.create_dir.assert_not_called()
         else:
-            mock_fs.create_dir.assert_not_called()
             path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
-            mock_fs.open_output_stream.assert_any_call(
-                expected_parent + "/.paimon-dir-marker")
+            mock_fs.create_dir.assert_called_once_with(
+                expected_parent, recursive=True)
         if bucket_stripped:
             for call_paths in get_file_info_calls:
                 for p in call_paths:

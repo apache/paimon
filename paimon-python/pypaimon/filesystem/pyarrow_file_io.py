@@ -50,9 +50,6 @@ class LegacyOssDirectoryListingError(RuntimeError):
     """Raised when legacy PyArrow OSS cannot enumerate a directory."""
 
 
-_OSS_DIRECTORY_MARKER = ".paimon-dir-marker"
-
-
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
@@ -482,18 +479,14 @@ class PyArrowFileIO(FileIO):
     def _delete_oss_directory(self, path_str: str, recursive: bool) -> bool:
         if recursive and not self._pyarrow_gte_22:
             self.filesystem.delete_dir_contents(path_str)
+            self.filesystem.delete_dir(path_str)
             return True
 
         selector = pafs.FileSelector(
             path_str, recursive=recursive, allow_not_found=True)
         file_infos = self.filesystem.get_file_info(selector)
-        if not recursive:
-            contents = [
-                info for info in file_infos
-                if info.base_name != _OSS_DIRECTORY_MARKER
-            ]
-            if contents:
-                raise OSError(f"Directory {path_str} is not empty")
+        if not recursive and file_infos:
+            raise OSError(f"Directory {path_str} is not empty")
         files = [
             info.path for info in file_infos
             if info.type == pafs.FileType.File
@@ -533,13 +526,6 @@ class PyArrowFileIO(FileIO):
             # the parent directory; object stores need no directories. Only
             # validate that the real bucket exists.
             self._check_legacy_bucket_exists()
-            return True
-
-        if self._is_oss and not self._use_jindo:
-            # Preserve empty directories without create_dir's HeadBucket call.
-            marker_path = path_str.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
-            marker_stream = self.filesystem.open_output_stream(marker_path)
-            marker_stream.close()
             return True
 
         self.filesystem.create_dir(path_str, recursive=True)

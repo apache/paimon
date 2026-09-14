@@ -31,7 +31,6 @@ from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.pyarrow_file_io import (
     LegacyOssDirectoryListingError,
     PyArrowFileIO,
-    _OSS_DIRECTORY_MARKER,
 )
 
 
@@ -194,20 +193,15 @@ class OssLegacyModeTest(unittest.TestCase):
             file_io.mkdirs(TABLE_PATH)
         file_io.filesystem.create_dir.assert_not_called()
 
-    def test_modern_mkdirs_writes_marker_without_create_dir(self):
+    def test_modern_mkdirs_creates_directory(self):
         file_io = self._new_file_io(legacy=False)
         file_io.filesystem.get_file_info.return_value = [
             _file_info("test-bucket/db-uuid.db/tbl-uuid", pafs.FileType.NotFound)]
-        marker_stream = mock.Mock()
-        file_io.filesystem.open_output_stream.return_value = marker_stream
 
         self.assertTrue(file_io.mkdirs(TABLE_PATH))
 
-        file_io.filesystem.create_dir.assert_not_called()
-        file_io.filesystem.open_output_stream.assert_called_once_with(
-            file_io.to_filesystem_path(TABLE_PATH).rstrip("/")
-            + "/" + _OSS_DIRECTORY_MARKER)
-        marker_stream.close.assert_called_once_with()
+        file_io.filesystem.create_dir.assert_called_once_with(
+            file_io.to_filesystem_path(TABLE_PATH), recursive=True)
 
     def test_oss_initialization_disables_optional_checksum_trailers(self):
         options = Options({
@@ -228,13 +222,11 @@ class OssLegacyModeTest(unittest.TestCase):
         file_io = self._new_file_io(legacy=False)
         file_io._pyarrow_gte_22 = True
         directory = file_io.to_filesystem_path(TABLE_PATH)
-        marker = directory.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
         data_dir = directory.rstrip("/") + "/data"
         data_file = directory.rstrip("/") + "/data/data.parquet"
         file_io.filesystem.get_file_info.side_effect = [
             [_file_info(directory, pafs.FileType.Directory)],
             [
-                _file_info(marker, pafs.FileType.File),
                 _file_info(data_dir, pafs.FileType.Directory),
                 _file_info(data_file, pafs.FileType.File),
             ],
@@ -242,12 +234,7 @@ class OssLegacyModeTest(unittest.TestCase):
 
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
-        self.assertCountEqual(
-            [
-                mock.call(marker),
-                mock.call(data_file),
-            ],
-            file_io.filesystem.delete_file.call_args_list)
+        file_io.filesystem.delete_file.assert_called_once_with(data_file)
         file_io.filesystem.delete_dir_contents.assert_not_called()
         self.assertEqual(
             [mock.call(data_dir), mock.call(directory.rstrip("/"))],
@@ -264,22 +251,20 @@ class OssLegacyModeTest(unittest.TestCase):
         self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
 
         file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
+        file_io.filesystem.delete_dir.assert_called_once_with(directory)
         file_io.filesystem.delete_file.assert_not_called()
 
-    def test_modern_non_recursive_delete_removes_empty_marker(self):
+    def test_modern_non_recursive_delete_removes_empty_directory(self):
         file_io = self._new_file_io(legacy=False)
         directory = file_io.to_filesystem_path(TABLE_PATH)
-        marker = directory.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
         file_io.filesystem.get_file_info.side_effect = [
             [_file_info(directory, pafs.FileType.Directory)],
-            [_file_info(marker, pafs.FileType.File)],
+            [],
         ]
 
         self.assertTrue(file_io.delete(TABLE_PATH))
 
-        self.assertEqual(
-            [mock.call(marker)],
-            file_io.filesystem.delete_file.call_args_list)
+        file_io.filesystem.delete_file.assert_not_called()
         file_io.filesystem.delete_dir.assert_called_once_with(
             directory.rstrip("/"))
 
