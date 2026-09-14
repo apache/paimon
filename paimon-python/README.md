@@ -302,3 +302,16 @@ only support `seek` and `read` remain serialized. Workers are created lazily
 and released when the index reader closes; separate readers have separate
 budgets. This option controls index I/O, not shard search or native compute
 threads.
+
+
+# Vector fallback scoring and refinement
+
+Raw vector fallback and refinement score regular FLOAT vectors in bounded
+blocks using NumPy. List, large-list and fixed-size-list Arrow arrays are
+supported, including slices and multiple chunks. Null or unsupported blocks
+use the scalar path. Candidate filters are applied before scoring.
+
+L2 and cosine retain scalar accumulation order. Inner product retains Python
+`sum` semantics, including its behavior on newer Python versions. Existing
+Top-K tie-breaking rules are preserved. The same scoring path is used for raw and
+refined primary-key vector results.
