@@ -69,7 +69,8 @@ public class CompactManifestAction extends ActionBase implements LocalAction {
                         dryRun,
                         manifestSortEnabled,
                         manifestSortPartitionField,
-                        manifestSortMaxRewriteSize);
+                        manifestSortMaxRewriteSize,
+                        null);
         for (String result : results) {
             LOG.info(result);
         }

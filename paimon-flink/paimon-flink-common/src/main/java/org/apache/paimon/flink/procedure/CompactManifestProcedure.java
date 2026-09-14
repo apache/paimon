@@ -59,6 +59,10 @@ public class CompactManifestProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "manifest_sort_max_rewrite_size",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_order",
+                        type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
     public String[] call(
@@ -68,7 +72,8 @@ public class CompactManifestProcedure extends ProcedureBase {
             @Nullable Boolean dryRun,
             @Nullable Boolean manifestSortEnabled,
             @Nullable String manifestSortPartitionField,
-            @Nullable String manifestSortMaxRewriteSize)
+            @Nullable String manifestSortMaxRewriteSize,
+            @Nullable String manifestSortOrder)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -87,6 +92,21 @@ public class CompactManifestProcedure extends ProcedureBase {
         if (manifestSortMaxRewriteSize != null) {
             dynamicOptions.put(
                     CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), manifestSortMaxRewriteSize);
+        }
+        if (manifestSortOrder != null) {
+            if (Boolean.FALSE.equals(manifestSortEnabled)
+                    || "false"
+                            .equalsIgnoreCase(
+                                    dynamicOptions.get(CoreOptions.MANIFEST_SORT_ENABLED.key()))) {
+                throw new IllegalArgumentException(
+                        "'manifest_sort_order' cannot be used with 'manifest_sort_enabled=false'.");
+            }
+            CoreOptions.ManifestSortOrder order =
+                    CoreOptions.ManifestSortOrder.fromString(manifestSortOrder);
+            dynamicOptions.put(CoreOptions.MANIFEST_SORT_ORDER.key(), order.toString());
+            dynamicOptions.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.TRUE.toString());
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(), Boolean.TRUE.toString());
         }
 
         table = table.copy(dynamicOptions);

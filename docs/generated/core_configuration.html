@@ -1066,6 +1066,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.force-rewrite</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When 'manifest-sort.enabled' is true, force an explicit manifest compaction to rewrite already compacted manifest runs using the configured manifest sort order. The existing 'manifest-sort.max-rewrite-size' rewrite budget semantics still apply. This should be supplied as a one-shot dynamic option for maintenance, not persisted for routine writes.</td>
+        </tr>
+        <tr>
             <td><h5>manifest-sort.max-rewrite-size</h5></td>
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>

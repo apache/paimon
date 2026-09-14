@@ -126,6 +126,16 @@ Compact manifest files.
 - `manifest_sort_enabled` (`BOOLEAN`, optional): whether to use manifest sort rewrite for this invocation.
 - `manifest_sort_partition_field` (`STRING`, optional): partition field used to sort manifest entries. Defaults to the first partition field.
 - `manifest_sort_max_rewrite_size` (`STRING`, optional): maximum manifest size rewritten by one sort pass.
+- `manifest_sort_order` (`STRING`, optional): target layout for a one-shot rewrite. Supported values are `bucket-first` and `partition-first`. Setting it enables manifest sort and forces existing manifests to be rewritten. `bucket-first` requires a bucketed table, and explicit sort orders are not supported for data evolution tables.
+
+When `manifest_sort_order` is omitted, the existing layout selection remains unchanged: bucketed
+tables use bucket-first, non-bucket tables use partition-first, and data evolution tables use RowID
+sorting when RowID metadata is available.
+
+Set `manifest-sort.force-rewrite=true` in `options` together with `manifest_sort_enabled=true` to
+rewrite already compacted manifest runs using the current sort order. Use it only as a one-shot
+dynamic option. The existing `manifest_sort_max_rewrite_size` rewrite budget semantics still apply;
+raise it to migrate more manifests in one invocation.
 
 ```sql
 CALL sys.compact_manifest(`table` => 'default.T');
@@ -136,6 +146,19 @@ CALL sys.compact_manifest(
   `table` => 'default.T',
   manifest_sort_enabled => true,
   manifest_sort_partition_field => 'dt',
+  manifest_sort_max_rewrite_size => '1 gb'
+);
+
+CALL sys.compact_manifest(
+  `table` => 'default.T',
+  manifest_sort_order => 'partition-first',
+  manifest_sort_max_rewrite_size => '1 gb'
+);
+
+-- Switch the same bucketed table back to bucket-first layout.
+CALL sys.compact_manifest(
+  `table` => 'default.T',
+  manifest_sort_order => 'bucket-first',
   manifest_sort_max_rewrite_size => '1 gb'
 );
 ```

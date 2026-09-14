@@ -69,7 +69,8 @@ class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
           "dry_run => true, " +
           "manifest_sort_enabled => true, " +
           "manifest_sort_partition_field => 'dt', " +
-          "manifest_sort_max_rewrite_size => '1gb')")
+          "manifest_sort_max_rewrite_size => '1gb', " +
+          "manifest_sort_order => 'partition-first')")
       .collectAsList()
     Assertions.assertThat(dryRunRows.get(0).getBoolean(0)).isTrue
 

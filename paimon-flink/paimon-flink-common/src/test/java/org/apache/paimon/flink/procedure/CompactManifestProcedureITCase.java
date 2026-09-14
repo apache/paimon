@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.CompactManifestAction;
@@ -123,6 +124,24 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         sql(procedure);
         Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
                 .isEqualTo(compactSnapshotId);
+
+        String forceRewriteProcedure =
+                "CALL sys.compact_manifest("
+                        + "`table` => 'default.T_SORT', "
+                        + "`manifest_sort_partition_field` => 'dt', "
+                        + "`manifest_sort_max_rewrite_size` => '1 gb', "
+                        + "`manifest_sort_order` => 'partition-first')";
+        sql(forceRewriteProcedure);
+        long forceRewriteSnapshotId = table.snapshotManager().latestSnapshot().id();
+        Assertions.assertThat(forceRewriteSnapshotId).isEqualTo(compactSnapshotId + 1);
+        Assertions.assertThat(paimonTable("T_SORT").options())
+                .doesNotContainKeys(
+                        CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(),
+                        CoreOptions.MANIFEST_SORT_ORDER.key());
+
+        sql(procedure);
+        Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
+                .isEqualTo(forceRewriteSnapshotId);
     }
 
     @Test
@@ -141,6 +160,25 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                                 + "`manifest_sort_partition_field` => 'missing')"))
                 .hasStackTraceContaining(
                         "'manifest-sort.partition-field' = 'missing' is not a partition field");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.compact_manifest("
+                                                + "`table` => 'default.T_INVALID', "
+                                                + "`manifest_sort_order` => 'unknown')"))
+                .hasStackTraceContaining(
+                        "Unsupported manifest sort order 'unknown'. Supported values are 'bucket-first' and 'partition-first'.");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.compact_manifest("
+                                                + "`table` => 'default.T_INVALID', "
+                                                + "`manifest_sort_enabled` => false, "
+                                                + "`manifest_sort_order` => 'partition-first')"))
+                .hasStackTraceContaining(
+                        "'manifest_sort_order' cannot be used with 'manifest_sort_enabled=false'.");
     }
 
     @Test
