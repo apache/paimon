@@ -976,6 +976,175 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testStringToArrayQuotingAndEscaping() {
+        ArrayType arrayType = new ArrayType(DataTypes.STRING());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // quotes group a token across the separator and do not survive into the value
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[\"a,b\", c]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("a,b"), BinaryString.fromString("c")
+                        }));
+
+        // quoting is how an empty string is written, so the element must be kept
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[\"\", a]"),
+                new GenericArray(
+                        new Object[] {BinaryString.fromString(""), BinaryString.fromString("a")}));
+
+        // an unquoted null is the null element; a quoted one is the four-character string
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[null, \"null\"]"),
+                new GenericArray(new Object[] {null, BinaryString.fromString("null")}));
+
+        // a backslash escapes the next character and is itself syntax
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[a\\,b, c]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("a,b"), BinaryString.fromString("c")
+                        }));
+    }
+
+    @Test
+    public void testStringToRowQuotingAndEscaping() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.STRING()),
+                        DataTypes.FIELD(1, "f1", DataTypes.INT()));
+        CastExecutor<BinaryString, InternalRow> cast =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{\"a,b\", 2}"),
+                GenericRow.of(BinaryString.fromString("a,b"), 2));
+
+        // an empty quoted field stays a field, so the field count still matches
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{\"\", 2}"),
+                GenericRow.of(BinaryString.fromString(""), 2));
+
+        // a quoted null is the string, an unquoted one is SQL NULL
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{\"null\", 2}"),
+                GenericRow.of(BinaryString.fromString("null"), 2));
+        compareCastResult(cast, BinaryString.fromString("{null, 2}"), GenericRow.of(null, 2));
+
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{a\\,b, 2}"),
+                GenericRow.of(BinaryString.fromString("a,b"), 2));
+    }
+
+    @Test
+    public void testStringToNestedArrayKeepsInnerSyntax() {
+        // quotes and escapes belong to whichever level wrote them: the outer split must leave a
+        // nested literal's own syntax in place for the element rule to parse again, or the inner
+        // separator stops being protected and the element count changes
+        ArrayType nested = new ArrayType(new ArrayType(DataTypes.STRING()));
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, nested);
+
+        assertNestedElements(cast, "[[\"a,b\"], [c]]", new String[] {"a,b"}, new String[] {"c"});
+        assertNestedElements(cast, "[[a\\,b], [c]]", new String[] {"a,b"}, new String[] {"c"});
+        assertNestedElements(cast, "[[\"null\"], [a]]", new String[] {"null"}, new String[] {"a"});
+        assertNestedElements(cast, "[[\"\"], [a]]", new String[] {""}, new String[] {"a"});
+        assertNestedElements(cast, "[[\" a \"], [b]]", new String[] {" a "}, new String[] {"b"});
+        assertNestedElements(cast, "[[1, 2], [3]]", new String[] {"1", "2"}, new String[] {"3"});
+    }
+
+    private static void assertNestedElements(
+            CastExecutor<BinaryString, InternalArray> cast, String literal, String[]... expected) {
+        InternalArray outer = cast.cast(BinaryString.fromString(literal));
+        assertThat(outer.size()).as("outer size of %s", literal).isEqualTo(expected.length);
+        for (int i = 0; i < expected.length; i++) {
+            InternalArray inner = outer.getArray(i);
+            assertThat(inner.size())
+                    .as("inner size of %s at %s", literal, i)
+                    .isEqualTo(expected[i].length);
+            for (int j = 0; j < expected[i].length; j++) {
+                assertThat(inner.getString(j).toString())
+                        .as("element %s.%s of %s", i, j, literal)
+                        .isEqualTo(expected[i][j]);
+            }
+        }
+    }
+
+    @Test
+    public void testStringToArrayEscapedNullIsALiteral() {
+        ArrayType arrayType = new ArrayType(DataTypes.STRING());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // escaping, like quoting, says the token is written text rather than the null literal
+        compareCastResult(
+                cast,
+                BinaryString.fromString("[\\null, x]"),
+                new GenericArray(
+                        new Object[] {
+                            BinaryString.fromString("null"), BinaryString.fromString("x")
+                        }));
+    }
+
+    @Test
+    public void testStringToRowWhitespaceOnlyFieldIsNotAField() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "f0", DataTypes.STRING()),
+                        DataTypes.FIELD(1, "f1", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "f2", DataTypes.STRING()));
+        CastExecutor<BinaryString, InternalRow> cast =
+                (CastExecutor<BinaryString, InternalRow>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, rowType);
+
+        // whitespace is not part of a token, so a field made only of whitespace was never
+        // written, and where it sits does not change that
+        for (String literal : new String[] {"{a,  ,b}", "{ ,a,b}", "{a,b, }"}) {
+            assertThatThrownBy(() -> cast.cast(BinaryString.fromString(literal)))
+                    .as("%s", literal)
+                    .hasMessageContaining("Row field count mismatch. Expected: 3, Actual: 2");
+        }
+
+        // quoting is how an empty field is written
+        compareCastResult(
+                cast,
+                BinaryString.fromString("{a, \"\", b}"),
+                GenericRow.of(
+                        BinaryString.fromString("a"),
+                        BinaryString.fromString(""),
+                        BinaryString.fromString("b")));
+    }
+
+    @Test
+    public void testStringToArraySkipsAnEmptyElement() {
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        CastExecutor<BinaryString, InternalArray> cast =
+                (CastExecutor<BinaryString, InternalArray>)
+                        CastExecutors.resolve(VarCharType.STRING_TYPE, arrayType);
+
+        // an element written as nothing, with or without whitespace, is no element: handing the
+        // empty string to the int cast instead would fail the whole array
+        compareCastResult(
+                cast, BinaryString.fromString("[1,,3]"), new GenericArray(new Integer[] {1, 3}));
+        compareCastResult(
+                cast, BinaryString.fromString("[1, , 3]"), new GenericArray(new Integer[] {1, 3}));
+    }
+
+    @Test
     public void testSplitMapEntriesWithQuotes() {
         String content = "1, \"abc\"";
         List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);
