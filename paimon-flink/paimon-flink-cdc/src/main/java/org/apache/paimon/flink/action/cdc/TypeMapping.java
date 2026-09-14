@@ -50,7 +50,7 @@ public class TypeMapping implements Serializable {
         Set<TypeMappingMode> typeMappingModes =
                 Arrays.stream(rawOptions)
                         .map(String::trim)
-                        .map(String::toLowerCase)
+                        .map(s -> s.toLowerCase(Locale.ROOT))
                         .map(TypeMappingMode::mode)
                         .collect(Collectors.toSet());
         return new TypeMapping(typeMappingModes);

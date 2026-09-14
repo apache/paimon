@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -118,7 +119,7 @@ public class CdcActionCommonUtils {
     public static List<String> listCaseConvert(List<String> origin, boolean caseSensitive) {
         return caseSensitive
                 ? origin
-                : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
+                : origin.stream().map(s -> s.toLowerCase(Locale.ROOT)).collect(Collectors.toList());
     }
 
     public static Schema buildPaimonSchema(

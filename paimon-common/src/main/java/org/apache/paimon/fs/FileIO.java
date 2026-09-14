@@ -557,7 +557,7 @@ public interface FileIO extends Serializable, Closeable {
         if (loader != null) {
             Set<String> options =
                     config.options().keySet().stream()
-                            .map(String::toLowerCase)
+                            .map(s -> s.toLowerCase(Locale.ROOT))
                             .collect(Collectors.toSet());
             Set<String> missOptions = new HashSet<>();
             for (String[] keys : loader.requiredOptions()) {

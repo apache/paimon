@@ -136,7 +136,7 @@ public class PaimonMetaHook implements HiveMetaHook {
             List<String> partitionKeys =
                     table.getPartitionKeys().stream()
                             .map(FieldSchema::getName)
-                            .map(String::toLowerCase)
+                            .map(s -> s.toLowerCase(Locale.ROOT))
                             .collect(Collectors.toList());
             schemaBuilder.partitionKeys(partitionKeys);
         }
