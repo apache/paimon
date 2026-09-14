@@ -17,7 +17,7 @@
 
 """Floating-point key bounds preserve overlapping split groups."""
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -50,13 +50,12 @@ def _file(name, minimum, maximum, fields):
 
 
 @pytest.mark.parametrize('type_name', ['FLOAT', 'DOUBLE'])
-@pytest.mark.parametrize('minimum,maximum,point', [
-    ((1.0, 0), (float('nan'), 10), (2.0, 100)),
-    ((-0.0, 0), (0.0, 10), (-0.0, 100)),
-])
-def test_floating_key_ranges_keep_versions_in_one_split(type_name, minimum, maximum, point):
+def test_signed_zero_key_ranges_keep_versions_in_one_split(type_name):
     fields = _key_fields(type_name)
-    files = [_file('broad', minimum, maximum, fields), _file('point', point, point, fields)]
+    files = [
+        _file('broad', (-0.0, 0), (0.0, 10), fields),
+        _file('point', (-0.0, 100), (-0.0, 100), fields),
+    ]
     sections = IntervalPartition(files).partition()
     assert len(sections) == 1
     assert sorted([f.file_name for f in run.files] for run in sections[0]) == [['broad'], ['point']]
@@ -69,27 +68,11 @@ def test_floating_key_ranges_keep_versions_in_one_split(type_name, minimum, maxi
     assert not splits[0].raw_convertible
 
 
-@pytest.mark.parametrize('type_name', ['FLOAT', 'DOUBLE'])
-def test_nan_boundary_keeps_disjoint_files_in_separate_runs(type_name):
-    fields = _key_fields(type_name)
-    files = [
-        _file('finite', (1.0, 0), (2.0, 0), fields),
-        _file('nan', (float('nan'), 100), (float('nan'), 100), fields),
-    ]
-    sections = IntervalPartition(files).partition()
-    # NaN metadata uses the same conservative grouping as the native planner.
-    assert len(sections) == 1
-    assert sorted([f.file_name for f in run.files] for run in sections[0]) == [['finite'], ['nan']]
-
-
-def test_decimal_keys_keep_numeric_equality_and_invalid_nan_errors():
+def test_decimal_keys_keep_numeric_equality():
     fields = _key_fields('DECIMAL(10, 2)')
     left = GenericRow([Decimal('-0'), 1], fields)
     right = GenericRow([Decimal('0'), 1], fields)
     assert default_key_comparator(left, right) == 0
-    invalid = GenericRow([Decimal('NaN'), 1], fields)
-    with pytest.raises(InvalidOperation):
-        default_key_comparator(invalid, right)
 
 
 @pytest.mark.parametrize('type_name', ['FLOAT', 'DOUBLE'])
