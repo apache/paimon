@@ -355,6 +355,37 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testModifyColumnTypeFromTimestampToBoundedString() {
+        // a bounded CHAR/VARCHAR target has to resolve to the same rule, then trim or pad
+        sql(
+                "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), d DATE, f TIME, g TIMESTAMP(3) WITH LOCAL TIME ZONE)");
+        sql(
+                "INSERT INTO T VALUES('paimon', TIMESTAMP '2023-06-06 12:00:00', DATE '2023-05-31', TIME '14:30:00', TO_TIMESTAMP_LTZ(4001, 3))");
+
+        sql("ALTER TABLE T MODIFY (b VARCHAR(10), d CHAR(12), f VARCHAR(5), g VARCHAR(10))");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(10),\n"
+                                + "  `d` CHAR(12),\n"
+                                + "  `f` VARCHAR(5),\n"
+                                + "  `g` VARCHAR(10),");
+        String localZoned =
+                DateTimeUtils.formatTimestamp(
+                        DateTimeUtils.parseTimestampData("1970-01-01 00:00:04.001", 3),
+                        TimeZone.getDefault(),
+                        3);
+        result = sql("SELECT * FROM T");
+        assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactly(
+                        "+I[paimon, 2023-06-06, 2023-05-31  , 14:30, "
+                                + localZoned.substring(0, 10)
+                                + "]");
+    }
+
+    @Test
     public void testModifyColumnTypeFromStringToString() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d CHAR(5), e CHAR(5))");
         sql("INSERT INTO T VALUES('paimon', '1234567890', '12345', '12345')");

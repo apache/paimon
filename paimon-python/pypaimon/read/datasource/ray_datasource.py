@@ -127,11 +127,15 @@ class RayDatasource(Datasource):
         nested_name_paths = self._split_provider.nested_name_paths()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
+        include_row_kind = self._split_provider.include_row_kind()
         if not splits:
             return []
 
         if self._schema is None:
             self._schema = PyarrowFieldParser.from_paimon_schema(read_type)
+            if include_row_kind:
+                from pypaimon.read.table_read import TableRead
+                self._schema = TableRead._add_row_kind_to_schema(self._schema)
         schema = self._schema
 
         if parallelism > len(splits):
@@ -150,6 +154,7 @@ class RayDatasource(Datasource):
                 schema=schema,
                 limit=limit,
                 nested_name_paths=nested_name_paths,
+                include_row_kind=include_row_kind,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
@@ -159,7 +164,8 @@ class RayDatasource(Datasource):
             # columns and reads every projected leaf as NULL.
             worker_table_read = TableRead(
                 table, predicate, read_type, limit=limit,
-                nested_name_paths=nested_name_paths)
+                nested_name_paths=nested_name_paths,
+                include_row_kind=include_row_kind)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
             has_data = False
@@ -187,6 +193,7 @@ class RayDatasource(Datasource):
             schema=schema,
             limit=limit,
             nested_name_paths=nested_name_paths,
+            include_row_kind=include_row_kind,
         )
 
         read_tasks = []

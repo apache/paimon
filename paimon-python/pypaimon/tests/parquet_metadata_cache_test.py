@@ -230,7 +230,9 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
     def test_does_not_retain_entry_larger_than_size_limit(self):
         cache = reader_module._FileFormatDatasetCache(5)
         loads = []
+        small_key = (None, "parquet", "small")
         key = (None, "parquet", "large")
+        cache.get_or_load(small_key, lambda: "small", lambda _: 4)
 
         def load():
             loads.append(True)
@@ -241,8 +243,8 @@ class FileFormatMetadataCacheTest(unittest.TestCase):
         self.assertEqual(
             "large", cache.get_or_load(key, load, lambda _: 6))
         self.assertEqual(2, len(loads))
-        self.assertEqual(0, len(cache._entries))
-        self.assertEqual(0, cache.estimated_size)
+        self.assertEqual([small_key], list(cache._entries))
+        self.assertEqual(4, cache.estimated_size)
 
     def test_does_not_retain_entry_without_size_estimate(self):
         cache = reader_module._FileFormatDatasetCache(10)

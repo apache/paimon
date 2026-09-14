@@ -195,21 +195,23 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testStaticOverwriteRejectsCustomLocationBeforeDeletingOldData() throws Exception {
+    void testStaticOverwriteResetsCustomLocationWithoutDeletingExternalData() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "overwrite-custom-location");
         Map<String, String> spec = Collections.singletonMap("part", "external");
         Path oldData = new Path(tablePath, "part=external/data-old.csv");
+        Path customLocation =
+                new Path(new Path(tempDir.toUri()), "overwrite-custom-storage/part=external");
+        Path customData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(oldData, "old", false);
+        fileIO.writeFile(customData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitionsByNames(Collections.singletonList(spec)))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/part=external")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/part=external")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -226,29 +228,28 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
-                .isInstanceOf(RuntimeException.class)
-                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage(
-                        "Overwriting catalog-managed Format Table partition {part=external} with "
-                                + "custom location 'file:/external/part=external' is not "
-                                + "supported.");
+        commit.commit(Collections.emptyList());
 
-        assertThat(fileIO.exists(oldData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(oldData)).isFalse();
+        assertThat(fileIO.exists(customData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
-    void testStaticOverwriteRejectsCustomLocationInsideTableRoot() throws Exception {
+    void testStaticOverwriteDoesNotReadUnrelatedRegistryRows() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "overwrite-future-default-location");
         Map<String, String> customSpec = Collections.singletonMap("part", "external");
         Map<String, String> targetSpec = Collections.singletonMap("part", "future");
         Path targetPartitionPath = new Path(tablePath, "part=future");
-        Path customData = new Path(targetPartitionPath, "data-custom.csv");
+        Path oldData = new Path(targetPartitionPath, "data-old.csv");
+        Path customLocation = new Path(tablePath, "unrelated-custom-location");
+        Path customData = new Path(customLocation, "data-custom.csv");
+        fileIO.writeFile(oldData, "old", false);
         fileIO.writeFile(customData, "custom", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitionsByNames(Collections.singletonList(targetSpec)))
@@ -256,7 +257,7 @@ class FormatTableCommitTest {
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Collections.singletonList(
-                                partitionAt(customSpec, targetPartitionPath.toString())));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -273,23 +274,19 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        Throwable failure = catchThrowable(() -> commit.commit(Collections.emptyList()));
-        assertThat(failure).isInstanceOf(RuntimeException.class);
-        assertThat(failure.getCause())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{part=external} of Format Table location_db.location_table.");
+        commit.commit(Collections.emptyList());
 
+        assertThat(fileIO.exists(oldData)).isFalse();
         assertThat(fileIO.exists(customData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
-    void testAppendRejectsCustomLocationInsideTableRoot() throws Exception {
+    void testAppendReadsOnlyWrittenPartitionNames() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "append-future-default-location");
         Map<String, String> customSpec = Collections.singletonMap("part", "external");
@@ -323,31 +320,23 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        Throwable failure =
-                catchThrowable(
-                        () ->
-                                commit.commit(
-                                        Collections.singletonList(
-                                                new TwoPhaseCommitMessage(committer))));
-        assertThat(failure).isInstanceOf(RuntimeException.class);
-        assertThat(failure.getCause())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{part=external} of Format Table location_db.location_table.");
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
         assertThat(fileIO.exists(customData)).isTrue();
         assertThat(fileIO.exists(targetPath)).isFalse();
         assertThat(fileIO.deleteCalls()).isZero();
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(committer, never()).commit(fileIO);
-        verify(committer, never()).clean(fileIO);
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(committer).commit(fileIO);
+        verify(committer).clean(fileIO);
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager).createPartitions(Collections.singletonList(targetSpec), true);
+        verify(partitionManager)
+                .createPartitions(anyList(), eq(true), anyList(), eq(false), isNull());
     }
 
     @Test
-    void testAppendWithEmptyMessagesRejectsCustomLocationInsideStaticPrefix() throws Exception {
+    void testAppendWithEmptyMessagesDoesNotReadPartitionRegistry() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "append-partial-static-owned-prefix");
         Map<String, String> staticPrefix = Collections.singletonMap("year", "2025");
@@ -374,19 +363,12 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        Throwable failure = catchThrowable(() -> commit.commit(Collections.emptyList()));
-        assertThat(failure).isInstanceOf(RuntimeException.class);
-        assertThat(failure.getCause())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{year=2024, month=11} of Format Table "
-                                + "location_db.location_table.");
+        commit.commit(Collections.emptyList());
 
-        assertThat(fileIO.exists(staticPrefixPath)).isFalse();
+        assertThat(fileIO.exists(staticPrefixPath)).isTrue();
         assertThat(fileIO.deleteCalls()).isZero();
-        assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        assertThat(fileIO.mkdirsCalls()).isEqualTo(1);
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).listPartitions(staticPrefix, null);
         verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never()).createPartitions(anyList(), anyBoolean());
@@ -395,23 +377,25 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testDynamicOverwriteRejectsAffectedCustomLocationBeforeReplacingData() throws Exception {
+    void testDynamicOverwriteResetsCustomLocationWithoutDeletingExternalData() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "dynamic-overwrite-custom-location");
         Map<String, String> spec = Collections.singletonMap("part", "external");
         Path oldData = new Path(tablePath, "part=external/data-old.csv");
+        Path customLocation =
+                new Path(new Path(tempDir.toUri()), "dynamic-custom-storage/part=external");
+        Path customData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(oldData, "old", false);
+        fileIO.writeFile(customData, "external", false);
         TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
         when(committer.targetPath()).thenReturn(new Path(tablePath, "part=external/data-new.csv"));
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitionsByNames(Collections.singletonList(spec)))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/part=external")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/part=external")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -428,37 +412,32 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(
-                        () ->
-                                commit.commit(
-                                        Collections.singletonList(
-                                                new TwoPhaseCommitMessage(committer))))
-                .isInstanceOf(RuntimeException.class)
-                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage(
-                        "Overwriting catalog-managed Format Table partition {part=external} with "
-                                + "custom location 'file:/external/part=external' is not "
-                                + "supported.");
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
-        assertThat(fileIO.exists(oldData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(oldData)).isFalse();
+        assertThat(fileIO.exists(customData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(committer, never()).commit(fileIO);
-        verify(committer, never()).clean(fileIO);
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(committer).commit(fileIO);
+        verify(committer).clean(fileIO);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
-    void testDynamicOverwriteRejectsCustomLocationInsideTableRoot() throws Exception {
+    void testDynamicOverwriteDoesNotReadUnrelatedRegistryRows() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath =
                 new Path(new Path(tempDir.toUri()), "dynamic-overwrite-future-default-location");
         Map<String, String> customSpec = Collections.singletonMap("part", "external");
         Map<String, String> targetSpec = Collections.singletonMap("part", "future");
         Path targetPartitionPath = new Path(tablePath, "part=future");
-        Path customData = new Path(targetPartitionPath, "data-custom.csv");
+        Path oldData = new Path(targetPartitionPath, "data-old.csv");
+        Path customLocation = new Path(tablePath, "unrelated-custom-location");
+        Path customData = new Path(customLocation, "data-custom.csv");
         Path targetPath = new Path(targetPartitionPath, "data-new.csv");
+        fileIO.writeFile(oldData, "old", false);
         fileIO.writeFile(customData, "custom", false);
         TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
         when(committer.targetPath()).thenReturn(targetPath);
@@ -468,7 +447,7 @@ class FormatTableCommitTest {
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Collections.singletonList(
-                                partitionAt(customSpec, targetPartitionPath.toString())));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -485,31 +464,22 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        Throwable failure =
-                catchThrowable(
-                        () ->
-                                commit.commit(
-                                        Collections.singletonList(
-                                                new TwoPhaseCommitMessage(committer))));
-        assertThat(failure).isInstanceOf(RuntimeException.class);
-        assertThat(failure.getCause())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{part=external} of Format Table location_db.location_table.");
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
+        assertThat(fileIO.exists(oldData)).isFalse();
         assertThat(fileIO.exists(customData)).isTrue();
         assertThat(fileIO.exists(targetPath)).isFalse();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(committer, never()).commit(fileIO);
-        verify(committer, never()).clean(fileIO);
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(committer).commit(fileIO);
+        verify(committer).clean(fileIO);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
-    void testStaticPrefixOverwriteRejectsCustomDescendantBeforeDeletingAnyPartition()
+    void testStaticPrefixOverwriteResetsEveryDescendantWithoutDeletingExternalData()
             throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "prefix-overwrite-custom-location");
@@ -517,20 +487,24 @@ class FormatTableCommitTest {
         Map<String, String> defaultSpec = partitionSpec("2025", "10");
         Map<String, String> customSpec = partitionSpec("2025", "11");
         Path defaultData = new Path(tablePath, "year=2025/month=10/data-old.csv");
-        Path customResidue = new Path(tablePath, "year=2025/month=11/data-old.csv");
+        Path customDefaultData = new Path(tablePath, "year=2025/month=11/data-old.csv");
+        Path customLocation =
+                new Path(new Path(tempDir.toUri()), "prefix-custom-storage/year=2025/month=11");
+        Path externalData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(defaultData, "default", false);
-        fileIO.writeFile(customResidue, "residue", false);
+        fileIO.writeFile(customDefaultData, "old", false);
+        fileIO.writeFile(externalData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitions(prefix, null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(defaultSpec, null),
-                                partitionAt(customSpec, "file:/external/year=2025/month=11")));
+                                partitionAt(customSpec, customLocation.toString())));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(defaultSpec, null),
-                                partitionAt(customSpec, "file:/external/year=2025/month=11")));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -547,24 +521,22 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
-                .isInstanceOf(RuntimeException.class)
-                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage(
-                        "Overwriting catalog-managed Format Table partition "
-                                + "{year=2025, month=11} with custom location "
-                                + "'file:/external/year=2025/month=11' is not supported.");
+        commit.commit(Collections.emptyList());
 
-        assertThat(fileIO.exists(defaultData)).isTrue();
-        assertThat(fileIO.exists(customResidue)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(defaultData)).isFalse();
+        assertThat(fileIO.exists(customDefaultData)).isFalse();
+        assertThat(fileIO.exists(externalData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(2);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitions(prefix, null);
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
-    void testStaticPrefixOverwriteRejectsCustomLocationInsideTableRoot() throws Exception {
+    void testStaticPrefixOverwriteDoesNotReadUnrelatedRegistryRows() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath =
                 new Path(new Path(tempDir.toUri()), "prefix-overwrite-future-default-location");
@@ -596,20 +568,16 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true);
         fileIO.startTrackingMutations();
 
-        Throwable failure = catchThrowable(() -> commit.commit(Collections.emptyList()));
-        assertThat(failure).isInstanceOf(RuntimeException.class);
-        assertThat(failure.getCause())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{year=2024, month=external} of Format Table "
-                                + "location_db.location_table.");
+        commit.commit(Collections.emptyList());
 
         assertThat(fileIO.exists(customData)).isTrue();
         assertThat(fileIO.deleteCalls()).isZero();
         assertThat(fileIO.mkdirsCalls()).isZero();
+        verify(partitionManager).listPartitions(prefix, null);
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
         verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), anyList());
     }
 
     @Test
@@ -647,26 +615,31 @@ class FormatTableCommitTest {
 
         assertThat(fileIO.exists(oldData)).isFalse();
         assertThat(fileIO.exists(new Path(tablePath, "part=default"))).isTrue();
-        verify(partitionManager)
-                .createPartitions(anyList(), eq(true), anyList(), eq(true), isNull());
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
-    void testWholeTableOverwriteRejectsCustomLocationBeforeDeletingAnyPartition() throws Exception {
+    void testWholeTableOverwriteResetsAllLocationsWithoutDeletingExternalData() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "whole-overwrite-custom-location");
         Map<String, String> defaultSpec = Collections.singletonMap("part", "default");
         Map<String, String> customSpec = Collections.singletonMap("part", "external");
         Path defaultData = new Path(tablePath, "part=default/data-old.csv");
-        Path customResidue = new Path(tablePath, "part=external/data-old.csv");
+        Path customDefaultData = new Path(tablePath, "part=external/data-old.csv");
+        Path customLocation =
+                new Path(new Path(tempDir.toUri()), "whole-custom-storage/part=external");
+        Path externalData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(defaultData, "default", false);
-        fileIO.writeFile(customResidue, "residue", false);
+        fileIO.writeFile(customDefaultData, "old", false);
+        fileIO.writeFile(externalData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(defaultSpec, null),
-                                partitionAt(customSpec, "file:/external/part=external")));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -683,20 +656,17 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ false);
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
-                .isInstanceOf(RuntimeException.class)
-                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage(
-                        "Overwriting catalog-managed Format Table partition {part=external} with "
-                                + "custom location 'file:/external/part=external' is not "
-                                + "supported.");
+        commit.commit(Collections.emptyList());
 
-        assertThat(fileIO.exists(defaultData)).isTrue();
-        assertThat(fileIO.exists(customResidue)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(defaultData)).isFalse();
+        assertThat(fileIO.exists(customDefaultData)).isFalse();
+        assertThat(fileIO.exists(externalData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(2);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
@@ -1449,33 +1419,33 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testTruncateTableRejectsCustomLocationBeforeDeletingOrReporting() throws Exception {
+    void testTruncateTableResetsCustomLocationWithoutDeletingExternalData() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-custom-location");
         Map<String, String> spec = Collections.singletonMap("part", "external");
         Path defaultData = new Path(tablePath, "part=external/data-old.csv");
+        Path customLocation =
+                new Path(new Path(tempDir.toUri()), "truncate-custom-storage/part=external");
+        Path externalData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(defaultData, "old", false);
+        fileIO.writeFile(externalData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/part=external")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         FormatTableCommit commit =
                 truncatingCommit(tablePath, fileIO, false, partitionManager, "part");
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(commit::truncateTable)
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Truncating catalog-managed Format Table partition {part=external} with "
-                                + "custom location 'file:/external/part=external' is not "
-                                + "supported.");
+        commit.truncateTable();
 
-        assertThat(fileIO.exists(defaultData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(defaultData)).isFalse();
+        assertThat(fileIO.exists(externalData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
@@ -1564,43 +1534,43 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testTruncateNamedPartitionRejectsCustomLocationBeforeDeletingOrReporting()
+    void testTruncateNamedPartitionResetsCustomLocationWithoutDeletingExternalData()
             throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-named-custom-location");
         Map<String, String> spec = partitionSpec("2025", "10");
         Path defaultData = new Path(tablePath, "year=2025/month=10/data-old.csv");
+        Path customLocation =
+                new Path(
+                        new Path(tempDir.toUri()),
+                        "truncate-named-custom-storage/year=2025/month=10");
+        Path externalData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(defaultData, "old", false);
+        fileIO.writeFile(externalData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitionsByNames(Collections.singletonList(spec)))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/year=2025/month=10")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
-                        Collections.singletonList(
-                                partitionAt(spec, "file:/external/year=2025/month=10")));
+                        Collections.singletonList(partitionAt(spec, customLocation.toString())));
         FormatTableCommit commit =
                 truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.truncatePartitions(Collections.singletonList(spec)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Truncating catalog-managed Format Table partition "
-                                + "{year=2025, month=10} with custom location "
-                                + "'file:/external/year=2025/month=10' is not supported.");
+        commit.truncatePartitions(Collections.singletonList(spec));
 
-        assertThat(fileIO.exists(defaultData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(defaultData)).isFalse();
+        assertThat(fileIO.exists(externalData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(spec));
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(spec));
     }
 
     @Test
-    void testTruncateNamedPartitionRejectsIncompleteSpecFromFullRegistryBeforeMutation()
-            throws Exception {
+    void testTruncateNamedPartitionDoesNotReadFullRegistry() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-named-incomplete-spec");
         Map<String, String> targetSpec = partitionSpec("2025", "10");
@@ -1608,104 +1578,104 @@ class FormatTableCommitTest {
         Path oldData = new Path(tablePath, "year=2025/month=10/data-old.csv");
         fileIO.writeFile(oldData, "old", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        when(partitionManager.listPartitionsByNames(Collections.singletonList(targetSpec)))
+                .thenReturn(Collections.singletonList(partitionAt(targetSpec, null)));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(Collections.singletonList(partitionAt(incompleteSpec, null)));
         FormatTableCommit commit =
                 truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.truncatePartitions(Collections.singletonList(targetSpec)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned incomplete partition spec {year=2025} for Format Table "
-                                + "truncate_db.truncate_table.");
+        commit.truncatePartitions(Collections.singletonList(targetSpec));
 
-        assertThat(fileIO.exists(oldData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(oldData)).isFalse();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
         verify(partitionManager, never()).createPartitions(anyList(), anyBoolean());
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
-    void testTruncateNamedPartitionRejectsCustomLocationInsideTableRootBeforeMutation()
-            throws Exception {
+    void testTruncateNamedPartitionLeavesUnrelatedCustomLocationUntouched() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-named-overlapping-location");
         Map<String, String> targetSpec = partitionSpec("2025", "10");
         Map<String, String> customSpec = partitionSpec("2024", "11");
         Path targetPartitionPath = new Path(tablePath, "year=2025/month=10");
-        Path customData = new Path(targetPartitionPath, "data-custom.csv");
+        Path targetData = new Path(targetPartitionPath, "data-old.csv");
+        Path customLocation = new Path(tablePath, "unrelated-custom-location");
+        Path customData = new Path(customLocation, "data-custom.csv");
+        fileIO.writeFile(targetData, "old", false);
         fileIO.writeFile(customData, "custom", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        when(partitionManager.listPartitionsByNames(Collections.singletonList(targetSpec)))
+                .thenReturn(Collections.singletonList(partitionAt(targetSpec, null)));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(targetSpec, null),
-                                partitionAt(customSpec, targetPartitionPath.toString())));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.truncatePartitions(Collections.singletonList(targetSpec)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Catalog returned an invalid custom location for partition "
-                                + "{year=2024, month=11} of Format Table "
-                                + "truncate_db.truncate_table.");
+        commit.truncatePartitions(Collections.singletonList(targetSpec));
 
+        assertThat(fileIO.exists(targetData)).isFalse();
         assertThat(fileIO.exists(customData)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.deleteCalls()).isEqualTo(1);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager).listPartitions(Collections.emptyMap(), null);
-        verify(partitionManager, never()).listPartitionsByNames(anyList());
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitionsByNames(Collections.singletonList(targetSpec));
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        assertReplacementReport(partitionManager, tablePath, Collections.singletonList(targetSpec));
     }
 
     @Test
-    void testTruncatePrefixRejectsCustomDescendantBeforeMutatingDefaultDescendant()
-            throws Exception {
+    void testTruncatePrefixResetsEveryDescendantWithoutDeletingExternalData() throws Exception {
         MutationTrackingLocalFileIO fileIO = new MutationTrackingLocalFileIO();
         Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-prefix-custom-location");
         Map<String, String> prefix = Collections.singletonMap("year", "2025");
         Map<String, String> defaultSpec = partitionSpec("2025", "10");
         Map<String, String> customSpec = partitionSpec("2025", "11");
         Path defaultData = new Path(tablePath, "year=2025/month=10/data-old.csv");
-        Path customResidue = new Path(tablePath, "year=2025/month=11/data-old.csv");
+        Path customDefaultData = new Path(tablePath, "year=2025/month=11/data-old.csv");
+        Path customLocation =
+                new Path(
+                        new Path(tempDir.toUri()),
+                        "truncate-prefix-custom-storage/year=2025/month=11");
+        Path externalData = new Path(customLocation, "data-external.csv");
         fileIO.writeFile(defaultData, "default", false);
-        fileIO.writeFile(customResidue, "residue", false);
+        fileIO.writeFile(customDefaultData, "old", false);
+        fileIO.writeFile(externalData, "external", false);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         when(partitionManager.listPartitions(prefix, null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(defaultSpec, null),
-                                partitionAt(customSpec, "file:/external/year=2025/month=11")));
+                                partitionAt(customSpec, customLocation.toString())));
         when(partitionManager.listPartitions(Collections.emptyMap(), null))
                 .thenReturn(
                         Arrays.asList(
                                 partitionAt(defaultSpec, null),
-                                partitionAt(customSpec, "file:/external/year=2025/month=11")));
+                                partitionAt(customSpec, customLocation.toString())));
         FormatTableCommit commit =
                 truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
         fileIO.startTrackingMutations();
 
-        assertThatThrownBy(() -> commit.truncatePartitions(Collections.singletonList(prefix)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Truncating catalog-managed Format Table partition "
-                                + "{year=2025, month=11} with custom location "
-                                + "'file:/external/year=2025/month=11' is not supported.");
+        commit.truncatePartitions(Collections.singletonList(prefix));
 
-        assertThat(fileIO.exists(defaultData)).isTrue();
-        assertThat(fileIO.exists(customResidue)).isTrue();
-        assertThat(fileIO.deleteCalls()).isZero();
+        assertThat(fileIO.exists(defaultData)).isFalse();
+        assertThat(fileIO.exists(customDefaultData)).isFalse();
+        assertThat(fileIO.exists(externalData)).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(2);
         assertThat(fileIO.mkdirsCalls()).isZero();
-        verify(partitionManager, never())
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean(), isNull());
+        verify(partitionManager).listPartitions(prefix, null);
+        verify(partitionManager, never()).listPartitions(Collections.emptyMap(), null);
+        verify(partitionManager, never()).listPartitionsByNames(anyList());
+        assertReplacementReport(
+                partitionManager, tablePath, Arrays.asList(defaultSpec, customSpec));
     }
 
     @Test
@@ -2768,13 +2738,23 @@ class FormatTableCommitTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Test
-    void testCleanupStatisticsClaimOnlyFilesDeletedByThisCommit() throws Exception {
+    void testOverwriteReportsEveryRegisteredTargetAfterCleanup() throws Exception {
         MixedOwnershipFileIO fileIO = new MixedOwnershipFileIO();
         Path tablePath = new Path(tempDir.toUri());
         writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=00"), 1);
         writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=01"), 1);
         writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=02"), 1);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        List<Map<String, String>> expectedSpecs =
+                Arrays.asList(
+                        partitionSpec("2025", "00"),
+                        partitionSpec("2025", "01"),
+                        partitionSpec("2025", "02"));
+        when(partitionManager.listPartitions(Collections.singletonMap("year", "2025"), null))
+                .thenReturn(
+                        expectedSpecs.stream()
+                                .map(spec -> partitionAt(spec, null))
+                                .collect(java.util.stream.Collectors.toList()));
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -2794,20 +2774,11 @@ class FormatTableCommitTest {
 
         commit.commit(Collections.emptyList());
 
-        Map<String, String> owned = partitionSpec("2025", "00");
-        ArgumentCaptor<List<Map<String, String>>> specs =
-                ArgumentCaptor.forClass((Class) List.class);
-        ArgumentCaptor<List<PartitionStatistics>> statistics =
-                ArgumentCaptor.forClass((Class) List.class);
-        verify(partitionManager)
-                .createPartitions(
-                        specs.capture(), eq(true), statistics.capture(), eq(true), isNull());
-        assertThat(specs.getValue()).containsExactly(owned);
-        assertThat(statistics.getValue())
-                .singleElement()
-                .satisfies(
+        List<PartitionStatistics> statistics =
+                assertReplacementReport(partitionManager, tablePath, expectedSpecs);
+        assertThat(statistics)
+                .allSatisfy(
                         stat -> {
-                            assertThat(stat.spec()).isEqualTo(owned);
                             assertThat(stat.recordCount()).isZero();
                             assertThat(stat.fileSizeInBytes()).isZero();
                             assertThat(stat.fileCount()).isZero();
@@ -2851,13 +2822,22 @@ class FormatTableCommitTest {
                     fileIO, new Path(tablePath, String.format("year=2025/month=%02d", month)), 1);
         }
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        List<Map<String, String>> expectedSpecs = new ArrayList<>();
+        for (int month = 0; month < 8; month++) {
+            expectedSpecs.add(partitionSpec("2025", String.format("%02d", month)));
+        }
+        when(partitionManager.listPartitions(Collections.singletonMap("year", "2025"), null))
+                .thenReturn(
+                        expectedSpecs.stream()
+                                .map(spec -> partitionAt(spec, null))
+                                .collect(java.util.stream.Collectors.toList()));
         doAnswer(
                         invocation -> {
                             assertThat(fileIO.activeDeletes()).isZero();
                             return null;
                         })
                 .when(partitionManager)
-                .createPartitions(anyList(), eq(true), anyList(), eq(true), isNull());
+                .createPartitions(anyList(), eq(true), anyList(), eq(true), anyList());
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -2877,23 +2857,13 @@ class FormatTableCommitTest {
 
         commit.commit(Collections.emptyList());
 
-        List<Map<String, String>> expectedSpecs = new ArrayList<>();
-        for (int month = 0; month < 8; month++) {
-            expectedSpecs.add(partitionSpec("2025", String.format("%02d", month)));
-        }
-        ArgumentCaptor<List<Map<String, String>>> specs =
-                ArgumentCaptor.forClass((Class) List.class);
-        ArgumentCaptor<List<PartitionStatistics>> statistics =
-                ArgumentCaptor.forClass((Class) List.class);
-        verify(partitionManager)
-                .createPartitions(
-                        specs.capture(), eq(true), statistics.capture(), eq(true), isNull());
-        assertThat(specs.getValue()).containsExactlyInAnyOrderElementsOf(expectedSpecs);
-        assertThat(statistics.getValue())
+        List<PartitionStatistics> statistics =
+                assertReplacementReport(partitionManager, tablePath, expectedSpecs);
+        assertThat(statistics)
                 .hasSize(8)
                 .extracting(PartitionStatistics::spec)
                 .containsExactlyInAnyOrderElementsOf(expectedSpecs);
-        assertThat(statistics.getValue())
+        assertThat(statistics)
                 .allSatisfy(
                         stat -> {
                             assertThat(stat.recordCount()).isZero();
@@ -3881,6 +3851,63 @@ class FormatTableCommitTest {
         spec.put("year", year);
         spec.put("month", month);
         return spec;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<PartitionStatistics> assertReplacementReport(
+            FormatTablePartitionManager partitionManager,
+            Path tablePath,
+            List<Map<String, String>> expectedSpecs) {
+        return assertReplacementReport(partitionManager, tablePath, false, expectedSpecs);
+    }
+
+    /**
+     * What a replacement sends for a partition: the directory that partition belongs in, named the
+     * way partition directories are named, escapes and all.
+     */
+    static Map<String, String> defaultDirectoryOption(
+            Path tablePath, Map<String, String> spec, boolean onlyValueInPath) {
+        return Collections.singletonMap(
+                CoreOptions.PATH.key(),
+                new Path(
+                                tablePath,
+                                PartitionPathUtils.generatePartitionPathUtil(
+                                        new LinkedHashMap<>(spec), onlyValueInPath))
+                        .toString());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<PartitionStatistics> assertReplacementReport(
+            FormatTablePartitionManager partitionManager,
+            Path tablePath,
+            boolean onlyValueInPath,
+            List<Map<String, String>> expectedSpecs) {
+        ArgumentCaptor<List<Map<String, String>>> specs =
+                ArgumentCaptor.forClass((Class) List.class);
+        ArgumentCaptor<List<PartitionStatistics>> statistics =
+                ArgumentCaptor.forClass((Class) List.class);
+        ArgumentCaptor<List<Map<String, String>>> options =
+                ArgumentCaptor.forClass((Class) List.class);
+        verify(partitionManager)
+                .createPartitions(
+                        specs.capture(),
+                        eq(true),
+                        statistics.capture(),
+                        eq(true),
+                        options.capture());
+        assertThat(specs.getValue()).containsExactlyInAnyOrderElementsOf(expectedSpecs);
+        assertThat(statistics.getValue())
+                .extracting(PartitionStatistics::spec)
+                .containsExactlyInAnyOrderElementsOf(expectedSpecs);
+        assertThat(options.getValue()).hasSameSizeAs(specs.getValue());
+        for (int i = 0; i < specs.getValue().size(); i++) {
+            assertThat(options.getValue().get(i))
+                    .as("a replacement names the partition's own default directory")
+                    .isEqualTo(
+                            defaultDirectoryOption(
+                                    tablePath, specs.getValue().get(i), onlyValueInPath));
+        }
+        return statistics.getValue();
     }
 
     /** The commit TRUNCATE makes: nothing to write, so no overwrite and no static partition. */

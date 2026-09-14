@@ -1,6 +1,5 @@
 ---
 title: "REST Management API"
-hide_table_of_contents: true
 ---
 
 <!--
@@ -20,6 +19,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
+# REST Management API
+
 The REST Management API is an experimental OpenAPI 3.1 control-plane extension for object
 privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract version is
 `1.0` and may evolve incompatibly while the design is being validated.
@@ -27,6 +28,17 @@ privileges, row filters, and column masks in a Paimon REST Catalog. Its current 
 `RESTCatalog` exposes `permissionManagement()` and `policyManagement()` directly. These methods are
 intentionally not part of the generic `Catalog` interface. Other catalog implementations do not
 expose this management contract.
+
+## Find the Right Operation
+
+| Task | Guide |
+| --- | --- |
+| Understand resources and allowed accesses | [Permission model](#permission-model) |
+| Grant, inspect, or revoke access | [Grant](#grant-permissions), [List](#list-permissions), [Revoke](#revoke-permissions) |
+| Restrict visible columns | [Column permissions](#column-permissions) |
+| Filter rows or mask values | [Data policy model](#data-policy-model), [Row filters](#create-row-filter-policies), [Column masks](#create-column-masking-policies) |
+| Inspect or remove policies | [List policies](#list-policies), [Drop policies](#drop-policies) |
+| Implement a server or client | [OpenAPI specification](/rest-management-open-api.yaml) |
 
 ## Catalog addressing
 

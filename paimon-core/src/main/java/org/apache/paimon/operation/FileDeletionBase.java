@@ -326,6 +326,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             String fileName = manifest.fileName();
             if (skippingSet.add(fileName)) {
                 manifests.add(fileName);
+                if (manifest.extraFiles() != null) {
+                    manifests.addAll(manifest.extraFiles());
+                }
             }
         }
         if (skippingSet.add(manifestName)) {

@@ -1,8 +1,7 @@
 ---
-title: "Cpp API"
-sidebar_position: 6
+title: "C++ API"
+sidebar_position: 8
 ---
-
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,15 +22,24 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Cpp API
+# C++ API
 
-[Paimon C++](https://github.com/apache/paimon-cpp.git) is a high-performance C++ implementation of Apache Paimon. 
-Paimon C++ aims to provide a native, high-performance and extensible implementation 
-that allows native engines to access the Paimon datalake format with maximum efficiency.
+[Paimon C++](https://github.com/apache/paimon-cpp) provides native table access for C++ applications
+and engines. It exchanges columnar data through the Arrow C Data Interface.
+
+This walkthrough follows the same workflow as the Java API: create a catalog and table, prepare and
+commit a batch, then plan splits and read them. The snippets are function-body fragments returning
+`paimon::Status` (place includes at file scope); `PAIMON_RETURN_NOT_OK` and `PAIMON_ASSIGN_OR_RAISE` propagate failures to its caller.
+The `PrepareData` helper returns `arrow::Result` and uses Arrow's error macros instead.
+
+For complete headers and a runnable application, start with the
+[C++ examples](https://paimon.apache.org/docs/cpp/examples/index.html). The C++ project has its own
+release cycle; use its build instructions and API reference for the version you select.
 
 ## Environment Settings
 
-You can checkout the [document](https://paimon.apache.org/docs/cpp/index.html) for more details about environment settings.
+Follow the [C++ build guide](https://paimon.apache.org/docs/cpp/building.html) to install prerequisites
+and select optional filesystem, file-format, and catalog components. A basic source build is:
 
 ```sh
 git clone https://github.com/apache/paimon-cpp.git
@@ -45,36 +53,37 @@ make install
 
 ## Create Catalog
 
-Before coming into contact with the Table, you need to create a Catalog.
+Create a filesystem catalog for a warehouse. Reuse these options and identifiers in the following
+fragments; choose a fresh table name when running the walkthrough again.
 
 ```c++
 #include "paimon/catalog/catalog.h"
 
-// Note that keys and values are all string
+const std::string root_path = "/tmp/paimon-cpp-warehouse";
+const std::string db_name = "my_db";
+const std::string table_name = "my_table";
 std::map<std::string, std::string> options;
 PAIMON_ASSIGN_OR_RAISE(std::unique_ptr<paimon::Catalog> catalog,
                        paimon::Catalog::Create(root_path, options));
 ```
 
-Current C++ Paimon only supports filesystem catalog. In the future, we will support REST catalog.
-See [Catalog](../concepts/catalog).
-
-You can use the catalog to create table for writing data.
+C++ also supports a REST catalog when built with `PAIMON_ENABLE_REST=ON`.
+See the [C++ catalog guide](https://paimon.apache.org/docs/cpp/user_guide/catalog.html) for options
+and supported operations. For REST-managed tables, use the table location returned by the catalog;
+the path construction below is specific to the filesystem catalog.
 
 ## Create Database
 
-Table is located in a database. If you want to create table in a new database, you should create it.
+Create the database before the table:
 
 ```c++
-PAIMON_RETURN_NOT_OK(catalog->CreateDatabase('database_name', options, /*ignore_if_exists=*/false));
+PAIMON_RETURN_NOT_OK(catalog->CreateDatabase(db_name, options, /*ignore_if_exists=*/false));
 ```
 
 ## Create Table
 
-Table schema contains fields definition, partition keys, primary keys, table options.
-The field definition is described by `Arrow::Schema`. All arguments except fields definition are optional.
-
-for example:
+Define fields using an `arrow::Schema`, then export it through the Arrow C Data Interface.
+This example creates an unpartitioned append table without primary keys.
 
 ```c++
 arrow::FieldVector fields = {
@@ -101,11 +110,13 @@ See [Data Types](https://paimon.apache.org/docs/cpp/user_guide/data_types.html) 
 
 ## Batch Write
 
-Paimon table write is Two-Phase Commit, you can write many times, but once committed, no more data can be written.
-C++ Paimon uses Apache Arrow as [in-memory format], check out [document](https://paimon.apache.org/docs/cpp/user_guide/arrow.html)
-for more details.
+First construct an Arrow batch, then write it and prepare commit messages. The committer publishes
+the prepared changes. In a distributed application, collect messages from the participating writers
+before committing. See the [memory format guide](https://paimon.apache.org/docs/cpp/user_guide/arrow.html)
+for ownership and Arrow conversion details.
 
-for example:
+### Build a batch
+
 ```c++
 arrow::Result<std::shared_ptr<arrow::StructArray>> PrepareData(const arrow::FieldVector& fields) {
     arrow::StringBuilder f0_builder;
@@ -134,6 +145,8 @@ arrow::Result<std::shared_ptr<arrow::StructArray>> PrepareData(const arrow::Fiel
     return std::make_shared<arrow::StructArray>(struct_type, f0_array->length(), children);
 }
 ```
+
+### Write and commit
 
 ```c++
 std::string table_path = root_path + "/" + db_name + ".db/" + table_name;
@@ -172,39 +185,39 @@ PAIMON_RETURN_NOT_OK(committer->Commit(commit_message));
 
 ## Batch Read
 
+Configure the reader, plan the splits, then consume each batch. When distributing reads, plan once
+and assign splits to reader tasks.
+
 ### Predicate pushdown
 
-A `ReadContextBuilder` is used to pass context to reader, push down and filter is done by reader.
+Use `ReadContextBuilder` to configure the reader. `EnablePredicateFilter(true)` requests row-level
+filtering as well as any pruning supported by the reader:
 
 ```c++
-ReadContextBuilder read_context_builder(table_path);
-```
-
-You can use `PredicateBuilder` to build filters and pushdown them by `ReadContextBuilder`:
-
-```c++
-# Example filter: 'f3' > 12.0 OR 'f1' == 1
+// Example filter: 'f3' > 12.0 OR 'f1' == 1
 PAIMON_ASSIGN_OR_RAISE(
     auto predicate,
-    PredicateBuilder::Or(
-        {PredicateBuilder::GreaterThan(/*field_index=*/3, /*field_name=*/"f3",
-                                        FieldType::DOUBLE, Literal(static_cast<double>(12.0))),
-        PredicateBuilder::Equal(/*field_index=*/1, /*field_name=*/"f1", FieldType::INT,
-                                    Literal(1))}));
-ReadContextBuilder read_context_builder(table_path);
+    paimon::PredicateBuilder::Or({
+        paimon::PredicateBuilder::GreaterThan(
+            /*field_index=*/3, /*field_name=*/"f3",
+            paimon::FieldType::DOUBLE, paimon::Literal(12.0)),
+        paimon::PredicateBuilder::Equal(
+            /*field_index=*/1, /*field_name=*/"f1",
+            paimon::FieldType::INT, paimon::Literal(1))}));
+paimon::ReadContextBuilder read_context_builder(table_path);
 read_context_builder.SetPredicate(predicate).EnablePredicateFilter(true);
 ```
 
-You can also pushdown projection by `ReadContextBuilder`:
+Set the projected fields on the same read context:
 
 ```c++
-# select f3 and f2 columns
-read_context_builder.SetReadSchema({"f3", "f1", "f2"});
+// Return f3, f1, and f2, in that order
+read_context_builder.SetReadFieldNames({"f3", "f1", "f2"});
 ```
 
 ### Generate Splits
 
-Then you can step into Scan Plan stage to get `splits`:
+Create a scan plan to discover the splits to read:
 
 ```c++
 // scan
@@ -217,11 +230,12 @@ PAIMON_ASSIGN_OR_RAISE(std::shared_ptr<paimon::Plan> plan, scanner->CreatePlan()
 auto splits = plan->Splits();
 ```
 
-Finally, you can read data from the `splits` to arrow format.
+Pass the planned splits to a table reader to obtain Arrow batches.
 
 ### Read Apache Arrow
 
-This requires `C++ Arrow` to be installed.
+Import each returned batch into Arrow C++ objects. This example collects the batches in memory;
+for large results, process batches as they arrive instead.
 
 ```c++
 PAIMON_ASSIGN_OR_RAISE(std::unique_ptr<paimon::ReadContext> read_context,

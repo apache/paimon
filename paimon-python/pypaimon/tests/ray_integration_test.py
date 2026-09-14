@@ -103,6 +103,60 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(list(df['id']), [1, 2, 3])
         self.assertEqual(list(df['name']), ['a', 'b', 'c'])
 
+    def test_to_ray_preserves_row_kind(self):
+        from pypaimon.read.table_read import TableRead
+
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        identifier = self._create_and_populate_table(
+            'test_to_ray_row_kind', pa_schema,
+            {'id': [1, 2], 'name': ['a', 'b']},
+        )
+        table = CatalogFactory.create(self.catalog_options).get_table(identifier)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        self.assertTrue(splits)
+        predicate = rb.new_predicate_builder().equal('id', 999)
+        cases = [('data', splits, None), ('no_splits', [], None),
+                 ('filtered_empty', splits, predicate)]
+
+        for include_row_kind in (False, True):
+            for name, task_splits, task_predicate in cases:
+                with self.subTest(include_row_kind=include_row_kind, case=name):
+                    read = TableRead(
+                        table, task_predicate, rb.read_type(),
+                        include_row_kind=include_row_kind)
+                    arrow = read.to_arrow(task_splits)
+                    expected_schema = pa_schema
+                    if include_row_kind:
+                        expected_schema = pa.schema(
+                            [pa.field('_row_kind', pa.string())] + list(pa_schema))
+                    self.assertEqual(arrow.schema, expected_schema)
+                    if name == 'data' and include_row_kind:
+                        self.assertEqual(arrow.column('_row_kind').to_pylist(), ['+I', '+I'])
+
+                    with patch.object(ray.data, 'read_datasource',
+                                      wraps=ray.data.read_datasource) as read_datasource:
+                        ds = read.to_ray(task_splits, override_num_blocks=1)
+                    self.assertEqual(ds.schema().base_schema, expected_schema)
+                    materialized = ds.materialize()
+                    self.assertEqual(materialized.schema().base_schema, expected_schema)
+                    self.assertEqual(materialized.take_all(), arrow.to_pylist())
+
+                    if task_splits:
+                        datasource = read_datasource.call_args[0][0]
+                        tasks = datasource.get_read_tasks(1)
+                        self.assertEqual(len(tasks), 1)
+                        task = tasks[0]
+                        task_schema = (task.schema if hasattr(task, 'schema')
+                                       else task.metadata.schema)
+                        self.assertEqual(task_schema, expected_schema)
+                        task = ray.cloudpickle.loads(ray.cloudpickle.dumps(task))
+                        blocks = list(task())
+                        self.assertTrue(blocks)
+                        for block in blocks:
+                            self.assertEqual(block.schema, expected_schema)
+                        self.assertEqual(pa.concat_tables(blocks), arrow)
+
     def test_read_paimon_with_projection(self):
         """read_paimon() respects column projection."""
         from pypaimon.ray import read_paimon

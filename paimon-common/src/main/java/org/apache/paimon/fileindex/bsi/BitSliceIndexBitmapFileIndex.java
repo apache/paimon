@@ -95,10 +95,26 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                             ? BitSliceIndexRoaringBitmap.map(input)
                             : BitSliceIndexRoaringBitmap.EMPTY;
 
-            return new Reader(dataType, rowNumber, positive, negative);
+            Reader reader = new Reader(dataType, rowNumber, positive, negative);
+            return valuesAreTruncated(dataType) ? new TruncatedValueReader(reader) : reader;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Whether the value mapper loses information for this type. TIMESTAMP above microsecond
+     * precision is mapped with {@link Timestamp#toMicros()}, so two values that differ only below a
+     * microsecond share one indexed value.
+     */
+    private static boolean valuesAreTruncated(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return ((TimestampType) dataType).getPrecision() > 6;
+        }
+        if (dataType instanceof LocalZonedTimestampType) {
+            return ((LocalZonedTimestampType) dataType).getPrecision() > 6;
+        }
+        return false;
     }
 
     private static class Writer extends FileIndexWriter {
@@ -355,6 +371,32 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                         RoaringBitmap32 lte = visitLessOrEqual(fieldRef, to).get();
                         return RoaringBitmap32.and(gte, lte);
                     });
+        }
+    }
+
+    /**
+     * Reader for a column whose values the mapper truncated, so comparing a literal against the
+     * indexed value cannot answer the predicate: {@code ts <> '...000000000'} would drop a row
+     * whose nanoseconds differ, and {@code ts = '...'} would select it. Inheriting {@link
+     * FileIndexReader}'s {@code REMAIN} for those leaves the rows to be read and filtered.
+     * Null-ness survives truncation, so those two questions still come from the index.
+     */
+    private static class TruncatedValueReader extends FileIndexReader {
+
+        private final Reader reader;
+
+        public TruncatedValueReader(Reader reader) {
+            this.reader = reader;
+        }
+
+        @Override
+        public FileIndexResult visitIsNull(FieldRef fieldRef) {
+            return reader.visitIsNull(fieldRef);
+        }
+
+        @Override
+        public FileIndexResult visitIsNotNull(FieldRef fieldRef) {
+            return reader.visitIsNotNull(fieldRef);
         }
     }
 

@@ -1,5 +1,5 @@
 ---
-title: "Migration From Hive"
+title: "Migrate from Hive"
 sidebar_position: 1
 ---
 
@@ -27,114 +27,222 @@ under the License.
 
 # Hive Table Migration
 
-Apache Hive supports ORC, Parquet file formats that could be migrated to Paimon. 
-When migrating data to a paimon table, the origin table will be permanently disappeared. So please back up your data if you
-still need the original table. The migrated table will be [append table](../append-table/).
+Migrate existing Hive data files into Paimon [append tables](../append-table/) using a Paimon
+Hive catalog. The migrator moves files and registers them in Paimon metadata. It supports
+ORC, Parquet, and Avro source files, for both partitioned and non-partitioned tables.
 
-Now, we can use paimon hive catalog with Migrate Table Procedure to totally migrate a table from hive to paimon.
-At the same time, you can use paimon hive catalog with Migrate Database Procedure to fully synchronize all tables in the database to paimon.
+By default, the original Hive table is replaced by a Paimon table with the same name. Use
+[Clone to Paimon](./clone-to-paimon) when you need a separate copy and a readable source table.
 
-* Migrate Table Procedure: Paimon table does not exist, use the procedure upgrade hive table to paimon table. Hive table will disappear after action done.
-* Migrate Database Procedure: Paimon table does not exist, use the procedure upgrade all hive tables in database to paimon table. All hive tables will disappear after action done.
+:::warning Migration is not atomic
 
-These two actions now support file format of hive "orc" and "parquet" and "avro".
+Back up the source data and Hive metadata before migrating, and stop writes to the source
+tables. An interruption can leave files or metadata partially migrated. Do not rely on
+`delete_origin => false` as a backup: it keeps the Hive metadata, but files are still moved
+out of the source location.
 
-<span style={{color: "red"}}> **We highly recommend to back up hive table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
+:::
+
+## Before You Start
+
+- Configure a Paimon catalog with `metastore = hive` and access to the source Hive metastore.
+  See [Catalog](../concepts/catalog), [Flink Procedures](../flink/procedures), or
+  [Spark Catalogs](../spark/catalogs) for setup.
+- Give the migration runtime access to source and target storage, including the ability to
+  move files and update Hive metadata. This is a file-move workflow, not a cross-storage copy.
+- Use a target append table with no primary key and `bucket = -1`. For an existing target,
+  check that the source data schema is compatible and partition names and types match.
+- Record source row counts, partition values, and representative query results for validation.
+  The examples below use an ORC source table named `default.hivetable`; adjust identifiers,
+  paths, and `file.format` for your source.
+
+## Choose the Target Behavior
+
+| Procedure arguments | Target | Source after success |
+| --- | --- | --- |
+| Omit `target_table` | Replaces the original table under its original name | Original Hive table is removed |
+| Set a different `target_table`; omit `delete_origin` or set it to `true` | Creates or imports files into the named Paimon table | Original Hive table is removed |
+| Set a different `target_table` and `delete_origin => false` | Creates or imports files into the named Paimon table | Hive metadata remains, but its files have moved |
+
+For an existing target, migration adds imported files; it does not use clone's partition
+overwrite behavior. Check the existing target data before importing to avoid duplicates.
+`target_table` and `delete_origin` are SQL procedure options; the Flink migration action shown
+below uses the default replacement behavior.
 
 ## Migrate Hive Table
 
-<Tabs groupId="migrate-table">
+Choose one of the following entry points. The SQL examples select the Paimon Hive catalog
+before calling the procedure.
 
+<Tabs groupId="migration-engine">
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
-CREATE CATALOG PAIMON WITH (
-   'type'='paimon',
-   'metastore' = 'hive',
-   'uri' = 'thrift://localhost:9083',
-   'warehouse'='/path/to/warehouse/');
+CREATE CATALOG paimon_hive WITH (
+    'type' = 'paimon',
+    'metastore' = 'hive',
+    'uri' = 'thrift://localhost:9083',
+    'warehouse' = 'hdfs:///warehouse'
+);
 
-USE CATALOG PAIMON;
+USE CATALOG paimon_hive;
 
+-- Flink 1.19 and later: replace default.hivetable with a Paimon table.
 CALL sys.migrate_table(
     connector => 'hive',
     source_table => 'default.hivetable',
-    -- You can specify the target table, and if the target table already exists
-    -- the file will be migrated directly to it
-    -- target_table => 'default.paimontarget',
-    -- You can specify delete_origin is false, this won't delete hivetable
-    -- delete_origin => false,
-    options => 'file.format=orc');
+    options => 'file.format=orc'
+);
+```
+
+For Flink 1.18, use positional arguments instead of the call above:
+
+```sql
+CALL sys.migrate_table('hive', 'default.hivetable', 'file.format=orc');
+```
+
+To import into a different target with Flink 1.19 or later, use this call **instead of** the
+replacement call. The original Hive table is removed by default.
+
+```sql
+CALL sys.migrate_table(
+    connector => 'hive',
+    source_table => 'default.hivetable',
+    target_table => 'default.paimon_target',
+    options => 'file.format=orc'
+);
 ```
 
 </TabItem>
+<TabItem value="spark-sql" label="Spark SQL">
 
-<TabItem value="flink-action" label="Flink Action">
+Configure a [Spark Hive catalog](../spark/catalogs) named `paimon_hive` with the following
+Spark startup options:
 
 ```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-@@VERSION@@.jar \
-migrate_table \
---warehouse /path/to/warehouse \
---catalog_conf uri=thrift://localhost:9083 \
---catalog_conf metastore=hive \
---source_type hive \
---table default.hive_or_paimon
+--conf spark.sql.catalog.paimon_hive=org.apache.paimon.spark.SparkCatalog \
+--conf spark.sql.catalog.paimon_hive.metastore=hive \
+--conf spark.sql.catalog.paimon_hive.uri=thrift://localhost:9083 \
+--conf spark.sql.catalog.paimon_hive.warehouse=hdfs:///warehouse \
+--conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
+```
+
+Then run:
+
+```sql
+USE paimon_hive.default;
+
+CALL sys.migrate_table(
+    source_type => 'hive',
+    table => 'default.hivetable',
+    options => 'file.format=orc'
+);
+```
+
+Spark uses `source_type` and `table` for these arguments. See
+[Spark Migration Procedures](../spark/procedures/migration#migrate_table) for optional target
+and parallelism arguments.
+
+</TabItem>
+<TabItem value="flink-action" label="Flink Action">
+
+Set `FLINK_HOME` to your Flink installation and use the matching
+[Flink action jar](../flink/action-jars).
+
+```bash
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    migrate_table \
+    --warehouse hdfs:///warehouse \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --source_type hive \
+    --table default.hivetable \
+    --options file.format=orc
 ```
 
 </TabItem>
-
 </Tabs>
 
-After invoke, "hivetable" will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
+After success, read and write the target through Paimon. Existing jobs that expect the
+original Hive storage format must be updated. Hive queries need the
+[Paimon Hive connector](../ecosystem/hive).
 
 ## Migrate Hive Database
 
-<Tabs groupId="migrate-database">
+Database migration attempts each table in the source database and replaces successfully
+migrated tables under their original names. It is not a transaction across all tables: a
+failure can leave a mixture of Hive and Paimon tables. Review every source table's format and
+requirements first. Use individual table migration for a selected subset.
 
+<Tabs groupId="migration-engine">
 <TabItem value="flink-sql" label="Flink SQL">
 
+Using the Paimon Hive catalog configured above:
+
 ```sql
-CREATE CATALOG PAIMON WITH (
-   'type'='paimon', 
-   'metastore' = 'hive', 
-   'uri' = 'thrift://localhost:9083', 
-   'warehouse'='/path/to/warehouse/');
+USE CATALOG paimon_hive;
 
-USE CATALOG PAIMON;
-
+-- Flink 1.19 and later
 CALL sys.migrate_database(
     connector => 'hive',
     source_database => 'default',
-    options => 'file.format=orc');
+    options => 'file.format=orc'
+);
+```
+
+For Flink 1.18, use this call instead:
+
+```sql
+CALL sys.migrate_database('hive', 'default', 'file.format=orc');
 ```
 
 </TabItem>
+<TabItem value="spark-sql" label="Spark SQL">
 
+```sql
+USE paimon_hive.default;
+
+CALL sys.migrate_database(
+    source_type => 'hive',
+    database => 'default',
+    options => 'file.format=orc'
+);
+```
+
+</TabItem>
 <TabItem value="flink-action" label="Flink Action">
 
 ```bash
-<FLINK_HOME>/bin/flink run \
-/path/to/paimon-flink-action-@@VERSION@@.jar \
-migrate_database \
---warehouse <warehouse-path> \
---source_type hive \
---database <database> \
-[--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
-[--options <paimon-table-conf  [,paimon-table-conf ...]> ]
-```
-
-Example:
-```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-@@VERSION@@.jar migrate_table \
---warehouse /path/to/warehouse \
---catalog_conf uri=thrift://localhost:9083 \
---catalog_conf metastore=hive \
---source_type hive \
---database default
+"$FLINK_HOME/bin/flink" run /path/to/paimon-flink-action-@@VERSION@@.jar \
+    migrate_database \
+    --warehouse hdfs:///warehouse \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://localhost:9083 \
+    --source_type hive \
+    --database default \
+    --options file.format=orc
 ```
 
 </TabItem>
-
 </Tabs>
 
-After invoke, all tables in "default" database will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
+## Verify the Migration
+
+1. Check the procedure output and logs. For a database, inspect both success and failure
+   counts; completion of the call does not mean every table migrated.
+2. Inspect the target schema, partition keys, and table options. Confirm that it is a Paimon
+   append table with `bucket = -1`.
+3. Query the target through Paimon and compare row counts and aggregates against the values
+   recorded before migration. Include null partition values and representative partitions.
+4. Update reader and writer configurations, then verify them against the migrated table.
+
+For example, in the selected Paimon catalog:
+
+```sql
+SHOW CREATE TABLE default.hivetable;
+SELECT COUNT(*) FROM default.hivetable;
+```
+
+If migration fails, inspect the source and target metadata and file locations before retrying.
+For database migration, identify the failed tables and handle them individually after resolving
+the cause; do not assume another database-wide call will safely resume the previous run.

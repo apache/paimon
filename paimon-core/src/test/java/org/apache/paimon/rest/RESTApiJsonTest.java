@@ -360,7 +360,41 @@ public class RESTApiJsonTest {
     }
 
     @Test
-    public void createPartitionsRequestRejectsNullOptionMapsTest() {
+    public void createPartitionsRequestCarriesPartitionLocationsTest() throws Exception {
+        Map<String, String> returningSpec = Collections.singletonMap("dt", "20260901");
+        Map<String, String> untouchedSpec = Collections.singletonMap("dt", "20260902");
+        Map<String, String> defaultDirectory =
+                Collections.singletonMap("path", "file:/warehouse/db/table/dt=20260901");
+        PartitionStatistics replacement =
+                new PartitionStatistics(returningSpec, 0L, 0L, 0L, 1756684800000L, -1);
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        Arrays.asList(returningSpec, untouchedSpec),
+                        true,
+                        Collections.singletonList(replacement),
+                        true,
+                        Arrays.asList(defaultDirectory, Collections.emptyMap()));
+
+        String json = RESTApi.toJson(request);
+        CreatePartitionsRequest parsed = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        Map<?, ?> wireObject = RESTApi.fromJson(json, Map.class);
+
+        // Naming the partition's own default directory is how a request asks for it back; an
+        // absent path leaves the stored location alone.
+        assertTrue(json.contains("\"path\":\"file:/warehouse/db/table/dt=20260901\""));
+        assertEquals(
+                Arrays.asList(defaultDirectory, Collections.emptyMap()),
+                parsed.getPartitionOptions());
+        assertEquals(5, wireObject.size());
+        assertTrue(wireObject.containsKey("partitionSpecs"));
+        assertTrue(wireObject.containsKey("ignoreIfExists"));
+        assertTrue(wireObject.containsKey("partitionStatistics"));
+        assertTrue(wireObject.containsKey("replaceStatistics"));
+        assertTrue(wireObject.containsKey("partitionOptions"));
+    }
+
+    @Test
+    public void createPartitionsRequestRejectsNullMapsKeysAndValuesTest() {
         List<Map<String, String>> specs =
                 Arrays.asList(
                         Collections.singletonMap("dt", "20260901"),
@@ -377,6 +411,7 @@ public class RESTApiJsonTest {
                                 Arrays.asList(null, Collections.emptyMap())));
 
         Map<String, String> nullValue = new HashMap<>();
+        nullValue.put("path", null);
         nullValue.put("owner", null);
         assertThrows(
                 IllegalArgumentException.class,
@@ -384,8 +419,10 @@ public class RESTApiJsonTest {
                         new CreatePartitionsRequest(
                                 specs,
                                 true,
-                                null,
-                                null,
+                                Collections.singletonList(
+                                        new PartitionStatistics(
+                                                specs.get(1), 0L, 0L, 0L, 1756684800000L, -1)),
+                                true,
                                 Arrays.asList(Collections.emptyMap(), nullValue)));
 
         Map<String, String> nullKey = new HashMap<>();

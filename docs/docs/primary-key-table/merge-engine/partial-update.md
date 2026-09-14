@@ -3,7 +3,6 @@ title: "Partial Update"
 sidebar_position: 2
 ---
 
-
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -25,262 +24,217 @@ under the License.
 
 # Partial Update
 
-By specifying `'merge-engine' = 'partial-update'`, users have the ability to update columns of a record through
-multiple updates until the record is complete. This is achieved by updating the value fields one by one, using the
-latest data under the same primary key. However, null values are not overwritten in the process.
+Set `merge-engine = partial-update` to combine updates to different columns of the same key.
+By default, non-null input values replace the corresponding fields and null input values leave
+them unchanged. [Sequence groups](#sequence-group) let independent streams order their own fields
+and explicitly replace values with null.
 
-For example, suppose Paimon receives three records:
+The Flink SQL examples below use bounded inputs. Wait for each `INSERT` job to finish before
+running the next statement, and run `SELECT` in batch mode.
 
-- `<1, 23.0, 10, NULL>`-
-- `<1, NULL, NULL, 'This is a book'>`
-- `<1, 25.2, NULL, NULL>`
+## Non-Null Updates
 
-Assuming that the first column is the primary key, the final result would be `<1, 25.2, 10, 'This is a book'>`.
+For example, a product's price, quantity, and description can arrive in separate updates:
+
+```sql
+CREATE TABLE products (
+    product_id BIGINT PRIMARY KEY NOT ENFORCED,
+    price DECIMAL(10, 2),
+    quantity INT,
+    description STRING
+) WITH (
+    'merge-engine' = 'partial-update'
+);
+
+INSERT INTO products VALUES (1, 23.00, 10, CAST(NULL AS STRING));
+INSERT INTO products VALUES (1, CAST(NULL AS DECIMAL(10, 2)), CAST(NULL AS INT), 'Book');
+INSERT INTO products VALUES (1, 25.20, CAST(NULL AS INT), CAST(NULL AS STRING));
+
+SELECT * FROM products;
+-- 1, 25.20, 10, Book
+```
+
+The second update fills in the description. The third changes only the price; its null fields
+preserve the stored quantity and description. To clear a stored value to null, use a sequence
+group with a valid version, as shown below.
 
 :::info
 
-For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer](../changelog-producer). ('input' changelog producer is also supported,
-but only returns input records.)
-
-:::
-
-:::info
-
-By default, Partial update can not accept delete records, you can choose one of the following solutions:
-
-- Configure 'ignore-delete' to ignore delete records.
-- Configure 'partial-update.remove-record-on-delete' to remove the whole row when receiving delete records.
-- Configure 'sequence-group's to retract partial columns. Also configure 'partial-update.remove-record-on-sequence-group' to remove the whole row when receiving deleted records of `specified sequence group`.
+Streaming readers that need the complete updated rows require the `lookup` or `full-compaction`
+[changelog producer](../changelog-producer). The `input` producer is also supported, but it
+returns the input changes, which may contain only partial rows.
 
 :::
 
 ## Sequence Group
 
-A sequence-field may not solve the disorder problem of partial-update tables with multiple stream updates, because
-the sequence-field may be overwritten by the latest data of another stream during multi-stream update.
+A single [sequence field](../sequence-rowkind#sequence-field) orders an entire record. When
+independent streams update different columns, give each stream its own sequence group so one
+stream's version does not determine whether the other stream's update is accepted.
 
-So we introduce sequence group mechanism for partial-update tables. It can solve:
-
-1. Disorder during multi-stream update. Each stream defines its own sequence-groups.
-2. A true partial-update, not just a non-null update.
-
-See example:
+Configure `fields.<ordering-field>.sequence-group` with the columns that the version protects.
+This example separates profile updates from score updates:
 
 ```sql
-CREATE TABLE t
-(
-    k   INT,
-    a   INT,
-    b   INT,
-    g_1 INT,
-    c   INT,
-    d   INT,
-    g_2 INT,
-    PRIMARY KEY (k) NOT ENFORCED
+CREATE TABLE profiles (
+    user_id BIGINT PRIMARY KEY NOT ENFORCED,
+    name STRING,
+    city STRING,
+    profile_version BIGINT,
+    score BIGINT,
+    score_version BIGINT
 ) WITH (
-      'merge-engine' = 'partial-update',
-      'fields.g_1.sequence-group' = 'a,b',
-      'fields.g_2.sequence-group' = 'c,d'
-      );
+    'merge-engine' = 'partial-update',
+    'fields.profile_version.sequence-group' = 'name,city',
+    'fields.score_version.sequence-group' = 'score'
+);
 
-INSERT INTO t
-VALUES (1, 1, 1, 1, 1, 1, 1);
+INSERT INTO profiles VALUES (1, 'Ada', 'London', 10, 40, 5);
 
--- g_2 is null, c, d should not be updated
-INSERT INTO t
-VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT));
+-- A newer profile clears city to NULL. A NULL score_version skips the score group.
+INSERT INTO profiles VALUES (1, 'Ada', CAST(NULL AS STRING), 11, 999, CAST(NULL AS BIGINT));
 
-SELECT *
-FROM t;
--- output 1, 2, 2, 2, 1, 1, 1
+-- The old profile is ignored, while the newer score is accepted.
+INSERT INTO profiles VALUES (1, 'Old', 'Paris', 9, 50, 6);
 
--- g_1 is smaller, a, b should not be updated
-INSERT INTO t
-VALUES (1, 3, 3, 1, 3, 3, 3);
-
-SELECT *
-FROM t; -- output 1, 2, 2, 2, 3, 3, 3
+SELECT * FROM profiles;
+-- 1, Ada, NULL, 11, 50, 6
 ```
 
-For `fields.<field-name>.sequence-group`, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER,
-BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
+![Profile and score updates use independent versions: profile version 11 clears city, a null score version skips that group, and a later input updates only the score.](/img/primary-key-sequence-groups.svg)
 
-You can also configure multiple sorted fields in a `sequence-group`,
-like `fields.<field-name1>,<field-name2>.sequence-group`, multiple fields will be compared in order.
+For fields without aggregation, each group follows these rules:
 
-See example:
+| Incoming ordering value | Effect on the group |
+| --- | --- |
+| Null | Skip this group; other groups and ungrouped fields can still update |
+| Smaller than the stored value | Keep the stored ordering value and protected fields |
+| Greater than or equal to the stored value | Replace the ordering value and protected fields, including null values |
 
-```sql
-CREATE TABLE SG
-(
-    k   INT,
-    a   INT,
-    b   INT,
-    g_1 INT,
-    c   INT,
-    d   INT,
-    g_2 INT,
-    g_3 INT,
-    PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-      'merge-engine' = 'partial-update',
-      'fields.g_1.sequence-group' = 'a,b',
-      'fields.g_2,g_3.sequence-group' = 'c,d'
-      );
+Fields outside sequence groups retain the default non-null update behavior. A primary-key
+column cannot be an ordering field or a protected field. Common ordering types include `DECIMAL`,
+`TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`, `FLOAT`, `DOUBLE`, `DATE`, `TIME`, `TIMESTAMP`, and
+`TIMESTAMP_LTZ`.
 
-INSERT INTO SG
-VALUES (1, 1, 1, 1, 1, 1, 1, 1);
+### Multiple Ordering Fields
 
--- g_3 is null, g_2, g_3 are not bigger, c, d should not be updated
-INSERT INTO SG
-VALUES (1, 2, 2, 2, 2, 2, 1, CAST(NULL AS INT));
+Use multiple ordering fields when one version is insufficient to break ties. For example,
+`fields.profile_version,profile_offset.sequence-group = name,city` compares `profile_version`
+first, then `profile_offset`. Both ordering columns must be present in the table schema.
 
-SELECT *
-FROM SG;
--- output 1, 2, 2, 2, 1, 1, 1, 1
+The group is skipped only when **all** its ordering fields are null. Otherwise, the tuple
+participates in comparison, with null sorting before a non-null value:
 
--- g_1 is smaller, a, b should not be updated
-INSERT INTO SG
-VALUES (1, 3, 3, 1, 3, 3, 3, 1);
-
-SELECT *
-FROM SG;
--- output 1, 2, 2, 2, 3, 3, 3, 1
-```
+| Stored tuple | Incoming tuple | Effect on non-aggregated protected fields |
+| --- | --- | --- |
+| `(1, 100)` | `(NULL, NULL)` | Skip the group |
+| `(1, 100)` | `(1, NULL)` | Keep stored fields: the incoming tuple is smaller |
+| `(1, 100)` | `(2, NULL)` | Replace fields: the first ordering value is larger |
+| `(1, 100)` | `(1, 100)` | Replace fields: equal versions are accepted |
 
 ## Aggregation For Partial Update
 
-You can specify aggregation function for the input field, all the functions in the
-[Aggregation](./aggregation) are supported.
+Set `fields.<field-name>.aggregate-function` to combine contributions to a field instead of
+replacing it. The functions listed in [Aggregation](./aggregation) are available, but every
+aggregated value field must belong to a sequence group unless its function is
+`last_non_null_value`. Primary-key fields and sequence-group ordering fields are not aggregated
+as value fields.
 
-:::info
+An aggregate changes how older records are handled: an older version can still contribute to
+an aggregated field, while non-aggregated fields in the same group keep their stored values.
+A group whose ordering fields are all null is still skipped.
 
-**Sequence-group behavior changes when aggregate functions are involved.**
+For example, profile names use replacement, while `total` accumulates contributions:
 
-Without aggregate functions, a sequence-group field acts as a **version filter**: an incoming sequence value
-that is newer than or equal to the stored value replaces the sequence fields and every protected field, including
-with NULL values. Only records with an older sequence value are ignored for the group.
+```sql
+CREATE TABLE profile_totals (
+    user_id BIGINT PRIMARY KEY NOT ENFORCED,
+    name STRING,
+    profile_version BIGINT,
+    total BIGINT,
+    event_version BIGINT
+) WITH (
+    'merge-engine' = 'partial-update',
+    'fields.profile_version.sequence-group' = 'name',
+    'fields.event_version.sequence-group' = 'total',
+    'fields.total.aggregate-function' = 'sum'
+);
 
-With aggregate functions, the sequence-group field acts as an **ordering key**: every incoming record with
-a non-NULL sequence value participates in the aggregation, regardless of whether its sequence value is
-larger or smaller than the stored one. The stored sequence value is only advanced when the incoming value
-is larger. For order-independent functions (`sum`, `product`, `max`, `min`) the ordering has no effect on
-the result; for order-dependent functions (`last_non_null_value`, `first_value`, `listagg`) the
-sequence-group value determines which record's contribution is considered "last" or "first".
+INSERT INTO profile_totals VALUES (1, 'Ada', 10, 5, 100);
 
-Records with a NULL sequence-group value are always skipped.
+-- The older name is ignored. The older total contribution still adds 3.
+INSERT INTO profile_totals VALUES (1, 'Older', 9, 3, 90);
+
+SELECT * FROM profile_totals;
+-- 1, Ada, 10, 8, 100
+
+-- Update the name; a NULL event_version skips the total contribution.
+INSERT INTO profile_totals VALUES (1, 'Bea', 11, 999, CAST(NULL AS BIGINT));
+
+SELECT * FROM profile_totals;
+-- 1, Bea, 11, 8, 100
+```
+
+The stored ordering tuple advances on newer or equal versions. With `sum`, an older or equal
+version still adds its contribution: a sequence group does **not** deduplicate repeated events.
+The same rules apply to groups with multiple ordering fields.
+
+:::warning
+
+Sequence groups do not guarantee a complete historical ordering for order-dependent aggregates
+such as `first_value` or `listagg`. An older contribution is combined with the current aggregate;
+Paimon does not retain and sort all prior contributions by their sequence-group values.
 
 :::
 
-See example:
+### Default Aggregation Function
+
+`fields.default-aggregate-function` supplies a function for value fields without an explicit
+field-level function. The sequence-group requirement above also applies to the default.
+Ordering fields and primary-key fields keep their special roles.
+
+For example, this configuration preserves non-null names while adding score contributions:
 
 ```sql
-CREATE TABLE t
-(
-    k INT,
-    a INT,
-    b INT,
-    c INT,
-    d INT,
-    PRIMARY KEY (k) NOT ENFORCED
+CREATE TABLE profile_scores (
+    user_id BIGINT PRIMARY KEY NOT ENFORCED,
+    name STRING,
+    profile_version BIGINT,
+    score BIGINT,
+    score_version BIGINT
 ) WITH (
-      'merge-engine' = 'partial-update',
-      'fields.a.sequence-group' = 'b',
-      'fields.b.aggregate-function' = 'first_value',
-      'fields.c.sequence-group' = 'd',
-      'fields.d.aggregate-function' = 'sum'
-      );
-INSERT INTO t
-VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t
-VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
-INSERT INTO t
-VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t
-VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
-
-
-SELECT *
-FROM t; -- output 1, 2, 1, 2, 3
+    'merge-engine' = 'partial-update',
+    'fields.profile_version.sequence-group' = 'name',
+    'fields.score_version.sequence-group' = 'score',
+    'fields.default-aggregate-function' = 'last_non_null_value',
+    'fields.score.aggregate-function' = 'sum'
+);
 ```
 
-You can also configure an aggregation function for a `sequence-group` within multiple sorted fields.
+The explicit `sum` takes precedence for `score`. The default `last_non_null_value` applies to
+`name`, so a newer profile with a null name now preserves the stored name instead of clearing it.
 
-See example:
+## Delete Handling
 
-```sql
-CREATE TABLE AGG
-(
-    k   INT,
-    a   INT,
-    b   INT,
-    g_1 INT,
-    c   VARCHAR,
-    g_2 INT,
-    g_3 INT,
-    PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-      'merge-engine' = 'partial-update',
-      'fields.a.aggregate-function' = 'sum',
-      'fields.g_1,g_3.sequence-group' = 'a',
-      'fields.g_2.sequence-group' = 'c');
--- a in sequence-group g_1, g_3 with sum agg
--- b not in sequence-group
--- c in sequence-group g_2 without agg
+Choose how to process `DELETE` (`-D`) and `UPDATE_BEFORE` (`-U`) records before connecting a
+source that produces retractions:
 
-INSERT INTO AGG
-VALUES (1, 1, 1, 1, '1', 1, 1);
+| Configuration | `DELETE` | `UPDATE_BEFORE` |
+| --- | --- | --- |
+| Default, without sequence groups | Rejected | Rejected |
+| `ignore-delete = true` | Ignored | Ignored |
+| `partial-update.remove-record-on-delete = true` | Remove the whole row | Ignored |
+| Sequence groups | Retract protected fields according to the group version and aggregate function | Same field-level retraction rules |
+| Sequence groups with `partial-update.remove-record-on-sequence-group` | Remove the whole row when a configured group accepts the delete's version | Apply field-level retractions; do not remove the whole row |
 
--- g_2 is null, c should not be updated
-INSERT INTO AGG
-VALUES (1, 2, 2, 2, '2', CAST(NULL AS INT), 2);
+For a sequence group, a newer or equal retraction clears non-aggregated protected fields to
+null. Aggregated fields use their function's retraction behavior, including for older versions;
+see each [aggregate function's requirements](./aggregation). A group with all-null ordering
+fields is skipped, and ungrouped fields are not retracted.
 
-SELECT *
-FROM AGG;
--- output 1, 3, 2, 2, "1", 1, 2
+Set `partial-update.remove-record-on-sequence-group` to a comma-separated list of ordering
+field names from the groups whose deletes should remove the whole row. For the `profiles`
+schema above, using `profile_version` allows an accepted profile delete to remove the row.
 
--- (g_1, g_3) = (2, 1) is smaller than stored (2, 2), so the stored sequence values are not advanced,
--- but the sum aggregate for a still applies: a = 3 + 3 = 6
-INSERT INTO AGG
-VALUES (1, 3, 3, 2, '3', 3, 1);
-
-SELECT *
-FROM AGG;
--- output 1, 6, 3, 2, "3", 3, 2
-```
-
-You can specify a default aggregation function for all the input fields with `fields.default-aggregate-function`, see
-example:
-
-```sql
-CREATE TABLE t
-(
-    k INT,
-    a INT,
-    b INT,
-    c INT,
-    d INT,
-    PRIMARY KEY (k) NOT ENFORCED
-) WITH (
-      'merge-engine' = 'partial-update',
-      'fields.a.sequence-group' = 'b',
-      'fields.c.sequence-group' = 'd',
-      'fields.default-aggregate-function' = 'last_non_null_value',
-      'fields.d.aggregate-function' = 'sum'
-      );
-
-INSERT INTO t
-VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t
-VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
-INSERT INTO t
-VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO t
-VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
-
-
-SELECT *
-FROM t; -- output 1, 2, 2, 2, 3
-
-```
+`partial-update.remove-record-on-delete` cannot be combined with sequence groups. Neither
+whole-row removal option can be combined with `ignore-delete`.

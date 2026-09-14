@@ -873,10 +873,12 @@ public class RESTCatalog implements Catalog {
             String location = copied.get(PATH.key());
             if (location != null) {
                 try {
+                    // A partition location may be the table's own directory, which is how a
+                    // request returns a partition there, so what a partition may own is judged
+                    // where the table is known rather than here.
                     copied.put(
                             PATH.key(),
-                            FormatTablePartitionPathResolver.canonicalizeCustomLocation(
-                                            location, context)
+                            FormatTablePartitionPathResolver.canonicalizeLocation(location, context)
                                     .toString());
                 } catch (IllegalArgumentException e) {
                     throw invalidPartitionLocation(identifier, partition, e);

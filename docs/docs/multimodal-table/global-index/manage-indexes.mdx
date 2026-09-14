@@ -1,0 +1,461 @@
+---
+title: "Manage Global Indexes"
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Manage Global Indexes
+
+Build and inspect indexes separately from ingesting table data. Use this guide to
+choose freshness behavior, coordinate index visibility, and remove index files.
+The SQL examples use a Paimon catalog with `db` as the current database.
+`CALL` examples apply to Spark and Flink; `ALTER TABLE` examples below use Spark SQL.
+In Flink, replace `SET TBLPROPERTIES (...)` with `SET (...)`.
+Index-specific build and query examples are listed in [Global Index](../global-index).
+
+## Build an Index
+
+Create a global index on an existing table. The examples assume a populated
+`db.my_table`; partition-scoped examples additionally require a partition column
+named `dt`. See [Global Index](../global-index#prerequisites) for table setup.
+
+Create global indexes for all partitions or only selected partitions:
+
+<Tabs groupId="global-index-build">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree',
+    partitions => 'dt=2026-06-18;dt=2026-06-19'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+added_files = table.create_global_index("name")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass build options and restrict the
+build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={"sorted-index.records-per-range": "10000000"},
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+PyPaimon global index build currently supports single-column BTree indexes,
+single-column Bitmap indexes, single-column paimon-vindex vector indexes,
+and single-column full-text indexes on tables with row tracking enabled.
+
+Re-running a build is incremental: it fills missing coverage. Spark and Flink can
+also refresh changed ranges under the `IGNORE` update policy; see
+[Update Indexed Columns](#update-indexed-columns) for the PyPaimon difference and
+the required source metadata. Changing a build option alone does not rebuild
+already covered rows. To replace existing tokenizer or vector-index settings,
+[drop the relevant index](#drop-an-index) and build it again, using the same
+partition scope when replacing only selected partitions.
+
+## Inspect Index Coverage
+
+Global indexes are stored in index files and recorded in table metadata. To inspect index files and
+their row-id coverage, query the `table_indexes` system table:
+
+<Tabs groupId="global-index-table-indexes">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+SELECT index_type, index_field_name, row_range_start, row_range_end
+FROM `my_table$table_indexes`
+WHERE index_field_name IS NOT NULL;
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+import pyarrow.compute as pc
+
+table_indexes = catalog.get_table("db.my_table$table_indexes")
+read_builder = table_indexes.new_read_builder().with_projection([
+    "index_type",
+    "index_field_name",
+    "row_range_start",
+    "row_range_end",
+])
+
+pa_table = read_builder.new_read().to_arrow(
+    read_builder.new_scan().plan().splits()
+)
+pa_table = pa_table.filter(pc.is_valid(pa_table["index_field_name"]))
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
+You can also query `file_key_ranges` to inspect data file row-id ranges and diagnose coverage:
+
+<Tabs groupId="global-index-file-key-ranges">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+SELECT file_path, first_row_id, record_count
+FROM `my_table$file_key_ranges`;
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+file_key_ranges = catalog.get_table("db.my_table$file_key_ranges")
+read_builder = file_key_ranges.new_read_builder().with_projection([
+    "file_path",
+    "first_row_id",
+    "record_count",
+])
+
+pa_table = read_builder.new_read().to_arrow(
+    read_builder.new_scan().plan().splits()
+)
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Wait for Index Visibility
+
+For Spark, Flink, and Java batch or bounded-stream writers, the visibility callback
+waits **after the data snapshot is committed** for existing indexes to cover newly
+appended ranges. It delays completion of the writer's commit call; other readers
+can already see the committed snapshot while it waits.
+
+Build the initial indexes before enabling the callback, and run subsequent index
+builds in a separate job or session. Running the index build only after the same
+blocked write returns would make the write time out. The callback waits for
+coverage; it does not create indexes:
+
+<Tabs groupId="global-index-visibility-callback">
+
+<TabItem value="spark" label="Spark SQL">
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'visibility-callback.enabled' = 'true',
+    'visibility-callback.timeout' = '30 min'
+);
+```
+
+</TabItem>
+
+<TabItem value="flink" label="Flink SQL">
+
+```sql
+ALTER TABLE my_table SET (
+    'visibility-callback.enabled' = 'true',
+    'visibility-callback.timeout' = '30 min'
+);
+```
+
+</TabItem>
+
+</Tabs>
+
+The callback tracks index definitions already present in each affected partition.
+It does not wait for a partition that has no existing index, including a newly
+created partition. On timeout, the committed data remains in the table; inspect
+the committed snapshot before retrying an append.
+
+PyPaimon writers do not implement this built-in visibility callback. Setting the
+table property through the Python catalog configures JVM writers of that table,
+but does not make a Python commit wait. For a Python pipeline, commit the data,
+run `table.create_global_index(...)`, and inspect coverage before treating that
+batch as ready for indexed queries.
+
+## Coverage and Freshness
+
+Global index files cover row-id ranges. If more rows are appended after an index is built, those
+new rows are not automatically covered by the existing index files. Build the global index again
+to create index files for newly uncovered data. The scalar, vector, and full-text families
+default to `fast`, which searches indexed row ranges.
+Choose a search mode deliberately when recently appended data must be included.
+Updates to already indexed rows also require the [update policy](#update-indexed-columns).
+
+| Mode | How coverage is checked | Use when |
+| --- | --- | --- |
+| `fast` | Search indexed coverage only. | The index is current, or partial coverage is acceptable. |
+| `full` | Check row-ID coverage against snapshot `nextRowId`; scan raw data for detected gaps where supported. | Newly appended ranges need to be included. |
+| `detail` | Compare active data-file row-ID ranges with index coverage, then scan detected gaps where supported. | Coverage should be checked against current files, including partition filtering. |
+
+![An index covers the original row range; appended rows need another index build or a search mode that includes uncovered data.](/img/multimodal-index-coverage.svg)
+
+To include appended data for query types that support raw-data search, set:
+
+<Tabs groupId="global-index-search-mode">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES ('vector-index.search-mode' = 'full');
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+
+catalog.alter_table(
+    "db.my_table",
+    [SchemaChange.set_option("vector-index.search-mode", "full")],
+)
+```
+
+For a read-only override on an existing `Table` instance:
+
+```python
+full_table = table.copy({"vector-index.search-mode": "full"})
+```
+
+</TabItem>
+
+</Tabs>
+
+With `full` search, supported global-index queries compare the allocated row-ID
+space `[0, nextRowId)` with index coverage. With `detail`, they instead inspect the
+row-ID ranges of current data files. Neither mode compares indexed values with
+the latest column values. An update that preserves row IDs can therefore leave
+stale index entries even when coverage is complete. Handle those updates through
+the [index update policy](#update-indexed-columns) and an index build.
+
+Use `scalar-index.search-mode`, `vector-index.search-mode`, or
+`full-text-index.search-mode` for one index family. The legacy
+`global-index.search-mode` has no default and is used as a fallback when the corresponding
+family-specific option is not explicitly configured.
+
+To temporarily disable global-index scan acceleration while keeping the index files, set:
+
+<Tabs groupId="global-index-enabled">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES ('global-index.enabled' = 'false');
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+
+catalog.alter_table(
+    "db.my_table",
+    [SchemaChange.set_option("global-index.enabled", "false")],
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+Set it back to `true` to use global indexes during scans again.
+
+## Update Indexed Columns
+
+Coverage and freshness are different checks: an index can cover a row ID while
+still holding that row's old value. For example, changing an indexed `name` from
+`a200` to `a250` keeps the row ID but makes the old index entry stale. Switching to
+`detail` does not repair or detect that value change.
+
+Choose `global-index.column-update-action` before updating an indexed column:
+
+| Policy | Effect of the update | What to do next |
+| --- | --- | --- |
+| `THROW_ERROR` (default) | Rejects the indexed-column update. | Choose a supported update policy or explicitly drop the index before updating. |
+| `DROP_PARTITION_INDEX` | Drops affected partition indexes as part of the update. | Build indexes again for the affected scope. |
+| `IGNORE` | Keeps existing index files with their old values. | Refresh or replace those indexes before relying on indexed results for the changed data. |
+
+With `IGNORE`, Spark and Flink incremental builds use source metadata stored in
+index files to find and rebuild changed row ranges. Older index files without
+that metadata are not refreshed automatically; drop and rebuild them.
+PyPaimon incremental builds currently fill uncovered ranges only. For updates to
+already covered rows through a Python pipeline, explicitly drop and rebuild the
+affected index instead of relying on a repeated `create_global_index` call alone.
+
+Keep the same partition scope when dropping and replacing an index. Until the
+replacement is built, query results depend on the remaining coverage, search
+mode, and query API.
+
+## Read Scored Results
+
+Vector, full-text, and hybrid search select a set of top-K matching row IDs and
+associate scores with them. A subsequent table scan reads the selected records
+in its scan order. The top-K selection does not guarantee that returned rows are
+displayed in descending score order.
+
+In Spark SQL, request the score and sort explicitly. For example, after building
+the [Full-Text Index](./full-text):
+
+```sql
+SELECT id, content, __paimon_search_score
+FROM full_text_search('my_table', 'content', '{"match":{"query":"paimon"}}', 10)
+ORDER BY __paimon_search_score DESC, id;
+```
+
+For Java or Python, obtain each score from the search result by Paimon row ID.
+The following snippets assume `result` is the scored result returned by a search
+builder; the IDs below are Paimon row IDs, not values of the business `id` column.
+
+<Tabs groupId="global-index-read-scores">
+
+<TabItem value="java" label="Java API">
+
+```java
+ScoredGlobalIndexResult scored = (ScoredGlobalIndexResult) result;
+ScoreGetter scores = scored.scoreGetter();
+List<Long> rowIds = new ArrayList<>();
+for (long rowId : scored.results()) {
+    rowIds.add(rowId);
+}
+rowIds.sort(Comparator.<Long>comparingDouble(rowId -> scores.score(rowId))
+        .reversed()
+        .thenComparingLong(rowId -> rowId));
+for (long rowId : rowIds) {
+    System.out.println(rowId + ": " + scores.score(rowId));
+}
+```
+
+</TabItem>
+
+<TabItem value="python" label="Python API">
+
+```python
+score = result.score_getter()
+ranked_row_ids = sorted(result.results(), key=lambda row_id: (-score(row_id), row_id))
+for row_id in ranked_row_ids:
+    print(row_id, score(row_id))
+```
+
+</TabItem>
+
+</Tabs>
+
+Associate materialized rows and scores by row ID. Do not zip a table scan's rows
+with a separately sorted score list: the two orders can differ.
+
+## Drop an Index
+
+Drop index files:
+
+<Tabs groupId="global-index-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("name", index_type="btree")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Shared Options
+
+These table options affect global index build and read behavior:
+
+| Option | Default | Description |
+|---|---|---|
+| `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
+| `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, Multivalue, and FM queries. |
+| `vector-index.search-mode` | `fast` | Search mode for vector queries. |
+| `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
+| `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `global-index.column-update-action` | `THROW_ERROR` | Update policy: `THROW_ERROR`, `DROP_PARTITION_INDEX`, or `IGNORE`. See [Update Indexed Columns](#update-indexed-columns) for refresh requirements and engine differences. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
+| `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
+| `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
+| `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
+| `visibility-callback.enabled` | `false` | Whether JVM batch or bounded-stream writers wait after commit for existing partition indexes to cover newly appended ranges. Does not hide the committed snapshot. |
+| `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |

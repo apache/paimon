@@ -33,7 +33,10 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.BaseValueVector;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.complex.BaseRepeatedValueVector;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
@@ -101,6 +104,13 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             createdArrowWriter =
                     ArrowFormatWriter.forBorrowedAllocator(
                             rowType, writeBatchSize, true, allocator, writeBatchMemory);
+            // Only batches smaller than Arrow's default allocation are sized by the batch.
+            if (writeBatchSize < BaseValueVector.INITIAL_VALUE_ALLOCATION) {
+                for (FieldVector vector :
+                        createdArrowWriter.getVectorSchemaRoot().getFieldVectors()) {
+                    setInitialCapacity(vector, writeBatchSize);
+                }
+            }
             Schema arrowSchema = createdArrowWriter.getVectorSchemaRoot().getSchema();
             createdNativeWriter =
                     nativeWriterFactory.create(outputStream, arrowSchema, options, allocator);
@@ -111,6 +121,15 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
 
         this.arrowFormatWriter = createdArrowWriter;
         this.nativeWriter = createdNativeWriter;
+    }
+
+    private static void setInitialCapacity(FieldVector vector, int capacity) {
+        if (vector instanceof BaseRepeatedValueVector) {
+            // Avoid Arrow's 5x estimate for fixed- or variable-width element vectors.
+            ((BaseRepeatedValueVector) vector).setInitialCapacity(capacity, 1.0);
+        } else {
+            vector.setInitialCapacity(capacity);
+        }
     }
 
     @Override

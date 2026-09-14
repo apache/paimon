@@ -400,6 +400,15 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         FileSystem fs = getFileSystem(hadoopDst);
 
+        // HadoopSecuredFileSystem cannot override FileSystem's protected 3-arg rename, so
+        // reflection has to find it on the file system underneath the wrapper.
+        final FileSystem renameTarget;
+        if (fs instanceof HadoopSecuredFileSystem) {
+            renameTarget = ((HadoopSecuredFileSystem) fs).unwrap();
+        } else {
+            renameTarget = fs;
+        }
+
         if (renameMethodRef == null) {
             synchronized (this) {
                 if (renameMethodRef == null) {
@@ -409,7 +418,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
                     // DistributedFileSystem and ViewFileSystem override the rename method to public
                     // and implement correct renaming
                     try {
-                        method = ReflectionUtils.getMethod(fs.getClass(), "rename", 3);
+                        method = ReflectionUtils.getMethod(renameTarget.getClass(), "rename", 3);
                     } catch (NoSuchMethodException e) {
                         method = null;
                     }
@@ -435,19 +444,54 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
                 writer.flush();
             }
 
-            renameMethod.invoke(
-                    fs, hadoopTemp, hadoopDst, new Options.Rename[] {Options.Rename.OVERWRITE});
+            Options.Rename[] renameOptions = new Options.Rename[] {Options.Rename.OVERWRITE};
+            if (fs instanceof HadoopSecuredFileSystem) {
+                // the call has to stay inside the wrapper's doAs, or the rename runs as
+                // whoever the current thread is rather than the login user
+                ((HadoopSecuredFileSystem) fs)
+                        .callAsLoginUser(
+                                () -> {
+                                    invokeRename(
+                                            renameMethod,
+                                            renameTarget,
+                                            hadoopTemp,
+                                            hadoopDst,
+                                            renameOptions);
+                                    return null;
+                                });
+            } else {
+                invokeRename(renameMethod, renameTarget, hadoopTemp, hadoopDst, renameOptions);
+            }
             renameDone = true;
             // TODO: this is a workaround of HADOOP-16255 - remove this when HADOOP-16255 is
             // resolved
             tryRemoveCrcFile(hadoopTemp);
             return true;
-        } catch (InvocationTargetException | IllegalAccessException e) {
-            throw new IOException(e);
         } finally {
             if (!renameDone) {
                 deleteQuietly(tempPath);
             }
+        }
+    }
+
+    /**
+     * Invokes the reflective 3-arg rename and translates reflective failures to {@link
+     * IOException}. Inside {@link HadoopSecuredFileSystem}'s {@code doAs}, an escaping {@link
+     * InvocationTargetException} is rewrapped as {@code UndeclaredThrowableException} and would
+     * surface as a {@link RuntimeException}, bypassing the {@code IOException} retry in {@code
+     * HintFileUtils.commitHint}.
+     */
+    private static void invokeRename(
+            Method renameMethod,
+            FileSystem renameTarget,
+            org.apache.hadoop.fs.Path src,
+            org.apache.hadoop.fs.Path dst,
+            Options.Rename[] renameOptions)
+            throws IOException {
+        try {
+            renameMethod.invoke(renameTarget, src, dst, renameOptions);
+        } catch (InvocationTargetException | IllegalAccessException e) {
+            throw new IOException(e);
         }
     }
 

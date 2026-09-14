@@ -1,0 +1,260 @@
+---
+title: "CLI: Create and Change Tables"
+sidebar_label: "Create and Change Tables"
+description: "Create tables, import local files, and change schemas or table options."
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# CLI: Create and Change Tables
+
+Create tables, import local files, and change schemas or table options. Configure a catalog with the [CLI quick start](./cli#basic-usage) first. The command examples are alternatives, not a script to run in order.
+
+## Table Create
+
+Create a new Paimon table with a schema defined in a JSON file. The schema JSON format is the same as the output from
+`table get`, ensuring consistency and easy schema reuse.
+
+**Options:**
+
+- `--schema, -s`: Path to schema JSON file - **Required**
+- `--ignore-if-exists, -i`: Do not raise error if table already exists
+
+The schema JSON file follows the same format as output by `table get`:
+
+**Field Properties:**
+
+- `id`: Field ID (integer, typically starts from 0) - **Required**
+- `name`: Field name - **Required**
+- `type`: Field data type (e.g., `INT`, `BIGINT`, `STRING`, `TIMESTAMP`, `DECIMAL(10,2)`) - **Required**
+- `description`: Optional field description
+
+**Schema Properties:**
+
+- `fields`: List of field definitions - **Required**
+- `partitionKeys`: List of partition key column names
+- `primaryKeys`: List of primary key column names
+- `options`: Table options as key-value pairs
+- `comment`: Table comment
+
+**Example Workflow:**
+
+1. Export schema from an existing table:
+   ```shell
+   paimon table get mydb.users > users_schema.json
+   ```
+
+2. Create a new table with the same schema:
+   ```shell
+   paimon table create mydb.users_copy --schema users_schema.json
+   ```
+
+## Table Import
+
+Import data from CSV or JSON files into an existing Paimon table. This is useful for bulk loading data from external sources.
+
+**Options:**
+
+- `--input, -i`: Path to input file (CSV or JSON format) - **Required**
+
+**Supported Formats:**
+
+- **CSV** (`.csv`): Comma-separated values file
+- **JSON** (`.json`): JSON file with array of objects format
+
+### Import from CSV
+
+The CSV file should have:
+- A header row with column names matching the table schema
+- Data types compatible with the table columns
+
+```csv
+id,name,age,city
+1,Alice,25,Beijing
+2,Bob,30,Shanghai
+3,Charlie,35,Guangzhou
+```
+
+Output:
+```
+Successfully imported 3 rows into 'mydb.users'.
+```
+
+### Import from JSON
+
+The JSON file should be an array of objects with keys matching the table column names.
+
+```json
+[
+  {"id": 1, "name": "Alice", "age": 25, "city": "Beijing"},
+  {"id": 2, "name": "Bob", "age": 30, "city": "Shanghai"},
+  {"id": 3, "name": "Charlie", "age": 35, "city": "Guangzhou"}
+]
+```
+
+Output:
+```
+Successfully imported 3 rows into 'mydb.users'.
+```
+
+### Important Notes
+
+- The target table must exist before importing data
+- Column names in the file must match the table schema
+- Data types should be compatible with the table schema
+- The import operation appends data to the existing table
+
+## Table Rename
+
+Rename a table in the catalog. Both source and target must be specified in `database.table` format.
+
+```shell
+paimon table rename mydb.old_name mydb.new_name
+```
+
+Output:
+```
+Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
+```
+
+**Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
+
+## Table Alter
+
+Alter a table's schema or options. This command supports multiple sub-commands for different types of schema changes.
+
+### Basic Syntax
+
+```shell
+paimon table alter DATABASE.TABLE [--ignore-if-not-exists] SUBCOMMAND [OPTIONS]
+```
+
+**Global Options:**
+
+- `--ignore-if-not-exists, -i`: Do not raise error if table does not exist
+
+### Set Option
+
+Set a table option (key-value pair):
+
+```shell
+paimon table alter mydb.users set-option -k snapshot.num-retained-max -v 10
+```
+
+### Remove Option
+
+Remove a table option:
+
+```shell
+paimon table alter mydb.users remove-option -k snapshot.num-retained-max
+```
+
+### Add Column
+
+Add a new column to the table:
+
+**Example:**
+
+```shell
+paimon table alter mydb.users add-column -n email -t STRING -c "User email address"
+```
+
+**Example with position (first):**
+
+```shell
+paimon table alter mydb.users add-column -n row_id -t BIGINT --first
+```
+
+**Example with position (after):**
+
+```shell
+paimon table alter mydb.users add-column -n email -t STRING --after name
+```
+
+### Drop Column
+
+Drop a column from the table:
+
+```shell
+paimon table alter mydb.users drop-column -n email
+```
+
+### Rename Column
+
+Rename an existing column:
+
+```shell
+paimon table alter mydb.users rename-column -n username -m user_name
+```
+
+### Alter Column
+
+Alter an existing column's type, comment, or position. Multiple changes can be specified in a single command.
+
+**Change Column Type:**
+
+```shell
+paimon table alter mydb.users alter-column -n age -t BIGINT
+```
+
+**Change Column Comment:**
+
+```shell
+paimon table alter mydb.users alter-column -n age -c 'User age in years'
+```
+
+**Change Column Position:**
+
+```shell
+paimon table alter mydb.users alter-column -n age --first
+
+paimon table alter mydb.users alter-column -n age --after name
+```
+
+**Multiple changes in one command:**
+
+```shell
+paimon table alter mydb.users alter-column -n age -t BIGINT -c 'User age in years'
+```
+
+### Update Comment
+
+```shell
+paimon table alter mydb.users update-comment -c "Updated user information table"
+```
+
+## Table Drop
+
+Drop a table from the catalog. This will permanently delete the table and all its data.
+
+**Options:**
+
+- `--ignore-if-not-exists, -i`: Do not raise error if table does not exist
+
+```shell
+paimon table drop mydb.old_table
+```
+
+Output:
+```
+Table 'mydb.old_table' dropped successfully.
+```
+
+**Warning:** This operation cannot be undone. All data in the table will be permanently deleted.

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Choose the layer your application needs</title>
+<desc id="desc">Catalog clients manage metadata. Table APIs plan reads and prepare writes. Flink and Spark integrate table access with execution and recovery.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="1" y="1" width="958" height="558" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Choose the layer your application needs</text>
+<text x="28" y="76" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Catalogs resolve tables; table APIs expose data access; engines coordinate execution.</text>
+<rect x="28" y="108" width="275" height="104" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="165.5" y="141" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Catalog clients</text>
+<text x="165.5" y="169" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Java Catalog / RESTApi</text>
+<text x="165.5" y="194" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">C++ / Rust catalogs</text>
+<rect x="343" y="108" width="275" height="104" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="480.5" y="141" font-size="21" fill="#2463b4" font-weight="700" text-anchor="middle">Table APIs</text>
+<text x="480.5" y="169" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Java / C++ / Rust / Python</text>
+<text x="480.5" y="194" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Rows, splits, commit messages</text>
+<rect x="658" y="108" width="274" height="104" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="795.0" y="141" font-size="21" fill="#087f6e" font-weight="700" text-anchor="middle">Engine integrations</text>
+<text x="795.0" y="169" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Flink / Spark</text>
+<text x="795.0" y="194" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Jobs and checkpoints</text>
+<path d="M 303 160 H 343" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 658 160 H 618" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="262" width="275" height="109" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="165.5" y="295" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Catalog metadata</text>
+<text x="165.5" y="323" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Databases and table schemas</text>
+<text x="165.5" y="348" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Names, locations, options</text>
+<rect x="343" y="262" width="275" height="109" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="480.5" y="295" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Read and write builders</text>
+<text x="480.5" y="323" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Plan splits → read rows</text>
+<text x="480.5" y="348" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Write files → prepare changes</text>
+<rect x="658" y="262" width="274" height="109" rx="8" fill="#f5f7fb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="795.0" y="295" font-size="21" fill="#172b4d" font-weight="700" text-anchor="middle">Runtime coordination</text>
+<text x="795.0" y="323" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Assign splits and route rows</text>
+<text x="795.0" y="348" font-size="17" fill="#526277" font-weight="400" text-anchor="middle">Commit and recover</text>
+<path d="M 165 212 V 262" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 480 212 V 262" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 795 212 V 262" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="422" width="904" height="99" rx="8" fill="#e8f7f2" stroke="#087f6e" stroke-width="1.5"/>
+<text x="480" y="458" font-size="23" fill="#087f6e" font-weight="700" text-anchor="middle">Paimon table storage</text>
+<text x="480" y="488" font-size="18" fill="#526277" font-weight="400" text-anchor="middle">Schemas • snapshots • manifests • data files • indexes</text>
+<path d="M 165 371 V 422" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 480 371 V 422" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 795 371 V 422" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+</g>
+</svg>

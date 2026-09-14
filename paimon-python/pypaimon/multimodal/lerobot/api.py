@@ -37,6 +37,7 @@ from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
     _validate_v3_required_features,
+    _video_feature_names,
 )
 from pypaimon.multimodal.lerobot.source import (
     _close_quietly,
@@ -49,6 +50,12 @@ from pypaimon.multimodal.lerobot.source import (
 from pypaimon.multimodal.source_utils import (
     _validated_source_options,
     _validate_source_kerberos,
+)
+
+
+_VIDEO_LAYOUT_ERROR = (
+    "LeRobot video import requires a bucket-unaware target table so each "
+    "Episode is written by one writer."
 )
 
 
@@ -94,14 +101,20 @@ def load_from_lerobot(
         _positive_integer(local_info.get("fps"), "fps")
         _validated_counts(local_info, resolved_source.path)
         _validate_v3_required_features(local_info)
+        video_fields = _video_feature_names(local_info)
         LeRobotDataset = _import_lerobot_dataset()
         dataset = _open_resolved_dataset(
-            LeRobotDataset, resolved_source, local_info)
+            LeRobotDataset,
+            resolved_source,
+            local_info,
+            download_videos=bool(video_fields),
+        )
         try:
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
             _validated_counts(info, resolved_source.path)
             _validate_v3_required_features(info)
+            video_fields = _video_feature_names(info)
 
             lerobot_schema = _schema_from_info(info)
             metadata = _load_dataset_metadata(
@@ -117,6 +130,7 @@ def load_from_lerobot(
                 options,
                 metadata,
                 tag_name,
+                video_fields,
             )
         finally:
             close = getattr(dataset, "close", None)
@@ -134,14 +148,21 @@ def _import_dataset(
         batch_size,
         options,
         metadata,
-        tag_name):
+        tag_name,
+        video_fields):
     table = _create_target_table(
-        connection, table_name, source_schema, options, metadata)
+        connection,
+        table_name,
+        source_schema,
+        options,
+        metadata,
+        video_fields,
+    )
     tables = _prepare_metadata_tables(
         connection, table.raw_table, metadata)
     episodes_snapshot_id = _append_arrow_tables(
         tables["episodes"],
-        _validated_episode_tables(metadata),
+        _validated_episode_tables(metadata, video_fields),
     )
     frames_snapshot_id = None
     if int(info["total_frames"]) > 0:
@@ -153,6 +174,7 @@ def _import_dataset(
             source_schema,
             batch_size,
             metadata,
+            video_fields,
         )
     _commit_metadata(
         connection,
@@ -195,8 +217,25 @@ def _required_count(info, name, source):
 
 
 def _create_target_table(
-        connection, table_name, source_schema, options, metadata):
+        connection, table_name, source_schema, options, metadata,
+        video_fields=()):
     create_options = dict(options or {})
+    configured = create_options.get("video-frame-field")
+    if configured is not None:
+        requested = {
+            name.strip() for name in str(configured).split(",")
+            if name.strip()
+        }
+        if requested != set(video_fields):
+            raise ValueError(
+                "LeRobot video features %s do not match "
+                "'video-frame-field'=%r."
+                % (list(video_fields), configured)
+            )
+    if video_fields:
+        if str(create_options.get("bucket", "-1")).strip() != "-1":
+            raise ValueError(_VIDEO_LAYOUT_ERROR)
+        create_options["video-frame-field"] = ",".join(video_fields)
     managed_options = _managed_table_options(
         connection._identifier(table_name), metadata)
     reserved_options = set(_COMPANION_OPTION_KEYS.values()).intersection(

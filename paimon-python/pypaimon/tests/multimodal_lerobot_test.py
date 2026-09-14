@@ -16,6 +16,8 @@
 
 import builtins
 from array import array
+from fractions import Fraction
+import importlib.util
 import io
 import json
 import pickle
@@ -26,6 +28,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -42,12 +45,15 @@ from pypaimon.multimodal.source_utils import _SourceFileIO
 from pypaimon.multimodal.connection import MultimodalConnection
 from pypaimon.multimodal.lerobot import load_from_lerobot
 from pypaimon.multimodal.lerobot.dataset import (
+    _PyAVVideoDecoder,
     _arrow_rows,
     _image_tensor,
     _index_names,
+    _open_video_decoder,
     _selected_episodes,
     _torch_row,
 )
+from pypaimon.multimodal.lerobot.api import _create_target_table
 from pypaimon.multimodal.lerobot.metadata import (
     _append_arrow_tables,
     _companion_identifier,
@@ -61,6 +67,8 @@ from pypaimon.multimodal.lerobot.metadata import (
 from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _read_batch,
+    _video_frame_ordinal,
+    _video_sample_timestamps,
     _validate_frame_controls,
 )
 from pypaimon.multimodal.lerobot.schema import (
@@ -82,6 +90,11 @@ try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 except ImportError:
     LeRobotDataset = None
+
+try:
+    import av
+except ImportError:
+    av = None
 
 
 def _replaced_contract(field, old, new):
@@ -115,6 +128,193 @@ def _catalog_metadata(connection, name):
 
 
 class LeRobotValidationTest(unittest.TestCase):
+
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_pyav_decoder_reuses_windows_and_seeks_known_frames(self):
+        class Frame:
+
+            time_base = Fraction(1, 10)
+
+            def __init__(self, pts):
+                self.pts = pts
+                self.key_frame = pts % 10 == 0
+
+            def to_ndarray(self, format):
+                assert format == "rgb24"
+                return np.full((2, 2, 3), self.pts, dtype=np.uint8)
+
+        class Container:
+
+            def __init__(self):
+                self.stream = SimpleNamespace(time_base=Fraction(1, 10))
+                self.streams = SimpleNamespace(video=[self.stream])
+                self.position = 0
+                self.decoded = 0
+                self.seeks = []
+
+            def decode(self, stream):
+                assert stream is self.stream
+                while self.position < 120:
+                    index = self.position
+                    self.position += 1
+                    self.decoded += 1
+                    yield Frame(index)
+
+            def seek(self, offset, *, backward, any_frame, stream):
+                assert backward
+                assert not any_frame
+                assert stream is self.stream
+                self.seeks.append(offset)
+                self.position = offset
+
+            def close(self):
+                pass
+
+        container = Container()
+        with patch("av.open", return_value=container):
+            decoder = _PyAVVideoDecoder(io.BytesIO())
+        try:
+            for index in range(119):
+                decoder[index]
+                decoder[index + 1]
+            self.assertEqual(120, container.decoded)
+            self.assertEqual([], container.seeks)
+
+            decoder[5]
+            decoder[90]
+            decoder[8]
+            self.assertEqual(136, container.decoded)
+            self.assertEqual([0, 90, 0], container.seeks)
+        finally:
+            decoder.close()
+
+    def test_pyav_decoder_indexes_cold_random_reads(self):
+        class Frame:
+
+            time_base = Fraction(1, 10)
+
+            def __init__(self, pts):
+                self.pts = pts
+                self.key_frame = pts % 10 == 0
+
+            def to_ndarray(self, format):
+                assert format == "rgb24"
+                return np.full((2, 2, 3), self.pts, dtype=np.uint8)
+
+        class Container:
+
+            def __init__(self):
+                self.stream = SimpleNamespace(time_base=Fraction(1, 10))
+                self.streams = SimpleNamespace(video=[self.stream])
+                self.position = 0
+                self.decoded = 0
+                self.demuxed = 0
+                self.seeks = []
+
+            def demux(self, stream):
+                assert stream is self.stream
+                for index in range(120):
+                    self.demuxed += 1
+                    yield SimpleNamespace(
+                        pts=index, time_base=Fraction(1, 10),
+                        is_discard=False, is_keyframe=index % 10 == 0,
+                    )
+
+            def decode(self, stream):
+                assert stream is self.stream
+                while self.position < 120:
+                    index = self.position
+                    self.position += 1
+                    self.decoded += 1
+                    yield Frame(index)
+
+            def seek(self, offset, *, backward, any_frame, stream):
+                assert backward
+                assert not any_frame
+                assert stream is self.stream
+                self.seeks.append(offset)
+                self.position = offset
+
+            def close(self):
+                pass
+
+        container = Container()
+        fake_av = SimpleNamespace(open=lambda unused_stream: container)
+        tensor = staticmethod(
+            lambda frame: frame.to_ndarray(format="rgb24"))
+        with patch.dict(sys.modules, {"av": fake_av}), patch.object(
+                _PyAVVideoDecoder, "_tensor", tensor):
+            decoder = _PyAVVideoDecoder(io.BytesIO())
+            try:
+                frame = decoder[95]
+                self.assertEqual(120, container.demuxed)
+                self.assertEqual([90], container.seeks)
+                self.assertEqual(6, container.decoded)
+                self.assertTrue((frame == 95).all())
+            finally:
+                decoder.close()
+
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_pyav_decoder_seeks_before_b_frames(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width = 16
+            stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 12
+            stream.codec_context.max_b_frames = 2
+            for index in range(70):
+                image = np.full(
+                    (16, 16, 3), index + 24, dtype=np.uint8)
+                frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+                frame.pts = index
+                frame.time_base = Fraction(1, 30)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        payload = output.getvalue()
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [
+                np.array(frame.to_ndarray(format="rgb24"), copy=True)
+                for frame in container.decode(video=0)
+            ]
+
+        decoder = _PyAVVideoDecoder(io.BytesIO(payload))
+        try:
+            for index in (69, 20, 35, 1, 68):
+                actual = decoder[index].permute(1, 2, 0).numpy()
+                np.testing.assert_array_equal(expected[index], actual)
+        finally:
+            decoder.close()
+
+    def test_default_video_backend_falls_back_on_os_error(self):
+        stream = Mock()
+        decoder = object()
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset."
+                "_open_torchcodec_decoder",
+                side_effect=OSError("unavailable")), patch(
+                "pypaimon.multimodal.lerobot.dataset._PyAVVideoDecoder",
+                return_value=decoder) as pyav:
+            self.assertIs(decoder, _open_video_decoder(stream))
+            stream.seek.assert_called_once_with(0)
+            pyav.assert_called_once_with(stream)
+
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset."
+                "_open_torchcodec_decoder",
+                side_effect=OSError("unavailable")):
+            with self.assertRaises(OSError):
+                _open_video_decoder(stream, backend="torchcodec")
 
     def test_dataset_requires_supported_python(self):
         with patch(
@@ -882,8 +1082,10 @@ class LeRobotValidationTest(unittest.TestCase):
                 "shape": [8, 10, 3],
             }
         }
-        with self.assertRaisesRegex(ValueError, "video feature camera.*not supported"):
-            _schema_from_info(info)
+        self.assertEqual(
+            pa.large_binary(),
+            _schema_from_info(info).field("camera").type,
+        )
 
     def test_existing_schema_preserves_lerobot_feature_contract(self):
         source = _schema_from_info({
@@ -993,6 +1195,7 @@ class LeRobotValidationTest(unittest.TestCase):
             "episode_index": [0],
             "dataset_from_index": [0],
             "dataset_to_index": [1],
+            "length": [1],
             "data/chunk_index": [0],
             "data/file_index": [0],
         })
@@ -1026,6 +1229,16 @@ class LeRobotValidationTest(unittest.TestCase):
                 "fps": 30,
                 "features": {
                     "index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {
+                        "dtype": "float32",
+                        "shape": [1],
+                        "fps": 10.0,
+                    },
+                    "camera": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
                 },
             }))
             connection = pmm.connect(options={
@@ -1039,6 +1252,72 @@ class LeRobotValidationTest(unittest.TestCase):
             import_lerobot.assert_not_called()
             with self.assertRaises(TableNotExistException):
                 connection.get_table("empty_frames")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_video_options_must_match_metadata(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_options_"))
+        try:
+            info = {
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "camera_a": {"dtype": "video", "shape": [8, 10, 3]},
+                    "camera_b": {"dtype": "video", "shape": [8, 10, 3]},
+                },
+            }
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            schema = _schema_from_info(info)
+            metadata = {"stats_table": None, "subtasks_table": None}
+
+            with self.assertRaisesRegex(ValueError, "do not match"):
+                _create_target_table(
+                    connection,
+                    "conflict",
+                    schema,
+                    options={"video-frame-field": "camera_a"},
+                    metadata=metadata,
+                    video_fields=("camera_a", "camera_b"),
+                )
+
+            table = _create_target_table(
+                connection,
+                "reordered",
+                schema,
+                options={"video-frame-field": "camera_b,camera_a"},
+                metadata=metadata,
+                video_fields=("camera_a", "camera_b"),
+            )
+            self.assertEqual(
+                {"camera_a", "camera_b"},
+                table.raw_table.options.video_frame_fields(),
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_video_import_requires_single_writer_layout(self):
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_layout_"))
+        try:
+            info = {
+                "features": {
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "camera": {"dtype": "video", "shape": [8, 10, 3]},
+                },
+            }
+            schema = _schema_from_info(info)
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            with self.assertRaisesRegex(ValueError, "bucket-unaware"):
+                _create_target_table(
+                    connection,
+                    "bucketed",
+                    schema,
+                    options={"bucket": "1"},
+                    metadata={"stats_table": None, "subtasks_table": None},
+                    video_fields=("camera",),
+                )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1339,25 +1618,734 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_local_video_is_rejected_before_opening(self):
+    def test_episode_aware_multi_video_import(self):
+        import pandas as pd
+
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_video_"))
         try:
             info_dir = temp_dir / "meta"
             info_dir.mkdir()
-            (info_dir / "info.json").write_text(json.dumps({
+            info = {
                 "codebase_version": "v3.0",
+                "fps": 10,
+                "total_frames": 5,
+                "total_episodes": 2,
+                "total_tasks": 1,
+                "data_path": (
+                    "data/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.parquet"
+                ),
+                "video_path": (
+                    "videos/{video_key}/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.mp4"
+                ),
                 "features": {
-                    "camera": {"dtype": "video", "shape": [8, 10, 3]},
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "frame_index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {
+                        "dtype": "float32",
+                        "shape": [1],
+                        "fps": 10.0,
+                    },
+                    "task_index": {"dtype": "int64", "shape": [1]},
+                    "observation.state": {
+                        "dtype": "float32",
+                        "shape": [3],
+                    },
+                    "camera_a": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
+                    "camera_b": {
+                        "dtype": "video",
+                        "shape": [8, 10, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
                 },
-            }))
+            }
+            (info_dir / "info.json").write_text(json.dumps(info))
+            payloads = {
+                "camera_a/chunk-000/file-000.mp4": b"camera-a",
+                "camera_b/chunk-000/file-000.mp4": b"camera-b-0",
+                "camera_b/chunk-000/file-001.mp4": b"camera-b-1",
+            }
+            for relative, payload in payloads.items():
+                path = temp_dir / "videos" / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+
+            episodes = [
+                {
+                    "episode_index": 0,
+                    "dataset_from_index": 0,
+                    "dataset_to_index": 2,
+                    "length": 2,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "tasks": ["pick"],
+                    "videos/camera_a/chunk_index": 0,
+                    "videos/camera_a/file_index": 0,
+                    "videos/camera_a/from_timestamp": 0.5,
+                    "videos/camera_a/to_timestamp": 0.7,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.0,
+                    "videos/camera_b/to_timestamp": 0.2,
+                },
+                {
+                    "episode_index": 1,
+                    "dataset_from_index": 2,
+                    "dataset_to_index": 5,
+                    "length": 3,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "tasks": ["pick"],
+                    "videos/camera_a/chunk_index": 0,
+                    "videos/camera_a/file_index": 0,
+                    "videos/camera_a/from_timestamp": 0.1,
+                    "videos/camera_a/to_timestamp": 0.4,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 1,
+                    "videos/camera_b/from_timestamp": 0.0,
+                    "videos/camera_b/to_timestamp": 0.3,
+                },
+            ]
+            # The published Episode Parquet, not the dataset object's stale
+            # metadata cache, must determine the imported video descriptors.
+            cached_episodes = [dict(episode) for episode in episodes]
+            cached_episodes[1].update({
+                "videos/camera_b/file_index": 0,
+                "videos/camera_b/from_timestamp": 0.2,
+                "videos/camera_b/to_timestamp": 0.5,
+            })
+
+            class Dataset:
+
+                root = temp_dir
+                meta = SimpleNamespace(
+                    info=info, episodes=cached_episodes, tasks=["pick"])
+                rows = pa.table({
+                    "index": pa.array(range(5), type=pa.int64()),
+                    "episode_index": pa.array(
+                        [0, 0, 1, 1, 1], type=pa.int64()),
+                    "frame_index": pa.array(
+                        [0, 1, 0, 1, 2], type=pa.int64()),
+                    "timestamp": pa.array(
+                        [0.0, 0.1, 0.0, 0.1, 0.2],
+                        type=pa.float32(),
+                    ),
+                    "task_index": pa.array([0] * 5, type=pa.int64()),
+                    "observation.state": pa.array(
+                        [[float(index), 0.0, 1.0] for index in range(5)],
+                        type=pa.list_(pa.float32(), 3),
+                    ),
+                })
+
+                def __len__(self):
+                    return 5
+
+                def read_batch(self, begin, end):
+                    return self.rows.slice(begin, end - begin)
+
             connection = pmm.connect(options={
                 "warehouse": str(temp_dir / "warehouse"),
             })
-            with self.assertRaisesRegex(
-                    ValueError, "video feature camera.*not supported"):
-                connection.load_from_lerobot("frames", temp_dir)
+            episodes_path = (
+                temp_dir / "meta/episodes/chunk-000/file-000.parquet")
+            episodes_path.parent.mkdir(parents=True)
+            pq.write_table(pa.Table.from_pylist(episodes), episodes_path)
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {"task_index": [0]},
+                index=pd.Index(["pick"], name="task"),
+            )), temp_dir / "meta/tasks.parquet")
+
+            def sample_timestamps(unused_dataset, uri):
+                return (
+                    [0.0, 0.1, 0.2, 0.3, 0.5, 0.6]
+                    if "camera_a" in uri else
+                    [0.0, 0.1, 0.2, 0.3, 0.4]
+                )
+
+            with patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_open_resolved_dataset",
+                    return_value=Dataset(),
+            ), patch(
+                    "pypaimon.multimodal.lerobot.loader."
+                    "_video_sample_timestamps",
+                    side_effect=sample_timestamps,
+            ):
+                result = connection.load_from_lerobot(
+                    "frames", temp_dir, batch_size=1)
+
+            self.assertIsNone(result)
+            table = connection.get_table("frames")
+            self.assertEqual(
+                {"camera_a", "camera_b"},
+                table.raw_table.options.video_frame_fields(),
+            )
+            field_types = {
+                field.name: str(field.type)
+                for field in table.raw_table.fields
+            }
+            self.assertEqual(
+                "VECTOR<FLOAT, 3> NOT NULL",
+                field_types["observation.state"],
+            )
+            rows = table.scan().select([
+                "index", "camera_a", "camera_b"
+            ]).to_arrow().sort_by("index").to_pylist()
+            camera_a = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera_a"])
+                for row in rows
+            ]
+            camera_b = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera_b"])
+                for row in rows
+            ]
+            self.assertEqual(
+                [4, 5, 1, 2, 3],
+                [descriptor.frame_index for descriptor in camera_a],
+            )
+            self.assertEqual(
+                [0, 1, 0, 1, 2],
+                [descriptor.frame_index for descriptor in camera_b],
+            )
+            _, bodies = table.scan().select([
+                "index", "camera_a", "camera_b"
+            ]).read_blobs()
+            self.assertEqual(
+                [payloads["camera_a/chunk-000/file-000.mp4"]] * 5,
+                bodies["camera_a"],
+            )
+            self.assertEqual(
+                [payloads["camera_b/chunk-000/file-000.mp4"]] * 2
+                + [payloads["camera_b/chunk-000/file-001.mp4"]] * 3,
+                bodies["camera_b"],
+            )
+
+            data_path = temp_dir / "data/chunk-000/file-000.parquet"
+            data_path.parent.mkdir(parents=True)
+            pq.write_table(Dataset.rows, data_path)
+            remote = "oss://source-bucket/robot-videos"
+            source_file_io = _RemoteLeRobotFileIO(temp_dir, remote)
+            with patch(
+                    "pypaimon.multimodal.lerobot.source._SourceFileIO",
+                    return_value=source_file_io,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.loader."
+                    "_video_sample_timestamps",
+                    side_effect=sample_timestamps,
+            ):
+                remote_result = connection.load_from_lerobot(
+                    "remote_frames", remote, batch_size=1)
+
+            self.assertIsNone(remote_result)
+            opened_videos = [
+                path for path in source_file_io.opened_paths
+                if path.endswith(".mp4")
+            ]
+            self.assertEqual(3, len(opened_videos))
+            self.assertEqual(1, source_file_io.close_count)
+            _, remote_bodies = connection.get_table(
+                "remote_frames").scan().select([
+                    "index", "camera_a", "camera_b"
+                ]).read_blobs()
+            self.assertEqual(bodies, remote_bodies)
+
+            # Both cameras now share one physical MP4 across Episodes. The
+            # logical Episode boundary must still control normal-file rolling.
+            episodes[1].update({
+                "videos/camera_b/file_index": 0,
+                "videos/camera_b/from_timestamp": 0.2,
+                "videos/camera_b/to_timestamp": 0.5,
+            })
+            pq.write_table(pa.Table.from_pylist(episodes), episodes_path)
+            with patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_open_resolved_dataset",
+                    return_value=Dataset(),
+            ), patch(
+                    "pypaimon.multimodal.lerobot.loader."
+                    "_video_sample_timestamps",
+                    side_effect=sample_timestamps,
+            ):
+                connection.load_from_lerobot(
+                    "shared_video_frames",
+                    temp_dir,
+                    batch_size=1,
+                    options={"target-file-row-num": "1"},
+                )
+            raw_table = connection.get_table(
+                "shared_video_frames").raw_table
+            files = {
+                file.file_name: file
+                for split in raw_table.new_read_builder().new_scan().plan().splits()
+                for file in split.files
+            }.values()
+            self.assertEqual(
+                [2, 3],
+                sorted(
+                    file.row_count for file in files
+                    if not file.file_name.endswith(".video")
+                    and ".vector." not in file.file_name
+                ),
+            )
+            self.assertEqual(
+                [2, 3],
+                sorted(
+                    file.row_count for file in files
+                    if ".vector." in file.file_name
+                ),
+            )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @unittest.skipUnless(av is not None, "PyAV is required for MP4 decoding")
+    def test_imported_video_payload_can_be_decoded(self):
+        self._assert_imported_video_payload_can_be_decoded(False)
+
+    @unittest.skipUnless(
+        av is not None
+        and sys.version_info >= (3, 10)
+        and importlib.util.find_spec("datasets") is not None
+        and importlib.util.find_spec("torch") is not None,
+        "Video training reads require Python 3.10+, PyAV, datasets, and Torch",
+    )
+    def test_imported_video_payload_supports_training_reads(self):
+        self._assert_imported_video_payload_can_be_decoded(True)
+
+    def _assert_imported_video_payload_can_be_decoded(self, training_reads):
+        import pandas as pd
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_mp4_"))
+        try:
+            info = {
+                "codebase_version": "v3.0",
+                "fps": 10,
+                "total_frames": 5,
+                "total_episodes": 2,
+                "total_tasks": 1,
+                "data_path": (
+                    "data/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.parquet"
+                ),
+                "video_path": (
+                    "videos/{video_key}/chunk-{chunk_index:03d}/"
+                    "file-{file_index:03d}.mp4"
+                ),
+                "features": {
+                    "index": {"dtype": "int64", "shape": [1]},
+                    "episode_index": {"dtype": "int64", "shape": [1]},
+                    "frame_index": {"dtype": "int64", "shape": [1]},
+                    "timestamp": {
+                        "dtype": "float32",
+                        "shape": [1],
+                        "fps": 10.0,
+                    },
+                    "task_index": {"dtype": "int64", "shape": [1]},
+                    "action": {"dtype": "float32", "shape": [1]},
+                    "camera": {
+                        "dtype": "video",
+                        "shape": [16, 16, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
+                    "camera_b": {
+                        "dtype": "video",
+                        "shape": [16, 16, 3],
+                        "video_info": {"video.fps": 10.0},
+                    },
+                },
+            }
+            episodes = [
+                {
+                    "episode_index": 0,
+                    "dataset_from_index": 0,
+                    "dataset_to_index": 2,
+                    "length": 2,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "tasks": ["pick"],
+                    "videos/camera/chunk_index": 0,
+                    "videos/camera/file_index": 0,
+                    "videos/camera/from_timestamp": 0.5,
+                    "videos/camera/to_timestamp": 0.7,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.5,
+                    "videos/camera_b/to_timestamp": 0.7,
+                },
+                {
+                    "episode_index": 1,
+                    "dataset_from_index": 2,
+                    "dataset_to_index": 5,
+                    "length": 3,
+                    "data/chunk_index": 0,
+                    "data/file_index": 0,
+                    "tasks": ["pick"],
+                    "videos/camera/chunk_index": 0,
+                    "videos/camera/file_index": 0,
+                    "videos/camera/from_timestamp": 0.1,
+                    "videos/camera/to_timestamp": 0.4,
+                    "videos/camera_b/chunk_index": 0,
+                    "videos/camera_b/file_index": 0,
+                    "videos/camera_b/from_timestamp": 0.1,
+                    "videos/camera_b/to_timestamp": 0.4,
+                },
+            ]
+            physical_frame_values = [24, 56, 88, 120, 168, 216]
+            expected_frame_values = [168, 216, 56, 88, 120]
+
+            info_dir = temp_dir / "meta"
+            info_dir.mkdir()
+            (info_dir / "info.json").write_text(json.dumps(info))
+            episodes_path = (
+                info_dir / "episodes/chunk-000/file-000.parquet")
+            episodes_path.parent.mkdir(parents=True)
+            pq.write_table(pa.Table.from_pylist(episodes), episodes_path)
+            pq.write_table(pa.Table.from_pandas(pd.DataFrame(
+                {"task_index": [0]},
+                index=pd.Index(["pick"], name="task"),
+            )), info_dir / "tasks.parquet")
+
+            video_path = (
+                temp_dir / "videos/camera/chunk-000/file-000.mp4")
+            video_path.parent.mkdir(parents=True)
+            with av.open(str(video_path), mode="w") as container:
+                stream = container.add_stream("mpeg4", rate=10)
+                stream.width = 16
+                stream.height = 16
+                stream.pix_fmt = "yuv420p"
+                stream.time_base = Fraction(1, 10)
+                for pts, value in zip(
+                        [0, 1, 2, 3, 5, 6], physical_frame_values):
+                    image = np.full((16, 16, 3), value, dtype=np.uint8)
+                    frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+                    frame.pts = pts
+                    frame.time_base = Fraction(1, 10)
+                    for packet in stream.encode(frame):
+                        container.mux(packet)
+                for packet in stream.encode():
+                    container.mux(packet)
+            camera_b_path = (
+                temp_dir / "videos/camera_b/chunk-000/file-000.mp4")
+            camera_b_path.parent.mkdir(parents=True)
+            shutil.copy2(video_path, camera_b_path)
+
+            class Dataset:
+
+                root = temp_dir
+                meta = SimpleNamespace(
+                    info=info, episodes=episodes, tasks=["pick"])
+                rows = pa.table({
+                    "index": pa.array(range(5), type=pa.int64()),
+                    "episode_index": pa.array(
+                        [0, 0, 1, 1, 1], type=pa.int64()),
+                    "frame_index": pa.array(
+                        [0, 1, 0, 1, 2], type=pa.int64()),
+                    "timestamp": pa.array(
+                        [0.0, 0.1, 0.0, 0.1, 0.2],
+                        type=pa.float32(),
+                    ),
+                    "task_index": pa.array([0] * 5, type=pa.int64()),
+                    "action": pa.array(
+                        [0.0, 1.0, 2.0, 3.0, 4.0], type=pa.float32()),
+                })
+
+                def __len__(self):
+                    return 5
+
+                def read_batch(self, begin, end):
+                    return self.rows.slice(begin, end - begin)
+
+            connection = pmm.connect(options={
+                "warehouse": str(temp_dir / "warehouse"),
+            })
+            with patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_import_lerobot_dataset",
+                    return_value=object,
+            ), patch(
+                    "pypaimon.multimodal.lerobot.api."
+                    "_open_resolved_dataset",
+                    return_value=Dataset(),
+            ):
+                connection.load_from_lerobot(
+                    "frames", temp_dir, batch_size=1)
+
+            table = connection.get_table("frames")
+            rows = table.scan().select([
+                "index", "camera"
+            ]).to_arrow().sort_by("index").to_pylist()
+            descriptors = [
+                pmm.VideoFrameDescriptor.deserialize(row["camera"])
+                for row in rows
+            ]
+            self.assertEqual(
+                [4, 5, 1, 2, 3],
+                [descriptor.frame_index for descriptor in descriptors],
+            )
+
+            class Decoder:
+
+                def __init__(self, source):
+                    self.container = av.open(source)
+                    self.frames = list(self.container.decode(video=0))
+
+                def value(self, frame_index):
+                    frame = self.frames[frame_index]
+                    return float(frame.to_ndarray(
+                        format="rgb24").mean()), float(frame.time)
+
+                def close(self):
+                    self.container.close()
+
+            collator = pmm.VideoFrameCollator(
+                table,
+                video_column="camera",
+                decoder_factory=Decoder,
+                decode_fn=lambda decoder, frame_index, row: decoder.value(
+                    frame_index),
+                output_column="decoded",
+                collate_fn=lambda decoded_rows: decoded_rows,
+            )
+            try:
+                decoded_rows = collator(rows)
+                self.assertEqual(1, len(collator._decoders))
+            finally:
+                collator.close()
+            np.testing.assert_allclose(
+                [row["decoded"][0] for row in decoded_rows],
+                expected_frame_values,
+                atol=5,
+            )
+            np.testing.assert_allclose(
+                [row["decoded"][1] for row in decoded_rows],
+                [0.5, 0.6, 0.1, 0.2, 0.3],
+                atol=1e-6,
+            )
+            if not training_reads:
+                return
+
+            dataset = pmm.PaimonLeRobotDataset(
+                table,
+                delta_timestamps={"camera": [0.0, 0.1]},
+            )
+            try:
+                last, first = dataset.__getitems__([4, 0])
+                self.assertEqual(
+                    [2, 3, 16, 16], list(last["camera"].shape))
+                self.assertEqual(
+                    [2, 3, 16, 16], list(first["camera"].shape))
+                self.assertEqual(
+                    [3, 16, 16], list(first["camera_b"].shape))
+                self.assertEqual("torch.float32", str(last["camera"].dtype))
+                np.testing.assert_allclose(
+                    [
+                        float(last["camera"][0].mean()) * 255,
+                        float(first["camera"][0].mean()) * 255,
+                        float(first["camera"][1].mean()) * 255,
+                    ],
+                    [120, 168, 216],
+                    atol=5,
+                )
+                self.assertEqual(
+                    [False, True], last["camera_is_pad"].tolist())
+                self.assertEqual(
+                    1, len(dataset._video_collators[0]._decoders))
+
+                from torch.utils.data import DataLoader
+                worker_indices = []
+                for batch in DataLoader(
+                        dataset,
+                        batch_size=2,
+                        shuffle=False,
+                        num_workers=2,
+                        multiprocessing_context="spawn"):
+                    worker_indices.extend(batch["index"].tolist())
+                self.assertEqual(list(range(5)), worker_indices)
+            finally:
+                dataset.close()
+
+            action_dataset = pmm.PaimonLeRobotDataset(
+                table,
+                delta_timestamps={"action": [0.0, 0.1]},
+            )
+            try:
+                item = action_dataset[0]
+                self.assertEqual([2], list(item["action"].shape))
+                np.testing.assert_allclose(
+                    [0.0, 1.0], item["action"].tolist())
+                self.assertEqual(
+                    [3, 16, 16], list(item["camera"].shape))
+                self.assertEqual(
+                    [3, 16, 16], list(item["camera_b"].shape))
+            finally:
+                action_dataset.close()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_video_ordinals_follow_source_timestamps(self):
+        info = {
+            "fps": 10,
+            "features": {
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "camera": {
+                    "dtype": "video",
+                    "shape": [8, 10, 3],
+                    "video_info": {"video.fps": 10.0},
+                },
+            },
+        }
+        rows = pa.table({
+            "episode_index": pa.array([0, 0, 1, 1], type=pa.int64()),
+            "frame_index": pa.array([0, 1, 0, 1], type=pa.int64()),
+            "timestamp": pa.array(
+                [0.0, 0.1, 0.0, 0.1], type=pa.float32()),
+        })
+
+        class Dataset:
+
+            root = Path("/")
+
+            def __init__(self, rows):
+                self.rows = rows
+
+            def read_batch(self, begin, end):
+                return self.rows.slice(begin, end - begin)
+
+            def video_sample_timestamps(self, unused_uri):
+                return [0.0, 0.1, 0.2, 0.3, 0.5, 0.6]
+
+        schema = _schema_from_info(info)
+        episodes = [
+            {
+                "episode_index": 0,
+                "length": 2,
+                "dataset_from_index": 0,
+                "dataset_to_index": 2,
+                "videos/camera/chunk_index": 0,
+                "videos/camera/file_index": 0,
+                "videos/camera/from_timestamp": 0.5,
+                "videos/camera/to_timestamp": 0.7,
+            },
+            {
+                "episode_index": 1,
+                "length": 2,
+                "dataset_from_index": 2,
+                "dataset_to_index": 4,
+                "videos/camera/chunk_index": 0,
+                "videos/camera/file_index": 0,
+                "videos/camera/from_timestamp": 0.1,
+                "videos/camera/to_timestamp": 0.3,
+            },
+        ]
+        video_sources = {}
+        with patch(
+                "pypaimon.multimodal.lerobot.loader._video_source",
+                return_value=("file:/video.mp4", 10),
+        ):
+            results = [
+                _read_batch(
+                    Dataset(rows), info, begin, begin + 2, schema,
+                    episode=episode, video_sources=video_sources,
+                )
+                for begin, episode in zip((0, 2), episodes)
+            ]
+        self.assertEqual(
+            [4, 5, 1, 2],
+            [
+                pmm.VideoFrameDescriptor.deserialize(value.as_py()).frame_index
+                for result in results
+                for value in result["camera"]
+            ],
+        )
+
+        missing = dict(episodes[0])
+        missing.update({
+            "videos/camera/from_timestamp": 0.8,
+            "videos/camera/to_timestamp": 1.0,
+        })
+        with patch(
+                "pypaimon.multimodal.lerobot.loader._video_source",
+                return_value=("file:/video.mp4", 10),
+        ), self.assertRaisesRegex(ValueError, "has no frame"):
+            _read_batch(
+                Dataset(rows), info, 0, 2, schema,
+                episode=missing, video_sources={})
+
+        for timestamp_range in (
+                (-0.1, 0.1), (0.0, float("nan")), (0.0, 0.3)):
+            invalid_episode = dict(episodes[0])
+            invalid_episode.update({
+                "videos/camera/from_timestamp": timestamp_range[0],
+                "videos/camera/to_timestamp": timestamp_range[1],
+            })
+            with self.subTest(timestamp_range=timestamp_range), \
+                    self.assertRaisesRegex(ValueError, "timestamp|duration"):
+                _read_batch(
+                    Dataset(rows), info, 0, 2, schema,
+                    episode=invalid_episode, video_sources={})
+
+    def test_video_sample_timestamps_skip_discard_packets(self):
+        class Container:
+
+            streams = SimpleNamespace(video=[SimpleNamespace(
+                time_base=Fraction(1, 10))])
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, unused_type, unused_value, unused_traceback):
+                pass
+
+            def demux(self, unused_stream):
+                return [
+                    SimpleNamespace(
+                        pts=-1, time_base=Fraction(1, 10),
+                        is_discard=True),
+                    SimpleNamespace(
+                        pts=0, time_base=Fraction(1, 10),
+                        is_discard=False),
+                    SimpleNamespace(
+                        pts=1, time_base=Fraction(1, 10),
+                        is_discard=False),
+                ]
+
+        fake_av = SimpleNamespace(open=lambda unused_source: Container())
+        with patch.dict(sys.modules, {"av": fake_av}):
+            timestamps = _video_sample_timestamps(
+                SimpleNamespace(), "file:/video.mp4")
+        self.assertEqual([0.0, 0.1], list(timestamps))
+
+    def test_video_frame_matching_quantizes_float32_timestamp(self):
+        frame_index = 61441
+        timestamps = array(
+            "d", (index / 30 for index in range(frame_index + 1)))
+        frame_timestamp = pa.scalar(
+            frame_index / 30, type=pa.float32()).as_py()
+
+        self.assertEqual(
+            frame_index,
+            _video_frame_ordinal(
+                timestamps, frame_timestamp, 0.0, pa.float32(), "camera"),
+        )
 
 
 class _RemoteLeRobotFileIO:
@@ -1384,7 +2372,9 @@ class _RemoteLeRobotFileIO:
         native_path = remote_path.split("://", 1)[1]
         file_type = pafs.FileType.Directory if local_path.is_dir() \
             else pafs.FileType.File
-        return pafs.FileInfo(native_path, file_type)
+        size = local_path.stat().st_size \
+            if file_type == pafs.FileType.File else None
+        return pafs.FileInfo(native_path, file_type, size=size)
 
     def get_file_status(self, remote_path):
         local_path = self._local_path(remote_path)
@@ -2387,7 +3377,8 @@ class LeRobotImportTest(unittest.TestCase):
                 source,
                 source_schema,
                 batch_size,
-                metadata):
+                metadata,
+                video_fields=()):
             table.add(_read_batch(
                 dataset,
                 info,
@@ -2403,6 +3394,7 @@ class LeRobotImportTest(unittest.TestCase):
                 source_schema,
                 batch_size,
                 metadata,
+                video_fields,
             )
 
         with patch.object(

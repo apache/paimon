@@ -1,5 +1,5 @@
 ---
-title: "PrimaryKey Table"
+title: "Primary-Key Table"
 sidebar_position: 2
 ---
 
@@ -22,13 +22,98 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+<a id="overview"></a>
 
-If you define a table with primary key, you can insert, update or delete records in the table.
+# Primary-Key Tables
 
-Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by
-sorting the primary key within each bucket, allowing users to achieve high performance by applying filtering conditions
-on the primary key. See [CREATE TABLE](../flink/sql-ddl#create-table).
+A primary-key table maintains one logical row per key. Incoming records can insert, update, or
+remove that row according to the table's **merge engine**. Multiple physical versions may remain
+in data files until they are merged during reads or compaction.
+
+Use a primary-key table for CDC replication, upsert pipelines, or combining updates to the same
+entity. For data that only grows without merging by key, see [Append Table](../append-table/).
+
+## Quick Start
+
+The following Flink SQL table keeps the latest row for each `order_id`:
+
+```sql
+CREATE TABLE orders (
+    order_id BIGINT,
+    customer_id BIGINT,
+    amount DECIMAL(12, 2),
+    PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+    'bucket' = '4'
+);
+
+INSERT INTO orders VALUES (1, 101, 12.00);
+INSERT INTO orders VALUES (1, 101, 15.00);
+
+SELECT * FROM orders;
+-- 1, 101, 15.00
+```
+
+This example uses four fixed buckets, the default `deduplicate` merge engine, and the default
+merge-on-read storage mode. Omitting `bucket` selects dynamic buckets. See
+[Data Distribution](./data-distribution) before choosing a bucket mode for your workload, and
+[Sequence Field](./sequence-rowkind#sequence-field) when updates can arrive out of order.
+
+## Design a Primary-Key Table
+
+These settings answer different questions. Choose them together, checking each feature's
+compatibility requirements.
+
+| Decision | What it controls | Read next |
+| --- | --- | --- |
+| Partition and bucket keys | Where a row is stored and how work is distributed | [Data Distribution](./data-distribution) |
+| Merge engine | How records with the same key form a logical row | [Merge Engine](./merge-engine/) |
+| Sequence and row kind | Which update takes precedence and whether it inserts or retracts | [Sequence and Row Kind](./sequence-rowkind) |
+| Table mode | Whether readers merge versions, read compacted files, or apply deletion vectors | [Table Mode](./table-mode) |
+| Changelog producer | Which changes a streaming consumer receives | [Changelog Producer](./changelog-producer) |
+
+Then tune [Compaction](./compaction) and [Query Performance](./query-performance). For specialized
+workloads, see [Primary-Key Indexes](./global-index), [PK Clustering Override](./pk-clustering-override),
+[Chain Table](./chain-table), and [BLOB Storage](./blob-storage).
+
+## Bucket
+
+A table, or each partition of a partitioned table, contains buckets. Each bucket has its own LSM
+tree of data files. Changelog files and indexes may accompany those data files, depending on the
+configuration.
+
+![A partition contains independent buckets, each with Level-0 files and higher-level sorted runs.](/img/primary-key-storage-layout.svg)
+
+In fixed-bucket mode, Paimon hashes the `bucket-key` columns to select a bucket. If `bucket-key`
+is not set, it uses the primary-key columns excluding partition columns. Dynamic and postpone
+buckets use different assignment mechanisms; see [Data Distribution](./data-distribution).
+
+Buckets distribute writes and affect read parallelism, but are not a universal one-reader limit:
+[Table Mode](./table-mode) explains when files can be read independently. Use the
+[bucket sizing guidance](./data-distribution#bucket-sizing) to balance parallelism against
+small-file overhead.
+
+## LSM Trees
+
+Paimon stores primary-key data in an LSM tree (log-structured merge-tree). Writers buffer records,
+sort them, and flush new files. Compaction merges files to reduce the work needed by future reads.
+
+### Sorted Runs
+
+A sorted run contains one or more data files. In the default primary-key layout, records in each
+file are sorted by key, and file key ranges do not overlap within the same run. Different runs
+can overlap and contain different versions of the same key.
+
+![Files have disjoint key ranges within a sorted run; key 7 occurs in two different runs.](/img/primary-key-sorted-runs.svg)
+
+A merge-on-read scan combines the relevant runs and applies the
+[merge engine](./merge-engine/) and [record ordering](./sequence-rowkind) to records with the same
+key. The result contains one logical row per key, even if several physical versions exist.
+
+Each Level-0 file is a separate sorted run; each higher level forms a run of non-overlapping
+files. [Compaction](./compaction) keeps the number of runs manageable.
+[PK Clustering Override](./pk-clustering-override) is a specialized layout that changes the physical
+sort order and resolves row versions using deletion vectors.
 
 ## Nullable Primary Keys
 
@@ -36,7 +121,7 @@ Primary key fields are `NOT NULL` by default. Set `primary-key.nullable` to `tru
 system can produce null key components:
 
 ```sql
-CREATE TABLE orders (
+CREATE TABLE nullable_orders (
     order_id BIGINT,
     payload STRING
 ) WITH (
@@ -59,31 +144,3 @@ which Flink can normalize only when the table exposes a SQL primary-key constrai
 nullable key cannot be exposed as that constraint, Paimon rejects this streaming-read combination
 instead of producing an invalid Flink plan. Insert-only streaming reads, such as tables using the
 `first-row` merge engine, are not affected.
-
-## Bucket
-
-Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.
-
-Each bucket directory contains an LSM tree and its [changelog files](./changelog-producer).
-
-The range for a bucket is determined by the hash value of one or more columns in the records. Users can specify bucketing columns by providing the [`bucket-key` option](../maintenance/configurations#coreoptions). If no `bucket-key` option is specified, the primary key (if defined) or the complete record will be used as the bucket key.
-
-A bucket is the smallest storage unit for reads and writes, so the number of buckets limits the maximum processing parallelism. This number should not be too big, though, as it will result in lots of small files and low read performance. In general, the recommended data size in each bucket is about 200MB - 1GB.
-
-Also, see [rescale bucket](../maintenance/rescale-bucket) if you want to adjust the number of buckets after a table is created.
-
-## LSM Trees
-
-Paimon adopts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
-
-### Sorted Runs
-
-LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple data files and each data file belongs to exactly one sorted run.
-
-Records within a data file are sorted by their primary keys. Within a sorted run, ranges of primary keys of data files never overlap.
-
-![](/img/sorted-runs.png)
-
-As you can see, different sorted runs may have overlapped primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine](./merge-engine/) and the timestamp of each record.
-
-New records written into the LSM tree will be first buffered in memory. When the memory buffer is full, all records in memory will be sorted and flushed to disk. A new sorted run is now created.

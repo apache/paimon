@@ -93,7 +93,7 @@ To skip compactions in writers, set the following table property to `true`.
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>false</td>
       <td>Boolean</td>
-      <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+      <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs. Set manifest.merge.skip-on-write-only=true to also skip automatic manifest merging; it defaults to false.</td>
     </tr>
     </tbody>
 </table>

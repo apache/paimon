@@ -575,14 +575,33 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(self.expected, actual)
 
-    def test_commit_minor_compacts_manifest_files(self):
+    @parameterized.expand([
+        ('default', None, None, True),
+        ('not_write_only_default', 'false', None, True),
+        ('write_only_default', 'true', None, True),
+        ('skip_enabled', None, 'true', True),
+        ('not_write_only_skip_enabled', 'false', 'true', True),
+        ('write_only_skip_enabled', 'true', 'true', False),
+        ('skip_disabled', None, 'false', True),
+        ('not_write_only_skip_disabled', 'false', 'false', True),
+        ('write_only_skip_disabled', 'true', 'false', True),
+    ])
+    def test_commit_manifest_merge(self, name, write_only, skip_on_write_only, merge_enabled):
+        options = {'manifest.merge-min-count': '2'}
+        if write_only is not None:
+            options['write-only'] = write_only
+        if skip_on_write_only is not None:
+            options['manifest.merge.skip-on-write-only'] = skip_on_write_only
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             partition_keys=['dt'],
-            options={'manifest.merge-min-count': '2'},
+            options=options,
         )
-        self.catalog.create_table('default.test_minor_manifest_compaction', schema, False)
-        table = self.catalog.get_table('default.test_minor_manifest_compaction')
+        identifier = 'default.test_manifest_merge_' + name
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        manifest_list_manager = ManifestListManager(table)
+        previous_manifests = []
 
         expected_data = {
             'user_id': [],
@@ -607,15 +626,24 @@ class TableWriteTest(unittest.TestCase):
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
             table_commit.close()
+            if i == 1:
+                previous_manifests = manifest_list_manager.read_all(
+                    table.snapshot_manager().get_latest_snapshot())
 
         snapshot = table.snapshot_manager().get_latest_snapshot()
-        manifest_list_manager = ManifestListManager(table)
         base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
         delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
 
-        self.assertEqual(len(base_manifests), 1)
-        self.assertEqual(base_manifests[0].num_added_files, 2)
-        self.assertEqual(base_manifests[0].num_deleted_files, 0)
+        if merge_enabled:
+            self.assertEqual(len(base_manifests), 1)
+            self.assertEqual(base_manifests[0].num_added_files, 2)
+            self.assertEqual(base_manifests[0].num_deleted_files, 0)
+        else:
+            self.assertEqual(len(base_manifests), 2)
+            self.assertEqual(
+                [manifest.file_name for manifest in previous_manifests],
+                [manifest.file_name for manifest in base_manifests],
+            )
         self.assertEqual(len(delta_manifests), 1)
 
         expected = pa.Table.from_pydict(expected_data, schema=self.pa_schema)

@@ -337,7 +337,7 @@ object ScalarOperatorGens {
         val mapDataUtil = className[InternalMapSerializer]
 
         val stmt =
-          if (containsFloatingPoint(keyType)) {
+          if (requiresElementWiseKeyMatch(keyType)) {
             val leftKeyArrayTerm = newName("leftKeyArray")
             val rightKeyArrayTerm = newName("rightKeyArray")
             val leftValueArrayTerm = newName("leftValueArray")
@@ -471,6 +471,19 @@ object ScalarOperatorGens {
       getNestedTypes(t).asScala.exists(containsFloatingPoint)
     case _ => false
   }
+
+  /**
+   * Whether map keys of the given type must be matched pairwise with the generated key equality
+   * instead of being looked up through a [[java.util.Map]].
+   *
+   * A [[java.util.Map]] lookup is only correct when the internal representation of the key has
+   * value-based `equals`/`hashCode`, which holds for numeric, character string, decimal and
+   * temporal keys. Binary keys are `byte[]` and compare by identity; composite keys may be columnar
+   * views without `hashCode` support or mix generic and binary representations across the two maps;
+   * floating-point keys need `Float.compare`/`Double.compare` semantics.
+   */
+  private def requiresElementWiseKeyMatch(keyType: DataType): Boolean =
+    containsFloatingPoint(keyType) || isBinaryString(keyType) || !isComparable(keyType)
 
   // ----------------------------------------------------------------------------------------------
 }

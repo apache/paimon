@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.utils.Range;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -40,7 +41,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 4;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
@@ -73,7 +74,14 @@ public class DataEvolutionCompactTaskSerializer
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
         view.writeInt(task.type().code());
-        if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
+        if (task.type() == DataEvolutionCompactTask.TaskType.NORMAL) {
+            List<Range> ranges = ((DataEvolutionNormalCompactTask) task).protectedRanges();
+            view.writeInt(ranges.size());
+            for (Range range : ranges) {
+                view.writeLong(range.from);
+                view.writeLong(range.to);
+            }
+        } else if (task.type() == DataEvolutionCompactTask.TaskType.MATERIALIZE_DELETION) {
             DeletionFile.serializeList(
                     view, ((DataEvolutionMaterializeDeletionCompactTask) task).deletionFiles());
         }
@@ -117,7 +125,12 @@ public class DataEvolutionCompactTaskSerializer
                 DataEvolutionCompactTask.TaskType.fromCode(view.readInt());
         switch (type) {
             case NORMAL:
-                return new DataEvolutionNormalCompactTask(partition, files);
+                int rangeCount = view.readInt();
+                List<Range> ranges = new ArrayList<>(rangeCount);
+                for (int i = 0; i < rangeCount; i++) {
+                    ranges.add(new Range(view.readLong(), view.readLong()));
+                }
+                return new DataEvolutionNormalCompactTask(partition, files, ranges);
             case BLOB:
                 return new DataEvolutionBlobCompactTask(partition, files);
             case MATERIALIZE_DELETION:

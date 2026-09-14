@@ -222,6 +222,8 @@ class FileStoreCommit:
         self.manifest_list_manager = ManifestListManager(table)
 
         self.manifest_target_size = table.options.manifest_target_size()
+        self.skip_manifest_merge_on_write_only = (
+            table.options.write_only() and table.options.manifest_merge_skip_on_write_only())
         self.manifest_merge_min_count = table.options.manifest_merge_min_count()
         self.manifest_file_merger = ManifestFileMerger(
             self.manifest_file_manager,
@@ -734,7 +736,7 @@ class FileStoreCommit:
         merge_before_manifests = []
         merge_after_manifests = []
         merge_new_files = []
-        skip_manifest_merge_on_retry = False
+        skip_manifest_merge = False
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
@@ -763,10 +765,12 @@ class FileStoreCommit:
                 if previous_record_count:
                     total_record_count += previous_record_count
 
-            reused_manifests = _try_reuse_manifest_merge_result(
-                retry_result, merge_before_manifests)
-            skip_manifest_merge_on_retry = (
-                reused_manifests is None and retry_result is not None)
+            reused_manifests = (
+                _try_reuse_manifest_merge_result(retry_result, merge_before_manifests)
+                if not self.skip_manifest_merge_on_write_only else None)
+            skip_manifest_merge = (
+                self.skip_manifest_merge_on_write_only
+                or (reused_manifests is None and retry_result is not None))
             if reused_manifests is not None:
                 merge_after_manifests = reused_manifests
                 old_names = {
@@ -776,7 +780,7 @@ class FileStoreCommit:
                     manifest for manifest in merge_after_manifests
                     if manifest.file_name not in old_names
                 ]
-            elif skip_manifest_merge_on_retry:
+            elif skip_manifest_merge:
                 merge_after_manifests = merge_before_manifests
             else:
                 merge_after_manifests, merge_new_files = (
@@ -861,7 +865,7 @@ class FileStoreCommit:
                     )
                     manifest_merge_result = (
                         None
-                        if skip_manifest_merge_on_retry
+                        if skip_manifest_merge
                         else ManifestMergeResult(
                             merge_before_manifests,
                             merge_after_manifests,

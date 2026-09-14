@@ -28,6 +28,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.IOUtils;
 
 import org.aliyun.lumina.LuminaDataset;
 import org.aliyun.lumina.LuminaFileOutput;
@@ -427,16 +428,23 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         FileBackedDataset(File file, int dim, long totalCount, String phase, int bufferSize)
                 throws IOException {
             this.raf = new RandomAccessFile(file, "r");
-            this.channel = raf.getChannel();
-            this.dim = dim;
-            this.totalCount = totalCount;
-            this.recordSizeInBytes = checkedRecordSize(dim, bufferSize);
-            this.cursor = 0;
-            this.readBuf = ByteBuffer.allocateDirect(bufferSize);
-            this.readBuf.order(ByteOrder.nativeOrder());
-            this.readBuf.limit(0); // empty initially
-            this.phase = phase;
-            this.lastLoggedPercent = -1;
+            try {
+                this.channel = raf.getChannel();
+                this.dim = dim;
+                this.totalCount = totalCount;
+                this.recordSizeInBytes = checkedRecordSize(dim, bufferSize);
+                this.cursor = 0;
+                this.readBuf = ByteBuffer.allocateDirect(bufferSize);
+                this.readBuf.order(ByteOrder.nativeOrder());
+                this.readBuf.limit(0); // empty initially
+                this.phase = phase;
+                this.lastLoggedPercent = -1;
+            } catch (RuntimeException | Error e) {
+                // a caller's try-with-resources never sees an object whose construction failed,
+                // so this is the only chance to release the file handle
+                IOUtils.closeQuietly(raf);
+                throw e;
+            }
         }
 
         @Override

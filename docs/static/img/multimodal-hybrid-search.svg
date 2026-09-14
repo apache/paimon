@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="536" viewBox="0 0 900 536" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Retrieve candidates, then rank once</title>
+<desc id="desc">A query runs against vector and full-text routes. Each route returns its own scored row IDs. A ranker merges candidates by row ID and selects a final top K, after which projected table columns are read. Multiple routes of either kind are allowed.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="534" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">Retrieve candidates, then rank once</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Example: route limits of 50 feed a final limit of 10.</text>
+<rect x="28" y="110" width="244" height="115" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="142" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">Vector route</text>
+<text x="46" y="171" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Title embedding index</text>
+<text x="46" y="196" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Up to 50 scored row IDs</text>
+<rect x="28" y="248" width="244" height="115" rx="8" fill="#fff3df" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="280" font-size="21" font-weight="700" fill="#9a5200" text-anchor="start">Full-text route</text>
+<text x="46" y="309" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Caption or content index</text>
+<text x="46" y="334" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Up to 50 scored row IDs</text>
+<path d="M282 168 L361 222" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M282 307 L361 253" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="375" y="173" width="228" height="146" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="393" y="205" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Rank candidates</text>
+<text x="393" y="234" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Merge by row ID</text>
+<text x="393" y="259" font-size="18" font-weight="400" fill="#526277" text-anchor="start">rrf · weighted_score</text>
+<text x="393" y="284" font-size="18" font-weight="400" fill="#526277" text-anchor="start">or mrr</text>
+<path d="M613 246 L652 246" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="666" y="173" width="206" height="146" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="684" y="205" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Final top 10</text>
+<text x="684" y="234" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Selected row IDs</text>
+<text x="684" y="259" font-size="18" font-weight="400" fill="#526277" text-anchor="start">+ ranked scores</text>
+<path d="M769 329 L769 380" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="375" y="390" width="497" height="102" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="393" y="422" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Read the table</text>
+<text x="393" y="451" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Fetch requested columns for the selected row IDs.</text>
+<text x="28" y="413" font-size="17" font-weight="400" fill="#526277" text-anchor="start">More routes can use</text>
+<text x="28" y="439" font-size="17" font-weight="400" fill="#526277" text-anchor="start">either index family.</text>
+<text x="28" y="520" font-size="17" font-weight="400" fill="#172b4d" text-anchor="start">A ranker only sees the candidates returned by its routes.</text>
+</g>
+</svg>

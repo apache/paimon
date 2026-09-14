@@ -24,172 +24,134 @@ under the License.
 
 # Compaction
 
-When more and more records are written into the LSM tree, the number of sorted runs will increase. Because querying an
-LSM tree requires all sorted runs to be combined, too many sorted runs will result in a poor query performance, or even
-out of memory.
+Compaction combines sorted runs and applies the [merge engine](./merge-engine/) to records with
+the same key. It reduces file and merge overhead for reads, while consuming CPU and storage I/O
+on the write side. Paimon's default strategy selects runs using a universal compaction policy.
 
-To limit the number of sorted runs, we have to merge several sorted runs into one big sorted run once in a while. This
-procedure is called compaction.
+![Compaction merges several overlapping sorted runs into a new run, while old files remain available to retained snapshots.](/img/primary-key-compaction.svg)
 
-However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too 
-frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Paimon
-currently adopts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
+Depending on the table options, compaction also generates a
+[changelog](./changelog-producer), maintains [deletion vectors](./table-mode#merge-on-write) and
+[indexes](./global-index#maintenance-and-coverage), or applies record-level expiration.
+Compaction itself does not mean that old files are immediately deleted: snapshot, tag, and
+partition retention have separate lifecycles. See [Maintenance](../maintenance/).
 
-Compaction solves:
+## Choose a Compaction Strategy
 
-1. Reduce Level 0 files to avoid poor query performance.
-2. Produce changelog via [changelog-producer](./changelog-producer).
-3. Produce deletion vectors for [MOW mode](./table-mode#merge-on-write).
-4. Snapshot Expiration, Tag Expiration, Partitions Expiration.
-
-Limitation:
-
-- There can only be one job working on the same partition's compaction, otherwise it will cause conflicts and one side will throw an exception failure.
-
-Writing performance is almost always affected by compaction, so its tuning is crucial.
+| Need | Configuration or operation | Trade-off |
+| --- | --- | --- |
+| Control overlapping runs | Default background compaction and sorted-run thresholds | Lower thresholds spend more write resources to reduce read work |
+| Fresh lookup changelogs or MOW rows | Lookup compaction with the default wait behavior | Commit latency includes required compaction work |
+| Favor write throughput | [Asynchronous Compaction](#asynchronous-compaction) | More pending files and potentially older query results |
+| Isolate compaction resources or coordinate writers | [Dedicated compaction job](#dedicated-compaction-job) | Requires a separately operated job |
+| Refresh a read-optimized view | `compaction.optimization-interval` | Freshness follows completed full compactions |
+| Fully merge every N delta commits | `full-compaction.delta-commits` | Synchronous full compaction increases write amplification |
 
 ## Asynchronous Compaction
 
-Compaction is inherently asynchronous, but if you want it to be completely asynchronous without blocking writes,
-expecting a mode for maximum writing throughput, the compaction can be done slowly and not in a hurry.
-You can use the following strategies for your table:
+Writers normally run compaction in background threads. They can still wait when too many sorted
+runs accumulate, or when lookup compaction is needed before a commit.
 
-```shell
+The following table options illustrate a configuration that relaxes those waits:
+
+```properties
 num-sorted-run.stop-trigger = 2147483647
 sort-spill-threshold = 10
 lookup-wait = false
 ```
 
-This configuration will generate more files during peak write periods and gradually merge them for optimal read
-performance during low write periods.
+This effectively removes the sorted-run write-stall limit and allows pending work to accumulate.
+It is a throughput-oriented example, not a default recommendation. Size the spill storage and
+monitor file counts, compaction backlog, and read latency before using it.
+
+By default, MOW and `first-row` batch reads exclude pending Level-0 data until lookup compaction
+publishes it. MOW batch readers can opt into merging pending data with
+`deletion-vectors.merge-on-read`; see [MOW visibility](./table-mode#merge-on-write).
+For `changelog-producer = lookup`, generated changelogs are also delayed. A compactor that cannot
+keep up with sustained input will keep falling behind; relaxing waits does not add capacity.
 
 ## Dedicated compaction job
 
-In general, if you expect multiple jobs to be written to the same table, you need to separate the compaction. You can
-use [dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job).
+Set `write-only = true` on ingest writers and run a
+[dedicated compaction job](../maintenance/dedicated-compaction#dedicated-compaction-job) when
+compaction needs separate resources or multiple writers need a single compaction owner.
+Avoid overlapping compaction jobs for the same partition, which can cause commit conflicts.
+
+This does not lift [dynamic-bucket](./data-distribution#dynamic-bucket) restrictions on concurrent
+writers to the same partition.
 
 ## Record-Level expire
 
-In compaction, you can configure record-Level expire time to expire records, you should configure:
+Configure `record-level.expire-time` for the retention duration and `record-level.time-field` for
+the field used to evaluate each record's age.
 
-1. `'record-level.expire-time'`: time retain for records.
-2. `'record-level.time-field'`: time field for record level expire.
-
-Expiration happens in compaction, and there is no strong guarantee to expire records in time.
-You can trigger a full compaction manually to expire records which were not expired in time.
+Expiration happens when compaction processes the records, so it has no strict wall-clock deadline.
+A manual full compaction can process records that ordinary compaction has not reached. This is
+separate from expiring snapshots or entire partitions.
 
 ## Full Compaction
 
-Paimon Compaction uses [Universal-Compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
-By default, when there is too much incremental data, Full Compaction will be automatically performed. You don't usually
-have to worry about it.
+Full compaction merges all runs of a bucket into its highest level. The default strategy can
+select a full compaction as data accumulates. To request one regularly:
 
-Paimon also provides a configuration that allows for regular execution of Full Compaction.
+| Option | Scheduling | Use |
+| --- | --- | --- |
+| `compaction.optimization-interval` | Time-based optimization compaction | Keep the [read-optimized table](../concepts/system-tables#read-optimized-table) reasonably fresh |
+| `full-compaction.delta-commits` | Synchronous compaction after a number of delta commits | COW behavior or periodic full-compaction changelogs |
 
-1. 'compaction.optimization-interval': Implying how often to perform an optimization full compaction, this
-    configuration is used to ensure the query timeliness of the read-optimized system table.
-2. 'full-compaction.delta-commits': Full compaction will be constantly triggered after delta commits. Its disadvantage
-    is that it can only perform compaction synchronously, which will affect writing efficiency.
+`full-compaction.delta-commits` is incompatible with `changelog-producer = lookup`. See
+[Full Compaction Changelogs](./changelog-producer#full-compaction) for producer-specific defaults.
 
 ## Lookup Compaction
 
-When primary key table is configured with `lookup` [changelog producer](./changelog-producer) 
-or `first-row` [merge-engine](./merge-engine/)
-or has enabled `deletion vectors` for [MOW mode](./table-mode#merge-on-write), Paimon will
-use a radical compaction strategy to force compacting level 0 files to higher levels for every compaction trigger.
+Paimon uses lookup compaction for the `lookup` changelog producer, the `first-row` merge engine,
+and tables with deletion vectors. It can also be enabled explicitly with `force-lookup = true`.
+Lookup compaction reconciles Level-0 records with existing rows and promotes them to higher
+levels, making processed rows or generated changelogs available to readers.
 
-Paimon also provides configurations to optimize the frequency of this compaction.
+The following options control forced Level-0 promotion for these lookup scenarios. Ordinary
+MOR tables can merge Level-0 data during reads and do not enable this strategy by default.
+Non-lookup tables can opt into immediate forced promotion separately with
+`compaction.force-up-level-0 = true`.
 
-1. 'lookup-compact': compact mode used for lookup compaction. Possible values: `radical`, will use
-   `ForceUpLevel0Compaction` strategy to radically compact new files; `gentle`, will use `UniversalCompaction` strategy
-   to gently compact new files;
-2. 'lookup-compact.max-interval': The max interval for a forced L0 lookup compaction to be triggered in `gentle` mode.
-   This option is only valid when `lookup-compact` mode is `gentle`.
+| Option | Behavior |
+| --- | --- |
+| `lookup-compact = radical` (default) | Immediately select Level-0 files for promotion when the universal strategy selects no compaction work |
+| `lookup-compact = gentle` | Allow the universal strategy to select work, with forced Level-0 promotion after the effective interval |
+| `lookup-compact.max-interval` | Control the forced-promotion interval in `gentle` mode; count only compaction-selection attempts where the universal strategy selects no work |
 
-By configuring 'lookup-compact' as `gentle`, new files in L0 will not be compacted immediately, this may greatly
-reduce the overall resource usage at the expense of worse data freshness in certain cases.
+Setting `lookup-compact = gentle` alone already defers forced Level-0 promotion. When
+`lookup-compact.max-interval` is unset, its effective runtime default is
+`2 * num-sorted-run.compaction-trigger`: **10** with the default trigger of **5**. An explicitly
+configured interval is clamped to at least `num-sorted-run.compaction-trigger`; for example,
+configuring `3` with a trigger of `5` gives an effective interval of `5`.
+
+The interval counts selection attempts, not elapsed time or commits. The universal strategy can
+still select compaction work before this interval is reached.
+
+Gentle mode can reduce compaction frequency, but pending Level-0 files can delay the visibility
+of DV/`first-row` data and lookup changelogs. Choose the interval together with `lookup-wait` and
+the [visibility requirements](#asynchronous-compaction) of your table mode.
 
 ## Compaction Options
 
 ### Number of Sorted Runs to Pause Writing
 
-When the number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so
-records can be continuously written into the table. However, to avoid unbounded growth of sorted runs, writers will
-pause writing when the number of sorted runs hits the threshold. The following table property determines
-the threshold.
+`num-sorted-run.stop-trigger` limits the backlog at which writers wait for compaction. If unset,
+it defaults to `num-sorted-run.compaction-trigger + 3`.
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Required</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>num-sorted-run.stop-trigger</h5></td>
-      <td>No</td>
-      <td style="word-wrap: break-word;">(none)</td>
-      <td>Integer</td>
-      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 3.</td>
-    </tr>
-    </tbody>
-</table>
-
-Write stalls will become less frequent when `num-sorted-run.stop-trigger` becomes larger, thus improving writing
-performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the
-table. If you are concerned about the OOM problem, please configure the following option.
-Its value depends on your memory size.
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Required</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>sort-spill-threshold</h5></td>
-      <td>No</td>
-      <td style="word-wrap: break-word;">(none)</td>
-      <td>Integer</td>
-      <td>If the maximum number of sort readers exceeds this value, a spill will be attempted. This prevents too many readers from consuming too much memory and causing OOM.</td>
-    </tr>
-    </tbody>
-</table>
+Increasing the limit can reduce write stalls but leaves more overlapping runs for readers. Use
+`sort-spill-threshold` to allow merge readers to spill when their number exceeds the configured
+threshold. This option has no explicit configured default; spilling trades memory pressure for
+local disk I/O. Size it for the available memory and disk resources.
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Paimon uses [LSM tree](./#lsm-trees) which supports a large number of updates. LSM organizes files in several [sorted runs](./#sorted-runs). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+`num-sorted-run.compaction-trigger` defaults to `5`. Each Level-0 file counts as one sorted run;
+each occupied higher level counts as one run.
 
-One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Paimon writers will automatically perform [compactions](./compaction). The following table property determines the minimum number of sorted runs to trigger a compaction.
+A larger value usually makes compaction less frequent and leaves more merge work for reads.
+A smaller value spends more write resources keeping reads efficient. Tune it alongside the
+stop threshold, rather than increasing either threshold to hide a persistent compaction backlog.
 
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Required</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>num-sorted-run.compaction-trigger</h5></td>
-      <td>No</td>
-      <td style="word-wrap: break-word;">5</td>
-      <td>Integer</td>
-      <td>The sorted run number to trigger compaction. Includes level0 files (one file one sorted run) and high-level runs (one level one sorted run).</td>
-    </tr>
-    </tbody>
-</table>
-
-Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
+For the complete option reference, see [Configurations](../maintenance/configurations#coreoptions).

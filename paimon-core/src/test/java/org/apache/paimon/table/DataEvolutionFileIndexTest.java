@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -31,6 +32,7 @@ import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory;
+import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -551,6 +553,80 @@ public class DataEvolutionFileIndexTest extends DataEvolutionTestBase {
                 FileIndexOptions.FILE_INDEX
                         + "."
                         + BitmapFileIndexFactory.BITMAP_INDEX
+                        + "."
+                        + CoreOptions.COLUMNS,
+                column);
+        return options;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSubMicrosecondTimestampBsiMatchesUnindexed(String format) throws Exception {
+        // A BSI index maps TIMESTAMP through toMicros(), so on a TIMESTAMP(9) column two values in
+        // the same microsecond share one indexed value. Answering <>, strict range or NOT IN from
+        // that bitmap drops rows the residual filter can no longer recover. The fix makes the
+        // indexed read (executeFilter) return exactly what an unindexed full scan does.
+        FileStoreTable table = createTimestampBsiTable("bsi_ts9_" + format, format);
+
+        long base = 1_704_067_200_000L;
+        Timestamp tsA = Timestamp.fromEpochMillis(base, 123_000); // micro bucket base*1000+123
+        Timestamp tsB = Timestamp.fromEpochMillis(base, 123_400); // same bucket, but tsB > tsA
+        Timestamp tsC = Timestamp.fromEpochMillis(base, 999_000); // a different bucket
+        write(
+                table,
+                GenericRow.of(0, tsA),
+                GenericRow.of(1, tsB),
+                GenericRow.of(2, tsC),
+                GenericRow.of(3, null));
+
+        PredicateBuilder b = new PredicateBuilder(table.rowType());
+
+        // Guard: the sub-microsecond nanos must survive the write/read round trip on this format,
+        // otherwise tsA and tsB collapse and the comparison below would pass vacuously.
+        List<Timestamp> stored = new ArrayList<>();
+        for (InternalRow row : fullScanFiltered(table, b.isNotNull(1))) {
+            stored.add(row.getTimestamp(1, 9));
+        }
+        assertThat(stored).contains(tsA, tsB);
+
+        // notEqual / strict lessThan / strict greaterThan are the ones that lose rows to the
+        // micro-bucket collision; isNull/isNotNull still come from the index; equal/between only
+        // over-select and are already corrected by the residual filter.
+        List<Predicate> predicates =
+                Arrays.asList(
+                        b.notEqual(1, tsA),
+                        b.lessThan(1, tsB),
+                        b.greaterThan(1, tsA),
+                        b.isNull(1),
+                        b.isNotNull(1),
+                        b.equal(1, tsA),
+                        b.between(1, tsA, tsC));
+        for (Predicate p : predicates) {
+            assertThat(query(table, p))
+                    .containsExactlyInAnyOrderElementsOf(fullScanFiltered(table, p));
+        }
+    }
+
+    private FileStoreTable createTimestampBsiTable(String name, String format) throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.TIMESTAMP(9))
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), format);
+        bsiOptions("f1").forEach(builder::option);
+        Identifier identifier = identifier(name);
+        catalog.createTable(identifier, builder.build(), false);
+        return getTable(identifier);
+    }
+
+    private static Map<String, String> bsiOptions(String column) {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                FileIndexOptions.FILE_INDEX
+                        + "."
+                        + BitSliceIndexBitmapFileIndexFactory.BSI_INDEX
                         + "."
                         + CoreOptions.COLUMNS,
                 column);

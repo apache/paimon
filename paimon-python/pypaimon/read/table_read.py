@@ -160,6 +160,7 @@ class TableRead:
         self.nested_name_paths = nested_name_paths
         self.limit = limit
         self._read_parallelism = self.table.options.read_parallelism()
+        self._parquet_row_group_cache = None
 
     def to_iterator(self, splits: List[Split]) -> Iterator:
         limit = self.limit
@@ -666,6 +667,8 @@ class TableRead:
 
         if not splits:
             schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
+            if self.include_row_kind:
+                schema = self._add_row_kind_to_schema(schema)
             empty_table = pyarrow.Table.from_arrays(
                 [pyarrow.array([], type=field.type) for field in schema],
                 schema=schema
@@ -686,6 +689,7 @@ class TableRead:
                 predicate=self.predicate,
                 limit=self.limit,
                 nested_name_paths=self.nested_name_paths,
+                include_row_kind=self.include_row_kind,
             )
         )
         ds = ray.data.read_datasource(
@@ -848,6 +852,7 @@ class TableRead:
             post_filter_after_inline,
         )
         sr._blob_parallelism = blob_parallelism
+        sr._parquet_row_group_cache = self._parquet_row_group_cache
         return sr
 
     def _build_split_read(self, split: Split, read_type=None,

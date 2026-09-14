@@ -1,0 +1,159 @@
+---
+title: "CDC Action Configuration"
+---
+
+import ConfigTable from '@site/src/components/ConfigTable';
+import temporalFunctionsHtml from '@site/generated/temporal_functions.html';
+import otherFunctionsHtml from '@site/generated/other_functions.html';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# CDC Action Configuration
+
+These settings are shared by Paimon's source-specific CDC actions. Each source guide provides
+its action syntax and supported arguments. Flink CDC YAML pipelines use a separate configuration
+format.
+
+## Command Structure
+
+Put Flink job options **before** the action jar and Paimon action arguments **after** it:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -Dexecution.checkpointing.interval=60s \
+    -Dpipeline.name=mysql-orders-to-paimon \
+    /path/to/paimon-flink-action-@@VERSION@@.jar \
+    mysql_sync_table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database analytics \
+    --table orders \
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=cdc_user \
+    --mysql_conf password=your_password \
+    --mysql_conf database-name=shop \
+    --mysql_conf table-name=orders
+```
+
+This example assumes that `shop.orders` has a primary key and the MySQL connector dependencies
+are installed. In syntax summaries, square brackets mark optional arguments; replace placeholders
+and omit the brackets when submitting a job.
+
+| Argument | Purpose |
+| --- | --- |
+| `--warehouse`, `--database`, `--table` | Locate the Paimon target; database actions do not take `--table`. |
+| `--<source>_conf key=value` | Configure the source connection, source names, and event format. Repeat for each property. |
+| `--catalog_conf key=value` | Configure the Paimon catalog, for example `metastore=hive` and `uri=thrift://hive-metastore:9083`. |
+| `--table_conf key=value` | Set target table properties and supported sink settings. Repeat for each property. |
+| `--partition_keys`, `--primary_keys` | Set comma-separated keys where the action supports them. |
+| `--type_mapping` | Select [type mapping rules](./schema-evolution#mapping-options). |
+| `--computed_column` | Define a derived field where supported by the action. |
+
+## Custom Job Settings
+
+### Checkpointing
+
+Set `-Dexecution.checkpointing.interval=<interval>` to choose the checkpoint interval. If
+checkpointing is disabled, the CDC action enables it with a default interval of **180 seconds**.
+Configure checkpoint storage in your Flink deployment before relying on job recovery.
+
+### Job Name
+
+Set `-Dpipeline.name=<job-name>` to name the synchronization job.
+
+### Table Configuration
+
+Use `--table_conf` for table properties and supported job settings such as `sink.parallelism`.
+For a new table, the action uses these properties when creating it. For an existing table, it
+alters mutable properties; it does not change immutable options such as `merge-engine`, or the
+bucket number. See [Configurations](../maintenance/configurations) for table and catalog options.
+
+## Computed Functions
+
+Use one `--computed_column` argument per derived field. Expressions reference source fields and
+use Paimon's CDC functions; they are not arbitrary Flink SQL expressions.
+
+For a source with `id` and `create_time`, derive a daily partition as follows:
+
+```bash
+--computed_column 'part=date_format(create_time,yyyy-MM-dd)' \
+--partition_keys part \
+--primary_keys id,part
+```
+
+When creating a primary-key table, include the partition fields in its primary key. Check the
+source action's support for custom keys before applying this example.
+
+### Temporal Functions
+
+Temporal functions can convert date and epoch time to another form. A common use case is to generate partition values.
+
+<ConfigTable html={temporalFunctionsHtml} />
+
+Choose the input interpretation and epoch precision to match the source data:
+
+| Input | Interpretation |
+| --- | --- |
+| Date or timestamp | Use its date and time components. |
+| Integer | Epoch time relative to `1970-01-01 00:00:00`; seconds by default. |
+| String without an epoch precision | Parse a formatted date or timestamp. |
+| String with an epoch precision | Parse a numeric epoch value. |
+
+| Precision | Epoch unit | Example value for `1970-01-01 00:00:00.123456789` |
+| --- | --- | --- |
+| `0` | Seconds | `0` |
+| `3` | Milliseconds | `123` |
+| `6` | Microseconds | `123456` |
+| `9` | Nanoseconds | `123456789` |
+
+For epoch milliseconds, use `date_format(epoch_col,yyyy-MM-dd,3)`. For formatted input,
+use a pattern such as `yyyy-MM-dd HH:mm:ss.SSS`. Week-based patterns such as `yyyy-ww` depend
+on the runtime locale's week rules; verify the expected result before using them as partition values.
+
+### Other Functions
+
+<ConfigTable html={otherFunctionsHtml} />
+
+## Starting with an Empty Topic
+
+Kafka and Pulsar **table** actions need a usable data record to infer a new target schema.
+If no such record is available, create the Paimon table before starting the action. Database
+actions instead create target tables as records arrive.
+
+In the Paimon catalog used by the job, create the keys and any fields referenced by computed columns:
+
+```sql
+CREATE TABLE test_db.test_table (
+    id INT,
+    create_time TIMESTAMP(3),
+    part STRING,
+    PRIMARY KEY (id, part) NOT ENFORCED
+) PARTITIONED BY (part);
+```
+
+Then run `kafka_sync_table` or `pulsar_sync_table` against `test_db.test_table` with the source
+connection options and:
+
+```bash
+--computed_column 'part=date_format(create_time,yyyy-MM-dd)'
+```
+
+Other source fields can be added as records arrive. Omit `--partition_keys` and `--primary_keys`
+when reusing this table; if supplied, they must match the existing keys. The input field types
+must be compatible with the table you created.

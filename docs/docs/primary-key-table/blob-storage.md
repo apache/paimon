@@ -29,13 +29,18 @@ Unlike the positional BLOB files used by append tables, managed BLOB payloads ha
 sorting, deduplication, and compaction can therefore reorder or remove rows without rewriting the surviving payload
 bytes.
 
-This mode stores:
+Three pieces of storage work together:
 
-- a serialized `BlobDescriptor` for each scalar value, non-null array element, or non-null map value;
-- the payload in an immutable `.managed.blob` pack; and
-- one `.blobref` sidecar for every data file, containing the exact managed packs referenced by that file.
+| Piece | Contents | Lifecycle |
+| --- | --- | --- |
+| Data file | A `BlobDescriptor` for each non-null scalar, array element, or map value | Rows and descriptors are merged by the table's merge engine |
+| `.managed.blob` pack | Immutable payload bytes, potentially shared by several rows and files | Surviving descriptors continue to reference the same bytes |
+| `.blobref` sidecar | Exact set of managed packs referenced by one data file | Owned by that data file and replaced with compacted output |
 
 For general BLOB concepts and read options, see [BLOB Storage](../multimodal-table/blob).
+Before adopting managed storage, check [Requirements and Limitations](#requirements-and-limitations)
+and [Garbage Collection](#garbage-collection). The sections below cover table creation, merge-engine
+behavior, and the payload lifecycle.
 
 The append-only `video-frame-field` mode is deliberately separate from primary-key managed BLOB
 storage. It writes self-contained `.video` packs containing complete encoded videos and embedded
@@ -48,7 +53,7 @@ Use `blob-field` to mark scalar, array, or map fields whose payloads should be s
 `blob-descriptor-field` and `blob-view-field` are inline forms: their serialized descriptor or view metadata stays in
 the normal data file and is not materialized into a managed BLOB file.
 
-The following example accepts both a scalar value and an ordered array of values:
+The following Flink SQL example accepts scalar, array, and map values:
 
 ```sql
 CREATE TABLE media (
@@ -74,6 +79,8 @@ Reads return the payload bytes by default; the existing `blob-as-descriptor` rea
 A `blob-descriptor-field` is written inline to the normal data file and does not participate in managed storage or its
 reference sidecars.
 
+### Copy Payloads from Another Table
+
 When descriptor-backed BLOBs are copied to another table, the target normally rebuilds a `FileIO` from its catalog
 context. For a managed `blob-field`, this is a copy flow: the target writes the payload into its own BLOB storage and
 does not retain the source descriptor. If the source table uses table-scoped credentials, configure
@@ -92,6 +99,8 @@ accessed with static configuration; `source-table` is for table-scoped `FileIO` 
 The source table must belong to the same catalog. A branch suffix is supported. Target tables without a catalog loader,
 including external tables in REST catalogs, are not supported. When this option is set, it takes precedence over other
 `blob-descriptor.*` options; remove it before switching back to descriptor-specific filesystem configuration.
+
+### Arrays, Maps, and Pack Size
 
 `ARRAY<BLOB>` is externalized element by element. Every non-null `Blob` element is copied into managed storage, while
 array order, a null array, and null elements are preserved. An empty array writes no payload. `ARRAY<BLOB>` uses
@@ -188,9 +197,8 @@ participates in aggregation or retraction, even when its sequence value is older
 the field for both newer and older retract records.
 
 Managed BLOB partial updates externalize each non-null scalar BLOB, array element, or map value into a
-`.managed.blob` pack. Empty collections and collections containing only null values write no payload. BLOB garbage
-collection for orphaned packs is not implemented yet; repeated updates can leave unreachable storage until a future
-collector is available.
+`.managed.blob` pack. Empty collections and collections containing only null values write no payload. Unreachable packs
+from repeated updates are reclaimed by `remove_orphan_blobs` after they are older than `older_than`.
 
 `blob-view-field` columns store serialized view structs inline. Reads resolve upstream blob bytes through the catalog
 when `blob-view.resolve.enabled` is true (default). Append upstream tables used by `sys.blob_view(...)` must enable
@@ -235,6 +243,11 @@ payload pack. A delete record does not write a new payload. The merge engine det
 reads and compaction. Each data file's `.blobref` sidecar records managed packs referenced by non-retract key-values in
 that file, which may include intermediate partial-update payloads before compaction.
 
+The example below uses `deduplicate`. A newer descriptor for key `7` replaces its old descriptor;
+the payload for unchanged key `11` remains shared with the input files.
+
+![Compaction replaces input data files and their reference sidecars while reusing the managed BLOB packs for surviving rows.](/img/primary-key-blob-lifecycle.svg)
+
 Compaction preserves descriptors for surviving values and creates new `.blobref` sidecars from the compacted output.
 It does not copy the referenced payload bytes into new `.managed.blob` packs. This keeps ordinary compaction cost
 proportional to row metadata instead of BLOB size.
@@ -245,16 +258,33 @@ extra files because more than one retained data file can reference the same pack
 
 ## Garbage Collection
 
-Garbage collection of unreferenced `.managed.blob` packs is not implemented yet. Updates, deletes, compaction, or an
-ambiguous writer failure can therefore leave payload packs that are no longer reachable from current rows.
+Unreferenced `.managed.blob` packs are reclaimed by `LocalManagedBlobOrphanFilesClean`.
+The cleaner reads every retained data file's `.blobref` sidecar across snapshots, tags, and
+branches, then deletes packs that are not referenced and whose modification time is earlier than the absolute
+`older_than` cutoff (1 day before the run starts by default).
+`remove_orphan_files` never deletes `.managed.blob` packs.
 
-The ordinary orphan-file cleaner intentionally preserves all `.managed.blob` files. This fail-safe behavior prevents it
-from deleting a payload that is still reachable from a snapshot, tag, branch, or another retained root, but it also
-means unused BLOB storage can grow until a root-aware BLOB garbage collector is available.
+This cleanup is best-effort. It lists snapshots, collects used packs twice, and aborts the run (deletes
+nothing) if the snapshot topology or used-pack set changed between those collections. That shrinks the
+window in which a concurrent commit can change reachability. Standard Paimon compaction does not make a pack
+that was unreachable at the final collection reachable afterward: it only reuses packs referenced by its
+input data files, and deletion-conflict detection rejects a stale compact whose inputs have already been
+removed. Under these standard compaction invariants, no separate commit lease is required for that
+compaction path.
 
-A future collector must compute reachability across all retained roots and treat a missing, corrupt, or unsupported
-`.blobref` sidecar as unsafe to delete. An empty, valid sidecar is different from a missing sidecar: it explicitly states
-that the data file references no managed payload pack.
+`older_than` provides a grace period for packs created by a writer but not yet referenced by a committed
+snapshot. Standard writers create new UUID-named packs; choose a cutoff far enough behind the current time
+for writes, commits, and retries to finish. The one-day default assumes those operations complete within one
+day. Writers that publish references to pre-existing old packs, or commit implementations that bypass normal
+deletion-conflict detection, are outside this safety model.
+
+A missing, corrupt, or unsupported `.blobref` sidecar on a data file that still exists is unsafe: that run skips
+deleting every `.managed.blob` file. ADD entries left in unmerged manifests after snapshot expire, whose data files
+are already gone, are ignored. An empty, valid sidecar is different from a missing sidecar: it explicitly states that
+the data file references no managed payload pack.
+
+Snapshot expiration still deletes only the data file and its `.blobref` extra file. Pack bytes are reclaimed on the
+next managed blob orphan cleanup run after they become unreachable.
 
 ## Reference Metadata
 
