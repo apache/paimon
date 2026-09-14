@@ -288,6 +288,8 @@ class GlobalIndexBuilder:
     def _build_generic_index(
         self, splits, unindexed_ranges, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
         if rows_per_shard <= 0:
             raise ValueError(
@@ -298,26 +300,38 @@ class GlobalIndexBuilder:
         for index_split, index_range in _split_by_global_index_shard(
             splits, rows_per_shard, unindexed_ranges
         ):
-            table = table_read.to_arrow([index_split])
-            if table is None or table.num_rows == 0:
-                continue
-
-            writer = self._create_generic_index_writer(index_path, index_field)
+            writer = None
             try:
-                if self._index_type in VINDEX_IDENTIFIERS:
-                    if table.column(SpecialFields.ROW_ID.name).null_count:
-                        raise ValueError("Cannot build global index because _ROW_ID is null.")
-                    for batch in table.to_batches(max_chunksize=ADD_BATCH_SIZE):
-                        _write_vector_batch(
-                            writer, batch, self._index_columns[0], index_range)
-                else:
-                    for value, row_id in _extract_index_rows(
-                        table,
-                        self._index_columns[0],
-                        SpecialFields.ROW_ID.name,
-                        index_range,
-                    ):
-                        writer.write(value, row_id - index_range.from_)
+                reader, batches = table_read._new_arrow_batch_reader([index_split])
+                # Close the Python iterator explicitly on failure as well as
+                # the Arrow reader, which may retain a suspended generator.
+                with _ClosableArrowBatchReader(reader, batches) as batch_reader:
+                    for batch in batch_reader:
+                        if batch.num_rows == 0:
+                            continue
+                        if writer is None:
+                            writer = self._create_generic_index_writer(
+                                index_path, index_field)
+                        if self._index_type in VINDEX_IDENTIFIERS:
+                            if batch.column(SpecialFields.ROW_ID.name).null_count:
+                                raise ValueError(
+                                    "Cannot build global index because _ROW_ID is null.")
+                            for offset in range(0, batch.num_rows, ADD_BATCH_SIZE):
+                                _write_vector_batch(
+                                    writer, batch.slice(offset, ADD_BATCH_SIZE),
+                                    self._index_columns[0], index_range)
+                        else:
+                            for value, row_id in _extract_index_rows(
+                                batch,
+                                self._index_columns[0],
+                                SpecialFields.ROW_ID.name,
+                                index_range,
+                            ):
+                                writer.write(value, row_id - index_range.from_)
+                        del batch
+
+                if writer is None:
+                    continue
 
                 index_adds = _to_index_manifest_entries(
                     self._table,
@@ -328,7 +342,8 @@ class GlobalIndexBuilder:
                     writer.finish(),
                 )
             finally:
-                writer.close()
+                if writer is not None:
+                    writer.close()
             if index_adds:
                 messages.append(
                     CommitMessage(
@@ -469,7 +484,7 @@ def _write_vector_batch(writer, batch, index_column, row_range):
 
 
 def _extract_index_rows(
-    table: pa.Table,
+    table: Union[pa.Table, pa.RecordBatch],
     index_column: str,
     row_id_column: str,
     row_range: Optional[Range] = None,

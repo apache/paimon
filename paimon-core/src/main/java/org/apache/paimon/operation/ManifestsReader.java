@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -28,8 +29,10 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TriFilter;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -53,6 +56,8 @@ public class ManifestsReader {
 
     private boolean onlyReadRealBuckets = false;
     @Nullable private Integer specifiedBucket = null;
+    @Nullable private Filter<Integer> bucketFilter = null;
+    @Nullable private TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter = null;
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
     // Auth partition filter (ANDed with partitionFilter); kept separate so it can be reset each
@@ -79,6 +84,17 @@ public class ManifestsReader {
 
     public ManifestsReader withBucket(int bucket) {
         this.specifiedBucket = bucket;
+        return this;
+    }
+
+    public ManifestsReader withBucketFilter(Filter<Integer> bucketFilter) {
+        this.bucketFilter = bucketFilter;
+        return this;
+    }
+
+    public ManifestsReader withTotalAwareBucketFilter(
+            TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
+        this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
 
@@ -147,9 +163,15 @@ public class ManifestsReader {
         // Compute the effective partition filter once (it ANDs the base and auth slots) instead of
         // rebuilding it per manifest.
         PartitionPredicate effectivePartitionFilter = partitionFilter();
+        BucketFilter effectiveBucketFilter =
+                BucketFilter.create(
+                        onlyReadRealBuckets, specifiedBucket, bucketFilter, totalAwareBucketFilter);
         List<ManifestFileMeta> filtered =
                 manifests.stream()
-                        .filter(m -> filterManifestFileMeta(m, effectivePartitionFilter))
+                        .filter(
+                                m ->
+                                        filterManifestFileMeta(
+                                                m, effectivePartitionFilter, effectiveBucketFilter))
                         .collect(Collectors.toList());
         return new Result(snapshot, manifests, filtered);
     }
@@ -183,17 +205,11 @@ public class ManifestsReader {
 
     /** Note: Keep this thread-safe. */
     private boolean filterManifestFileMeta(
-            ManifestFileMeta manifest, @Nullable PartitionPredicate effectivePartitionFilter) {
-        Integer minBucket = manifest.minBucket();
-        Integer maxBucket = manifest.maxBucket();
-        if (minBucket != null && maxBucket != null) {
-            if (onlyReadRealBuckets && maxBucket < 0) {
-                return false;
-            }
-            if (specifiedBucket != null
-                    && (specifiedBucket < minBucket || specifiedBucket > maxBucket)) {
-                return false;
-            }
+            ManifestFileMeta manifest,
+            @Nullable PartitionPredicate effectivePartitionFilter,
+            @Nullable BucketFilter effectiveBucketFilter) {
+        if (effectiveBucketFilter != null && !effectiveBucketFilter.mayContain(manifest)) {
+            return false;
         }
 
         Integer minLevel = manifest.minLevel();

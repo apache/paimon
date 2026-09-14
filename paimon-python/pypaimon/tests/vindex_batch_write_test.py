@@ -167,7 +167,7 @@ class VindexBatchWriteTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '_ROW_ID is null'):
             _write_vector_batch(self._writer(), batch, 'embedding', Range(10, 19))
 
-    def test_null_row_ids_are_rejected_before_writing_any_batch(self):
+    def test_null_row_ids_are_rejected_before_writing_source_batch(self):
         builder = object.__new__(GlobalIndexBuilder)
         builder._core_options = Mock()
         builder._core_options.global_index_row_count_per_shard.return_value = 10
@@ -176,10 +176,13 @@ class VindexBatchWriteTest(unittest.TestCase):
         writer = Mock()
         builder._create_generic_index_writer = Mock(return_value=writer)
         read = Mock()
-        read.to_arrow.return_value = pa.table({
+        table = pa.table({
             'embedding': pa.array([[1], [3, 4]], type=pa.list_(pa.float32())),
             '_ROW_ID': pa.array([0, None], type=pa.int64()),
         })
+        batches = iter(table.to_batches())
+        read._new_arrow_batch_reader.return_value = (
+            pa.RecordBatchReader.from_batches(table.schema, batches), batches)
         module = 'pypaimon.globalindex.create_global_index'
         with patch(module + '._split_by_global_index_shard', return_value=[
             (Mock(), Range(0, 9)),

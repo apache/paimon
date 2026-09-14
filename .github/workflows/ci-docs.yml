@@ -13,16 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: docs-tests
-on:
-  push:
-  pull_request:
-    paths:
-      - 'docs/**'
+name: CI / Documentation
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
+on:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -31,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
