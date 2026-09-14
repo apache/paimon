@@ -2023,8 +2023,10 @@ public class SchemaValidation {
         if (options.manifestSortEnabled()) {
             if (!options.dataEvolutionEnabled()) {
                 checkArgument(
-                        !schema.partitionKeys().isEmpty(),
-                        "Cannot enable '%s' for non-partition table.",
+                        !schema.partitionKeys().isEmpty()
+                                || options.bucket() > 0
+                                || options.bucket() == BucketMode.POSTPONE_BUCKET,
+                        "Cannot enable '%s' for non-partition table without fixed or postponed buckets or data evolution.",
                         CoreOptions.MANIFEST_SORT_ENABLED.key());
             }
             String sortPartitionField = options.manifestSortPartitionField();

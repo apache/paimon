@@ -1063,7 +1063,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td><h5>manifest-sort.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+            <td>Whether to invoke manifest sort rewrite during commit. Non-partitioned tables can sort by bucket with fixed or postponed buckets, or by RowID for data evolution tables when all input manifests contain RowID ranges.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
         </tr>
         <tr>
             <td><h5>manifest-sort.max-rewrite-size</h5></td>
@@ -1075,7 +1075,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td><h5>manifest-sort.partition-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
+            <td>Partition field name to sort manifest entries by. Validated by schema validation; must be unset for non-partitioned tables. If not configured, defaults to the first partition field, or all partition fields for data evolution RowID sorting.</td>
         </tr>
         <tr>
             <td><h5>manifest.compression</h5></td>

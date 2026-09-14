@@ -29,10 +29,10 @@ import java.util.stream.Collectors;
  * A {@code ManifestAdjacentSortedRun} is a list of {@link ManifestFileMeta}s sorted by manifest
  * sort key. The sort-key intervals of these manifests do not overlap.
  *
- * <p><b>Boundary Equality:</b> Partition-field sorting treats boundary-touching intervals (min ==
- * previous.max) as non-overlapping, so they can be placed in the same SortedRun. This reduces the
- * number of runs and improves compaction efficiency. RowID sorting treats row-id ranges as
- * inclusive, so boundary-touching row-id ranges are considered overlapping.
+ * <p><b>Boundary Equality:</b> Bucket and partition-field sorting treat boundary-touching intervals
+ * (min == previous.max) as non-overlapping, so they can be placed in the same SortedRun. This
+ * reduces the number of runs and improves compaction efficiency. RowID sorting treats row-id ranges
+ * as inclusive, so boundary-touching row-id ranges are considered overlapping.
  */
 public class ManifestAdjacentSortedRun {
 
