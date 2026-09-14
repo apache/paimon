@@ -32,6 +32,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -155,7 +156,7 @@ public class ManifestFileSorter {
             @Nullable IOManager ioManager)
             throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
-        boolean bucketed = options.bucket() > 0;
+        boolean bucketed = options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET;
         boolean runMergeOptimizeEnabled = options.manifestMergeOptimizeEnabled();
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
@@ -1110,7 +1111,7 @@ public class ManifestFileSorter {
             sorted =
                     ManifestEntryRunMerge.sortAndWriteFullEntries(
                             section,
-                            (RowIdEntrySortKey) ctx.sortKey,
+                            (RowIdSortKey) ctx.sortKey,
                             ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
@@ -1152,7 +1153,7 @@ public class ManifestFileSorter {
             sorted =
                     ManifestEntryRunMerge.sortAndWriteMinorEntries(
                             section,
-                            (RowIdEntrySortKey) ctx.sortKey,
+                            (RowIdSortKey) ctx.sortKey,
                             ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
@@ -1186,14 +1187,6 @@ public class ManifestFileSorter {
             }
         }
         return true;
-    }
-
-    static ManifestSortKey createSortKey(
-            boolean dataEvolutionEnabled,
-            List<ManifestFileMeta> input,
-            String sortPartitionField,
-            RowType partitionType) {
-        return createSortKey(dataEvolutionEnabled, input, sortPartitionField, partitionType, false);
     }
 
     static ManifestSortKey createSortKey(
@@ -1287,11 +1280,6 @@ public class ManifestFileSorter {
                 GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow);
 
         InternalRow binaryManifestRow(BinaryRow row);
-    }
-
-    interface RowIdEntrySortKey extends ManifestSortKey {
-
-        int comparePartitions(BinaryRow left, BinaryRow right);
     }
 
     private static class PartitionSortKey implements ManifestSortKey {
@@ -1458,7 +1446,7 @@ public class ManifestFileSorter {
         }
     }
 
-    private static class RowIdSortKey implements RowIdEntrySortKey {
+    static class RowIdSortKey implements ManifestSortKey {
 
         @Nullable private final RecordComparator partitionComparator;
         private final InternalRow.FieldGetter[] partitionFieldGetters;
@@ -1545,8 +1533,7 @@ public class ManifestFileSorter {
             return row.getRow(sortFieldNum, ManifestEntry.MANIFEST_ROW_TYPE.getFieldCount());
         }
 
-        @Override
-        public int comparePartitions(BinaryRow left, BinaryRow right) {
+        int comparePartitions(BinaryRow left, BinaryRow right) {
             return partitionComparator == null ? 0 : partitionComparator.compare(left, right);
         }
 

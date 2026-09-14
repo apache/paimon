@@ -76,9 +76,10 @@ class ManifestEntryRunMergeTest extends ManifestFileMetaTestBase {
         List<ManifestFileMeta> manifests = new ArrayList<>();
         manifests.add(makeManifest(firstManifest.toArray(new ManifestEntry[0])));
         manifests.add(makeManifest(secondManifest.toArray(new ManifestEntry[0])));
-        ManifestFileSorter.RowIdEntrySortKey sortKey =
-                (ManifestFileSorter.RowIdEntrySortKey)
-                        ManifestFileSorter.createSortKey(true, manifests, null, partitionType);
+        ManifestFileSorter.RowIdSortKey sortKey =
+                (ManifestFileSorter.RowIdSortKey)
+                        ManifestFileSorter.createSortKey(
+                                true, manifests, null, partitionType, false);
 
         CollectedDeletes deletes = new CollectedDeletes(true);
         List<ManifestFileMeta> output;

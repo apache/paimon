@@ -71,7 +71,7 @@ final class ManifestEntryRunMerge {
     @Nullable
     static List<ManifestFileMeta> sortAndWriteFullEntries(
             List<ManifestFileMeta> section,
-            ManifestFileSorter.RowIdEntrySortKey sortKey,
+            ManifestFileSorter.RowIdSortKey sortKey,
             RowType partitionType,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
@@ -102,7 +102,7 @@ final class ManifestEntryRunMerge {
     @Nullable
     static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sortAndWriteMinorEntries(
             List<ManifestFileMeta> section,
-            ManifestFileSorter.RowIdEntrySortKey sortKey,
+            ManifestFileSorter.RowIdSortKey sortKey,
             RowType partitionType,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
@@ -133,7 +133,7 @@ final class ManifestEntryRunMerge {
     @Nullable
     private static ManifestEntryRunMergePlan discoverRuns(
             List<ManifestFileMeta> section,
-            ManifestFileSorter.RowIdEntrySortKey sortKey,
+            ManifestFileSorter.RowIdSortKey sortKey,
             RowType partitionType,
             ManifestFile manifestFile,
             CollectedDeletes deletes,
