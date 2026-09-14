@@ -35,6 +35,7 @@ import org.apache.paimon.fileindex.bsi.BitSliceIndexBitmapFileIndexFactory;
 import org.apache.paimon.fileindex.rangebitmap.RangeBitmapFileIndexFactory;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
@@ -2990,6 +2991,86 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         // global effective rows: parquet file0 -> [0,4], orc file1 -> [5,9] ; RowRange [3, 6]
         List<String> actual = readAppendRowRange(table, RowRange.of(3L, 6L), null, false);
         assertThat(actual).containsExactly("0|3|30", "0|4|40", "0|5|50", "0|6|60");
+    }
+
+    /**
+     * Regression for {@code scan.ignore-lost-files=true}: two parquet files hold a = 0..4 and 5..9;
+     * the first file is deleted after planning. The ordinary reader returns a = 5..9. A ranged read
+     * {@code RowRange.of(1, 2)} must return the matching slice of that ordinary output (a = 6, 7),
+     * not {@code []}. With the per-file range pushdown enabled, the missing file's manifest
+     * rowCount was counted as effective rows, shifting offsets so the surviving file was skipped
+     * before the missing-file reader could emit zero rows; the effective-row fallback is kept when
+     * files may be ignored.
+     */
+    @Test
+    public void testAppendRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(CoreOptions.SCAN_IGNORE_LOST_FILE, true);
+                        });
+        writeAppendRows(table, 0, 5);
+        writeAppendRows(table, 5, 10);
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        assertThat(splits).hasSize(1);
+        DataSplit split = (DataSplit) splits.get(0);
+        assertThat(split.dataFiles()).hasSize(2);
+
+        // delete the first file (a = 0..4) after planning
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket())
+                        .toPath(split.dataFiles().get(0));
+        table.fileIO().deleteQuietly(path);
+
+        // ordinary read over the surviving file
+        List<String> ordinary = readAppendRowRange(table, null, null, false);
+        assertThat(ordinary).containsExactly("0|5|50", "0|6|60", "0|7|70", "0|8|80", "0|9|90");
+
+        // ranged read must be the corresponding slice of the ordinary (effective) output
+        List<String> ranged = readAppendRowRange(table, RowRange.of(1L, 2L), null, false);
+        assertThat(ranged).containsExactly("0|6|60", "0|7|70");
+        assertThat(ranged).isEqualTo(ordinary.subList(1, 3));
+    }
+
+    /**
+     * Regression for {@code scan.ignore-corrupt-files=true}: the first file's bytes are corrupted
+     * after planning. The ranged read must still slice the effective (surviving) output rather than
+     * indexing against the corrupt file's manifest rowCount.
+     */
+    @Test
+    public void testAppendRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(CoreOptions.SCAN_IGNORE_CORRUPT_FILE, true);
+                        });
+        writeAppendRows(table, 0, 5);
+        writeAppendRows(table, 5, 10);
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        DataSplit split = (DataSplit) splits.get(0);
+
+        // corrupt the first file (a = 0..4) after planning
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket())
+                        .toPath(split.dataFiles().get(0));
+        try (PositionOutputStream out = table.fileIO().newOutputStream(path, true)) {
+            out.write(new byte[] {0, 0, 0, 0});
+        }
+
+        List<String> ordinary = readAppendRowRange(table, null, null, false);
+        assertThat(ordinary).containsExactly("0|5|50", "0|6|60", "0|7|70", "0|8|80", "0|9|90");
+
+        List<String> ranged = readAppendRowRange(table, RowRange.of(1L, 2L), null, false);
+        assertThat(ranged).containsExactly("0|6|60", "0|7|70");
+        assertThat(ranged).isEqualTo(ordinary.subList(1, 3));
     }
 
     /**
