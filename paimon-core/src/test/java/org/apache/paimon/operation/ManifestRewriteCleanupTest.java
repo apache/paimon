@@ -598,7 +598,7 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
     private ManifestFileSorter.ManifestSortKey failingSortKey(
             List<ManifestFileMeta> input, int successfulRowsBeforeFailure, AssertionError failure) {
         return new FailingManifestSortKey(
-                ManifestFileSorter.createSortKey(true, input, null, PARTITION_TYPE),
+                ManifestFileSorter.createSortKey(true, input, null, PARTITION_TYPE, false),
                 successfulRowsBeforeFailure,
                 failure);
     }
