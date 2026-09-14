@@ -26,11 +26,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -114,52 +112,15 @@ class StringToArrayCastRule extends AbstractCastRule<BinaryString, InternalArray
     private List<Object> parseArrayElements(
             String content, CastExecutor<BinaryString, Object> elementCastExecutor) {
         List<Object> elements = new ArrayList<>();
-        for (String token : splitArrayElements(content)) {
-            String trimmedToken = token.trim();
+        for (TokenSplitter.Token token : TokenSplitter.split(content)) {
+            String value = token.value();
+            // only an unquoted null is the null element; "null" is the four-character string
             Object element =
-                    "null".equals(trimmedToken)
+                    !token.literal() && "null".equals(value)
                             ? null
-                            : elementCastExecutor.cast(BinaryString.fromString(trimmedToken));
+                            : elementCastExecutor.cast(BinaryString.fromString(value));
             elements.add(element);
         }
         return elements;
-    }
-
-    private List<String> splitArrayElements(String content) {
-        List<String> elements = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        Stack<Character> bracketStack = new Stack<>();
-        boolean inQuotes = false;
-        boolean escaped = false;
-
-        for (char c : content.toCharArray()) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                inQuotes = !inQuotes;
-            } else if (!inQuotes) {
-                if (StringUtils.isOpenBracket(c)) {
-                    bracketStack.push(c);
-                } else if (StringUtils.isCloseBracket(c) && !bracketStack.isEmpty()) {
-                    bracketStack.pop();
-                } else if (c == ',' && bracketStack.isEmpty()) {
-                    addCurrentElement(elements, current);
-                    continue;
-                }
-            }
-            current.append(c);
-        }
-
-        addCurrentElement(elements, current);
-        return elements;
-    }
-
-    private void addCurrentElement(List<String> elements, StringBuilder current) {
-        if (current.length() > 0) {
-            elements.add(current.toString());
-            current.setLength(0);
-        }
     }
 }
