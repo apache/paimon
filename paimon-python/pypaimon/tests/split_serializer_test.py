@@ -16,6 +16,7 @@
 # under the License.
 
 import base64
+import struct
 import unittest
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
@@ -56,7 +57,7 @@ _GOLDEN_DATA_SPLIT_V1 = base64.b64decode(
 )
 
 # Same split serialized as an IndexedSplit (type id 3): identical DataSplit body
-# with a trailing row-ranges/scores section that the reader skips.
+# with a trailing row-ranges/scores section that must survive decoding.
 _GOLDEN_INDEXED_SPLIT_V1 = base64.b64decode(
     "U1BMSVRfVjEAAAABAAAAA/L54FRCJC4xAAAAAd7D0jAsGexmAAAACAAAAAAAAAAqAAAAHAAAAAIA"
     "AAAAAAAAAOoHAAAAAAAABwAAAAAAAAAAAAADABRkdD0yMDI2MDcwNi9idWNrZXQtMwEAAAAIAAAA"
@@ -75,6 +76,26 @@ _GOLDEN_INDEXED_SPLIT_V1 = base64.b64decode(
     "AAAMAAAAMAAAAAgAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     "AAAAAAAAAAAAAQAAAAIAAQAJZHYvZmlsZS1iAAAAAAAAAAIAAAAAAAAACgAAAAAAAAADAAEAAAAC"
     "AAAAAAAAAAEAAAAAAAAABAAAAAAAAAALAAAAAAAAAA0BAAAAAz8AAAA+gAAAPgAAAA=="
+)
+
+
+# Java DataSplitCompatibleTest's v9 golden, also used by paimon-rust's
+# serialize_matches_datasplit_v9 test. Includes the new non-null per-column
+# sequence numbers [15, 100, 150, 200] after write_cols.
+_GOLDEN_DATA_SPLIT_V9 = base64.b64decode(
+    "3sPSMCwZ7GYAAAAJAAAAAAAAABIAAAAUAAAAAQAAAAAAAAAAYWFhYWEAAIUAAAAUAAdteSBwYXRo"
+    "AQAAACAAAAAAAAAAAAEAAAJoAAAAAAAAAABteV9maWxlhwAAEAAAAAAAAAQAAAAAAAAUAAAAsAAA"
+    "ABQAAADIAAAAYAAAAOAAAACAAAAAQAEAAA8AAAAAAAAAyAAAAAAAAAAFAAAAAAAAAAMAAAAAAAAA"
+    "GAAAAMABAABgTEpMfwEAAAsAAAAAAAAAAQIEAAAAAIMBAAAAAAAAACAAAADYAQAAGQAAAPgBAAAM"
+    "AAAAAAAAACgAAAAYAgAAKAAAAEACAAAAAAABAAAAAAAAAABtaW5fa2V5hwAAAAAAAAABAAAAAAAA"
+    "AABtYXhfa2V5hwAAAAAAAAAAAAAAABQAAAAgAAAAFAAAADgAAAAQAAAAUAAAAAAAAAEAAAAAAAAA"
+    "AG1pbl9rZXmHAAAAAAAAAAEAAAAAAAAAAG1heF9rZXmHAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAACQAAAAgAAAAJAAAAEgAAAAQAAAAcAAAAAAAAAEAAAAAAAAAAAkAAAAQAAAAbWluX3ZhbHVl"
+    "AAAAAAAAAAAAAAAAAAABAAAAAAAAAAAJAAAAEAAAAG1heF92YWx1ZQAAAAAAAAAAAAAAAQAAAAAA"
+    "AAAAAAAAAAAAAAIAAAAAAAAAZXh0cmExAIZleHRyYTIAhgMAAAAAAAAAZmllbGQxAIZmaWVsZDIA"
+    "hmZpZWxkMwCGaGRmczovLy9wYXRoL3RvL3dhcmVob3VzZQAAAAAAAAAEAAAAAAAAAGEAAAAAAACB"
+    "YgAAAAAAAIFjAAAAAAAAgWYAAAAAAACBBAAAAAAAAAAPAAAAAAAAAGQAAAAAAAAAlgAAAAAAAADI"
+    "AAAAAAAAAAEAAAABAQANZGVsZXRpb25fZmlsZQAAAAAAAABkAAAAAAAAABYAAAAAAAAAIQAA"
 )
 
 
@@ -138,6 +159,51 @@ class SplitSerializerTest(unittest.TestCase):
         self.assertEqual(
             _decode_modified_utf8(bytes([0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80])),
             '\U0001F600')
+
+    def test_deserialize_v9_data_and_indexed_splits(self):
+        fields = [DataField(0, 's', AtomicType('STRING'))]
+        for indexed in (False, True):
+            with self.subTest(indexed=indexed):
+                if indexed:
+                    data = (_GOLDEN_INDEXED_SPLIT_V1[:28] + _GOLDEN_DATA_SPLIT_V9
+                            + struct.pack('>iqqBif', 1, 13, 14, 1, 1, 0.75))
+                else:
+                    data = _GOLDEN_DATA_SPLIT_V1[:16] + _GOLDEN_DATA_SPLIT_V9
+                split = deserialize_split_v1(data, fields, fields)
+                self.assertEqual(split.snapshot_id, 18)
+                self.assertEqual(list(split.partition.values), ['aaaaa'])
+                self.assertEqual(split.bucket, 20)
+                self.assertFalse(split.raw_convertible)
+                self.assertEqual(len(split.files), 1)
+                file = split.files[0]
+                self.assertEqual(file.file_name, 'my_file')
+                self.assertEqual(file.file_path, 'hdfs:///path/to/warehouse')
+                self.assertEqual((file.file_size, file.row_count), (1024 * 1024, 1024))
+                self.assertEqual(list(file.min_key.values), ['min_key'])
+                self.assertEqual(list(file.max_key.values), ['max_key'])
+                self.assertEqual((file.min_sequence_number, file.max_sequence_number), (15, 200))
+                self.assertEqual((file.schema_id, file.level), (5, 3))
+                self.assertEqual(file.extra_files, ['extra1', 'extra2'])
+                self.assertEqual(file.embedded_index, bytes([1, 2, 4]))
+                self.assertEqual(file.value_stats_cols, ['field1', 'field2', 'field3'])
+                self.assertEqual(file.first_row_id, 12)
+                self.assertEqual(file.write_cols, ['a', 'b', 'c', 'f'])
+                self.assertEqual(len(split.data_deletion_files), 1)
+                dv = split.data_deletion_files[0]
+                self.assertEqual(
+                    (dv.dv_index_path, dv.offset, dv.length, dv.cardinality),
+                    ('deletion_file', 100, 22, 33))
+                if indexed:
+                    self.assertEqual([(r.from_, r.to) for r in split.row_ranges()], [(13, 14)])
+                    self.assertEqual(split.scores(), [0.75])
+
+    def test_unsupported_data_split_version_raises(self):
+        for version in (7, 10):
+            with self.subTest(version=version):
+                data = (_GOLDEN_DATA_SPLIT_V1[:24] + struct.pack('>i', version)
+                        + _GOLDEN_DATA_SPLIT_V1[28:])
+                with self.assertRaisesRegex(ValueError, 'unsupported DataSplit version'):
+                    deserialize_split_v1(data, self._partition_fields())
 
     def test_decode_str_array_inline_and_pointer(self):
         # Covers both element encodings: inline (<=7 bytes) and var pointer (>7).
