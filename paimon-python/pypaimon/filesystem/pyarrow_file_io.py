@@ -482,10 +482,7 @@ class PyArrowFileIO(FileIO):
             if info.type == pafs.FileType.File
         ]
         if files:
-            thread_num = self._get_property(
-                "file-operation.thread-num", "delete-file.thread-num")
-            thread_num = 16 if thread_num is None or int(thread_num) <= 0 else int(thread_num)
-            with ThreadPoolExecutor(max_workers=min(thread_num, len(files))) as executor:
+            with ThreadPoolExecutor(max_workers=min(16, len(files))) as executor:
                 list(executor.map(self.filesystem.delete_file, files))
         directories = sorted(
             (info.path for info in file_infos
