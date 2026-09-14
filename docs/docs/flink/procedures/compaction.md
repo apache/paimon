@@ -250,6 +250,10 @@ To compact_manifest the manifests. Arguments:
 
 - manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.
 
+When manifest sort is enabled, `compact_manifest` performs a full sort using the layout selected
+from the table options. The existing `manifest_sort_max_rewrite_size` limit still controls the
+amount of manifest data rewritten in one invocation.
+
 **Syntax**
 
 ```sql
