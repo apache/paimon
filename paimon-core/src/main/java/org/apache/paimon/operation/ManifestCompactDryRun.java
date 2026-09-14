@@ -110,13 +110,11 @@ public class ManifestCompactDryRun {
             RowType partitionType,
             CoreOptions options) {
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
-        boolean forceRewrite = options.manifestSortForceRewrite();
         boolean fullCompaction =
-                forceRewrite
-                        || ManifestFileSorter.reachesFullCompactionThreshold(
-                                manifests,
-                                suggestedMetaSize,
-                                options.manifestFullCompactionThresholdSize().getBytes());
+                ManifestFileSorter.reachesFullCompactionThreshold(
+                        manifests,
+                        suggestedMetaSize,
+                        options.manifestFullCompactionThresholdSize().getBytes());
         ManifestFileSorter.ManifestSortKey sortKey =
                 ManifestFileSorter.createSortKey(
                         options.dataEvolutionEnabled(),
@@ -136,8 +134,7 @@ public class ManifestCompactDryRun {
 
         // A full compaction with no work falls through to the minor path. Mirror that fallback so
         // the reported levels describe the path which a real compaction would use.
-        if (!forceRewrite
-                && fullCompaction
+        if (fullCompaction
                 && classifyResult.compactWithoutSort.isEmpty()
                 && new ManifestPickStrategy(
                                 options.maxSizeAmplificationPercent(), options.sortedRunSizeRatio())

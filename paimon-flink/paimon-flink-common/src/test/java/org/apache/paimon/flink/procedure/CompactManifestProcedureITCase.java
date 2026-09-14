@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.CompactManifestAction;
@@ -123,24 +122,7 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         long compactSnapshotId = table.snapshotManager().latestSnapshot().id();
         sql(procedure);
         Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(compactSnapshotId);
-
-        String forceRewriteProcedure =
-                "CALL sys.compact_manifest("
-                        + "`table` => 'default.T_SORT', "
-                        + "`options` => 'manifest-sort.force-rewrite=true', "
-                        + "`manifest_sort_enabled` => true, "
-                        + "`manifest_sort_partition_field` => 'dt', "
-                        + "`manifest_sort_max_rewrite_size` => '1 gb')";
-        sql(forceRewriteProcedure);
-        long forceRewriteSnapshotId = table.snapshotManager().latestSnapshot().id();
-        Assertions.assertThat(forceRewriteSnapshotId).isEqualTo(compactSnapshotId + 1);
-        Assertions.assertThat(paimonTable("T_SORT").options())
-                .doesNotContainKey(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key());
-
-        sql(procedure);
-        Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
-                .isEqualTo(forceRewriteSnapshotId);
+                .isEqualTo(compactSnapshotId + 1);
     }
 
     @Test

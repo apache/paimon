@@ -33,6 +33,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.operation.ManifestFileMergerTestUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -1353,7 +1354,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteAlreadyCompactedRuns() {
+    public void testManifestSortFullCompactionAlreadyCompactedRuns() {
         List<ManifestFileMeta> physical =
                 Arrays.asList(
                         makeManifest(makeBucketEntry("a-3", 0, 3), makeBucketEntry("a-1", 0, 1)),
@@ -1373,6 +1374,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
         testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1G");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
         testOptions.set(CoreOptions.BUCKET, 4);
 
         List<ManifestFileMeta> unchanged =
@@ -1383,9 +1385,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         CoreOptions.fromMap(testOptions.toMap()));
         assertThat(unchanged).containsExactlyInAnyOrderElementsOf(input);
 
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         input,
                         manifestFile,
                         getPartitionType(),
@@ -1406,7 +1407,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertThat(rewritten.get(0).maxBucket()).isEqualTo(3);
         assertThat(rewritten.get(0).totalBuckets()).isEqualTo(240);
 
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, false);
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
         List<ManifestFileMeta> afterMigration =
                 ManifestFileMerger.merge(
                         rewritten,
@@ -1417,7 +1418,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteAllLevelRuns() {
+    public void testManifestSortFullCompactionAllLevelRuns() {
         List<ManifestFileMeta> physical =
                 Arrays.asList(
                         makeManifest(makeBucketEntry("a-3", 0, 3), makeBucketEntry("a-1", 2, 1)),
@@ -1431,6 +1432,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
         testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1G");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
         testOptions.set(CoreOptions.BUCKET, 4);
 
         // Without bucket metadata, manifest sort falls back to the overlapping partition ranges
@@ -1454,9 +1456,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         CoreOptions.fromMap(testOptions.toMap()));
         assertThat(unchanged).containsExactlyInAnyOrderElementsOf(input);
 
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         input,
                         manifestFile,
                         getPartitionType(),
@@ -1475,34 +1476,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteDryRunUsesFullCompaction() {
-        List<ManifestFileMeta> input =
-                Arrays.asList(
-                        makeManifest(makeEntry(true, "base", 0)),
-                        makeManifest(
-                                makeEntry(false, "base", 0), makeEntry(true, "replacement", 0)));
-
-        Options testOptions = new Options();
-        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
-        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1B");
-        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
-
-        FileStoreTable table = mock(FileStoreTable.class, RETURNS_DEEP_STUBS);
-        Snapshot snapshot = mock(Snapshot.class);
-        when(table.options()).thenReturn(testOptions.toMap());
-        when(table.store().snapshotManager().latestSnapshot()).thenReturn(snapshot);
-        when(table.store().manifestListFactory().create().readDataManifests(snapshot))
-                .thenReturn(input);
-        when(table.store().manifestFileFactory().create()).thenReturn(manifestFile);
-        when(table.schema().logicalPartitionType()).thenReturn(getPartitionType());
-
-        assertThat(ManifestCompactDryRun.execute(table))
-                .endsWith("Manifest sort level files: L0=0, L1=0, L2=0, L3=0, L4=0.");
-    }
-
-    @Test
-    public void testManifestSortForceRewriteSingleManifest() {
+    public void testManifestSortFullCompactionSingleManifest() {
         ManifestFileMeta physical =
                 makeManifest(makeBucketEntry("file-3", 0, 3), makeBucketEntry("file-0", 0, 0));
         ManifestFileMeta input =
@@ -1511,10 +1485,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         testOptions.set(CoreOptions.BUCKET, 4);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         Collections.singletonList(input),
                         manifestFile,
                         getPartitionType(),
@@ -1528,7 +1501,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteRespectsRewriteBudget() {
+    public void testManifestSortFullCompactionRespectsRewriteLimit() {
         long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -1538,11 +1511,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
         testOptions.set(CoreOptions.BUCKET, 4);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         input,
                         manifestFile,
                         getPartitionType(),
@@ -1558,7 +1530,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteDoesNotExceedBudgetForSingletonTail() {
+    public void testManifestSortFullCompactionDoesNotExceedLimitForSingletonTail() {
         long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
@@ -1568,11 +1540,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
         testOptions.set(CoreOptions.BUCKET, 4);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         input,
                         manifestFile,
                         getPartitionType(),
@@ -1588,7 +1559,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteDoesNotRewriteTailBeyondBudget() {
+    public void testManifestSortFullCompactionDoesNotRewriteTailBeyondLimit() {
         long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -1601,11 +1572,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
         testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
         testOptions.set(CoreOptions.BUCKET, 8);
         List<ManifestFileMeta> rewritten =
-                ManifestFileMerger.merge(
+                ManifestFileMergerTestUtils.fullMerge(
                         input,
                         manifestFile,
                         getPartitionType(),

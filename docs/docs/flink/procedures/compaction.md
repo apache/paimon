@@ -250,7 +250,9 @@ To compact_manifest the manifests. Arguments:
 
 - manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.
 
-Set `manifest-sort.force-rewrite=true` in `options` together with `manifest_sort_enabled=true` to rewrite already compacted manifest runs using the layout selected from the table options. Use it only as a one-shot dynamic option. The existing `manifest_sort_max_rewrite_size` rewrite budget semantics still apply; raise it to migrate more manifests in one invocation.
+When manifest sort is enabled, `compact_manifest` performs a full sort using the layout selected
+from the table options. The existing `manifest_sort_max_rewrite_size` limit still controls the
+amount of manifest data rewritten in one invocation.
 
 **Syntax**
 
@@ -280,13 +282,6 @@ CALL sys.compact_manifest(
     `table` => 'default.T',
     `manifest_sort_enabled` => true,
     `manifest_sort_partition_field` => 'dt',
-    `manifest_sort_max_rewrite_size` => '1 gb'
-);
-
-CALL sys.compact_manifest(
-    `table` => 'default.T',
-    `options` => 'manifest-sort.force-rewrite=true',
-    `manifest_sort_enabled` => true,
     `manifest_sort_max_rewrite_size` => '1 gb'
 );
 ```

@@ -71,7 +71,7 @@ public class ManifestFileSorter {
     /** Context object that carries shared state across compaction methods. */
     static class CompactionContext {
         final boolean fullCompaction;
-        final boolean forceRewrite;
+        final boolean fullSort;
         final boolean runMergeOptimizeEnabled;
         final ManifestSortKey sortKey;
         final RowType partitionType;
@@ -92,7 +92,7 @@ public class ManifestFileSorter {
 
         CompactionContext(
                 boolean fullCompaction,
-                boolean forceRewrite,
+                boolean fullSort,
                 boolean runMergeOptimizeEnabled,
                 ManifestSortKey sortKey,
                 RowType partitionType,
@@ -102,7 +102,7 @@ public class ManifestFileSorter {
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
-            this.forceRewrite = forceRewrite;
+            this.fullSort = fullSort;
             this.runMergeOptimizeEnabled = runMergeOptimizeEnabled;
             this.sortKey = sortKey;
             this.partitionType = partitionType;
@@ -156,7 +156,8 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             RowType partitionType,
             CoreOptions options,
-            @Nullable IOManager ioManager)
+            @Nullable IOManager ioManager,
+            boolean fullSort)
             throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
         boolean bucketed = options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET;
@@ -164,7 +165,6 @@ public class ManifestFileSorter {
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
         long fullCompactionThreshold = options.manifestFullCompactionThresholdSize().getBytes();
-        boolean forceRewrite = options.manifestSortForceRewrite();
         long maxRewriteSize = options.manifestSortMaxRewriteSize();
         int maxSizeAmplificationPercent = options.maxSizeAmplificationPercent();
         int sortedRunSizeRatio = options.sortedRunSizeRatio();
@@ -185,7 +185,7 @@ public class ManifestFileSorter {
                         suggestedMetaSize,
                         suggestedMinMetaCount,
                         fullCompactionThreshold,
-                        forceRewrite,
+                        fullSort,
                         maxRewriteSize,
                         maxSizeAmplificationPercent,
                         sortedRunSizeRatio,
@@ -230,7 +230,7 @@ public class ManifestFileSorter {
             long suggestedMetaSize,
             int suggestedMinMetaCount,
             long fullCompactionThreshold,
-            boolean forceRewrite,
+            boolean fullSort,
             long maxRewriteSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
@@ -238,7 +238,7 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Check if full compaction threshold is met
-        if (!forceRewrite
+        if (!fullSort
                 && !reachesFullCompactionThreshold(
                         input, suggestedMetaSize, fullCompactionThreshold)) {
             return Optional.empty();
@@ -248,7 +248,7 @@ public class ManifestFileSorter {
                 prepareCompaction(
                         input,
                         true,
-                        forceRewrite,
+                        fullSort,
                         manifestFile,
                         partitionType,
                         sortPartitionField,
@@ -262,10 +262,8 @@ public class ManifestFileSorter {
                         manifestReadParallelism);
         try {
             List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
-            List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
-            if (forceRewrite) {
-                pickedRuns = new ArrayList<>(levelRuns);
-            }
+            List<ManifestAdjacentSortedRun> pickedRuns =
+                    fullSort ? new ArrayList<>(levelRuns) : ctx.pickedRuns;
 
             if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
                 LOG.debug(
@@ -295,11 +293,10 @@ public class ManifestFileSorter {
             }
             pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
 
-            // Step 4: Split into sections and merge small adjacent sections. A forced rewrite
-            // intentionally uses one global section so entries from different already-compacted
-            // manifests can be clustered using the layout selected from the table options.
+            // Step 4: A full sort uses one global section so entries from all existing runs can be
+            // clustered using the layout selected from the table options.
             List<Section> sections;
-            if (forceRewrite) {
+            if (fullSort) {
                 long totalSize = 0L;
                 boolean hasDefaultCompactFile = false;
                 for (ManifestFileMeta file : pickedFiles) {
@@ -485,7 +482,7 @@ public class ManifestFileSorter {
     private static CompactionContext prepareCompaction(
             List<ManifestFileMeta> input,
             boolean fullCompaction,
-            boolean forceRewrite,
+            boolean fullSort,
             ManifestFile manifestFile,
             RowType partitionType,
             String sortPartitionField,
@@ -528,7 +525,7 @@ public class ManifestFileSorter {
 
         return new CompactionContext(
                 fullCompaction,
-                forceRewrite,
+                fullSort,
                 useRunMergeOptimize,
                 sortKey,
                 partitionType,
@@ -1099,11 +1096,11 @@ public class ManifestFileSorter {
             CompactionContext ctx,
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism,
-            boolean allowForceRewrite)
+            boolean allowFullRewrite)
             throws Exception {
         // Skip rewrite for single file not in delete-range.
         if (section.size() == 1
-                && !(allowForceRewrite && ctx.forceRewrite)
+                && !(allowFullRewrite && ctx.fullSort)
                 && !ctx.defaultCompactFiles.getOrDefault(section.get(0), false)) {
             output.addUnchanged(section.get(0));
             return;

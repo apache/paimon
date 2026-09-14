@@ -417,7 +417,7 @@ public class SchemaValidation {
 
         validatePkClusteringOverride(options);
 
-        validateManifestSort(schema, options, dynamicOptionKeys);
+        validateManifestSort(schema, options);
     }
 
     /**
@@ -2019,15 +2019,7 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateManifestSort(
-            TableSchema schema, CoreOptions options, Set<String> dynamicOptionKeys) {
-        checkArgument(
-                !schema.options().containsKey(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key())
-                        || dynamicOptionKeys.contains(
-                                CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key()),
-                "'%s' is only supported as a dynamic option for explicit manifest compaction.",
-                CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key());
-
+    private static void validateManifestSort(TableSchema schema, CoreOptions options) {
         if (options.manifestSortEnabled()) {
             if (!options.dataEvolutionEnabled()) {
                 checkArgument(

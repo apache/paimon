@@ -599,20 +599,6 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
-    @ExcludeFromDocumentation("Only used by compact_manifest maintenance procedure")
-    public static final ConfigOption<Boolean> MANIFEST_SORT_FORCE_REWRITE =
-            key("manifest-sort.force-rewrite")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "When 'manifest-sort.enabled' is true, force an explicit manifest"
-                                    + " compaction to rewrite already compacted manifest runs using"
-                                    + " the layout selected from the table options."
-                                    + " The existing 'manifest-sort.max-rewrite-size' rewrite budget"
-                                    + " semantics still apply."
-                                    + " This should be supplied as a one-shot dynamic option for"
-                                    + " maintenance, not persisted for routine writes.");
-
     public static final ConfigOption<Boolean> MANIFEST_MERGE_OPTIMIZE_ENABLED =
             key("manifest.merge-optimize.enabled")
                     .booleanType()
@@ -3239,10 +3225,6 @@ public class CoreOptions implements Serializable {
 
     public long manifestSortMaxRewriteSize() {
         return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
-    }
-
-    public boolean manifestSortForceRewrite() {
-        return options.get(MANIFEST_SORT_FORCE_REWRITE);
     }
 
     public boolean manifestMergeOptimizeEnabled() {

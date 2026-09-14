@@ -36,7 +36,6 @@ import java.util.List;
 import java.util.Map;
 
 import static java.util.Collections.emptyList;
-import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -2048,31 +2047,6 @@ class SchemaValidationTest {
                                                 options6,
                                                 "")))
                 .hasMessageContaining("is not a partition field");
-    }
-
-    @Test
-    void testManifestSortForceRewriteIsDynamicOnly() {
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.INT()));
-        Map<String, String> baseOptions = new HashMap<>();
-        baseOptions.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
-        baseOptions.put(BUCKET.key(), "-1");
-
-        Map<String, String> forceOptions = new HashMap<>(baseOptions);
-        forceOptions.put(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(), "true");
-        TableSchema forceSchema =
-                new TableSchema(1, fields, 10, singletonList("f0"), emptyList(), forceOptions, "");
-        assertThatThrownBy(() -> validateTableSchema(forceSchema))
-                .hasMessage(
-                        "'manifest-sort.force-rewrite' is only supported as a dynamic option for explicit manifest compaction.");
-        assertThatNoException()
-                .isThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        forceSchema,
-                                        singleton(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key())));
     }
 
     @Test
