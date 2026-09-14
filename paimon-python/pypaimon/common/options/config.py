@@ -134,6 +134,23 @@ class CatalogOptions:
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
 
 
+class FileIOOptions:
+    READ_COALESCE_MAX_GAP = (
+        ConfigOptions.key("file-io.read-coalesce.max-gap")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(1))
+        .with_description(
+            "Maximum gap between same-file ranges merged into one read."
+        )
+    )
+    READ_COALESCE_MAX_SPAN = (
+        ConfigOptions.key("file-io.read-coalesce.max-span")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(8))
+        .with_description("Maximum span for merging same-file ranges.")
+    )
+
+
 class HdfsOptions:
     HDFS_CLIENT_IMPL = (
         ConfigOptions.key("hdfs.client.impl")

@@ -188,7 +188,7 @@ class FileIO(ABC):
             stream.close()
 
     def read_ranges_coalesced(self, ranges, parallelism,
-                              max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
+                              max_gap=None, max_span=None):
         """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
         bytes in the same order. Same-file nearby ranges are merged into one read
         to cut round trips, then sliced. Each worker lane reuses one exclusive
@@ -198,12 +198,13 @@ class FileIO(ABC):
         A failed read propagates and aborts the whole batch (unlike a per-row
         ``file.open()`` loop that fails one row at a time).
         """
+        max_gap, max_span = self._resolve_coalesce_limits(max_gap, max_span)
         return self._read_ranges_coalesced(
             ranges, parallelism, max_gap, max_span,
             max_retained_amplification=0, return_views=False)
 
     def read_ranges_coalesced_views(self, ranges, parallelism,
-                                    max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN,
+                                    max_gap=None, max_span=None,
                                     max_retained_amplification=(
                                         _COALESCE_VIEW_MAX_RETAINED_AMPLIFICATION)):
         """Read coalesced ranges as zero-copy ``memoryview`` slices.
@@ -216,9 +217,23 @@ class FileIO(ABC):
         excessive gap bytes; set ``max_retained_amplification`` to a non-positive
         value to always share the merged buffer.
         """
+        max_gap, max_span = self._resolve_coalesce_limits(max_gap, max_span)
         return self._read_ranges_coalesced(
             ranges, parallelism, max_gap, max_span, max_retained_amplification,
             return_views=True)
+
+    def _resolve_coalesce_limits(self, max_gap, max_span):
+        from pypaimon.common.options.config import FileIOOptions
+        properties = getattr(self, "properties", None)
+        if max_gap is None:
+            max_gap = (properties.get(FileIOOptions.READ_COALESCE_MAX_GAP)
+                       .get_bytes() if isinstance(properties, Options)
+                       else _COALESCE_GAP)
+        if max_span is None:
+            max_span = (properties.get(FileIOOptions.READ_COALESCE_MAX_SPAN)
+                        .get_bytes() if isinstance(properties, Options)
+                        else _COALESCE_SPAN)
+        return max_gap, max_span
 
     def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
                                max_retained_amplification, return_views):
