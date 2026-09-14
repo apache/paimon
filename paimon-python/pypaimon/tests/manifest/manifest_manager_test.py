@@ -52,7 +52,7 @@ def _paimon_python_root():
 
 
 def _runner_can_write_zstandard_avro():
-    """fastavro uses ``backports.zstd`` (Py < 3.14) to *write* zstandard Avro blocks."""
+    """Whether fastavro can write zstandard Avro blocks with the installed backends."""
     try:
         from io import BytesIO
         import fastavro
@@ -89,8 +89,8 @@ _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON = None
 def _manifest_zstd_read_subprocess_venv_python():
     """Disposable venv with editable pypaimon for ``manifest_list_zstd_read_subprocess.py``.
 
-    Does not install ``backports.zstd`` so the first worker run can hit fastavro's missing zstd
-    codec path when reading zstandard-compressed manifest lists.
+    The test removes the zstd backends before the first worker run, then installs them
+    again to verify reading zstandard-compressed manifest lists in a fresh process.
     """
     global _MANIFEST_ZSTD_READ_SUBPROC_VENV_DIR, _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON
     with _MANIFEST_ZSTD_READ_SUBPROC_VENV_LOCK:
@@ -99,18 +99,21 @@ def _manifest_zstd_read_subprocess_venv_python():
         repo = _paimon_python_root()
         venv_dir = tempfile.mkdtemp(prefix='paimon-zstd-read-subprocess-')
         pip_install_env = _subprocess_env_for_pip()
+        # Keep the codec behavior identical to the parent test environment.
+        fastavro_requirement = 'fastavro=={}'.format(fastavro.__version__)
         uv_bin = shutil.which('uv')
         try:
             if uv_bin:
                 subprocess.check_call(
-                    [uv_bin, 'venv', venv_dir],
+                    [uv_bin, 'venv', '--python', sys.executable, '--seed', venv_dir],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     env=pip_install_env,
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python, '-e', repo, 'requests'],
+                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python,
+                     '-e', repo, 'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
             else:
@@ -121,7 +124,8 @@ def _manifest_zstd_read_subprocess_venv_python():
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo, 'requests'],
+                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo,
+                     'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
         except Exception:
@@ -606,10 +610,10 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         sys.version_info >= (3, 13),
         'fastavro >= 1.12 bundles zstd in compiled extension on Python 3.13+',
     )
-    def test_zstd_manifest_list_fastavro_requires_backports_zstd(self):
+    def test_zstd_manifest_list_requires_codec_backend(self):
         """Child venv runs ``manifest_list_zstd_read_subprocess`` (argv: warehouse, table id, list file name).
 
-        No ``backports.zstd`` in the venv → read fails; after ``pip install`` → read succeeds.
+        No zstd backend in the venv → read fails; after ``pip install`` → read succeeds.
         """
         if not _runner_can_write_zstandard_avro():
             self.skipTest('runner cannot write zstandard Avro')
@@ -629,7 +633,7 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         catalog_table_id = 'default.{}'.format(self._table_name)
         isolated_venv_python = _manifest_zstd_read_subprocess_venv_python()
         pip_install_env = _subprocess_env_for_pip()
-        subprocess.run(
+        subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'uninstall', '-y',
              'backports.zstd', 'zstandard'],
             stdout=subprocess.DEVNULL,
@@ -654,7 +658,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         stderr_and_stdout = (
             read_without_zstd_backend.stdout + read_without_zstd_backend.stderr)
         self.assertIn('zstandard codec is supported but you need to install', stderr_and_stdout)
-        self.assertIn('backports.zstd', stderr_and_stdout)
+        # fastavro 1.11 uses zstandard; newer versions use backports.zstd.
+        self.assertRegex(stderr_and_stdout, r"'(?:backports\.zstd|zstandard)'")
 
         subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'install', '-q',

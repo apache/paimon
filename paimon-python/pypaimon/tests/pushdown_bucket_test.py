@@ -759,7 +759,9 @@ class BucketPruningIntegrationTest(unittest.TestCase):
                          "Equal on PK still narrows to the writer's bucket "
                          "even when AND'd with a non-bucket-key predicate")
 
+    @pytest.mark.python_plan
     def test_manifest_bucket_pruning_skips_file_reads(self):
+        # This test observes Python FileIO calls; Rust uses its own file I/O.
         table = self._create_pk_table('manifest_bucket_pruning')
         for i in range(self.NUM_BUCKETS):
             self._write(table, [{'id': i, 'val': i * 11}])

@@ -18,7 +18,7 @@
 """Deserialize the cross-language ``SplitSerializer`` v1 binary into a pypaimon
 :class:`DataSplit`.
 
-Mirror of the Java ``DataSplit#serialize`` (VERSION 8) frame wrapped in the
+Mirror of the Java ``DataSplit#serialize`` (versions 8 and 9) frame wrapped in the
 ``SplitSerializer`` v1 header, as produced by ``pypaimon_rust``'s
 ``Split.serialize()``. Extracts the fields the reader needs, plus per-file
 min/max keys for PK merge-on-read; key/value stats (planning-only) stay empty.
@@ -46,16 +46,14 @@ _TYPE_INDEXED_SPLIT = 3
 _INDEXED_SPLIT_MAGIC = -938472394838495695
 _INDEXED_SPLIT_VERSION = 1
 _SPLIT_MAGIC = -2394839472490812314
-_SPLIT_VERSION = 8
-
-_DFM_ARITY = 20
+_DFM_ARITY_BY_VERSION = {8: 20, 9: 21}
 
 
 def _f(idx, name, dtype):
     return DataField(idx, name, dtype)
 
 
-# DataFileMeta 20-field layout (order/types mirror DataFileMetaSerializer#toRow).
+# DataFileMeta layout (order/types mirror DataFileMetaSerializer#toRow).
 # Fields 3/4 (min/max key) are decoded for PK tables; 5/6 (stats) stay unread.
 _DFM_FIELDS: List[DataField] = [
     _f(0, '_FILE_NAME', AtomicType('STRING')),
@@ -78,10 +76,11 @@ _DFM_FIELDS: List[DataField] = [
     _f(17, '_EXTERNAL_PATH', AtomicType('STRING')),
     _f(18, '_FIRST_ROW_ID', AtomicType('BIGINT')),
     _f(19, '_WRITE_COLS', AtomicType('BYTES')),
+    # Added in v9 for compaction/index refresh; unused by the Python reader.
+    _f(20, '_WRITE_COLS_SEQUENCES', AtomicType('BYTES')),
 ]
 
-# Arity is fixed by DataSplit VERSION 8; keep the field list and arity in lockstep.
-assert len(_DFM_FIELDS) == _DFM_ARITY
+assert len(_DFM_FIELDS) == max(_DFM_ARITY_BY_VERSION.values())
 
 
 def _decode_str_array(b: Optional[bytes]) -> Optional[List[str]]:
@@ -214,9 +213,9 @@ def _read_datasplit_body(r: _Reader, partition_fields: List[DataField],
     if r.i64() != _SPLIT_MAGIC:
         raise ValueError("bad DataSplit magic")
     version = r.i32()
-    if version != _SPLIT_VERSION:
+    if version not in _DFM_ARITY_BY_VERSION:
         raise ValueError(
-            "unsupported DataSplit version %d (expected %d)" % (version, _SPLIT_VERSION))
+            "unsupported DataSplit version %d (expected 8 or 9)" % version)
     snapshot_id = r.i64()   # scanned snapshot; row-id conflict detection needs it
     partition = GenericRowDeserializer.from_bytes(r.take(r.i32()), partition_fields)
     bucket = r.i32()
@@ -228,7 +227,8 @@ def _read_datasplit_body(r: _Reader, partition_fields: List[DataField],
     if r.u8() != 0:                       # beforeDeletionFiles must be null
         raise ValueError("cannot deserialize a split with before deletion files")
     file_count = r.i32()
-    files = [_datafilemeta_from_row(r.take(r.i32()), bucket_path, key_fields)
+    arity = _DFM_ARITY_BY_VERSION[version]
+    files = [_datafilemeta_from_row(r.take(r.i32()), bucket_path, arity, key_fields)
              for _ in range(file_count)]
     data_deletion_files = _read_deletion_list(r)
     r.u8()    # isStreaming
@@ -250,9 +250,9 @@ def _decode_key(b: Optional[bytes], key_fields: Optional[List[DataField]]) -> Ge
     return GenericRowDeserializer.from_bytes(b, key_fields)
 
 
-def _datafilemeta_from_row(row_bytes: bytes, bucket_path: str,
+def _datafilemeta_from_row(row_bytes: bytes, bucket_path: str, arity: int,
                            key_fields: Optional[List[DataField]] = None) -> DataFileMeta:
-    row = BinaryRow(struct.pack('>i', _DFM_ARITY) + row_bytes, _DFM_FIELDS)
+    row = BinaryRow(struct.pack('>i', arity) + row_bytes, _DFM_FIELDS[:arity])
     g = row.get_field
     file_name = g(0)
     external_path = g(17)
