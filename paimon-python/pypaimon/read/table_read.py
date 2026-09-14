@@ -37,7 +37,8 @@ from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
-from pypaimon.schema.data_types import DataField, MapType, PyarrowFieldParser
+from pypaimon.schema.data_types import (
+    DataField, MapType, PyarrowFieldParser, is_map_blob_type)
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
@@ -1036,6 +1037,7 @@ class TableRead:
             paths = paths_by_top[top_name]
             if (isinstance(field.type, MapType)
                     and all(len(path) > 1 for path in paths)
+                    and not is_map_blob_type(field.type)
                     and not self._map_has_aggregator(top_name)):
                 keys = []
                 for path in paths:

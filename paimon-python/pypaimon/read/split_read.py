@@ -344,23 +344,8 @@ class SplitRead(ABC):
                     "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = self._read_blob_as_descriptor(read_file_fields)
             blob_parallelism = self._blob_parallelism
-            blob_full_fields = self.read_fields
-            if file_read_fields and any(
-                    is_map_selected_keys_field(field)
-                    for field in file_read_fields):
-                # Decode the physical MAP<BLOB> before extracting selected keys.
-                file_schema = self._resolve_schema(file.schema_id)
-                physical_fields = {
-                    field.id: field
-                    for field in self._all_data_fields_from(file_schema.fields)
-                }
-                blob_full_fields = [
-                    physical_fields.get(field.id, field)
-                    if is_map_selected_keys_field(field) else field
-                    for field in file_read_fields
-                ]
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
-                                             blob_full_fields, read_arrow_predicate, blob_as_descriptor,
+                                             self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
                                              row_indices=row_indices,
                                              blob_parallelism=blob_parallelism,

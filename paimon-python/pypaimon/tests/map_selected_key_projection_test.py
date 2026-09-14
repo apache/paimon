@@ -349,6 +349,34 @@ class MapSelectedKeyProjectionTest(unittest.TestCase):
             selected.column('payload_k').to_pylist(),
         )
 
+        row_ids = self._read(table, ['id', '_ROW_ID']).to_pylist()
+        update_builder = table.new_batch_write_builder()
+        update = update_builder.new_update().with_update_type(['payload'])
+        messages = update.update_by_arrow_with_row_id(pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0]['_ROW_ID']], type=pa.int64()),
+            'payload': pa.array([[('k', b'updated')]], type=map_type),
+        }))
+        update_builder.new_commit().commit(messages)
+
+        full = self._read(table, ['payload']).column('payload').to_pylist()
+        selected = self._read(table, ["payload['k']"])
+        self.assertEqual(
+            [b'updated', None, None, None],
+            selected.column('payload_k').to_pylist(),
+        )
+        self.assertEqual(
+            [None if row is None else dict(row).get('k') for row in full],
+            selected.column('payload_k').to_pylist(),
+        )
+
+        from pypaimon.table.row.blob import BlobDescriptor
+        descriptors = self._read(
+            table.copy({'blob-as-descriptor': 'true'}),
+            ["payload['k']"],
+        ).column('payload_k').to_pylist()
+        self.assertIsInstance(
+            BlobDescriptor.deserialize(descriptors[0]), BlobDescriptor)
+
     def test_projects_map_key_after_column_rename(self):
         self._write_table('renamed', {})
         self.catalog.alter_table(
