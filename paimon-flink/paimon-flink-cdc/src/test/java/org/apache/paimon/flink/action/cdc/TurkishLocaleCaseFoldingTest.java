@@ -30,17 +30,16 @@ import java.util.List;
 import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * The CDC action layer case-folds identifiers and option values before matching them. {@link
  * CdcActionCommonUtils#buildPaimonSchema} does it through separate helpers for field names and for
- * key lists, and {@link TypeMapping#parse} does it for `--type-mapping` values. Under a Turkish
- * default locale 'I' lowercases to a dotless glyph, so every one of those conversions has to pin
- * {@link Locale#ROOT}: otherwise a key list holds a name no field has, and an option spelled in
- * upper case stops matching any mode.
+ * key lists, and {@link TypeMapping#parse} does it for {@code --type-mapping} values. Under a
+ * Turkish default locale 'I' lowercases to a dotless glyph, so every one of those conversions has
+ * to pin {@link Locale#ROOT}: otherwise a key list holds a name no field has, and an option spelled
+ * in upper case stops matching any mode.
  */
-class TurkishLocaleSchemaKeyTest {
+class TurkishLocaleCaseFoldingTest {
 
     private Locale original;
 
@@ -84,15 +83,15 @@ class TurkishLocaleSchemaKeyTest {
     void specifiedPrimaryKeyPassesStrictChecking() {
         Schema source = Schema.newBuilder().column("ID", DataTypes.INT()).build();
 
-        assertThatCode(
-                        () ->
-                                build(
-                                        Collections.emptyList(),
-                                        Collections.singletonList("ID"),
-                                        source,
-                                        true,
-                                        false))
-                .doesNotThrowAnyException();
+        Schema result =
+                build(
+                        Collections.emptyList(),
+                        Collections.singletonList("ID"),
+                        source,
+                        true,
+                        false);
+
+        assertThat(result.primaryKeys()).containsExactly("id");
     }
 
     @Test
