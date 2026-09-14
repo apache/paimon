@@ -2047,23 +2047,6 @@ class SchemaValidationTest {
                                                 options6,
                                                 "")))
                 .hasMessageContaining("is not a partition field");
-
-        // Test 7: bucket-first sorting is incompatible with RowID sorting
-        Map<String, String> options7 = new HashMap<>(options4);
-        options7.put(CoreOptions.MANIFEST_SORT_BUCKET_FIRST.key(), "true");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options7,
-                                                "")))
-                .hasMessageContaining(CoreOptions.MANIFEST_SORT_BUCKET_FIRST.key())
-                .hasMessageContaining(DATA_EVOLUTION_ENABLED.key());
     }
 
     @Test

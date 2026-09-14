@@ -113,7 +113,7 @@ class ManifestEntryRunMergeTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    void testBucketFirstManifestComparisonFallsBackForLegacyMetadata() {
+    void testBucketedManifestComparisonFallsBackForLegacyMetadata() {
         ManifestFileMeta first = makeManifest(bucketEntry("first", 2, 0));
         ManifestFileMeta legacy = copyWithoutBucketStats(makeManifest(bucketEntry("legacy", 1, 2)));
         ManifestFileMeta last = makeManifest(bucketEntry("last", 0, 1));

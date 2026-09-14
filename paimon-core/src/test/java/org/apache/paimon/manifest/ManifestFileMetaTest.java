@@ -1287,7 +1287,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortPreservesExistingOrderWhenBucketFirstDisabled() {
+    public void testManifestSortPreservesExistingOrderForUnawareBucketTable() {
         List<ManifestFileMeta> input =
                 Arrays.asList(
                         makeManifest(makeBucketEntry("a-3", 0, 3), makeBucketEntry("a-1", 0, 1)),
@@ -1311,7 +1311,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortCanUseBucketAsPrimaryKey() {
+    public void testManifestSortUsesBucketAsPrimaryKeyForBucketedTable() {
         List<ManifestFileMeta> input =
                 Arrays.asList(
                         makeManifest(
@@ -1322,7 +1322,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_BUCKET_FIRST, true);
+        testOptions.set(CoreOptions.BUCKET, 4);
         testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1G");
         testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1B");
         List<ManifestFileMeta> merged =
@@ -1448,7 +1448,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testManifestSortWithSpillableExternalSortBuffer(boolean bucketFirst) {
+    public void testManifestSortWithSpillableExternalSortBuffer(boolean bucketed) {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int manifest = 0; manifest < 4; manifest++) {
             List<ManifestEntry> entries = new ArrayList<>();
@@ -1468,7 +1468,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
-        testOptions.set(CoreOptions.MANIFEST_SORT_BUCKET_FIRST, bucketFirst);
+        if (bucketed) {
+            testOptions.set(CoreOptions.BUCKET, 4);
+        }
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("page-size", "1kb");
         testOptions.set("sort-spill-buffer-size", "4kb");
@@ -1487,7 +1489,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             ManifestEntry previous = entries.get(i - 1);
             ManifestEntry current = entries.get(i);
             int comparison = 0;
-            if (bucketFirst) {
+            if (bucketed) {
                 comparison = Integer.compare(previous.bucket(), current.bucket());
             }
             if (comparison == 0) {
@@ -1499,7 +1501,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 comparison = previous.file().fileName().compareTo(current.file().fileName());
             }
             assertThat(comparison)
-                    .as("Entries should use the configured sort order after spill")
+                    .as("Entries should use the table's sort order after spill")
                     .isLessThanOrEqualTo(0);
         }
     }
