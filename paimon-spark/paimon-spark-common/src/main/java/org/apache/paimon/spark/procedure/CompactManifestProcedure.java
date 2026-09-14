@@ -59,8 +59,7 @@ public class CompactManifestProcedure extends BaseProcedure {
                 ProcedureParameter.optional("dry_run", BooleanType),
                 ProcedureParameter.optional("manifest_sort_enabled", BooleanType),
                 ProcedureParameter.optional("manifest_sort_partition_field", StringType),
-                ProcedureParameter.optional("manifest_sort_max_rewrite_size", StringType),
-                ProcedureParameter.optional("manifest_sort_order", StringType)
+                ProcedureParameter.optional("manifest_sort_max_rewrite_size", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -92,7 +91,6 @@ public class CompactManifestProcedure extends BaseProcedure {
         Boolean manifestSortEnabled = args.isNullAt(3) ? null : args.getBoolean(3);
         String manifestSortPartitionField = args.isNullAt(4) ? null : args.getString(4);
         String manifestSortMaxRewriteSize = args.isNullAt(5) ? null : args.getString(5);
-        String manifestSortOrder = args.isNullAt(6) ? null : args.getString(6);
 
         Table table = loadSparkTable(tableIdent).getTable();
         HashMap<String, String> dynamicOptions = new HashMap<>();
@@ -108,21 +106,6 @@ public class CompactManifestProcedure extends BaseProcedure {
         if (manifestSortMaxRewriteSize != null) {
             dynamicOptions.put(
                     CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), manifestSortMaxRewriteSize);
-        }
-        if (manifestSortOrder != null) {
-            if (Boolean.FALSE.equals(manifestSortEnabled)
-                    || "false"
-                            .equalsIgnoreCase(
-                                    dynamicOptions.get(CoreOptions.MANIFEST_SORT_ENABLED.key()))) {
-                throw new IllegalArgumentException(
-                        "'manifest_sort_order' cannot be used with 'manifest_sort_enabled=false'.");
-            }
-            CoreOptions.ManifestSortOrder order =
-                    CoreOptions.ManifestSortOrder.fromString(manifestSortOrder);
-            dynamicOptions.put(CoreOptions.MANIFEST_SORT_ORDER.key(), order.toString());
-            dynamicOptions.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.TRUE.toString());
-            dynamicOptions.put(
-                    CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(), Boolean.TRUE.toString());
         }
         table = table.copy(dynamicOptions);
 

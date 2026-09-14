@@ -607,19 +607,11 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "When 'manifest-sort.enabled' is true, force an explicit manifest"
                                     + " compaction to rewrite already compacted manifest runs using"
-                                    + " the configured manifest sort order."
+                                    + " the layout selected from the table options."
                                     + " The existing 'manifest-sort.max-rewrite-size' rewrite budget"
                                     + " semantics still apply."
                                     + " This should be supplied as a one-shot dynamic option for"
                                     + " maintenance, not persisted for routine writes.");
-
-    @ExcludeFromDocumentation("Only used by compact_manifest maintenance procedure")
-    public static final ConfigOption<ManifestSortOrder> MANIFEST_SORT_ORDER =
-            key("manifest-sort.order")
-                    .enumType(ManifestSortOrder.class)
-                    .noDefaultValue()
-                    .withDescription(
-                            "Target manifest layout for a one-shot manifest sort rewrite.");
 
     public static final ConfigOption<Boolean> MANIFEST_MERGE_OPTIMIZE_ENABLED =
             key("manifest.merge-optimize.enabled")
@@ -3253,11 +3245,6 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_SORT_FORCE_REWRITE);
     }
 
-    @Nullable
-    public ManifestSortOrder manifestSortOrder() {
-        return options.getOptional(MANIFEST_SORT_ORDER).orElse(null);
-    }
-
     public boolean manifestMergeOptimizeEnabled() {
         return options.get(MANIFEST_MERGE_OPTIMIZE_ENABLED);
     }
@@ -5461,42 +5448,6 @@ public class CoreOptions implements Serializable {
                                 }
                             })
                     .collect(Collectors.toSet());
-
-    /** Target layout for an explicit manifest sort rewrite. */
-    public enum ManifestSortOrder implements DescribedEnum {
-        BUCKET_FIRST("bucket-first", "Sort manifest entries by bucket before partition."),
-        PARTITION_FIRST("partition-first", "Sort manifest entries by partition.");
-
-        private final String value;
-        private final String description;
-
-        ManifestSortOrder(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        public static ManifestSortOrder fromString(String value) {
-            for (ManifestSortOrder order : values()) {
-                if (order.value.equalsIgnoreCase(value.trim())) {
-                    return order;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Unsupported manifest sort order '%s'. Supported values are 'bucket-first' and 'partition-first'.",
-                            value));
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-    }
 
     /** Specifies the sort engine for table with primary key. */
     public enum SortEngine implements DescribedEnum {

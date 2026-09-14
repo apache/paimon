@@ -2051,7 +2051,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    void testManifestSortMaintenanceOptionsAreDynamicOnly() {
+    void testManifestSortForceRewriteIsDynamicOnly() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -2073,62 +2073,6 @@ class SchemaValidationTest {
                                 validateTableSchema(
                                         forceSchema,
                                         singleton(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key())));
-
-        Map<String, String> orderOptions = new HashMap<>(baseOptions);
-        orderOptions.put(CoreOptions.MANIFEST_SORT_ORDER.key(), "partition-first");
-        TableSchema orderSchema =
-                new TableSchema(1, fields, 10, singletonList("f0"), emptyList(), orderOptions, "");
-        assertThatThrownBy(() -> validateTableSchema(orderSchema))
-                .hasMessage(
-                        "'manifest-sort.order' is only supported as a dynamic option for explicit manifest compaction.");
-        assertThatNoException()
-                .isThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        orderSchema,
-                                        singleton(CoreOptions.MANIFEST_SORT_ORDER.key())));
-    }
-
-    @Test
-    void testManifestSortMaintenanceOrderValidation() {
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.INT()));
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
-        options.put(CoreOptions.MANIFEST_SORT_ORDER.key(), "bucket-first");
-        options.put(BUCKET.key(), "-1");
-
-        TableSchema schema =
-                new TableSchema(1, fields, 10, singletonList("f0"), emptyList(), options, "");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        schema, singleton(CoreOptions.MANIFEST_SORT_ORDER.key())))
-                .hasMessage("Manifest sort order 'bucket-first' requires a bucketed table.");
-
-        options.put(BUCKET.key(), "4");
-        options.put(CoreOptions.BUCKET_KEY.key(), "f1");
-        assertThatNoException()
-                .isThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        schema.copy(options),
-                                        singleton(CoreOptions.MANIFEST_SORT_ORDER.key())));
-
-        options.put(CoreOptions.MANIFEST_SORT_ORDER.key(), "partition-first");
-        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        options.put(BUCKET.key(), "-1");
-        options.remove(CoreOptions.BUCKET_KEY.key());
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        schema.copy(options),
-                                        singleton(CoreOptions.MANIFEST_SORT_ORDER.key())))
-                .hasMessage(
-                        "Explicit manifest sort order is not supported for data evolution tables.");
     }
 
     @Test

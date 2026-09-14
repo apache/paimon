@@ -250,11 +250,7 @@ To compact_manifest the manifests. Arguments:
 
 - manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.
 
-- manifest_sort_order (String, optional): target layout for a one-shot rewrite. Supported values are `bucket-first` and `partition-first`. Setting it enables manifest sort and forces existing manifests to be rewritten. `bucket-first` requires a bucketed table, and explicit sort orders are not supported for data evolution tables.
-
-When `manifest_sort_order` is omitted, the existing layout selection remains unchanged: bucketed tables use bucket-first, non-bucket tables use partition-first, and data evolution tables use RowID sorting when RowID metadata is available.
-
-Set `manifest-sort.force-rewrite=true` in `options` together with `manifest_sort_enabled=true` to rewrite already compacted manifest runs using the current sort order. Use it only as a one-shot dynamic option. The existing `manifest_sort_max_rewrite_size` rewrite budget semantics still apply; raise it to migrate more manifests in one invocation.
+Set `manifest-sort.force-rewrite=true` in `options` together with `manifest_sort_enabled=true` to rewrite already compacted manifest runs using the layout selected from the table options. Use it only as a one-shot dynamic option. The existing `manifest_sort_max_rewrite_size` rewrite budget semantics still apply; raise it to migrate more manifests in one invocation.
 
 **Syntax**
 
@@ -269,8 +265,7 @@ CALL [catalog.]sys.compact_manifest(
     `table` => 'identifier',
     `manifest_sort_enabled` => true,
     `manifest_sort_partition_field` => 'dt',
-    `manifest_sort_max_rewrite_size` => '1 gb',
-    `manifest_sort_order` => 'partition-first'
+    `manifest_sort_max_rewrite_size` => '1 gb'
 );
 ```
 
@@ -290,14 +285,8 @@ CALL sys.compact_manifest(
 
 CALL sys.compact_manifest(
     `table` => 'default.T',
-    `manifest_sort_order` => 'partition-first',
-    `manifest_sort_max_rewrite_size` => '1 gb'
-);
-
--- Switch the same bucketed table back to bucket-first layout.
-CALL sys.compact_manifest(
-    `table` => 'default.T',
-    `manifest_sort_order` => 'bucket-first',
+    `options` => 'manifest-sort.force-rewrite=true',
+    `manifest_sort_enabled` => true,
     `manifest_sort_max_rewrite_size` => '1 gb'
 );
 ```

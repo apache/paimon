@@ -2021,25 +2021,12 @@ public class SchemaValidation {
 
     private static void validateManifestSort(
             TableSchema schema, CoreOptions options, Set<String> dynamicOptionKeys) {
-        for (ConfigOption<?> option :
-                Arrays.asList(
-                        CoreOptions.MANIFEST_SORT_FORCE_REWRITE, CoreOptions.MANIFEST_SORT_ORDER)) {
-            checkArgument(
-                    !schema.options().containsKey(option.key())
-                            || dynamicOptionKeys.contains(option.key()),
-                    "'%s' is only supported as a dynamic option for explicit manifest compaction.",
-                    option.key());
-        }
-
-        CoreOptions.ManifestSortOrder sortOrder = options.manifestSortOrder();
         checkArgument(
-                sortOrder == null || !options.dataEvolutionEnabled(),
-                "Explicit manifest sort order is not supported for data evolution tables.");
-        checkArgument(
-                sortOrder != CoreOptions.ManifestSortOrder.BUCKET_FIRST
-                        || options.bucket() > 0
-                        || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Manifest sort order 'bucket-first' requires a bucketed table.");
+                !schema.options().containsKey(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key())
+                        || dynamicOptionKeys.contains(
+                                CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key()),
+                "'%s' is only supported as a dynamic option for explicit manifest compaction.",
+                CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key());
 
         if (options.manifestSortEnabled()) {
             if (!options.dataEvolutionEnabled()) {

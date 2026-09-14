@@ -123,7 +123,6 @@ public class ManifestCompactDryRun {
                         manifests,
                         options.manifestSortPartitionField(),
                         partitionType,
-                        options.manifestSortOrder(),
                         options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET);
         ManifestFileSorter.ClassifyResult classifyResult =
                 ManifestFileSorter.classifyManifests(

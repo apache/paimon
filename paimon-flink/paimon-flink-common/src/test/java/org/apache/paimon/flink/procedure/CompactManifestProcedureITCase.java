@@ -128,16 +128,15 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
         String forceRewriteProcedure =
                 "CALL sys.compact_manifest("
                         + "`table` => 'default.T_SORT', "
+                        + "`options` => 'manifest-sort.force-rewrite=true', "
+                        + "`manifest_sort_enabled` => true, "
                         + "`manifest_sort_partition_field` => 'dt', "
-                        + "`manifest_sort_max_rewrite_size` => '1 gb', "
-                        + "`manifest_sort_order` => 'partition-first')";
+                        + "`manifest_sort_max_rewrite_size` => '1 gb')";
         sql(forceRewriteProcedure);
         long forceRewriteSnapshotId = table.snapshotManager().latestSnapshot().id();
         Assertions.assertThat(forceRewriteSnapshotId).isEqualTo(compactSnapshotId + 1);
         Assertions.assertThat(paimonTable("T_SORT").options())
-                .doesNotContainKeys(
-                        CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(),
-                        CoreOptions.MANIFEST_SORT_ORDER.key());
+                .doesNotContainKey(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key());
 
         sql(procedure);
         Assertions.assertThat(table.snapshotManager().latestSnapshot().id())
@@ -160,34 +159,6 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                                                 + "`manifest_sort_partition_field` => 'missing')"))
                 .hasStackTraceContaining(
                         "'manifest-sort.partition-field' = 'missing' is not a partition field");
-
-        Assertions.assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CALL sys.compact_manifest("
-                                                + "`table` => 'default.T_INVALID', "
-                                                + "`manifest_sort_order` => 'unknown')"))
-                .hasStackTraceContaining(
-                        "Unsupported manifest sort order 'unknown'. Supported values are 'bucket-first' and 'partition-first'.");
-
-        Assertions.assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CALL sys.compact_manifest("
-                                                + "`table` => 'default.T_INVALID', "
-                                                + "`manifest_sort_enabled` => false, "
-                                                + "`manifest_sort_order` => 'partition-first')"))
-                .hasStackTraceContaining(
-                        "'manifest_sort_order' cannot be used with 'manifest_sort_enabled=false'.");
-
-        Assertions.assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CALL sys.compact_manifest("
-                                                + "`table` => 'default.T_INVALID', "
-                                                + "`manifest_sort_order` => 'bucket-first')"))
-                .hasStackTraceContaining(
-                        "Manifest sort order 'bucket-first' requires a bucketed table.");
     }
 
     @Test

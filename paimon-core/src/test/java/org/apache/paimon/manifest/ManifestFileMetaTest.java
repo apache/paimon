@@ -1417,86 +1417,6 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testManifestSortForceRewriteSwitchesLayout() {
-        List<ManifestFileMeta> input =
-                Arrays.asList(
-                        makeManifest(
-                                makeBucketEntry("a-p0-b3", 0, 3), makeBucketEntry("a-p1-b1", 1, 1)),
-                        makeManifest(
-                                makeBucketEntry("b-p0-b2", 0, 2),
-                                makeBucketEntry("b-p1-b0", 1, 0)));
-
-        Options testOptions = new Options();
-        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1G");
-        testOptions.set(CoreOptions.BUCKET, 4);
-        testOptions.set(
-                CoreOptions.MANIFEST_SORT_ORDER, CoreOptions.ManifestSortOrder.PARTITION_FIRST);
-
-        List<ManifestFileMeta> partitionFirst =
-                ManifestFileMerger.merge(
-                        input,
-                        manifestFile,
-                        getPartitionType(),
-                        CoreOptions.fromMap(testOptions.toMap()));
-        assertEquivalentEntries(input, partitionFirst);
-        assertThat(readEntries(partitionFirst))
-                .extracting(entry -> entry.partition().getInt(0))
-                .containsExactly(0, 0, 1, 1);
-
-        testOptions.set(
-                CoreOptions.MANIFEST_SORT_ORDER, CoreOptions.ManifestSortOrder.BUCKET_FIRST);
-        List<ManifestFileMeta> bucketFirst =
-                ManifestFileMerger.merge(
-                        partitionFirst,
-                        manifestFile,
-                        getPartitionType(),
-                        CoreOptions.fromMap(testOptions.toMap()));
-        assertEquivalentEntries(partitionFirst, bucketFirst);
-        assertThat(readEntries(bucketFirst))
-                .extracting(ManifestEntry::bucket)
-                .containsExactly(0, 1, 2, 3);
-    }
-
-    @Test
-    public void testManifestSortExplicitOrderValidation() {
-        List<ManifestFileMeta> input =
-                Collections.singletonList(makeManifest(makeBucketEntry("file", 0, 0)));
-
-        Options testOptions = new Options();
-        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
-        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
-        testOptions.set(
-                CoreOptions.MANIFEST_SORT_ORDER, CoreOptions.ManifestSortOrder.BUCKET_FIRST);
-        assertThat(
-                        assertThrows(
-                                IllegalArgumentException.class,
-                                () ->
-                                        ManifestFileMerger.merge(
-                                                input,
-                                                manifestFile,
-                                                getPartitionType(),
-                                                CoreOptions.fromMap(testOptions.toMap()))))
-                .hasMessage("Manifest sort order 'bucket-first' requires a bucketed table.");
-
-        testOptions.set(
-                CoreOptions.MANIFEST_SORT_ORDER, CoreOptions.ManifestSortOrder.PARTITION_FIRST);
-        testOptions.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
-        assertThat(
-                        assertThrows(
-                                IllegalArgumentException.class,
-                                () ->
-                                        ManifestFileMerger.merge(
-                                                input,
-                                                manifestFile,
-                                                getPartitionType(),
-                                                CoreOptions.fromMap(testOptions.toMap()))))
-                .hasMessage(
-                        "Explicit manifest sort order is not supported for data evolution tables.");
-    }
-
-    @Test
     public void testManifestSortForceRewriteAllLevelRuns() {
         List<ManifestFileMeta> physical =
                 Arrays.asList(
@@ -1634,6 +1554,69 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 .extracting(ManifestFileMeta::fileName)
                 .filteredOn(inputNames::contains)
                 .hasSize(2);
+        assertEquivalentEntries(input, rewritten);
+    }
+
+    @Test
+    public void testManifestSortForceRewriteDoesNotExceedBudgetForSingletonTail() {
+        long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            input.add(
+                    copyWithFileSize(makeManifest(makeBucketEntry("file-" + i, 0, i)), targetSize));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
+        testOptions.set(CoreOptions.BUCKET, 4);
+        List<ManifestFileMeta> rewritten =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        Set<String> inputNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        assertThat(rewritten)
+                .extracting(ManifestFileMeta::fileName)
+                .filteredOn(inputNames::contains)
+                .hasSize(1);
+        assertEquivalentEntries(input, rewritten);
+    }
+
+    @Test
+    public void testManifestSortForceRewriteDoesNotRewriteTailBeyondBudget() {
+        long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            input.add(
+                    copyWithFileSize(makeManifest(makeBucketEntry("file-" + i, 0, i)), targetSize));
+        }
+        input.add(
+                copyWithFileSize(
+                        makeManifest(makeBucketEntry("small-file", 0, 4)), targetSize - 1));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "1B");
+        testOptions.set(CoreOptions.BUCKET, 8);
+        List<ManifestFileMeta> rewritten =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        Set<String> inputNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        assertThat(rewritten)
+                .extracting(ManifestFileMeta::fileName)
+                .filteredOn(inputNames::contains)
+                .hasSize(3);
         assertEquivalentEntries(input, rewritten);
     }
 
