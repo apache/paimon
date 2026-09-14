@@ -539,6 +539,7 @@ class TableUpdate:
                 partition=entry.partition,
                 bucket=entry.bucket,
                 index_file=entry.index_file,
+                schema_id=entry.schema_id,
             ))
 
         return [message for message in messages.values() if not message.is_empty()]

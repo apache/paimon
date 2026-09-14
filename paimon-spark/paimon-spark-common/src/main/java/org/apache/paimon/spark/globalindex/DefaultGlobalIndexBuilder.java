@@ -159,7 +159,8 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                         indexedFields(),
                         indexType,
                         resultEntries,
-                        sourceMeta);
+                        sourceMeta,
+                        table.schema().id());
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());

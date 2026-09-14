@@ -786,10 +786,15 @@ public class DataEvolutionRowIdReassigner {
                             indexFile.rowCount(),
                             indexFile.dvRanges(),
                             indexFile.externalPath(),
-                            newGlobalIndex);
+                            newGlobalIndex,
+                            entry.schemaId());
             rewritten.add(
                     new IndexManifestEntry(
-                            entry.kind(), entry.partition(), entry.bucket(), newIndexFile));
+                            entry.kind(),
+                            entry.partition(),
+                            entry.bucket(),
+                            newIndexFile,
+                            entry.schemaId()));
         }
 
         return new RewrittenIndexManifest(

@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -30,8 +31,10 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.Random;
 
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IndexManifestEntrySerializer}. */
@@ -78,17 +81,43 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 10,
                                 new GlobalIndexMeta(
                                         0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
-                                null));
+                                null),
+                        11L);
         assertThat(serializer.toRow(entry).getInt(0)).isEqualTo(1);
 
-        GlobalIndexMeta restored =
-                serializer
-                        .deserializeFromBytes(serializer.serializeToBytes(entry))
-                        .indexFile()
-                        .globalIndexMeta();
+        IndexManifestEntry restoredEntry =
+                serializer.deserializeFromBytes(serializer.serializeToBytes(entry));
+        GlobalIndexMeta restored = restoredEntry.indexFile().globalIndexMeta();
 
         assertThat(restored.indexMeta()).containsExactly(3, 4);
         assertThat(restored.sourceMeta()).containsExactly(1, 2);
+        assertThat(restoredEntry.schemaId()).isEqualTo(11L);
+        assertThat(restoredEntry.indexFile().schemaId()).isEqualTo(11L);
+        assertThat(restoredEntry.toDeleteEntry().schemaId()).isEqualTo(11L);
+    }
+
+    @Test
+    void testReadsLegacyEntryWithoutSchemaId() {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        InternalRow globalIndex = GenericRow.of(0L, 9L, 7, null, null, null);
+        InternalRow legacyRow =
+                GenericRow.of(
+                        1,
+                        FileKind.ADD.toByteValue(),
+                        serializeBinaryRow(BinaryRow.EMPTY_ROW),
+                        0,
+                        fromString("btree"),
+                        fromString("index-file"),
+                        100L,
+                        10L,
+                        null,
+                        null,
+                        globalIndex);
+
+        IndexManifestEntry restored = serializer.fromRow(legacyRow);
+
+        assertThat(restored.schemaId()).isNull();
+        assertThat(restored.indexFile().schemaId()).isNull();
     }
 
     @Override

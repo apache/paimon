@@ -120,6 +120,7 @@ class GlobalIndexDropper:
                     partition=entry.partition,
                     bucket=entry.bucket,
                     index_file=entry.index_file,
+                    schema_id=entry.schema_id,
                 )
             )
 

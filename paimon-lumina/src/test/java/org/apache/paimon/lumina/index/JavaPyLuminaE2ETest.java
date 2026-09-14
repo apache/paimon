@@ -194,7 +194,8 @@ public class JavaPyLuminaE2ETest {
                         rowRange,
                         embeddingField.id(),
                         LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -298,7 +299,8 @@ public class JavaPyLuminaE2ETest {
                         rowRange,
                         embeddingField.id(),
                         LuminaVectorGlobalIndexerFactory.IDENTIFIER,
-                        vectorEntries);
+                        vectorEntries,
+                        table.schema().id());
 
         // Build BTree global index on "id".
         DataField idField = table.rowType().getField("id");
@@ -318,7 +320,8 @@ public class JavaPyLuminaE2ETest {
                         rowRange,
                         idField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
-                        idEntries);
+                        idEntries,
+                        table.schema().id());
 
         // Commit both index sets in a single index-only commit.
         java.util.List<IndexFileMeta> allIndexFiles = new java.util.ArrayList<>();

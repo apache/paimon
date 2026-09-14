@@ -27,6 +27,10 @@ from pypaimon.globalindex.global_index_evaluator import (
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _map_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.global_index_schema_compatibility import (
+    filter_compatible_global_index_files,
+    filter_compatible_global_indexes,
+)
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
@@ -161,7 +165,8 @@ class DataEvolutionGlobalIndexScanner:
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         if index_files is not None:
-            index_files = _supported_scalar_index_files(index_files)
+            index_files = filter_compatible_global_index_files(
+                table, _supported_scalar_index_files(index_files))
             if len(index_files) == 0:
                 return None
             core_options = _core_options(table)
@@ -207,6 +212,7 @@ class DataEvolutionGlobalIndexScanner:
             snapshot = _resolve_snapshot(table, None)
         index_file_handler = IndexFileHandler(table=table)
         entries = index_file_handler.scan(snapshot, index_file_filter)
+        entries = filter_compatible_global_indexes(table, entries)
         scanned_index_files = [entry.index_file for entry in entries]
 
         if len(scanned_index_files) == 0:

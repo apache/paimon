@@ -20,6 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -31,13 +33,24 @@ public class RawFullTextSearchSplit extends FullTextSearchSplit {
     private static final long serialVersionUID = 1L;
 
     private final List<Range> rowRanges;
+    @Nullable private final String indexType;
 
     public RawFullTextSearchSplit(List<Range> rowRanges) {
+        this(rowRanges, null);
+    }
+
+    public RawFullTextSearchSplit(List<Range> rowRanges, @Nullable String indexType) {
         this.rowRanges = Collections.unmodifiableList(new ArrayList<>(rowRanges));
+        this.indexType = indexType;
     }
 
     public List<Range> rowRanges() {
         return rowRanges;
+    }
+
+    @Nullable
+    public String indexType() {
+        return indexType;
     }
 
     @Override
@@ -46,16 +59,23 @@ public class RawFullTextSearchSplit extends FullTextSearchSplit {
             return false;
         }
         RawFullTextSearchSplit that = (RawFullTextSearchSplit) o;
-        return Objects.equals(rowRanges, that.rowRanges);
+        return Objects.equals(rowRanges, that.rowRanges)
+                && Objects.equals(indexType, that.indexType);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(rowRanges);
+        return Objects.hash(rowRanges, indexType);
     }
 
     @Override
     public String toString() {
-        return "RawFullTextSearchSplit{" + "rowRanges=" + rowRanges + '}';
+        return "RawFullTextSearchSplit{"
+                + "rowRanges="
+                + rowRanges
+                + ", indexType='"
+                + indexType
+                + '\''
+                + '}';
     }
 }

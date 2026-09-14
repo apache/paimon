@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexCoverage;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -114,8 +115,9 @@ public class DataEvolutionVectorScan implements VectorScan {
                     return false;
                 };
 
+        List<IndexManifestEntry> indexEntries = indexFileHandler.scan(snapshot, indexFileFilter);
         List<IndexFileMeta> allIndexFiles =
-                indexFileHandler.scan(snapshot, indexFileFilter).stream()
+                GlobalIndexSchemaCompatibility.filterCompatible(table, indexEntries).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         String vectorIndexType = vectorIndexType(allIndexFiles);

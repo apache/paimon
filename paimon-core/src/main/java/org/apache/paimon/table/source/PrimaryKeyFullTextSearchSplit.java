@@ -42,7 +42,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class PrimaryKeyFullTextSearchSplit extends FullTextSearchSplit {
 
     private static final long serialVersionUID = 1L;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private DataSplit dataSplit;
     private transient List<IndexFileMeta> payloadFiles;
