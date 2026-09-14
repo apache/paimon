@@ -15,7 +15,7 @@ Pypaimon requires Python 3.6+.
 The core dependencies are listed in `dev/requirements.txt`.
 The development dependencies are listed in `dev/requirements-dev.txt`.
 For new environments, the recommended PyArrow range remains
-`pyarrow>=16,!=19.0.0,<20`. PyArrow 20 through 25 are supported when another
+`pyarrow>=16,!=19.0.0,<20`. PyArrow 20 through 23 are supported when another
 dependency requires a newer version.
 
 # Build
