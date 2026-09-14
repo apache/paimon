@@ -131,6 +131,44 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
         got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
         self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
 
+    def test_row_path_precedes_dotted_top_level_prefix(self):
+        pa_schema = pa.schema([
+            ('a', pa.struct([
+                ('b', pa.struct([('c', pa.int64())])),
+            ])),
+            ('a.b', pa.struct([
+                ('c', pa.int64()),
+                ('d', pa.int64()),
+            ])),
+            ('id', pa.int64()),
+        ])
+        identifier = 'default.ao_row_path_precedence'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_arrays([
+            pa.array([{'b': {'c': 1}}], type=pa_schema.field('a').type),
+            pa.array([{'c': 99, 'd': 88}],
+                     type=pa_schema.field('a.b').type),
+            pa.array([7], type=pa.int64()),
+        ], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection([
+            'a.b.c', 'a.b.d', 'id',
+        ])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual(
+            {'a_b_c': [1], 'a.b_d': [88], 'id': [7]},
+            got.to_pydict(),
+        )
+
     def test_unknown_dotted_name_silently_skipped(self):
         pa_schema = pa.schema([
             ('id', pa.int64()),

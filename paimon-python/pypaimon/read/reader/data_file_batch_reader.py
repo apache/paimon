@@ -22,6 +22,11 @@ import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.data.map_shared_shredding import (
+    assemble_normal_map_selected_keys,
+    is_map_selected_keys_field,
+    map_selected_keys,
+)
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
@@ -160,6 +165,7 @@ class DataFileBatchReader(RecordBatchReader):
         self.index_mapping = index_mapping
         self.partition_info = partition_info
         self.system_primary_key = system_primary_key
+        self.data_field_map = {field.name: field for field in fields}
         self.schema_map = {field.name: field for field in PyarrowFieldParser.from_paimon_schema(fields)}
         self.row_tracking_enabled = row_tracking_enabled
         self.first_row_id = first_row_id
@@ -366,6 +372,16 @@ class DataFileBatchReader(RecordBatchReader):
         out_arrays = []
         out_fields = []
         for name, array in zip(names, arrays):
+            data_field = self.data_field_map.get(name)
+            if (data_field is not None
+                    and is_map_selected_keys_field(data_field)
+                    and pa.types.is_map(array.type)):
+                value_type = PyarrowFieldParser.from_paimon_type(
+                    data_field.type.fields[0].type)
+                array = assemble_normal_map_selected_keys(
+                    array,
+                    map_selected_keys(data_field.description),
+                    value_type)
             target_field = self.schema_map.get(name)
             if target_field is None:
                 target_field = pa.field(name, array.type)

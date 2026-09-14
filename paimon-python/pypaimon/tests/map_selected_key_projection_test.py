@@ -74,6 +74,18 @@ class MapSelectedKeyProjectionTest(unittest.TestCase):
             'attributes_first': [10, None, None],
         }, result.to_pydict())
 
+    def test_row_format_uses_full_map_fallback(self):
+        table = self._write_table('row_format', {
+            'file.format': 'row',
+        })
+
+        result = self._read(table, ["attributes['first']"])
+
+        self.assertEqual(
+            [10, None, None],
+            result.column('attributes_first').to_pylist(),
+        )
+
     def test_projects_map_key_with_row_tracking_fields(self):
         table = self._write_table('row_tracking_fields', {
             'row-tracking.enabled': 'true',

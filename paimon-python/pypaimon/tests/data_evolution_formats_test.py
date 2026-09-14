@@ -239,6 +239,53 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.column('val').to_pylist(), ['v5'])
         self.assertEqual(actual.column('_ROW_ID').to_pylist(), [5])
 
+    def test_row_sidecar_map_key_uses_full_map_fallback(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('attributes', pa.map_(pa.string(), pa.int64())),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'data-evolution.row-sidecar.enabled': 'true',
+            'file.format': 'parquet',
+        })
+        identifier = 'default.fmt_row_sidecar_map_key'
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_arrays([
+            pa.array(list(range(100)), type=pa.int32()),
+            pa.array(
+                [[('first', i)] for i in range(100)],
+                type=pa_schema.field('attributes').type),
+        ], schema=pa_schema))
+        cmts = tw.prepare_commit()
+        tc.commit(cmts)
+        tw.close()
+        tc.close()
+
+        data_file = next(
+            nf for manifest in cmts for nf in manifest.new_files
+            if nf.file_name.endswith('.parquet'))
+        self.assertEqual(1, len(self._row_sidecar_files(data_file)))
+        os.remove(self._file_path(data_file))
+
+        rb = table.new_read_builder().with_projection([
+            "attributes['first']", '_ROW_ID',
+        ])
+        pb = rb.new_predicate_builder()
+        rb.with_filter(pb.equal('_ROW_ID', 5))
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual(
+            {'attributes_first': [5], '_ROW_ID': [5]},
+            actual.to_pydict(),
+        )
+
     def test_parquet_column_subset_write_and_merge_read(self):
         """Write disjoint column subsets as parquet, merge-read via data evolution."""
         pa_schema = pa.schema([

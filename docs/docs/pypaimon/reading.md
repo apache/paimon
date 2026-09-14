@@ -56,44 +56,18 @@ read_builder = read_builder.with_filter(predicate_5)
 
 See [Predicate](./reading#predicate) for all supported filters and building methods. Filter by `_ROW_ID`: see [Data Evolution](./data-evolution#filter-by-_row_id).
 
-You can also pushdown projection by `ReadBuilder`:
-
-```python
-# select f3 and f2 columns
-read_builder = read_builder.with_projection(['f3', 'f2'])
-```
-
-For tables with nested struct columns, you can project individual sub-fields using dotted names:
-
-```python
-# Given a table with schema: id BIGINT, info ROW<name STRING, age INT>, val STRING
-
-# Select a nested sub-field and a top-level field
-read_builder = read_builder.with_projection(['info.name', 'val'])
-
-# The result columns are flattened with underscore-joined names:
-# info_name, val
-```
-
-Nested `ROW` projections are supported for ordinary append tables and primary-key
-merge reads. The reader may read the containing `ROW` and extract the requested
-leaf, so selecting a leaf does not guarantee physical leaf-only I/O.
-
-For a top-level `MAP<STRING, ...>`, use a quoted bracket selector. Dots inside
-the key are preserved:
+Use `with_projection()` for columns, nested `ROW` fields, and literal
+`MAP<STRING, ...>` keys:
 
 ```python
 read_builder = read_builder.with_projection([
-    'id', "attributes['key.with.dots']"
+    'id', 'profile.name', "attributes['key.with.dots']"
 ])
-# Result: id, attributes_key_with_dots
 ```
 
-Dot notation is reserved for nested `ROW` fields. Exact top-level names win;
-conflicting derived names receive a `__N` suffix.
-
-Shared-shredding MAP files read only the required physical columns and
-overflow; normal MAP files fall back to reading the full MAP.
+Use `.` for `ROW` fields and `['...']` for literal MAP keys, so dots inside a
+key are not split as a `ROW` path. Shared-shredding MAP files prune unselected
+keys; other layouts read the full MAP and extract the key.
 
 Limitations:
 

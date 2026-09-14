@@ -190,6 +190,23 @@ class ReadBuilder:
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
         top_index = {f.name: i for i, f in enumerate(table_fields)}
 
+        def resolve_row_path(top, parts):
+            path = [top_index[top]]
+            current_field = table_fields[path[0]]
+            for part in parts:
+                if not is_row_type(current_field.type):
+                    return None
+                child_fields = current_field.type.fields
+                child_idx = next(
+                    (i for i, f in enumerate(child_fields)
+                     if f.name == part),
+                    -1)
+                if child_idx < 0:
+                    return None
+                path.append(child_idx)
+                current_field = child_fields[child_idx]
+            return path
+
         paths: List[List[int]] = []
         for name in names:
             # Dot can be part of a top-level field name, not only a struct path
@@ -206,6 +223,17 @@ class ReadBuilder:
 
             if '.' not in name:
                 continue
+
+            # Preserve the original ROW-path semantics before considering a
+            # dotted top-level field name as the path prefix.
+            parts = name.split('.')
+            top = parts[0]
+            if top in top_index:
+                path = resolve_row_path(top, parts[1:])
+                if path is not None:
+                    paths.append(path)
+                    continue
+
             candidates = [
                 field_name for field_name in top_index
                 if name.startswith(field_name + '.')
@@ -215,23 +243,8 @@ class ReadBuilder:
                 continue
             top = max(candidates, key=len)
             parts = name[len(top) + 1:].split('.')
-            path = [top_index[top]]
-            current_field = table_fields[path[0]]
-            ok = True
-            for part in parts:
-                if not is_row_type(current_field.type):
-                    ok = False
-                    break
-                child_fields = current_field.type.fields
-                child_idx = next(
-                    (i for i, f in enumerate(child_fields) if f.name == part),
-                    -1)
-                if child_idx < 0:
-                    ok = False
-                    break
-                path.append(child_idx)
-                current_field = child_fields[child_idx]
-            if ok:
+            path = resolve_row_path(top, parts)
+            if path is not None:
                 paths.append(path)
         return paths
 
