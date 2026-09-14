@@ -64,9 +64,10 @@ read_builder = read_builder.with_projection([
 ])
 ```
 
-Nested `ROW` fields use dot notation, such as `profile.name`. MAP subkeys use
-bracket notation; a dot inside the quotes is part of the key, not a nested
-path. Shared-shredding MAP files prune unselected keys; other layouts read the
+Nested `ROW` fields use dot notation, for example
+`with_projection(['profile.name'])`. MAP subkeys use bracket notation;
+`with_projection(["attributes['sub.key']"])` treats `sub.key` as one literal
+key. Shared-shredding MAP files prune unselected keys; other layouts read the
 full MAP and extract the key.
 
 Limitations:
