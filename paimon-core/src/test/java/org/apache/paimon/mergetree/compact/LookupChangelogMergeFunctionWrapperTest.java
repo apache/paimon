@@ -555,4 +555,248 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv.value().getInt(0)).isEqualTo(3);
     }
+
+    @Test
+    public void testPreserveFieldOnRetractDelete() {
+        // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // preserve f1 (index 1) — event metadata appended as extra columns
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Delete: -D before-image should retain old values, event metadata appended
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(2));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, DELETE, row(10, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(DELETE);
+        InternalRow deleteValue = changelogs.get(0).value();
+        // before-image is correct: both fields from old row
+        assertThat(deleteValue.getInt(0)).isEqualTo(10);
+        assertThat(deleteValue.getInt(1)).isEqualTo(50);
+        // event metadata appended at position 2 (field count = 2 + 1 preserved)
+        assertThat(deleteValue.getFieldCount()).isEqualTo(3);
+        assertThat(deleteValue.getInt(2)).isEqualTo(100);
+        // sequence number from the before record
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(1);
+    }
+
+    @Test
+    public void testPreserveFieldOnRetractUpdate() {
+        // Schema: value has two fields: f0 (data), f1 (event_ts to preserve)
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // preserve f1 (index 1) — event metadata appended as extra columns
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Update: -U before-image should keep old values, event metadata appended
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(20, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+
+        // -U (UPDATE_BEFORE): correct before-image, event metadata appended
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+        InternalRow ubValue = changelogs.get(0).value();
+        assertThat(ubValue.getInt(0)).isEqualTo(10);
+        assertThat(ubValue.getInt(1)).isEqualTo(50);
+        assertThat(ubValue.getFieldCount()).isEqualTo(3);
+        assertThat(ubValue.getInt(2)).isEqualTo(100);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(1);
+
+        // +U (UPDATE_AFTER): event values + metadata (mirrors regular values for schema
+        // consistency)
+        assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+        InternalRow uaValue = changelogs.get(1).value();
+        assertThat(uaValue.getInt(0)).isEqualTo(20);
+        assertThat(uaValue.getInt(1)).isEqualTo(100);
+        assertThat(uaValue.getFieldCount()).isEqualTo(3);
+        assertThat(uaValue.getInt(2)).isEqualTo(100);
+    }
+
+    @Test
+    public void testPreserveFieldOnRetractNotConfigured() {
+        // Verify that the old behavior is preserved when no columns are specified
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"f0", "f1"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType, CoreOptions.fromMap(ImmutableMap.of("sequence.field", "f1")));
+        assert userDefinedSeqComparator != null;
+
+        // no preserve columns (null)
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        null);
+
+        // Delete: changelog -D should use old row's values (original behavior, no extra columns)
+        highLevel.put(row(1), new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(2));
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, DELETE, row(10, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(DELETE);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(10);
+        // f1 should be from the OLD row (original behavior)
+        assertThat(changelogs.get(0).value().getInt(1)).isEqualTo(50);
+        // field count should be 2 (no extra columns)
+        assertThat(changelogs.get(0).value().getFieldCount()).isEqualTo(2);
+        assertThat(changelogs.get(0).sequenceNumber()).isEqualTo(1);
+    }
+
+    @Test
+    public void testPreserveFieldFilterCorrectness() {
+        // Verify that a downstream WHERE event_ts < 75 filter works correctly:
+        // After +I(id=1, event_ts=50), update to event_ts=100 should produce
+        // -U with before-image event_ts=50 (matches filter) so the old row is retracted.
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"data", "event_ts"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType,
+                        CoreOptions.fromMap(ImmutableMap.of("sequence.field", "event_ts")));
+        assert userDefinedSeqComparator != null;
+
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Simulate: old row has event_ts=50, update event has event_ts=100
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(20, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+
+        // -U: before-image event_ts=50 — a WHERE event_ts < 75 filter WILL see this retraction
+        InternalRow ubValue = changelogs.get(0).value();
+        int beforeImageEventTs = ubValue.getInt(1);
+        assertThat(beforeImageEventTs).isEqualTo(50);
+        assertThat(beforeImageEventTs < 75).isTrue();
+
+        // Event metadata at position 2: event_ts=100 from the incoming event
+        assertThat(ubValue.getInt(2)).isEqualTo(100);
+    }
+
+    @Test
+    public void testPreserveFieldAggregationCorrectness() {
+        // Verify that a downstream GROUP BY event_ts aggregation works correctly:
+        // Retraction must target the OLD group (event_ts=50), not the new group (event_ts=100).
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
+        RowType valueType =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"amount", "event_ts"})
+                        .build();
+        UserDefinedSeqComparator userDefinedSeqComparator =
+                UserDefinedSeqComparator.create(
+                        valueType,
+                        CoreOptions.fromMap(ImmutableMap.of("sequence.field", "event_ts")));
+        assert userDefinedSeqComparator != null;
+
+        LookupChangelogMergeFunctionWrapper function =
+                new LookupChangelogMergeFunctionWrapper(
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
+                        highLevel::get,
+                        null,
+                        LookupStrategy.from(false, true, false, false),
+                        null,
+                        userDefinedSeqComparator,
+                        new int[] {1});
+
+        // Old row: amount=10, event_ts=50 → belongs to group event_ts=50
+        // Update:  amount=20, event_ts=100 → moves to group event_ts=100
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(10, 50)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(20, 100)).setLevel(0));
+        ChangelogResult result = function.getResult();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(2);
+
+        // -U retraction targets old group: event_ts=50 in before-image
+        InternalRow retractValue = changelogs.get(0).value();
+        int retractGroup = retractValue.getInt(1);
+        assertThat(retractGroup).isEqualTo(50);
+
+        // +U targets new group: event_ts=100
+        InternalRow insertValue = changelogs.get(1).value();
+        int insertGroup = insertValue.getInt(1);
+        assertThat(insertGroup).isEqualTo(100);
+
+        // Groups are different — the aggregation correctly decrements old group and increments new
+        assertThat(retractGroup).isNotEqualTo(insertGroup);
+    }
 }

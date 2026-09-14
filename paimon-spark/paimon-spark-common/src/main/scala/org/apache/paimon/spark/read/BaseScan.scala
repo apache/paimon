@@ -25,9 +25,10 @@ import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSpli
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{OptionUtils, SplitUtils}
-import org.apache.paimon.table.{SpecialFields, Table}
+import org.apache.paimon.table.{FileStoreTable, SpecialFields, Table}
 import org.apache.paimon.table.BlobDescriptorReadUtils
 import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.system.ChangelogEventMetadataTable
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
@@ -72,14 +73,21 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   lazy val tableRowType: RowType = {
+    var rowType = table.rowType()
     if (
       coreOptions
-        .rowTrackingEnabled() && !table.rowType().containsField(SpecialFields.ROW_ID.name())
+        .rowTrackingEnabled() && !rowType.containsField(SpecialFields.ROW_ID.name())
     ) {
-      SpecialFields.rowTypeWithRowTracking(table.rowType())
-    } else {
-      table.rowType()
+      rowType = SpecialFields.rowTypeWithRowTracking(rowType)
     }
+    if (
+      !coreOptions.changelogExposeFieldAsMetadata().isEmpty && table.isInstanceOf[FileStoreTable]
+    ) {
+      rowType = ChangelogEventMetadataTable.computeExtendedRowType(
+        table.asInstanceOf[FileStoreTable],
+        rowType)
+    }
+    rowType
   }
 
   /**

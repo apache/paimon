@@ -126,16 +126,43 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
-        return KeyValueFileReaderFactory.builder(
-                fileIO,
-                schemaManager,
-                schema,
-                keyType,
-                valueType,
-                FileFormatDiscover.of(options),
-                pathFactory(),
-                keyValueFieldsExtractor,
-                options);
+        KeyValueFileReaderFactory.Builder builder =
+                KeyValueFileReaderFactory.builder(
+                        fileIO,
+                        schemaManager,
+                        schema,
+                        keyType,
+                        valueType,
+                        FileFormatDiscover.of(options),
+                        pathFactory(),
+                        keyValueFieldsExtractor,
+                        options);
+        List<String> preserveColumns = options.changelogExposeFieldAsMetadata();
+        if (!preserveColumns.isEmpty()) {
+            List<org.apache.paimon.types.DataField> extraFields = new java.util.ArrayList<>();
+            List<String> fieldNames = valueType.getFieldNames();
+            int nextId =
+                    valueType.getFields().stream()
+                                    .mapToInt(org.apache.paimon.types.DataField::id)
+                                    .max()
+                                    .orElse(0)
+                            + 1;
+            for (String name : preserveColumns) {
+                int idx = fieldNames.indexOf(name);
+                if (idx >= 0) {
+                    org.apache.paimon.types.DataField original = valueType.getFields().get(idx);
+                    extraFields.add(
+                            new org.apache.paimon.types.DataField(
+                                    nextId++,
+                                    options.changelogMetadataFieldPrefix() + original.name(),
+                                    original.type().copy(true)));
+                }
+            }
+            if (!extraFields.isEmpty()) {
+                builder.withChangelogExtraValueFields(extraFields);
+            }
+        }
+        return builder;
     }
 
     @Override
