@@ -68,6 +68,7 @@ public class ManifestFileMetaSerializerTest extends ObjectSerializerTestBase<Man
                             original.maxLevel(),
                             original.minRowId(),
                             original.maxRowId(),
+                            original.totalBuckets(),
                             extraFiles);
 
             ManifestFileMeta fromRow = serializer.fromRow(serializer.toRow(meta));

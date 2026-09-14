@@ -97,6 +97,21 @@ except ImportError:
     av = None
 
 
+class _ManualDatasetReader(pmm.PaimonDatasetReader):
+
+    def read_indices(self, indices, columns):
+        raise NotImplementedError
+
+
+class _PickleDatasetReader(_ManualDatasetReader):
+
+    def __init__(self, value):
+        self.value = value
+
+    def __getstate__(self):
+        return {"value": self.value}
+
+
 def _replaced_contract(field, old, new):
     description = field.metadata[b"description"].decode("utf-8")
     if old not in description:
@@ -324,6 +339,141 @@ class LeRobotValidationTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Python 3.10"):
                 pmm.PaimonLeRobotDataset(Mock())
             load.assert_not_called()
+
+    def test_dataset_reads_one_batch_from_custom_reader(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        info = {
+            "codebase_version": "v3.0",
+            "total_frames": 3,
+            "total_episodes": 1,
+            "total_tasks": 1,
+            "fps": 10,
+            "features": {
+                "index": {"dtype": "int64", "shape": [1]},
+                "episode_index": {"dtype": "int64", "shape": [1]},
+                "frame_index": {"dtype": "int64", "shape": [1]},
+                "timestamp": {"dtype": "float32", "shape": [1]},
+                "task_index": {"dtype": "int64", "shape": [1]},
+                "observation.state": {"dtype": "float32", "shape": [2]},
+                "action": {"dtype": "float32", "shape": [1]},
+            },
+        }
+        rows = {
+            index: {
+                "index": index,
+                "episode_index": 0,
+                "frame_index": index,
+                "timestamp": index / 10,
+                "task_index": 0,
+                "observation.state": [index, index + 1],
+                "action": float(index),
+            }
+            for index in range(3)
+        }
+
+        class Reader(pmm.PaimonDatasetReader):
+
+            def __init__(self, metadata, **kwargs):
+                self.calls = []
+                self.closed = False
+                super().__init__(metadata, **kwargs)
+
+            def read_indices(self, indices, columns):
+                self.calls.append((indices, columns))
+                return pa.Table.from_pylist([
+                    {name: rows[index][name] for name in columns}
+                    for index in indices
+                ], schema=self.schema)
+
+            def close(self):
+                super().close()
+                self.closed = True
+
+        metadata = {
+            "repo_id": "logical/multi-table",
+            "revision": "dataset-version-12",
+            "info": info,
+            "episodes": [{
+                "episode_index": 0,
+                "dataset_from_index": 0,
+                "dataset_to_index": 3,
+                "length": 3,
+                "tasks": ["pick"],
+            }],
+            "tasks": ["pick"],
+            "stats": {"action": {"mean": [1.0]}},
+        }
+        missing_episodes = dict(metadata)
+        missing_episodes.pop("episodes")
+        with self.assertRaisesRegex(ValueError, "must define episodes"):
+            Reader(missing_episodes)
+        reader = Reader(
+            metadata,
+            delta_timestamps={"action": [-0.1, 0.0, 0.1]},
+        )
+        with self.assertRaisesRegex(TypeError, "tag_name"):
+            Reader(metadata, tag_name="snapshot-b")
+        dataset = pmm.PaimonLeRobotDataset(reader)
+
+        self.assertIsInstance(dataset.reader, pmm.PaimonDatasetReader)
+        self.assertEqual(_schema_from_info(info), dataset.reader.schema)
+        self.assertIsNone(dataset.reader.absolute_to_relative_idx)
+        self.assertTrue(repr(dataset).startswith("PaimonLeRobotDataset("))
+        sample, _ = dataset.__getitems__([1, 2])
+
+        self.assertEqual([((0, 1, 2), tuple(info["features"]))],
+                         reader.calls)
+        self.assertFalse(hasattr(dataset, "tag_name"))
+        self.assertEqual("dataset-version-12", dataset.meta.revision)
+        self.assertEqual((2,), dataset.features["observation.state"]["shape"])
+        self.assertEqual([1.0], dataset.meta.stats["action"]["mean"].tolist())
+        self.assertEqual(0, dataset.meta.get_task_index("pick"))
+        self.assertEqual("pick", sample["task"])
+        torch.testing.assert_close(
+            sample["observation.state"], torch.tensor([1.0, 2.0]))
+        torch.testing.assert_close(
+            sample["action"], torch.tensor([0.0, 1.0, 2.0]))
+        self.assertEqual([False, False, False],
+                         sample["action_is_pad"].tolist())
+        dataset.return_uint8 = True
+        self.assertTrue(reader.return_uint8)
+        with self.assertRaisesRegex(TypeError, "return_uint8"):
+            dataset.return_uint8 = 1
+        image_transforms = Mock()
+        dataset.image_transforms = image_transforms
+        self.assertIs(image_transforms, reader.image_transforms)
+        dataset.image_transforms = None
+        self.assertIsNone(reader.image_transforms)
+        with self.assertRaisesRegex(TypeError, "image_transforms"):
+            dataset.image_transforms = 1
+
+        wrong_schema = reader.schema.set(
+            reader.schema.get_field_index("action"),
+            pa.field("action", pa.int64()),
+        )
+        with patch.object(reader, "read_indices") as read:
+            read.return_value = pa.Table.from_pylist(
+                [{name: rows[0][name] for name in info["features"]}],
+                schema=wrong_schema,
+            )
+            with self.assertRaisesRegex(
+                    ValueError, "field action expects float, found int64"):
+                dataset[0]
+        dataset.close()
+        self.assertTrue(reader.closed)
+
+    def test_dataset_does_not_proxy_pickle_protocol(self):
+        dataset = pmm.PaimonLeRobotDataset(_PickleDatasetReader(7))
+        with self.assertRaises(AttributeError):
+            dataset.__getattr__("__getstate__")
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        self.assertIsInstance(restored.reader, _PickleDatasetReader)
+        self.assertEqual(7, restored.reader.value)
 
     def test_metadata_json_preserves_nested_values(self):
         values = {
@@ -632,7 +782,7 @@ class LeRobotValidationTest(unittest.TestCase):
                     "L", np.full((4, 5), 80 + index, np.uint8)),
             })
 
-        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset = object.__new__(_ManualDatasetReader)
         dataset._total_frames = 2
         dataset.episodes = None
         dataset._selected_ranges = None
@@ -692,7 +842,7 @@ class LeRobotValidationTest(unittest.TestCase):
             "observation.image": descriptor,
         }]
 
-        dataset = object.__new__(pmm.PaimonLeRobotDataset)
+        dataset = object.__new__(_ManualDatasetReader)
         dataset._total_frames = 1
         dataset.episodes = None
         dataset._selected_ranges = None
@@ -752,6 +902,8 @@ class LeRobotValidationTest(unittest.TestCase):
                 "pypaimon.multimodal.lerobot.dataset."
                 "_load_dataset",
                 return_value=loaded), patch(
+                "pypaimon.multimodal.lerobot.dataset._target_schema",
+                return_value=pa.schema([])), patch(
                 "pypaimon.multimodal.lerobot.dataset.sys.version_info",
                 (3, 10)):
             for invalid in (0, 1, None, "true"):
@@ -2936,8 +3088,8 @@ class LeRobotImportTest(unittest.TestCase):
             return original_plan(scan)
 
         with patch.object(TableScan, "plan", new=counted_plan), patch.object(
-                dataset, "_read_rows",
-                wraps=dataset._read_rows) as read, patch(
+                dataset.reader, "_read_rows",
+                wraps=dataset.reader._read_rows) as read, patch(
                 "pypaimon.multimodal.blob_read.fetch_blob_bodies",
                 wraps=fetch_blob_bodies) as fetch:
             last, first = dataset.__getitems__([4, 0])
@@ -2947,7 +3099,6 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertIs(scanner, dataset._frame_locator._scanner)
         self.assertEqual(1, read.call_count)
         self.assertEqual([0, 1, 3, 4], read.call_args.args[0])
-        self.assertFalse(read.call_args.args[3])
         self.assertEqual(1, fetch.call_count)
         self.assertEqual(3, fetch.call_args.args[3])
         self.assertEqual("place", last["task"])

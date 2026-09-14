@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
@@ -119,7 +120,8 @@ public class ManifestCompactDryRun {
                         options.dataEvolutionEnabled(),
                         manifests,
                         options.manifestSortPartitionField(),
-                        partitionType);
+                        partitionType,
+                        options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET);
         ManifestFileSorter.ClassifyResult classifyResult =
                 ManifestFileSorter.classifyManifests(
                         manifests,

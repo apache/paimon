@@ -353,7 +353,6 @@ class _SimplePartitionIndex:
             return assigned, max(max_bucket_id, assigned)
 
         if self.current_bucket not in self.bucket_information:
-            self.bucket_list.append(self.current_bucket)
             self.bucket_information[self.current_bucket] = 0
         num = self.bucket_information[self.current_bucket]
 
@@ -383,6 +382,7 @@ class _SimplePartitionIndex:
             ):
                 if max_buckets_num == -1 or i <= max_buckets_num - 1:
                     self.current_bucket = i
+                    self.bucket_list.append(i)
                     return
                 return
         raise RuntimeError(

@@ -226,3 +226,30 @@ Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
 to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
 either decoder.
+
+Subclass `PaimonDatasetReader` for a custom logical frame layout:
+
+```python
+from pypaimon.multimodal import PaimonDatasetReader, PaimonLeRobotDataset
+
+class CustomDatasetReader(PaimonDatasetReader):
+    def __init__(self, metadata, source, **kwargs):
+        self._source = source
+        super().__init__(
+            metadata,
+            file_io=getattr(source, "file_io", None),
+            **kwargs,
+        )
+
+    def read_indices(self, indices, columns):
+        return self._source.read_indices(indices, columns)
+
+reader = CustomDatasetReader(
+    metadata, source, delta_timestamps=delta_timestamps
+)
+dataset = PaimonLeRobotDataset(reader)
+```
+
+`source` exposes `read_indices` and optional `file_io`. Pass
+`schema=source.schema` for eager schema validation. `PaimonDatasetReader`
+reuses the standard Episode, delta-window, media, and Torch handling.

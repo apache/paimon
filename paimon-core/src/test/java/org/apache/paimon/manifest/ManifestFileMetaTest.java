@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
@@ -30,11 +31,13 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -80,6 +84,9 @@ import java.util.stream.LongStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link ManifestFileMeta}. */
 public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
@@ -1287,6 +1294,99 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testManifestSortPreservesExistingOrderForUnawareBucketTable() {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeBucketEntry("a-3", 0, 3), makeBucketEntry("a-1", 0, 1)),
+                        makeManifest(makeBucketEntry("b-2", 0, 2), makeBucketEntry("b-0", 0, 0)));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1G");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1B");
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+        assertThat(readEntries(merged))
+                .extracting(ManifestEntry::bucket)
+                .containsExactly(1, 3, 0, 2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {4, -2})
+    public void testManifestSortUsesBucketAsPrimaryKeyForBucketedTable(int bucket) {
+        int firstBucket = bucket == -2 ? -2 : 0;
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(
+                                makeBucketEntry("a-b1-p1", 1, 1),
+                                makeBucketEntry("a-first-p0", 0, firstBucket)),
+                        makeManifest(
+                                makeBucketEntry("b-b1-p0", 0, 1),
+                                makeBucketEntry("b-first-p1", 1, firstBucket)));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.BUCKET, bucket);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1G");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1B");
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+        List<ManifestEntry> entries = readEntries(merged);
+        assertThat(entries)
+                .extracting(ManifestEntry::bucket)
+                .containsExactly(firstBucket, firstBucket, 1, 1);
+        assertThat(entries)
+                .extracting(entry -> entry.partition().getInt(0))
+                .containsExactly(0, 1, 0, 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 4, -2})
+    public void testManifestSortDryRunUsesBucketRangesForBucketedTable(int bucket) {
+        int firstBucket = bucket == -2 ? -2 : 0;
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(
+                                makeBucketEntry("a-p0", 0, firstBucket),
+                                makeBucketEntry("a-p1", 1, firstBucket)),
+                        makeManifest(makeBucketEntry("b-p0", 0, 1), makeBucketEntry("b-p1", 1, 1)));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.BUCKET, bucket);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1B");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+
+        FileStoreTable table = mock(FileStoreTable.class, RETURNS_DEEP_STUBS);
+        Snapshot snapshot = mock(Snapshot.class);
+        when(table.options()).thenReturn(testOptions.toMap());
+        when(table.store().snapshotManager().latestSnapshot()).thenReturn(snapshot);
+        when(table.store().manifestListFactory().create().readDataManifests(snapshot))
+                .thenReturn(input);
+        when(table.store().manifestFileFactory().create()).thenReturn(manifestFile);
+        when(table.schema().logicalPartitionType()).thenReturn(getPartitionType());
+
+        // Overlapping partition ranges form one run only when buckets take precedence.
+        assertThat(ManifestCompactDryRun.execute(table))
+                .endsWith(
+                        bucket == -1
+                                ? "Manifest sort level files: L0=0, L1=0, L2=0, L3=1, L4=1."
+                                : "Manifest sort level files: L0=0, L1=0, L2=0, L3=0, L4=2.");
+    }
+
+    @Test
     public void testManifestSortMinorCompactionRespectsMergeMinCount() {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
@@ -1392,26 +1492,32 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                 .isTrue();
     }
 
-    @Test
-    public void testManifestSortWithSpillableExternalSortBuffer() {
+    @ParameterizedTest
+    @CsvSource({"-1, false", "4, true", "-2, true"})
+    public void testManifestSortWithSpillableExternalSortBuffer(int bucket, boolean bucketed) {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int manifest = 0; manifest < 4; manifest++) {
             List<ManifestEntry> entries = new ArrayList<>();
             for (int i = 0; i < 80; i++) {
                 int partition = manifest % 2 == 0 ? 79 - i : i;
+                int entryBucket = Math.floorMod(manifest * 31 + i * 17, 4);
+                if (bucket == -2 && entryBucket == 3) {
+                    entryBucket = -2;
+                }
                 entries.add(
-                        makeEntry(
-                                true,
+                        makeBucketEntry(
                                 String.format(
                                         "spill-manifest-%02d-entry-%03d-payload-padding-%040d",
                                         manifest, i, i),
-                                partition));
+                                partition,
+                                entryBucket));
             }
             input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
         }
 
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set(CoreOptions.BUCKET, bucket);
         testOptions.set("manifest.full-compaction-threshold-size", "1B");
         testOptions.set("page-size", "1kb");
         testOptions.set("sort-spill-buffer-size", "4kb");
@@ -1425,15 +1531,25 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         CoreOptions.fromMap(testOptions.toMap()));
 
         assertEquivalentEntries(input, merged);
-        for (ManifestFileMeta meta : merged) {
-            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
-            for (int i = 1; i < entries.size(); i++) {
-                int prevPartition = entries.get(i - 1).partition().getInt(0);
-                int currPartition = entries.get(i).partition().getInt(0);
-                assertThat(currPartition)
-                        .as("Entries within a manifest should be sorted after spill")
-                        .isGreaterThanOrEqualTo(prevPartition);
+        List<ManifestEntry> entries = readEntries(merged);
+        for (int i = 1; i < entries.size(); i++) {
+            ManifestEntry previous = entries.get(i - 1);
+            ManifestEntry current = entries.get(i);
+            int comparison = 0;
+            if (bucketed) {
+                comparison = Integer.compare(previous.bucket(), current.bucket());
             }
+            if (comparison == 0) {
+                comparison =
+                        Integer.compare(
+                                previous.partition().getInt(0), current.partition().getInt(0));
+            }
+            if (comparison == 0) {
+                comparison = previous.file().fileName().compareTo(current.file().fileName());
+            }
+            assertThat(comparison)
+                    .as("Entries should use the table's sort order after spill")
+                    .isLessThanOrEqualTo(0);
         }
     }
 
@@ -2534,7 +2650,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestA.minLevel(),
                         manifestA.maxLevel(),
                         manifestA.minRowId(),
-                        manifestA.maxRowId()));
+                        manifestA.maxRowId(),
+                        null,
+                        null));
 
         // Manifest B: partitions [5, 15] - overlaps with A
         List<ManifestEntry> entriesB = new ArrayList<>();
@@ -2555,7 +2673,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestB.minLevel(),
                         manifestB.maxLevel(),
                         manifestB.minRowId(),
-                        manifestB.maxRowId()));
+                        manifestB.maxRowId(),
+                        null,
+                        null));
 
         // Manifest C: partitions [10, 20] - overlaps with B
         List<ManifestEntry> entriesC = new ArrayList<>();
@@ -2576,7 +2696,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         manifestC.minLevel(),
                         manifestC.maxLevel(),
                         manifestC.minRowId(),
-                        manifestC.maxRowId()));
+                        manifestC.maxRowId(),
+                        null,
+                        null));
 
         // Set small budget to force split
         Options testOptions = new Options();
@@ -2700,6 +2822,12 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(prevPartition);
             }
         }
+    }
+
+    /** Create a ManifestEntry with an explicit bucket. */
+    private ManifestEntry makeBucketEntry(String fileName, int partition, int bucket) {
+        ManifestEntry entry = makeEntry(true, fileName, partition);
+        return ManifestEntry.create(entry.kind(), entry.partition(), bucket, 240, entry.file());
     }
 
     /** Create a ManifestEntry with a 3-field partition row (region, dt, hour). */
