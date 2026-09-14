@@ -61,7 +61,10 @@ Streaming write also supports [Write merge schema](./sql-write#write-merge-schem
 Structured Streaming replays a micro-batch with its original batch id when a query is restarted
 after failing between the sink writing the batch and Spark recording that batch as completed.
 Paimon commits every micro-batch under a commit user that is stable across restarts, and skips a
-batch that the same user already committed, so a replay does not write the data twice.
+batch that the same user already committed, so a replay does not write the data twice. Micro-batch
+`n` is committed under commit identifier `n + 1`, the way Flink numbers its checkpoints, which is
+what the `$snapshots` system table shows and what a `compacted-full` scan recognises a scheduled
+full compaction by.
 
 What the commit user identifies is one incarnation of a checkpoint, not the place it is stored:
 reusing it across two different queries would make Paimon skip the data of the second one, while

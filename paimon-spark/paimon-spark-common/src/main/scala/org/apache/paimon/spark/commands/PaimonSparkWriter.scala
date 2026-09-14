@@ -63,6 +63,15 @@ case class PaimonSparkWriter(
   extends WriteHelper
   with Logging {
 
+  /**
+   * Paimon numbers the commits of a stream from 1, the way Flink numbers its checkpoints, and
+   * [[org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner]] recognises a full
+   * compaction by an identifier that is a multiple of 'full-compaction.delta-commits'. Spark
+   * numbers its micro-batches from 0, so the third one is batch 2; both the full compaction
+   * schedule and the identifier it is published under have to count it as 3.
+   */
+  private val commitIdentifier: Option[Long] = batchId.map(_ + 1)
+
   private lazy val tableSchema = table.schema
 
   private lazy val bucketMode = table.bucketMode
@@ -183,7 +192,7 @@ case class PaimonSparkWriter(
         rowKindColIdx,
         writeRowTracking,
         fullCompactionDeltaCommits,
-        batchId,
+        commitIdentifier,
         uriReaderFactory,
         postponePartitionBucketComputer
       )
@@ -470,7 +479,7 @@ case class PaimonSparkWriter(
    */
   private def idempotentCommitIdentifier: Option[Long] =
     for {
-      identifier <- batchId
+      identifier <- commitIdentifier
       _ <- commitUser
     } yield identifier
 
