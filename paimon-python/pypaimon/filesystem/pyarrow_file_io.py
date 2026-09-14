@@ -536,9 +536,7 @@ class PyArrowFileIO(FileIO):
             return True
 
         if self._is_oss and not self._use_jindo:
-            # PyArrow's S3 create_dir performs HeadBucket first. OSS roles can
-            # allow object IO while denying that bucket-level operation. A
-            # child marker gives the path directory semantics without it.
+            # Preserve empty directories without create_dir's HeadBucket call.
             marker_path = path_str.rstrip("/") + "/" + _OSS_DIRECTORY_MARKER
             marker_stream = self.filesystem.open_output_stream(marker_path)
             marker_stream.close()
