@@ -452,6 +452,22 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testTimeMillsWithInteriorDuplicateCommitTimes() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        long[] commitTimes = {millis - 1, millis, millis, millis, millis + 1};
+        for (int i = 0; i < commitTimes.length; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, commitTimes[i]);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis).id()).isEqualTo(3);
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(1);
+    }
+
+    @Test
     public void testEarlierOrEqualTimeMillsWithConcurrentRollback() throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
@@ -479,6 +495,40 @@ public class SnapshotManagerTest {
         snapshotManager.commitEarliestHint(0);
 
         assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testEarlierOrEqualTimeMillsWithRollbackAfterEqualProbe() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new PostMatchRollbackSnapshotManager(
+                        localFileIO, new Path(tempDir.toString()), 1, 4);
+        long[] commitTimes = {millis - 1, millis, millis, millis, millis + 1};
+        for (int i = 0; i < commitTimes.length; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, commitTimes[i]);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        snapshotManager.commitLatestHint(4);
+
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis).id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLaterOrEqualTimeMillsWithExpirationAfterEqualProbe() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new PostMatchExpirationSnapshotManager(
+                        localFileIO, new Path(tempDir.toString()), 2);
+        long[] commitTimes = {millis - 1, millis, millis, millis, millis + 1};
+        for (int i = 0; i < commitTimes.length; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, commitTimes[i]);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        snapshotManager.commitEarliestHint(0);
+
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(2);
     }
 
     @ParameterizedTest
@@ -1035,6 +1085,64 @@ public class SnapshotManagerTest {
                 rollbackLatestSnapshot = false;
             }
             return snapshotId;
+        }
+    }
+
+    private static class PostMatchRollbackSnapshotManager extends SnapshotManager {
+        private final long retainedSnapshotId;
+        private final long latestSnapshotId;
+        private boolean rollback = true;
+
+        private PostMatchRollbackSnapshotManager(
+                FileIO fileIO, Path tablePath, long retainedSnapshotId, long latestSnapshotId) {
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
+            this.retainedSnapshotId = retainedSnapshotId;
+            this.latestSnapshotId = latestSnapshotId;
+        }
+
+        @Override
+        public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
+            Snapshot snapshot = super.tryGetSnapshot(snapshotId);
+            if (rollback && snapshotId == retainedSnapshotId) {
+                try {
+                    commitLatestHint(retainedSnapshotId);
+                    for (long id = retainedSnapshotId + 1; id <= latestSnapshotId; id++) {
+                        fileIO().delete(snapshotPath(id), true);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                rollback = false;
+            }
+            return snapshot;
+        }
+    }
+
+    private static class PostMatchExpirationSnapshotManager extends SnapshotManager {
+        private final long retainedSnapshotId;
+        private boolean expire = true;
+
+        private PostMatchExpirationSnapshotManager(
+                FileIO fileIO, Path tablePath, long retainedSnapshotId) {
+            super(fileIO, tablePath, DEFAULT_MAIN_BRANCH, null, null);
+            this.retainedSnapshotId = retainedSnapshotId;
+        }
+
+        @Override
+        public Snapshot tryGetSnapshot(long snapshotId) throws FileNotFoundException {
+            Snapshot snapshot = super.tryGetSnapshot(snapshotId);
+            if (expire && snapshotId == retainedSnapshotId) {
+                try {
+                    commitEarliestHint(retainedSnapshotId);
+                    for (long id = 0; id < retainedSnapshotId; id++) {
+                        fileIO().delete(snapshotPath(id), true);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                expire = false;
+            }
+            return snapshot;
         }
     }
 }

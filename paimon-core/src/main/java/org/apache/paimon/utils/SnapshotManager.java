@@ -67,6 +67,8 @@ public class SnapshotManager implements Serializable {
 
     public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300;
 
+    private static final int TIME_TRAVEL_SNAPSHOT_LOOKUP_RETRY_NUM = 3;
+
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
@@ -360,6 +362,20 @@ public class SnapshotManager implements Serializable {
      * mills. If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
+        FileNotFoundException exception = null;
+        for (int retry = 0; retry <= TIME_TRAVEL_SNAPSHOT_LOOKUP_RETRY_NUM; retry++) {
+            try {
+                return earlierOrEqualTimeMillsOnce(timestampMills);
+            } catch (FileNotFoundException e) {
+                exception = e;
+            }
+        }
+        throw new UncheckedIOException(
+                "Failed to find snapshot while searching by commit time.", exception);
+    }
+
+    private @Nullable Snapshot earlierOrEqualTimeMillsOnce(long timestampMills)
+            throws FileNotFoundException {
         Snapshot latestSnapshot = latestSnapshot();
         if (latestSnapshot == null) {
             return null;
@@ -378,7 +394,7 @@ public class SnapshotManager implements Serializable {
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            Snapshot snapshot = tryGetSnapshot(mid);
             long commitTime = snapshot.timeMillis();
             if (commitTime > timestampMills) {
                 latest = mid - 1; // Search in the left half
@@ -398,6 +414,20 @@ public class SnapshotManager implements Serializable {
      * If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {
+        FileNotFoundException exception = null;
+        for (int retry = 0; retry <= TIME_TRAVEL_SNAPSHOT_LOOKUP_RETRY_NUM; retry++) {
+            try {
+                return laterOrEqualTimeMillsOnce(timestampMills);
+            } catch (FileNotFoundException e) {
+                exception = e;
+            }
+        }
+        throw new UncheckedIOException(
+                "Failed to find snapshot while searching by commit time.", exception);
+    }
+
+    private @Nullable Snapshot laterOrEqualTimeMillsOnce(long timestampMills)
+            throws FileNotFoundException {
         Snapshot latestSnapshot = latestSnapshot();
         if (latestSnapshot == null || latestSnapshot.timeMillis() < timestampMills) {
             return null;
@@ -416,7 +446,7 @@ public class SnapshotManager implements Serializable {
         Snapshot finalSnapshot = null;
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
-            Snapshot snapshot = snapshot(mid);
+            Snapshot snapshot = tryGetSnapshot(mid);
             long commitTime = snapshot.timeMillis();
             if (commitTime > timestampMills) {
                 latest = mid - 1; // Search in the left half
