@@ -92,8 +92,9 @@ Paths can address nested objects and arrays, for example `$.user.id`, `$.items[0
 `$[0]`. A missing path returns `NULL`. Conversion behavior for incompatible values is defined by
 the query engine and the Variant function being used.
 
-With a JSON string, an equivalent query uses string-oriented JSON functions and normally parses the
-text while evaluating the query:
+For an existing `json_events` table that instead stores JSON text in a
+`payload_json STRING` column, an equivalent query uses string-oriented JSON
+functions and normally parses the text while evaluating the query:
 
 ```sql
 SELECT
@@ -103,6 +104,8 @@ FROM json_events;
 ```
 
 ## Storage Layout
+
+![Plain Variant stores binary value and metadata; shredding adds typed Parquet leaves while preserving other values in overflow bytes.](/img/multimodal-variant-shredding.svg)
 
 ### Plain Variant
 
@@ -171,11 +174,17 @@ TBLPROPERTIES (
     'variant.shreddingSchema' =
     '{"type":"ROW","fields":[{"name":"payload","type":{"type":"ROW","fields":[{"name":"user_id","type":"BIGINT"},{"name":"city","type":"STRING"}]}}]}'
 );
+
+INSERT INTO user_events VALUES
+    (1, parse_json('{"user_id":1001,"city":"Hangzhou","active":true}')),
+    (2, parse_json('{"user_id":1002,"city":"Beijing","score":9.5}'));
 ```
 
-This schema shreds `$.user_id` as `BIGINT` and `$.city` as `STRING`. Other fields remain available
-through the overflow bytes. The legacy key `parquet.variant.shreddingSchema` is accepted as an
-alias.
+This schema shreds the sample's top-level `$.user_id` as `BIGINT` and `$.city` as
+`STRING`. The `active` and `score` fields remain available through the overflow
+bytes. Unlike the earlier `events` example, this table uses a top-level `user_id`
+field rather than nested `user.id`. The legacy key
+`parquet.variant.shreddingSchema` is accepted as an alias.
 
 Shredded typed values support character and binary types, booleans, decimal and numeric types, and
 nested `ROW` and `ARRAY` types. A `VARIANT` branch in the shredding schema leaves that branch in its
@@ -186,7 +195,8 @@ predictable physical layout and avoids inference buffering.
 
 ### Automatic Schema Inference
 
-Paimon can infer a shredding schema independently for each output file:
+By default, Paimon infers a shredding schema independently for each output file
+when inference is enabled:
 
 ```sql
 CREATE TABLE inferred_events (
@@ -201,6 +211,9 @@ TBLPROPERTIES (
     'variant.shredding.maxSchemaDepth' = '50',
     'variant.shredding.minFieldCardinalityRatio' = '0.1'
 );
+
+-- Reuse the populated sample from the explicit-schema example.
+INSERT INTO inferred_events SELECT id, payload FROM user_events;
 ```
 
 The writer buffers the initial rows of a file, infers their common shape, creates the physical
@@ -211,13 +224,16 @@ fields with incompatible observed types remain unshredded.
 |---|---:|---|
 | `variant.inferShreddingSchema` | `false` | Enables per-file shredding schema inference when no explicit schema is configured. |
 | `variant.shredding.maxInferBufferRow` | `4096` | Maximum number of initial rows buffered for inference. |
-| `variant.shredding.maxSchemaWidth` | `300` | Maximum number of fields in an inferred shredding schema. |
+| `variant.shredding.maxSchemaWidth` | `300` | Inferred shredding width budget, including `value` and `typed_value` entries; not a count of JSON keys. |
 | `variant.shredding.maxSchemaDepth` | `50` | Maximum Variant traversal depth during inference. |
 | `variant.shredding.minFieldCardinalityRatio` | `0.1` | Minimum fraction of sampled non-null Variant values that must contain a field before it is shredded. |
 
-Automatic inference is convenient for exploratory or rapidly evolving data. Because inference is
-per file, different files can have different shredded paths; readers use each file's physical
-schema transparently.
+For example, an object with five shredded scalar fields needs a width budget of
+11: one root `value` entry plus one `value` and one `typed_value` entry per field.
+
+Automatic inference is convenient for exploratory or rapidly evolving data. With
+the default per-file inference, files can have different shredded paths; readers
+use each file's physical schema transparently.
 
 ## Query Pushdown
 
@@ -232,9 +248,12 @@ Spark 4.1 and later can push `variant_get` extractions into Paimon when
 SET spark.sql.variant.pushVariantIntoScan = true;
 
 SELECT
-    variant_get(payload, '$.user_id', 'bigint'),
-    variant_get(payload, '$.city', 'string')
-FROM user_events;
+    id,
+    variant_get(payload, '$.user_id', 'bigint') AS user_id,
+    variant_get(payload, '$.city', 'string') AS city
+FROM user_events
+ORDER BY id;
+-- (1, 1001, Hangzhou), (2, 1002, Beijing)
 ```
 
 The SQL and result are the same for plain, shredded, and mixed-layout files. Shredded files provide

@@ -33,30 +33,79 @@ combine multiple vector indexes, multiple full-text indexes, or a mix of vector 
 indexes. This is useful when one table stores several searchable representations for the same
 record, such as title embeddings, body embeddings, and content text.
 
+![Vector and full-text routes return scored row IDs; a ranker merges candidates and selects the final rows to read.](/img/multimodal-hybrid-search.svg)
+
+## Create the Example Table
+
+This example uses a separate table with two three-dimensional vector columns.
+In a configured Spark Paimon catalog, select the existing `db` database and run:
+
+```sql
+CREATE TABLE hybrid_documents (
+    id INT,
+    title_embedding ARRAY<FLOAT>,
+    body_embedding ARRAY<FLOAT>,
+    content STRING
+) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+INSERT INTO hybrid_documents VALUES
+    (1, array(1.0f, 0.0f, 0.0f), array(0.0f, 1.0f, 0.0f), 'paimon hybrid search'),
+    (2, array(0.9f, 0.1f, 0.0f), array(0.1f, 0.9f, 0.0f), 'paimon lake format'),
+    (3, array(0.0f, 1.0f, 0.0f), array(1.0f, 0.0f, 0.0f), 'vector search tutorial');
+```
+
+The Java and Python examples query this same table through their catalog. Use
+matching dimensions and model preprocessing for stored and query vectors in a
+real pipeline. The sample vectors here only illustrate route configuration.
+
+## Build the Route Indexes
+
 Before running hybrid search, create a global index for every vector or text column used by
 the query:
 
 ```sql
 CALL sys.create_global_index(
-    table => 'db.my_table',
+    table => 'db.hybrid_documents',
     index_column => 'title_embedding',
-    index_type => 'ivf-pq',
-    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+    index_type => 'ivf-flat',
+    options => 'ivf-flat.dimension=3,ivf-flat.distance.metric=cosine,ivf-flat.nlist=1'
 );
 
 CALL sys.create_global_index(
-    table => 'db.my_table',
+    table => 'db.hybrid_documents',
     index_column => 'body_embedding',
-    index_type => 'ivf-pq',
-    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+    index_type => 'ivf-flat',
+    options => 'ivf-flat.dimension=3,ivf-flat.distance.metric=cosine,ivf-flat.nlist=1'
 );
 
 CALL sys.create_global_index(
-    table => 'db.my_table',
+    table => 'db.hybrid_documents',
     index_column => 'content',
     index_type => 'full-text'
 );
 ```
+
+Alternatively, after creating and populating the table, build the same indexes
+with Python. Install `pypaimon[vindex,full-text]` for the native index dependencies:
+
+```python
+table = catalog.get_table("db.hybrid_documents")
+for column in ("title_embedding", "body_embedding"):
+    table.create_global_index(column, index_type="ivf-flat", options={
+        "ivf-flat.dimension": "3",
+        "ivf-flat.distance.metric": "cosine",
+        "ivf-flat.nlist": "1",
+    })
+table.create_global_index("content", index_type="full-text")
+```
+
+The sample uses one IVF cluster and queries it with `ivf.nprobe=1`. Larger indexes
+can use different build and [search options](./vector#search-options).
+
+## Choose a Ranker
 
 For Spark SQL, use the `hybrid_search(table_name, vector_routes, full_text_routes, limit[, ranker])`
 table-valued function. The fourth argument is the final number of ranked results to return.
@@ -70,6 +119,8 @@ Rankers combine route scores differently:
 | `rrf` | Combining routes with different score scales | Reciprocal rank fusion uses each route's rank order, so vector and full-text scores do not need to be normalized. |
 | `weighted_score` | Weighting routes by normalized score, not just rank | Min-max normalizes each route's scores to `[0, 1]`, then sums them weighted by route `weight`, so weights (not raw score magnitude) control each route's influence. The exposed `__paimon_search_score` is therefore a per-query relative value in `[0, sum of weights]`, not a raw similarity or BM25 score. |
 | `mrr` | Emphasizing top-ranked hits from each route | Weighted reciprocal-rank fusion sums `weight / rank` for each row returned by a route, where rank starts at 1. |
+
+## Configure Routes
 
 The second argument is an array of vector route configs created by `named_struct`:
 
@@ -99,6 +150,11 @@ Use route `limit` values larger than the final limit when each route should cont
 candidates for ranking. For example, with a final limit of `10`, route limits such as `50` or `100`
 give the ranker more candidates to merge.
 
+## Run Hybrid Search
+
+Route limits and the final limit are upper bounds. The three-row sample table
+returns at most three rows even when a route asks for `50` and the final limit is `10`.
+
 <Tabs groupId="hybrid-search">
 
 <TabItem value="spark-sql" label="Spark SQL">
@@ -108,14 +164,14 @@ Vector and full-text routes can be searched together:
 ```sql
 SELECT id, __paimon_search_score
 FROM hybrid_search(
-  'my_table',
+  'hybrid_documents',
   array(
     named_struct(
       'field', 'title_embedding',
       'query_vector', array(1.0f, 0.0f, 0.0f),
       'limit', 50,
       'weight', 2.0f,
-      'options', map('ivf.nprobe', '32'))),
+      'options', map('ivf.nprobe', '1'))),
   array(
     named_struct(
       'column', 'content',
@@ -124,7 +180,8 @@ FROM hybrid_search(
       'weight', 1.0f,
       'options', map())),
   10,
-  'rrf');
+  'rrf')
+ORDER BY __paimon_search_score DESC, id;
 ```
 
 To search two vector indexes without a full-text route, pass `array()` as the third argument:
@@ -132,23 +189,24 @@ To search two vector indexes without a full-text route, pass `array()` as the th
 ```sql
 SELECT id, __paimon_search_score
 FROM hybrid_search(
-  'my_table',
+  'hybrid_documents',
   array(
     named_struct(
       'field', 'title_embedding',
       'query_vector', array(1.0f, 0.0f, 0.0f),
       'limit', 50,
       'weight', 2.0f,
-      'options', map('ivf.nprobe', '32')),
+      'options', map('ivf.nprobe', '1')),
     named_struct(
       'field', 'body_embedding',
       'query_vector', array(0.0f, 1.0f, 0.0f),
       'limit', 50,
       'weight', 1.0f,
-      'options', map('ivf.nprobe', '32'))),
+      'options', map('ivf.nprobe', '1'))),
   array(),
   10,
-  'weighted_score');
+  'weighted_score')
+ORDER BY __paimon_search_score DESC, id;
 ```
 
 Use `mrr` when you want weighted reciprocal-rank fusion:
@@ -156,20 +214,22 @@ Use `mrr` when you want weighted reciprocal-rank fusion:
 ```sql
 SELECT id, __paimon_search_score
 FROM hybrid_search(
-  'my_table',
+  'hybrid_documents',
   array(
     named_struct(
       'field', 'title_embedding',
       'query_vector', array(1.0f, 0.0f, 0.0f),
       'limit', 50,
       'weight', 2.0f,
-      'options', map('ivf.nprobe', '32'))),
+      'options', map('ivf.nprobe', '1'))),
   array(),
   10,
-  'mrr');
+  'mrr')
+ORDER BY __paimon_search_score DESC, id;
 ```
 
-Spark SQL adds `__paimon_search_score` to expose the ranked score.
+Spark SQL adds `__paimon_search_score` to expose the ranked score. Use `ORDER BY`
+when the displayed row order must follow that score.
 
 </TabItem>
 
@@ -185,7 +245,7 @@ HybridSearchBuilder searchBuilder =
                         new float[] {1.0f, 0.0f, 0.0f},
                         50,
                         2.0f,
-                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                        java.util.Collections.singletonMap("ivf.nprobe", "1"))
                 .addFullTextRoute(
                         "content",
                         "{\"match\":{\"query\":\"paimon search\"}}",
@@ -215,13 +275,13 @@ GlobalIndexResult vectorOnlyResult =
                         new float[] {1.0f, 0.0f, 0.0f},
                         50,
                         2.0f,
-                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                        java.util.Collections.singletonMap("ivf.nprobe", "1"))
                 .addVectorRoute(
                         "body_embedding",
                         new float[] {0.0f, 1.0f, 0.0f},
                         50,
                         1.0f,
-                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                        java.util.Collections.singletonMap("ivf.nprobe", "1"))
                 .withLimit(10)
                 .withWeightedScoreRanker()
                 .executeLocal();
@@ -237,7 +297,7 @@ GlobalIndexResult mrrResult =
                         new float[] {1.0f, 0.0f, 0.0f},
                         50,
                         1.0f,
-                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                        java.util.Collections.singletonMap("ivf.nprobe", "1"))
                 .withLimit(10)
                 .withRanker("mrr")
                 .executeLocal();
@@ -251,7 +311,7 @@ directly. `VectorSearch` and `HybridSearch` are internal pushdown representation
 <TabItem value="python-sdk" label="Python SDK">
 
 ```python
-table = catalog.get_table("db.my_table")
+table = catalog.get_table("db.hybrid_documents")
 
 result = (
     table.new_hybrid_search_builder()
@@ -260,7 +320,7 @@ result = (
         [1.0, 0.0, 0.0],
         limit=50,
         weight=2.0,
-        options={"ivf.nprobe": "32"},
+        options={"ivf.nprobe": "1"},
     )
     .add_full_text_route(
         "content",
@@ -291,14 +351,14 @@ result = (
         [1.0, 0.0, 0.0],
         limit=50,
         weight=2.0,
-        options={"ivf.nprobe": "32"},
+        options={"ivf.nprobe": "1"},
     )
     .add_vector_route(
         "body_embedding",
         [0.0, 1.0, 0.0],
         limit=50,
         weight=1.0,
-        options={"ivf.nprobe": "32"},
+        options={"ivf.nprobe": "1"},
     )
     .with_limit(10)
     .with_weighted_score_ranker()
@@ -316,7 +376,7 @@ result = (
         [1.0, 0.0, 0.0],
         limit=50,
         weight=1.0,
-        options={"ivf.nprobe": "32"},
+        options={"ivf.nprobe": "1"},
     )
     .with_limit(10)
     .with_ranker("mrr")
@@ -327,3 +387,13 @@ result = (
 </TabItem>
 
 </Tabs>
+
+## Coverage and Candidate Limits
+
+Each route depends on its own index coverage and search mode. Review
+[Coverage and Freshness](./manage-indexes#coverage-and-freshness) when ingesting or
+updating data. The ranker can only combine candidates returned by the routes;
+increase route limits when a small candidate set restricts final recall.
+
+For Java and Python, the subsequent table scan does not preserve ranking order.
+See [Read Scored Results](./manage-indexes#read-scored-results) to access scores by row ID.

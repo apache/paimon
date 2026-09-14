@@ -130,7 +130,8 @@ class ManifestSchemaTest(unittest.TestCase):
         expected_fields = [
             "_VERSION", "_FILE_NAME", "_FILE_SIZE", "_NUM_ADDED_FILES",
             "_NUM_DELETED_FILES", "_PARTITION_STATS", "_SCHEMA_ID",
-            "_MIN_ROW_ID", "_MAX_ROW_ID",
+            "_MIN_BUCKET", "_MAX_BUCKET", "_MIN_LEVEL", "_MAX_LEVEL",
+            "_MIN_ROW_ID", "_MAX_ROW_ID", "_TOTAL_BUCKETS", "_EXTRA_FILES",
         ]
 
         for field_name in expected_fields:
@@ -144,8 +145,14 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(field_map["_NUM_DELETED_FILES"]["type"], "long")
         self.assertEqual(field_map["_PARTITION_STATS"]["type"], PARTITION_STATS_SCHEMA)
         self.assertEqual(field_map["_SCHEMA_ID"]["type"], "long")
+        for name in ["_MIN_BUCKET", "_MAX_BUCKET", "_MIN_LEVEL", "_MAX_LEVEL", "_TOTAL_BUCKETS"]:
+            self.assertEqual(field_map[name]["type"], ["null", "int"])
+            self.assertIsNone(field_map[name]["default"])
         self.assertEqual(field_map["_MIN_ROW_ID"]["type"], ["null", "long"])
         self.assertEqual(field_map["_MAX_ROW_ID"]["type"], ["null", "long"])
+        self.assertEqual(field_map["_EXTRA_FILES"]["type"],
+                         ["null", {"type": "array", "items": "string"}])
+        self.assertIsNone(field_map["_EXTRA_FILES"]["default"])
         self.assertIsNone(
             field_map["_MIN_ROW_ID"].get("default"),
             "_MIN_ROW_ID should have default None for backward compatibility",
@@ -232,3 +239,12 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(meta.schema_id, 0)
         self.assertIsNone(meta.min_row_id)
         self.assertIsNone(meta.max_row_id)
+        self.assertIsNone(meta.extra_files)
+        for field in ['min_bucket', 'max_bucket', 'min_level', 'max_level', 'total_buckets']:
+            self.assertIsNone(getattr(meta, field))
+
+        buffer.seek(0)
+        resolved_record = next(fastavro.reader(buffer, reader_schema=MANIFEST_FILE_META_SCHEMA))
+        self.assertIsNone(resolved_record["_EXTRA_FILES"])
+        for field in ['_MIN_BUCKET', '_MAX_BUCKET', '_MIN_LEVEL', '_MAX_LEVEL', '_TOTAL_BUCKETS']:
+            self.assertIsNone(resolved_record[field])

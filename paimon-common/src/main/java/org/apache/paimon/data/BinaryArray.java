@@ -83,6 +83,7 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
             case ARRAY:
+            case VECTOR:
             case MULTISET:
             case MAP:
             case ROW:
@@ -260,7 +261,8 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
 
     @Override
     public InternalVector getVector(int pos) {
-        throw new IllegalArgumentException("Unsupported type: VectorType");
+        assertIndexIsValid(pos);
+        return MemorySegmentUtils.readVectorData(segments, offset, getLong(pos));
     }
 
     @Override

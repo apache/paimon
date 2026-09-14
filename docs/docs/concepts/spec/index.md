@@ -1,5 +1,5 @@
 ---
-title: "Specification"
+title: "Storage Specification"
 sidebar_position: 11
 ---
 
@@ -22,61 +22,85 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Spec Overview
+<a id="spec-overview"></a>
 
-This is the specification for the Paimon table format, this document standardizes the underlying file structure and
-design of Paimon.
+# Storage Specification
 
-![](/img/file-layout.png)
+This section describes the files and metadata that make up a Paimon table. Use it when inspecting
+storage or implementing a reader, writer, or integration. For an introduction to the concepts,
+start with [Basic Concepts](../basic-concepts).
 
-## Terms
+<a id="terms"></a>
 
-- Schema: fields, primary keys definition, partition keys definition and options.
-- Snapshot: the entrance to all data committed at some specific time point.
-- Manifest list: includes several manifest files.
-- Manifest: includes several data files or changelog files.
-- Data File: contains incremental records.
-- Changelog File: contains records produced by changelog-producer.
-- Global Index: index for a bucket or partition.
-- Data File Index: index for a data file.
+## Metadata and File Relationships
 
-Run Flink SQL with Paimon:
+A snapshot is the entry point to a committed table state. Its base and delta manifest lists
+identify the manifests needed to resolve live data files. Optional references describe changelog
+files and table indexes.
+
+[![Snapshot metadata links to schema, data and changelog manifests, and an index manifest; manifests identify the files used by the table.](/img/concepts-file-layout.svg)](/img/concepts-file-layout.svg)
+
+| Layer | Reference | What it describes |
+| --- | --- | --- |
+| Table definition | [Schema](./schema) | Fields, field IDs, partition keys, primary keys, and options |
+| Committed state | [Snapshot](./snapshot) | Schema and manifest references, commit information, and record counts |
+| File inventory | [Manifest](./manifest) | File additions and deletions, partition and file statistics, and index metadata |
+| Data organization | [Data Files](./datafile) | Partition and bucket paths, primary-key records, and changelog files |
+| Physical encoding | [File Format](./fileformat), [Row Format](./rowformat) | Format-specific type mappings and the Paimon row-format binary layout |
+| Table indexes | [Table Index](./tableindex) | Dynamic bucket indexes and deletion vectors |
+| Per-file indexes | [File Index](./fileindex) | Index headers and encodings for column indexes within a data file |
+
+Table indexes and per-file indexes have different roles and metadata. See the
+[global index guide](../../primary-key-table/global-index) for global query-index behavior and
+its compatibility requirements.
+
+## Example Table Directory
+
+The following Flink SQL creates a primary-key table with one fixed bucket and Parquet data files:
 
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
     'warehouse' = '/your/path'
-);       
+);
 USE CATALOG my_catalog;
 
 CREATE TABLE my_table (
     k INT PRIMARY KEY NOT ENFORCED,
     f0 INT,
     f1 STRING
+) WITH (
+    'bucket' = '1',
+    'file.format' = 'parquet'
 );
 
 INSERT INTO my_table VALUES (1, 11, '111');
 ```
 
-Take a look to the disk:
+A simplified directory after the first commit looks like this. UUIDs and file counters are
+abbreviated; the exact number of manifests depends on the write.
 
-```shell
-warehouse
-└── default.db
-    └── my_table
-        ├── bucket-0
-        │   └── data-59f60cb9-44af-48cc-b5ad-59e85c663c8f-0.orc
-        ├── index
-        │   └── index-5625e6d9-dd44-403b-a738-2b6ea92e20f1-0
-        ├── manifest
-        │   ├── index-manifest-5d670043-da25-4265-9a26-e31affc98039-0
-        │   ├── manifest-6758823b-2010-4d06-aef0-3b1b597723d6-0
-        │   ├── manifest-list-9f856d52-5b33-4c10-8933-a0eddfaa25bf-0
-        │   └── manifest-list-9f856d52-5b33-4c10-8933-a0eddfaa25bf-1
-        ├── schema
+```text
+warehouse/
+└── default.db/
+    └── my_table/
+        ├── bucket-0/
+        │   └── data-<uuid>-0.parquet
+        ├── manifest/
+        │   ├── manifest-<uuid>-0
+        │   ├── manifest-list-<uuid>-0
+        │   └── manifest-list-<uuid>-1
+        ├── schema/
         │   └── schema-0
-        └── snapshot
+        └── snapshot/
             ├── EARLIEST
             ├── LATEST
             └── snapshot-1
 ```
+
+Partitioned tables add partition directories above the bucket directories. Features such as
+dynamic buckets and deletion vectors add index files under `index/` and an index manifest under
+`manifest/`. External data paths can place data files outside the table directory.
+
+`EARLIEST` and `LATEST` are snapshot lookup hints. The selected snapshot's metadata determines
+which files to read; readers must not treat all files present in a directory as live table data.

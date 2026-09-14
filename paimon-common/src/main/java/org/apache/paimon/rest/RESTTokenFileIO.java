@@ -45,7 +45,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -227,11 +226,7 @@ public class RESTTokenFileIO implements FileIO {
                             catalogContext.hadoopConf(),
                             catalogContext.preferIO(),
                             catalogContext.fallbackIO());
-            try {
-                fileIO = FileIO.get(path, context);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
+            fileIO = FileIO.get(path, context);
             FILE_IO_CACHE.put(token, fileIO);
             return fileIO;
         }

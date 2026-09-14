@@ -46,7 +46,14 @@ Use `btree-index.fallback-scan-max-size` to cap fallback range and string scans 
 candidate index file size.
 For keyword-style text retrieval, use [Full-Text Index](./full-text) instead.
 
+For table prerequisites, see [Global Index](../global-index#prerequisites).
+For refresh, coverage modes, and shared build options, see
+[Manage Global Indexes](./manage-indexes).
+
 ## Build BTree Index
+
+Use the populated [shared example table](../global-index#prerequisites). It includes
+the indexed column and the `dt` partition key used in the examples below.
 
 <Tabs groupId="btree-build">
 
@@ -101,6 +108,57 @@ print(added_files)
 
 </Tabs>
 
+## Query with BTree Index
+
+Once a BTree index is built, it is automatically used during scan when a filter predicate matches the indexed column.
+
+<Tabs groupId="btree-search">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+SELECT * FROM my_table WHERE name IN ('a200', 'a300');
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.common.predicate_builder import PredicateBuilder
+
+table = catalog.get_table("db.my_table")
+
+read_builder = table.new_read_builder()
+read_builder = read_builder.with_filter(
+    PredicateBuilder(table.fields)
+    .is_in("name", ["a200", "a300"])
+)
+
+scan = read_builder.new_scan()
+read = read_builder.new_read()
+pa_table = read.to_arrow(scan.plan().splits())
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
+## BTree Options
+
+| Option | Default | Description |
+|---|---|---|
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
+| `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
+| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
+| `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
+
+The legacy `btree-index.records-per-range` and
+`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
+
 ## Drop BTree Index
 
 <Tabs groupId="btree-drop">
@@ -137,57 +195,6 @@ matched_files = table.drop_global_index(
     dry_run=True,
 )
 print(matched_files)
-```
-
-</TabItem>
-
-</Tabs>
-
-## BTree Options
-
-| Option | Default | Description |
-|---|---|---|
-| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
-| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
-| `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
-| `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
-| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
-| `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
-
-The legacy `btree-index.records-per-range` and
-`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
-
-## Query with BTree Index
-
-Once a BTree index is built, it is automatically used during scan when a filter predicate matches the indexed column.
-
-<Tabs groupId="btree-search">
-
-<TabItem value="sql" label="SQL">
-
-```sql
-SELECT * FROM my_table WHERE name IN ('a200', 'a300');
-```
-
-</TabItem>
-
-<TabItem value="python-sdk" label="Python SDK">
-
-```python
-from pypaimon.common.predicate_builder import PredicateBuilder
-
-table = catalog.get_table("db.my_table")
-
-read_builder = table.new_read_builder()
-read_builder = read_builder.with_filter(
-    PredicateBuilder(table.fields)
-    .is_in("name", ["a200", "a300"])
-)
-
-scan = read_builder.new_scan()
-read = read_builder.new_read()
-pa_table = read.to_arrow(scan.plan().splits())
-print(pa_table)
 ```
 
 </TabItem>

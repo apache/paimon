@@ -378,10 +378,29 @@ public interface FileIO extends Serializable, Closeable {
      * implementations.
      */
     default void overwriteFileUtf8(Path path, String content) throws IOException {
-        try (PositionOutputStream out = newOutputStream(path, true)) {
+        // Some FileIO implementations (e.g. HDFS) rethrow the exact same exception instance from
+        // close() that was already thrown from write(), which makes the try-with-resources
+        // suppression mechanism fail with "Self-suppression not permitted". Therefore close the
+        // stream manually and only add suppressed exceptions that differ from the primary one.
+        IOException primaryException = null;
+        PositionOutputStream out = newOutputStream(path, true);
+        try {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
             writer.write(content);
             writer.flush();
+        } catch (IOException e) {
+            primaryException = e;
+            throw e;
+        } finally {
+            try {
+                out.close();
+            } catch (IOException closeException) {
+                if (primaryException == null) {
+                    throw closeException;
+                } else if (primaryException != closeException) {
+                    primaryException.addSuppressed(closeException);
+                }
+            }
         }
     }
 

@@ -81,9 +81,9 @@ public class CacheManagerTest {
         CacheManager cacheManager =
                 new CacheManager(MemorySize.ofKibiBytes(64), 0) {
                     @Override
-                    public void invalidPage(CacheKey key) {
+                    protected void invalidPage(CacheKey key, Cache.CacheValue expected) {
                         invalidatedPages.incrementAndGet();
-                        super.invalidPage(key);
+                        super.invalidPage(key, expected);
                     }
                 };
         BlockCache blockCache =
@@ -100,6 +100,7 @@ public class CacheManagerTest {
 
         blockCache.close();
         assertThat(invalidatedPages).hasValue(hotPages);
+        assertThat(cacheManager.cachedFileCount()).isZero();
     }
 
     @Test

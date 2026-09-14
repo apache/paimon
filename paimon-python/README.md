@@ -44,17 +44,29 @@ pip install 'pypaimon[lerobot]'
 import pypaimon.multimodal as pmm
 
 connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
-version_id = connection.load_from_lerobot(
+connection.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(version_id)
 ```
 
 The source dataset must be non-empty. Its schema comes from `meta/info.json`.
 Each frame becomes one row; media uses BLOB columns. The import creates frame,
-Episode, task, and version tables and tags the three component tables with the
-returned `version_id`.
+Episode, task, info, and optional stats/subtask tables. Info and stats use
+`key STRING, value STRING` rows, with each value JSON-encoded to preserve
+nested metadata. Decode values with `json.loads`.
+
+Before training, pause writes and create a shared tag:
+
+```python
+connection.create_lerobot_tag("robot_data", "train-2026-09-07")
+frames = connection.get_table("robot_data").scan(
+    tag_name="train-2026-09-07").to_arrow()
+```
+
+Read every metadata component with the same tag. Use the tag only after creation
+succeeds; cross-table tagging is not atomic. Alternatively, pass `tag_name` to
+`load_from_lerobot` to tag the imported snapshots immediately.
 
 # HDF5 to multimodal tables
 
@@ -274,3 +286,42 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
+
+
+# Vector index range reads
+
+Native vector indexes (`ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, and `diskann`)
+read multiple file ranges concurrently when the input stream supports
+thread-safe positional reads. Set the table option `vindex.read.parallelism`
+to a positive integer to control the maximum number of concurrent reads per
+index reader, including reads from concurrent native query callbacks.
+
+The default is **4** for remote index paths and **1** for local paths (including
+`file://`). Setting it to **1** disables range-level concurrency. Streams that
+only support `seek` and `read` remain serialized. Workers are created lazily
+and released when the index reader closes; separate readers have separate
+budgets. This option controls index I/O, not shard search or native compute
+threads.
+
+
+# Native vector index training
+
+The native vector index writer submits training vectors in bounded batches.
+`<index-type>.train.sample-ratio` (or its field-level override) still selects
+the same evenly spaced non-null vectors in the same order. Native training
+receives the final corpus size for automatic IVF sizing. This bounds Python
+training buffers; native training and index construction have their own
+memory requirements.
+
+
+# Vector fallback scoring and refinement
+
+Raw vector fallback and refinement score regular FLOAT vectors in bounded
+blocks using NumPy. List, large-list and fixed-size-list Arrow arrays are
+supported, including slices and multiple chunks. Null or unsupported blocks
+use the scalar path. Candidate filters are applied before scoring.
+
+L2 and cosine retain scalar accumulation order. Inner product retains Python
+`sum` semantics, including its behavior on newer Python versions. Existing
+Top-K tie-breaking rules are preserved. The same scoring path is used for raw and
+refined primary-key vector results.

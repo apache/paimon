@@ -73,6 +73,33 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testValidateRejectsUnsupportedNestedType() {
+        JsonFileFormat format =
+                new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+
+        // VARIANT is not in the supported set, so it must be rejected wherever it is nested.
+        List<RowType> rejected =
+                Arrays.asList(
+                        RowType.of(DataTypes.ARRAY(DataTypes.VARIANT())),
+                        RowType.of(DataTypes.MAP(DataTypes.VARIANT(), DataTypes.STRING())),
+                        RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.VARIANT())),
+                        RowType.of(DataTypes.ROW(DataTypes.INT(), DataTypes.VARIANT())),
+                        RowType.of(DataTypes.ARRAY(DataTypes.ROW(DataTypes.VARIANT()))));
+        for (RowType rowType : rejected) {
+            assertThatThrownBy(() -> format.validateDataFields(rowType))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessageContaining("Unsupported data type for JSON format");
+        }
+
+        // Supported types nested the same way still validate.
+        format.validateDataFields(
+                RowType.of(
+                        DataTypes.ARRAY(DataTypes.STRING()),
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()),
+                        DataTypes.ROW(DataTypes.INT(), DataTypes.ARRAY(DataTypes.DOUBLE()))));
+    }
+
+    @Test
     public void testUnresolvableCastFailsWithClearMessage() throws Exception {
         JsonFileFormat format =
                 new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));

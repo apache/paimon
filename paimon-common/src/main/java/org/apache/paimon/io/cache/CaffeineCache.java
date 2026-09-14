@@ -38,7 +38,16 @@ public class CaffeineCache implements Cache {
 
     @Nullable
     @Override
+    public CacheValue getIfPresent(CacheKey key) {
+        // Every hit contributes to admission and eviction, including when the hot set changes.
+        return this.cache.getIfPresent(key);
+    }
+
+    @Nullable
+    @Override
     public CacheValue get(CacheKey key, Function<CacheKey, CacheValue> supplier) {
+        // The loading path already follows a failed probe. Let Caffeine handle atomic loading
+        // directly instead of performing another quiet lookup.
         return this.cache.get(key, supplier);
     }
 

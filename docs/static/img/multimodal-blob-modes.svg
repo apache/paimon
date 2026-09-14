@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="538" viewBox="0 0 900 538" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Choose what a BLOB field stores</title>
+<desc id="desc">Managed fields write payload bytes in files owned by the table. Descriptor-only fields store an inline URI, offset, and length. BLOB views store an inline upstream table, field, and row ID. Descriptors and views depend on the referenced data remaining available.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="536" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" font-weight="700" fill="#172b4d" text-anchor="start">Choose what a BLOB field stores</text>
+<text x="28" y="76" font-size="17" font-weight="400" fill="#526277" text-anchor="start">A single table can use different modes for different BLOB columns.</text>
+<rect x="28" y="111" width="320" height="108" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="143" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Managed BLOB</text>
+<text x="46" y="172" font-size="18" font-weight="400" fill="#526277" text-anchor="start">__BLOB_FIELD</text>
+<text x="46" y="197" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scalar · array · map values</text>
+<path d="M358 165 L406 165" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="418" y="111" width="454" height="108" rx="8" fill="#e7f5f1" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="436" y="143" font-size="21" font-weight="700" fill="#14766b" text-anchor="start">Paimon-managed payload</text>
+<text x="436" y="172" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Bytes written to dedicated .blob files</text>
+<text x="436" y="197" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Owned by this table</text>
+<rect x="28" y="241" width="320" height="108" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="273" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Descriptor-only</text>
+<text x="46" y="302" font-size="18" font-weight="400" fill="#526277" text-anchor="start">__BLOB_DESCRIPTOR_FIELD</text>
+<text x="46" y="327" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scalar only</text>
+<path d="M358 295 L406 295" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="418" y="241" width="454" height="108" rx="8" fill="#eaf2ff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="436" y="273" font-size="21" font-weight="700" fill="#2463b4" text-anchor="start">Inline file reference</text>
+<text x="436" y="302" font-size="18" font-weight="400" fill="#526277" text-anchor="start">URI + byte offset + byte length</text>
+<text x="436" y="327" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Read bytes from the referenced object</text>
+<rect x="28" y="371" width="320" height="108" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="46" y="403" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">BLOB view</text>
+<text x="46" y="432" font-size="18" font-weight="400" fill="#526277" text-anchor="start">__BLOB_VIEW_FIELD</text>
+<text x="46" y="457" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Scalar only</text>
+<path d="M358 425 L406 425" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="418" y="371" width="454" height="108" rx="8" fill="#f2ecfb" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="436" y="403" font-size="21" font-weight="700" fill="#7046a4" text-anchor="start">Inline table reference</text>
+<text x="436" y="432" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Upstream table + BLOB field + row ID</text>
+<text x="436" y="457" font-size="18" font-weight="400" fill="#526277" text-anchor="start">Resolve the upstream value at read time</text>
+<text x="28" y="514" font-size="17" font-weight="400" fill="#526277" text-anchor="start">Keep referenced objects and upstream rows available for descriptors and views.</text>
+</g>
+</svg>

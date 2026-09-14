@@ -47,7 +47,8 @@ public class FileIndexPredicateCloseTest {
 
         assertThatThrownBy(() -> new FileIndexPredicate(tracking(notAnIndexFile, closed), ROW_TYPE))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("not file index file");
+                .hasMessageContaining("Exception happens while construct file index reader.")
+                .hasRootCauseMessage("This file is not file index file.");
 
         assertThat(closed).hasValue(1);
     }

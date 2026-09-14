@@ -434,7 +434,10 @@ abstract class AbstractDataTableScan implements DataTableScan {
             case COMPACT_BUCKET_TABLE:
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
-                return new ContinuousCompactorStartingScanner(snapshotManager);
+                return new ContinuousCompactorStartingScanner(
+                        snapshotManager,
+                        options.toConfiguration()
+                                .get(CoreOptions.CONTINUOUS_COMPACTION_INITIAL_SCAN_MODE));
             case FILE_MONITOR:
                 return new FullStartingScanner(snapshotManager);
         }

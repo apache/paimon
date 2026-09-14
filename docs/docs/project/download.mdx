@@ -1,6 +1,6 @@
 ---
 title: "Download"
-sidebar_position: 2
+sidebar_position: 1
 ---
 
 import Stable from '@site/src/components/Stable';
@@ -27,17 +27,48 @@ under the License.
 
 # Download
 
-This documentation is a guide for downloading Paimon Jars.
+Choose artifacts for Paimon **@@VERSION@@** and the engine version you run.
+For released source archives, signatures, and checksums, use the
+[project downloads page](https://paimon.apache.org/downloads/). For the Python
+client, see [PyPaimon installation](../pypaimon/installation.md).
 
-##  Engine Jars
+## Choose an artifact
+
+| You need to | Download | Installation guide |
+| --- | --- | --- |
+| Use Paimon from a query engine | The matching [engine JAR](#engine-jars) or Trino plugin archive | [Flink](../flink/quick-start.mdx), [Spark](../spark/quick-start.mdx), or your engine's integration guide |
+| Access object storage | The required [filesystem JAR](#filesystem-jars), alongside the engine connector | [Filesystems](../maintenance/filesystems.mdx) |
+| Embed Paimon in a Java application | The [API bundle](#api-jars) | [Java API](../program-api/java-api.mdx) |
+
+Match the engine version in the table, including the Scala binary version in
+Spark artifact names. Follow the integration guide for where to install the
+artifact; downloading a JAR alone does not configure a catalog or storage.
 
 <Unstable>
 
+This is development documentation. The snapshot links below are intended for
+contributors testing unreleased changes. A snapshot repository can contain
+multiple timestamped builds; inspect the JAR's [manifest](#manifestmf) when
+reporting which build you tested. Use the project downloads page above for
+released versions.
 
+</Unstable>
+
+<Stable>
+
+The links below resolve convenience artifacts for this documentation version
+from Maven Central. Refer to the source download page above to verify the
+signed Apache release.
+
+</Stable>
+
+## Engine JARs
+
+<Unstable>
 
 | Version          | Jar                                                                                                                                                                   |
 |------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Flink 2.0        | Not yet released                                                                                                                                                      |
+| Flink 2.x        | For development builds, see [Build from Source](../flink/installation.mdx#build-from-source). |
 | Flink 1.20       | [paimon-flink-1.20-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.20/@@VERSION@@/)                                 |
 | Flink 1.19       | [paimon-flink-1.19-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.19/@@VERSION@@/)                                 |
 | Flink 1.18       | [paimon-flink-1.18-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.18/@@VERSION@@/)                                 |
@@ -54,16 +85,12 @@ This documentation is a guide for downloading Paimon Jars.
 | Hive 2.3         | [paimon-hive-connector-2.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.3/@@VERSION@@/)                 |
 | Hive 2.2         | [paimon-hive-connector-2.2-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.2/@@VERSION@@/)                 |
 | Hive 2.1         | [paimon-hive-connector-2.1-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1/@@VERSION@@/)                 |
-| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/) | |
+| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/) |
 | Trino 440        | [paimon-trino-440-@@VERSION@@-plugin.tar.gz](https://repository.apache.org/content/repositories/snapshots/org/apache/paimon/paimon-trino-440/@@VERSION@@/)    |
-
-
 
 </Unstable>
 
 <Stable>
-
-
 
 | Version          | Jar                                                                                                                                                                                                                     |
 |------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -89,15 +116,11 @@ This documentation is a guide for downloading Paimon Jars.
 | Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/@@VERSION@@/paimon-hive-connector-2.1-cdh-6.3-@@VERSION@@.jar) |
 | Trino            | [Download from master](https://paimon.apache.org/docs/master/project/download/)                                                                                                                                         |
 
-
-
 </Stable>
 
-## Filesystem Jars
+## Filesystem JARs
 
 <Unstable>
-
-
 
 | Version      | Jar                                                                                                                         |
 |--------------|-----------------------------------------------------------------------------------------------------------------------------|
@@ -105,13 +128,9 @@ This documentation is a guide for downloading Paimon Jars.
 | paimon-jindo | [paimon-jindo-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-jindo/@@VERSION@@/) |
 | paimon-s3    | [paimon-s3-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-s3/@@VERSION@@/)       |
 
-
-
 </Unstable>
 
 <Stable>
-
-
 
 | Version      | Jar                                                                                                                                                      |
 |--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -119,45 +138,37 @@ This documentation is a guide for downloading Paimon Jars.
 | paimon-jindo | [paimon-jindo-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-jindo/@@VERSION@@/paimon-jindo-@@VERSION@@.jar) |
 | paimon-s3    | [paimon-s3-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/@@VERSION@@/paimon-s3-@@VERSION@@.jar)          |
 
-
-
 </Stable>
 
-## API Jars
+## API JARs
 
 <Unstable>
-
-
 
 | Version       | Jar                                                                                                                           |
 |---------------|-------------------------------------------------------------------------------------------------------------------------------|
 | paimon-bundle | [paimon-bundle-@@VERSION@@.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-bundle/@@VERSION@@/) |
 
-
-
 </Unstable>
 
 <Stable>
-
-
 
 | Version       | Jar                                                                                                                                                         |
 |---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | paimon-bundle | [paimon-bundle-@@VERSION@@.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-bundle/@@VERSION@@/paimon-bundle-@@VERSION@@.jar) |
 
-
-
 </Stable>
 
-<Unstable>
+## Inspect a JAR manifest {#manifestmf}
 
-
-
-<h2>MANIFEST.MF</h2>
-
-For unstable version, you can find git commit id in jar:
+For a snapshot build, inspect `META-INF/MANIFEST.MF` inside the downloaded JAR:
 
 ```shell
+unzip -p /path/to/paimon.jar META-INF/MANIFEST.MF
+```
+
+For example:
+
+```text
 Manifest-Version: 1.0
 Implementation-Title: Paimon : Common
 Implementation-Version: @@VERSION@@
@@ -172,8 +183,4 @@ Build-Jdk: 1.8.0_301
 Specification-Version: @@VERSION@@
 ```
 
-The `SCM-Revision` git commit id.
-
-
-
-</Unstable>
+The `SCM-Revision` field identifies the Git commit used to build the JAR.

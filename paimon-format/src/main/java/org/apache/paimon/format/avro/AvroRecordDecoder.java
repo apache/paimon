@@ -93,6 +93,16 @@ public final class AvroRecordDecoder {
         return FieldType.valueOf(recordSchema.getFields().get(position).schema().getType().name());
     }
 
+    /** Returns the field type after resolving a nullable union, without changing its decoder. */
+    public FieldType nonNullFieldType(int position) {
+        Schema schema = recordSchema.getFields().get(position).schema();
+        if (schema.getType() == Schema.Type.UNION) {
+            int nullIndex = FieldReaderFactory.nullableUnionNullIndex(schema);
+            schema = schema.getTypes().get(1 - nullIndex);
+        }
+        return FieldType.valueOf(schema.getType().name());
+    }
+
     /** Creates a decoder for one writer field. */
     public FieldDecoder createFieldDecoder(int position, @Nullable DataType readType) {
         FieldReader reader =

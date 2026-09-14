@@ -378,6 +378,75 @@ public class AvroFileFormatTest {
     }
 
     @Test
+    void testNonNullFieldTypePreservesNullableRecordDecoding() throws IOException {
+        Schema fileSchema = SchemaBuilder.record("file").fields().requiredInt("id").endRecord();
+        Schema nullSchema = Schema.create(Schema.Type.NULL);
+        for (Schema fieldSchema :
+                Arrays.asList(
+                        fileSchema,
+                        Schema.createUnion(Arrays.asList(nullSchema, fileSchema)),
+                        Schema.createUnion(Arrays.asList(fileSchema, nullSchema)))) {
+            Schema writerSchema =
+                    SchemaBuilder.record("manifest")
+                            .fields()
+                            .name("_FILE")
+                            .type(fieldSchema)
+                            .noDefault()
+                            .endRecord();
+            AvroRecordDecoder decoder = new AvroRecordDecoder(writerSchema);
+            AvroRecordDecoder.FieldType rawType = decoder.fieldType(0);
+            assertThat(decoder.nonNullFieldType(0)).isEqualTo(AvroRecordDecoder.FieldType.RECORD);
+            assertThat(decoder.fieldType(0)).isEqualTo(rawType);
+
+            GenericRecord file = new GenericData.Record(fileSchema);
+            file.put("id", 42);
+            GenericRecord manifest = new GenericData.Record(writerSchema);
+            manifest.put("_FILE", file);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(output, null);
+            new GenericDatumWriter<GenericRecord>(writerSchema).write(manifest, encoder);
+            encoder.flush();
+            byte[] bytes = output.toByteArray();
+            AvroRecordDecoder.FieldDecoder field =
+                    decoder.createFieldDecoder(
+                            0, RowType.builder().field("id", DataTypes.INT().notNull()).build());
+            decoder.reset(bytes, 0, bytes.length);
+            assertThat(decoder.readRecordStart()).isTrue();
+            assertThat(((InternalRow) field.read(decoder, null)).getInt(0)).isEqualTo(42);
+            assertThat(decoder.isEnd()).isTrue();
+
+            decoder.reset(bytes, 0, bytes.length);
+            assertThat(decoder.readRecordStart()).isTrue();
+            field.skip(decoder);
+            assertThat(decoder.isEnd()).isTrue();
+        }
+    }
+
+    @Test
+    void testNonNullFieldTypeRejectsNonNullableUnions() {
+        Schema record = SchemaBuilder.record("file").fields().requiredInt("id").endRecord();
+        Schema integer = Schema.create(Schema.Type.INT);
+        for (Schema union :
+                Arrays.asList(
+                        Schema.createUnion(Arrays.asList(record, integer)),
+                        Schema.createUnion(
+                                Arrays.asList(Schema.create(Schema.Type.NULL), record, integer)))) {
+            Schema writerSchema =
+                    SchemaBuilder.record("manifest")
+                            .fields()
+                            .name("_FILE")
+                            .type(union)
+                            .noDefault()
+                            .endRecord();
+            AvroRecordDecoder decoder = new AvroRecordDecoder(writerSchema);
+            assertThat(decoder.fieldType(0)).isEqualTo(AvroRecordDecoder.FieldType.UNION);
+            assertThatThrownBy(() -> decoder.nonNullFieldType(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Only nullable Avro unions are supported");
+        }
+    }
+
+    @Test
     void testReadsLargeZstdBlock() throws IOException {
         RowType rowType =
                 RowType.builder()

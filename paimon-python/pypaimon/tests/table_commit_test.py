@@ -25,8 +25,7 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
-class TestTableCommitEmptyOverwrite(unittest.TestCase):
-    """Tests for TableCommit._commit handling of empty commit messages in overwrite mode."""
+class TestTableCommit(unittest.TestCase):
 
     def _create_commit(self, cls, overwrite_partition=None):
         commit = cls.__new__(cls)
@@ -88,6 +87,35 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
             mock_fsc.commit.assert_not_called()
             mock_fsc.overwrite.assert_not_called()
 
+    def test_batch_commit_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            BatchTableCommit, overwrite_partition=None)
+        message = CommitMessage(
+            partition=(), bucket=0, new_files=[Mock()])
+
+        commit.commit([message], snapshot_properties={"source": "capture"})
+
+        mock_fsc.commit.assert_called_once_with(
+            commit_messages=[message],
+            commit_identifier=BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties={"source": "capture"},
+        )
+
+    def test_overwrite_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            BatchTableCommit, overwrite_partition={"dt": "2024-01-15"})
+        message = CommitMessage(
+            partition=("2024-01-15",), bucket=0, new_files=[Mock()])
+
+        commit.commit([message], snapshot_properties={"source": "capture"})
+
+        mock_fsc.overwrite.assert_called_once_with(
+            overwrite_partition={"dt": "2024-01-15"},
+            commit_messages=[message],
+            commit_identifier=BATCH_COMMIT_IDENTIFIER,
+            snapshot_properties={"source": "capture"},
+        )
+
     # -- StreamTableCommit overwrite should also reach overwrite() with empty messages --
 
     def test_stream_commit_overwrite_empty_messages(self):
@@ -99,4 +127,22 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
             overwrite_partition={'dt': '2024-01-15'},
             commit_messages=[],
             commit_identifier=42,
+        )
+
+    def test_stream_commit_forwards_snapshot_properties(self):
+        commit, mock_fsc = self._create_commit(
+            StreamTableCommit, overwrite_partition=None)
+        message = CommitMessage(
+            partition=(), bucket=0, new_files=[Mock()])
+
+        commit.commit(
+            [message],
+            commit_identifier=42,
+            snapshot_properties={"checkpoint": "42"},
+        )
+
+        mock_fsc.commit.assert_called_once_with(
+            commit_messages=[message],
+            commit_identifier=42,
+            snapshot_properties={"checkpoint": "42"},
         )

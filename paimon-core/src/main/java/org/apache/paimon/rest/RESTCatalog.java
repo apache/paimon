@@ -479,6 +479,34 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Optional<TableSchema> loadSchema(Identifier identifier, String version)
+            throws TableNotExistException {
+        try {
+            return Optional.ofNullable(api.loadSchema(identifier, version));
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SCHEMA)) {
+                return Optional.empty();
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public PagedList<TableSchema> listSchemasPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listSchemasPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
@@ -845,10 +873,12 @@ public class RESTCatalog implements Catalog {
             String location = copied.get(PATH.key());
             if (location != null) {
                 try {
+                    // A partition location may be the table's own directory, which is how a
+                    // request returns a partition there, so what a partition may own is judged
+                    // where the table is known rather than here.
                     copied.put(
                             PATH.key(),
-                            FormatTablePartitionPathResolver.canonicalizeCustomLocation(
-                                            location, context)
+                            FormatTablePartitionPathResolver.canonicalizeLocation(location, context)
                                     .toString());
                 } catch (IllegalArgumentException e) {
                     throw invalidPartitionLocation(identifier, partition, e);

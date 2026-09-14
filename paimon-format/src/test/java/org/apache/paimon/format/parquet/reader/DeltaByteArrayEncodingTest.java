@@ -103,6 +103,23 @@ public class DeltaByteArrayEncodingTest {
     }
 
     /**
+     * skipBinary alternates two vectors and leaves {@code previous} pointing into the buffer of
+     * whichever one it wrote last, so after an odd number of skipped values the next skip call
+     * starts by resetting that very vector. The prefix of the following value is copied out of it.
+     */
+    @Test
+    public void skippingAnOddNumberOfValuesKeepsThePrefix() throws Exception {
+        String[] vals = new String[] {"aaaa", "aaab", "aaac", "aaad"};
+        Utils.writeData(writer, vals);
+        reader.initFromPage(vals.length, writer.getBytes().toInputStream());
+
+        reader.skipBinary(1);
+        reader.skipBinary(1);
+
+        assertArrayEquals(vals[2].getBytes(), reader.readBinary(0).getBytes());
+    }
+
+    /**
      * The record reader resets the vector between batches, so a page that spans two batches has to
      * survive that reset. Every other case here reads a whole page into one vector without a reset,
      * which is why none of them exercises this.

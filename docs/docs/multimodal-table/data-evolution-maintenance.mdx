@@ -1,0 +1,205 @@
+---
+title: "Data Evolution Maintenance"
+sidebar_label: "Maintenance"
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Data Evolution Maintenance
+
+Use compaction to consolidate column versions. Use deletion-vector materialization
+when deleted positions must be removed from the latest data files. These operations
+have different effects on row IDs and dependent indexes.
+
+| Goal | Operation | Row IDs |
+| --- | --- | --- |
+| Reduce column-file fragmentation | [Ordinary compaction](#ordinary-compaction) | Preserved |
+| Resize large normal files | [Split during compaction](#splitting-large-files-during-compaction) | Preserved |
+| Remove logically deleted positions | [Materialize deletion vectors](#materialize-deletion-vectors) | Reassigned in rewritten ranges |
+
+For updates and logical deletes, see [Data Evolution](./data-evolution).
+For the normal/dedicated range contract, see [File Layout and Reads](./data-evolution-file-layout).
+The unpartitioned examples below use `default.target_table` from the
+[Data Evolution setup](./data-evolution#create-a-table).
+
+## Compaction and Row-ID Lifetime
+
+![Ordinary compaction retains row IDs 0 through 3 and the deleted position at 1. Deletion-vector materialization rewrites the three surviving values under new row IDs.](/img/data-evolution-maintenance.svg)
+
+The new IDs `[100, 102]` in this example are illustrative. Actual IDs are
+allocated at commit time. Both paths preserve the visible values, but only
+materialization removes deleted positions from the rewritten files.
+
+### Ordinary Compaction
+
+Repeated partial updates leave multiple column versions in each group.
+Ordinary Data Evolution compaction reads their merged values and writes
+consolidated normal files. It can also merge adjacent ranges in the same
+partition. It preserves row IDs, row order, version information, and logical
+deletions, and keeps the resulting normal/dedicated layout within the file
+contract.
+
+For example, replacing all normal files for `[0, 5]` and `[6, 9]` with one
+normal file `[0, 9]` changes file boundaries without changing any row's ID.
+Dedicated files contained in either old range are contained in the new range,
+so they do not need rewriting just because the normal files were merged.
+
+Both Spark and Flink provide:
+
+```sql
+CALL sys.compact(`table` => 'default.target_table');
+```
+
+BLOB compaction is separately controlled by `blob-compaction.enabled`
+(default `false`). Dedicated vector-file compaction is not currently
+supported. See [Dedicated Compaction](../maintenance/dedicated-compaction)
+for scheduling compaction jobs.
+
+Ordinary compaction **does not physically remove rows hidden by deletion
+vectors**. Removing their positions would change the alignment with untouched
+column files.
+
+### Splitting Large Files During Compaction
+
+To resize existing large normal data files, enable
+`data-evolution.compaction.split-large-files` (default: `false`) and run compaction:
+
+```sql
+ALTER TABLE default.target_table SET TBLPROPERTIES (
+    'target-file-size' = '128 MB',
+    'data-evolution.compaction.split-large-files' = 'true',
+    'data-evolution.compaction.large-file-ratio' = '3.0'
+);
+CALL sys.compact('default.target_table');
+```
+
+The example uses Spark SQL and selects normal files strictly larger than 384 MB.
+`data-evolution.compaction.large-file-ratio` controls the multiplier relative to
+`target-file-size`; it defaults to `2.0` and accepts finite values of at least `1.0`,
+including fractional values such as `1.5`. Files strictly exceeding the threshold
+qualify for compaction below `compaction.min.file-num` when their dedicated-file
+ranges allow splitting.
+Changing the ratio does not change the output target size. Compaction includes all
+column updates for the same row-ID range. Before writing, it estimates rows per output
+from the total normal input file size, the logical row count, and `target-file-size`.
+It then adjusts the estimated cut points to safe dedicated-file boundaries.
+Actual output sizes can differ from the target because of compression, data skew,
+overwritten column versions, and dedicated-file ranges; the last file may be smaller.
+The write-time `target-file-row-num` limit does not apply to compaction.
+
+Row IDs, column updates, and logical deletions are preserved. This option only rewrites
+normal files: associated BLOB and VECTOR files keep their existing contents and file names,
+and their sizes do not trigger splitting. Separate dedicated-file compaction options keep
+their existing behavior. Files referenced by older snapshots or tags remain until those
+references expire and snapshot expiration removes them.
+
+Every BLOB or VECTOR file must remain fully contained in a single normal file's
+row-ID range. An estimated cut inside a dedicated file moves to the end of its range,
+including any overlapping ranges from different columns or versions and ranges produced
+by dedicated compaction in the same batch. Output files may therefore exceed
+`target-file-size`. If these ranges prevent any split, file size alone does not trigger a compaction task. Normal
+merging based on `compaction.min.file-num` remains available.
+
+### Materialize Deletion Vectors
+
+The target must be a Data Evolution append table with
+`deletion-vectors.enabled=true`, and it must contain logical deletes to materialize.
+The `target_table` setup already enables this option. Flink must run in batch mode;
+before calling the procedure in a Flink SQL session, set:
+
+```sql
+SET 'execution.runtime-mode' = 'batch';
+SET 'table.dml-sync' = 'true';
+```
+
+To remove deleted positions from the latest table state, run:
+
+```sql
+CALL sys.materialize_deletion_vectors(`table` => 'default.target_table');
+```
+
+This operation reads the affected groups with their deletions applied,
+rewrites the surviving data, assigns new row IDs, removes the applied deletion
+vectors, and drops affected global indexes. Concurrent changes to the affected
+row-ID ranges cause the operation to fail instead of committing stale results.
+Materialization of groups containing dedicated vector files is not currently
+supported.
+
+For a partitioned table, select partitions by either `partitions` or a
+partition predicate in `where`; they cannot be used together. These alternative
+examples assume an existing `default.partitioned_table` with an integer partition
+key `dt` in `YYYYMMDD` form and the same required table options:
+
+```sql
+CALL sys.materialize_deletion_vectors(
+    `table` => 'default.partitioned_table',
+    partitions => 'dt=20260812');
+
+CALL sys.materialize_deletion_vectors(
+    `table` => 'default.partitioned_table',
+    `where` => 'dt >= 20260801');
+```
+
+Spark processes bounded batches until all matching deletion vectors are
+materialized. Each Flink invocation processes one batch with a soft target of
+100,000 deletion vectors. An overlapping row-ID component is never split and
+can exceed that target. Wait for each Flink job to finish before repeating the
+call, and continue until it makes no changes.
+
+Historical snapshots and tags can still reference the replaced files.
+Reclaiming their storage requires those references to expire and snapshot
+expiration to remove the files. The legacy
+`data-evolution.compaction.rewrite-row-ids = true` setting is rejected; use the
+materialization procedure instead.
+
+### Row-ID Lifetime
+
+| Operation | Effect on row IDs |
+| --- | --- |
+| Append new rows | Allocates new IDs. |
+| Partial update or column backfill | Preserves existing IDs. |
+| Logical delete | Hides IDs without shifting the remaining rows. |
+| Ordinary Data Evolution compaction | Preserves IDs, but may change file-group boundaries. |
+| Deletion-vector materialization | Assigns new IDs to surviving rows in the rewritten ranges. |
+| Explicit `reassign_row_id` maintenance | Changes IDs by remapping file metadata. |
+| Overwrite or partition removal | Removes the replaced rows from the current table state; do not assume their IDs remain usable. |
+
+Applications that persist `_ROW_ID` values, including references from other
+tables, must coordinate with operations that replace or reassign IDs. Row IDs
+are not permanent application identifiers. The `reassign_row_id` procedure is
+documented in the [Spark](../spark/procedures) and
+[Flink](../flink/procedures) procedure references.
+
+## File Sizing
+
+`target-file-size` controls normal-file sizing. `blob.target-file-size` and
+`vector.target-file-size` control dedicated file sizing and default to the
+normal target size. These are size targets, not permission to break the
+containment rules.
+
+A large normal range makes even a selective normal-column update process many
+rows. `target-file-row-num` can bound newly appended file row counts where the
+writer supports it; it is disabled by default. It does not split existing
+normal ranges during partial updates, and Data Evolution compaction can
+produce larger ranges. Choose file sizing with both scan efficiency and
+future update cost in mind.
+
+For write-column encoding and the `$files` inspection query, see
+[File Layout and Reads](./data-evolution-file-layout#compact-write-column-metadata).

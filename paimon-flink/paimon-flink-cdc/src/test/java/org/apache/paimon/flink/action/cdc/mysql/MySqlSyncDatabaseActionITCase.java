@@ -1028,6 +1028,22 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     rowType,
                     Collections.singletonList("k"));
 
+            // Use records from both shards as a barrier before altering t2. Waiting for t1 alone
+            // does not guarantee that the t2 snapshot readers have loaded their schemas.
+            statement.executeUpdate("INSERT INTO database_shard_1.t2 VALUES (-1, -1.1)");
+            statement.executeUpdate("INSERT INTO database_shard_2.t2 VALUES (-2, -2.2)");
+            table = getFileStoreTable("t2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.BIGINT().notNull(), DataTypes.DOUBLE()},
+                            new String[] {"k", "v1"});
+            waitForResult(
+                    client,
+                    Arrays.asList("+I[-1, -1.1]", "+I[-2, -2.2]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
             // test schema evolution of t2
             statement.executeUpdate("ALTER TABLE database_shard_1.t2 ADD COLUMN v2 INT");
             statement.executeUpdate("ALTER TABLE database_shard_2.t2 ADD COLUMN v3 VARCHAR(10)");
@@ -1048,6 +1064,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             waitForResult(
                     client,
                     Arrays.asList(
+                            "+I[-1, -1.1, NULL, NULL]",
+                            "+I[-2, -2.2, NULL, NULL]",
                             "+I[1, 1.1, 1, NULL]",
                             "+I[2, 2.2, 2, NULL]",
                             "+I[3, 3.3, NULL, db2_3]",

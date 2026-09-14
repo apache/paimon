@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib.util
 import inspect
 import json
 import subprocess
@@ -30,12 +29,6 @@ from pypaimon.sample import robomind_agilex as agilex
 
 
 h5py = pytest.importorskip("h5py")
-
-requires_vortex = pytest.mark.skipif(
-    importlib.util.find_spec("vortex") is None,
-    reason="RoboMIND ingestion uses Vortex, which requires Python >= 3.11",
-)
-
 
 _NUMERIC_PATHS = [path for _, path in agilex.NUMERIC_FIELDS]
 _IMAGE_PATHS = [path for _, path in agilex.IMAGE_FIELDS]
@@ -87,7 +80,6 @@ def customer_agilex_input(request):
     return value
 
 
-@requires_vortex
 def test_explicit_customer_input_uses_downloaded_episodes(
         customer_agilex_input, tmp_path):
     episodes = agilex.discover_episodes(customer_agilex_input)
@@ -149,8 +141,10 @@ def test_shared_transform_streams_complete_agilex_business_schema(
     frames = pa.Table.from_batches(batches)
     assert frames["episode_id"].to_pylist() == ["train-a"] * 3
     assert frames["frame_index"].to_pylist() == [0, 1, 2]
-    assert frames["rgb_front"][0].as_py() == b"train-a:0:0"
-    assert frames["depth_right_wrist"][2].as_py() == b"train-a:5:2"
+    assert frames["observation_images_rgb_front"][0].as_py() == (
+        b"train-a:0:0")
+    assert frames["observation_images_depth_wrist_right"][2].as_py() == (
+        b"train-a:5:2")
     assert frames["action_joint_position_left"][1].as_py() == [
         float(value) for value in range(1207, 1214)
     ]
@@ -253,7 +247,6 @@ def test_transform_rejects_empty_episode_but_accepts_one_frame(tmp_path):
     assert [batch.num_rows for batch in batches] == [1]
 
 
-@requires_vortex
 def test_local_ingest_and_backfill_materialize_only_canonical_action(
         agilex_input, tmp_path):
     root, paths = agilex_input
@@ -302,7 +295,7 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     for table in (episodes, frames, stats):
         options = table.raw_table.table_schema.options
         assert options["deletion-vectors.enabled"] == "true"
-        assert options["vector.file.format"] == "vortex"
+        assert options["vector.file.format"] == "parquet"
         assert options["blob-as-descriptor"] == "false"
         assert "file.format" not in agilex.TABLE_OPTIONS
     assert "action" in frames.raw_table.field_names
@@ -352,7 +345,6 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     assert refreshed_snapshot > backfill["statistics_snapshot_id"]
 
 
-@requires_vortex
 def test_canonical_action_backfill_resumes_after_schema_change(
         agilex_input, tmp_path, monkeypatch):
     root, _ = agilex_input
@@ -387,7 +379,6 @@ def test_canonical_action_backfill_resumes_after_schema_change(
         np.testing.assert_array_equal(row["action"], expected)
 
 
-@requires_vortex
 def test_ray_ingest_matches_local_schema_rows_and_backfill(
         agilex_input, tmp_path):
     ray = pytest.importorskip("ray")

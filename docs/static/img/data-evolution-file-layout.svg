@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">One logical range, several column files</title>
+<desc id="desc">Two adjacent file groups. Group A has two normal files over row IDs 0 to 5, BLOB files over 0 to 1 and 2 to 5, and vector files over 0 to 2 and 3 to 5. Group B covers row IDs 6 to 9. Every dedicated file stays inside one normal range.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="898" height="598" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">One logical range, several column files</text>
+<text x="28" y="75" font-size="18" font-weight="400" text-anchor="start" fill="#526277">All ranges are inclusive. Each bar represents one physical file.</text>
+<text x="268" y="114" font-size="17" font-weight="400" text-anchor="end" fill="#526277">Row ID</text>
+<text x="311.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">0</text>
+<text x="365.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">1</text>
+<text x="419.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">2</text>
+<text x="473.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">3</text>
+<text x="527.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">4</text>
+<text x="581.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">5</text>
+<text x="635.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">6</text>
+<text x="689.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">7</text>
+<text x="743.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">8</text>
+<text x="797.0" y="114" font-size="18" font-weight="400" text-anchor="middle" fill="#526277">9</text>
+<line x1="284" y1="124" x2="284" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="338" y1="124" x2="338" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="392" y1="124" x2="392" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="446" y1="124" x2="446" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="500" y1="124" x2="500" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="554" y1="124" x2="554" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="608" y1="124" x2="608" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="662" y1="124" x2="662" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="716" y1="124" x2="716" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="770" y1="124" x2="770" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<line x1="824" y1="124" x2="824" y2="507" stroke="#d7dfeb" stroke-width="1.5" stroke-dasharray="3 5"/>
+<rect x="284" y="126" width="324" height="380" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5" stroke-dasharray="5 5"/>
+<rect x="608" y="126" width="216" height="380" rx="8" fill="#f5f7fb" stroke="#526277" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="446" y="151" font-size="19" font-weight="700" text-anchor="middle" fill="#2463b4">Group A · [0, 5]</text>
+<text x="716" y="151" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Group B · [6, 9]</text>
+<text x="28" y="200" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Normal · id, b, c</text>
+<text x="28" y="257" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Normal · b update</text>
+<text x="28" y="343" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">BLOB · image</text>
+<text x="28" y="429" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Vector · embedding</text>
+<rect x="286" y="176" width="320" height="35" rx="5" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="446.0" y="200.5" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">N0 [0, 5]</text>
+<rect x="610" y="176" width="212" height="35" rx="5" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="716.0" y="200.5" font-size="18" font-weight="700" text-anchor="middle" fill="#2463b4">N2 [6, 9]</text>
+<rect x="286" y="233" width="320" height="35" rx="5" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="446.0" y="257.5" font-size="18" font-weight="700" text-anchor="middle" fill="#9a5200">N1 [0, 5]</text>
+<rect x="286" y="319" width="104" height="35" rx="5" fill="#f1eafa" stroke="#7140ad" stroke-width="1.5"/>
+<text x="338.0" y="343.5" font-size="18" font-weight="700" text-anchor="middle" fill="#7140ad">B0 [0, 1]</text>
+<rect x="394" y="319" width="212" height="35" rx="5" fill="#f1eafa" stroke="#7140ad" stroke-width="1.5"/>
+<text x="500.0" y="343.5" font-size="18" font-weight="700" text-anchor="middle" fill="#7140ad">B1 [2, 5]</text>
+<rect x="610" y="319" width="212" height="35" rx="5" fill="#f1eafa" stroke="#7140ad" stroke-width="1.5"/>
+<text x="716.0" y="343.5" font-size="18" font-weight="700" text-anchor="middle" fill="#7140ad">B2 [6, 9]</text>
+<rect x="286" y="405" width="158" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="365.0" y="429.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">V0 [0, 2]</text>
+<rect x="448" y="405" width="158" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="527.0" y="429.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">V1 [3, 5]</text>
+<rect x="610" y="405" width="212" height="35" rx="5" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="716.0" y="429.5" font-size="18" font-weight="700" text-anchor="middle" fill="#10705d">V2 [6, 9]</text>
+<text x="446" y="480" font-size="18" font-weight="400" text-anchor="middle" fill="#2463b4">Same rows, different columns</text>
+<rect x="28" y="529" width="844" height="45" rx="8" fill="#eaf2ff" stroke="#eaf2ff" stroke-width="1.5"/>
+<text x="44" y="556" font-size="18" font-weight="400" text-anchor="start" fill="#2463b4">Normal versions share the full range. Dedicated files may have smaller boundaries.</text>
+</g>
+</svg>

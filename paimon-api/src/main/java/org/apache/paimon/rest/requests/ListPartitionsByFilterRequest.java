@@ -40,7 +40,15 @@ public class ListPartitionsByFilterRequest implements RESTRequest {
     private static final String FIELD_MAX_RESULTS = "maxResults";
     private static final String FIELD_PAGE_TOKEN = "pageToken";
 
-    /** JSON serialization of a Paimon {@code Predicate} tree over the partition columns. */
+    /**
+     * JSON serialization of a Paimon {@code Predicate} tree over the partition columns.
+     *
+     * <p>Wire encoding of the literals a server has to parse: DATE, TIME, TIMESTAMP and
+     * TIMESTAMP_LTZ are ISO-8601 strings (e.g. {@code "2026-01-15"}, {@code "12:34:56.789"}, {@code
+     * "2026-01-15T12:34:56.789"}, {@code "2026-01-15T04:34:56.789Z"}); DECIMAL is a plain
+     * (non-scientific) decimal string. Older clients emitted these as JSON arrays and numbers that
+     * no Paimon server could read back, so no previously working request encoding changes meaning.
+     */
     @JsonProperty(FIELD_FILTER)
     private final String filter;
 

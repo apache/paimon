@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="548" viewBox="0 0 960 548" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Keep job state and table state together</title>
+<desc id="desc">Enable sink.savepoint.auto-tag before starting the writer. Triggering a savepoint retains job state and creates a Paimon tag named savepoint-checkpoint-ID. To recover, stop writers, roll back each table to its matching tag, then restore the Flink job from the matching savepoint.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="546" rx="12" fill="#fff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="44" font-size="27" fill="#172b4d" font-weight="700" text-anchor="start">Keep job state and table state together</text>
+<text x="28" y="78" font-size="18" fill="#526277" font-weight="400" text-anchor="start">A savepoint and its Paimon tag identify the same recovery point.</text>
+<rect x="28" y="110" width="904" height="72" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="142" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Before submission: sink.savepoint.auto-tag = true</text>
+<text x="44" y="164" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Trigger a savepoint and wait for it to complete successfully.</text>
+<path d="M 265 184 V 215" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M 697 184 V 215" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="218" width="410" height="113" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="250" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">Flink savepoint</text>
+<text x="44" y="279" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Operator state + source positions</text>
+<text x="44" y="304" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Stored in the savepoint location</text>
+<rect x="496" y="218" width="436" height="113" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="512" y="250" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">Paimon tag</text>
+<text x="512" y="279" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Snapshot at the matching commit</text>
+<text x="512" y="304" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Name: savepoint-&lt;checkpoint-id&gt;</text>
+<text x="448" y="284" font-size="25" fill="#526277" font-weight="700" text-anchor="start">+</text>
+<text x="28" y="377" font-size="16" fill="#526277" font-weight="700" text-anchor="start">RECOVERY ORDER</text>
+<rect x="28" y="397" width="250" height="94" rx="8" fill="#f3f5f8" stroke="#526277" stroke-width="1.5"/>
+<text x="44" y="429" font-size="21" fill="#526277" font-weight="700" text-anchor="start">1. Stop writers</text>
+<text x="44" y="458" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Pause table changes</text>
+<path d="M 280 444 H 323" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="326" y="397" width="282" height="94" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="342" y="429" font-size="21" fill="#10705d" font-weight="700" text-anchor="start">2. Roll back tables</text>
+<text x="342" y="458" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Use each matching tag</text>
+<path d="M 610 444 H 653" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="656" y="397" width="276" height="94" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="672" y="429" font-size="21" fill="#2463b4" font-weight="700" text-anchor="start">3. Restore Flink</text>
+<text x="672" y="458" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Use the saved job state</text>
+<text x="28" y="526" font-size="18" fill="#526277" font-weight="400" text-anchor="start">Rollback removes later table history. Match the tag and savepoint before restoring.</text>
+</g>
+</svg>

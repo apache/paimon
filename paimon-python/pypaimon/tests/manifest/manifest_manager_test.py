@@ -22,7 +22,10 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
+from io import BytesIO
 
+import fastavro
 import pyarrow as pa
 
 from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
@@ -49,7 +52,7 @@ def _paimon_python_root():
 
 
 def _runner_can_write_zstandard_avro():
-    """fastavro uses ``backports.zstd`` (Py < 3.14) to *write* zstandard Avro blocks."""
+    """Whether fastavro can write zstandard Avro blocks with the installed backends."""
     try:
         from io import BytesIO
         import fastavro
@@ -86,8 +89,8 @@ _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON = None
 def _manifest_zstd_read_subprocess_venv_python():
     """Disposable venv with editable pypaimon for ``manifest_list_zstd_read_subprocess.py``.
 
-    Does not install ``backports.zstd`` so the first worker run can hit fastavro's missing zstd
-    codec path when reading zstandard-compressed manifest lists.
+    The test removes the zstd backends before the first worker run, then installs them
+    again to verify reading zstandard-compressed manifest lists in a fresh process.
     """
     global _MANIFEST_ZSTD_READ_SUBPROC_VENV_DIR, _MANIFEST_ZSTD_READ_SUBPROC_VENV_PYTHON
     with _MANIFEST_ZSTD_READ_SUBPROC_VENV_LOCK:
@@ -96,18 +99,21 @@ def _manifest_zstd_read_subprocess_venv_python():
         repo = _paimon_python_root()
         venv_dir = tempfile.mkdtemp(prefix='paimon-zstd-read-subprocess-')
         pip_install_env = _subprocess_env_for_pip()
+        # Keep the codec behavior identical to the parent test environment.
+        fastavro_requirement = 'fastavro=={}'.format(fastavro.__version__)
         uv_bin = shutil.which('uv')
         try:
             if uv_bin:
                 subprocess.check_call(
-                    [uv_bin, 'venv', venv_dir],
+                    [uv_bin, 'venv', '--python', sys.executable, '--seed', venv_dir],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     env=pip_install_env,
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python, '-e', repo, 'requests'],
+                    [uv_bin, 'pip', 'install', '-q', '--python', isolated_venv_python,
+                     '-e', repo, 'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
             else:
@@ -118,7 +124,8 @@ def _manifest_zstd_read_subprocess_venv_python():
                 )
                 isolated_venv_python = _venv_python_executable(venv_dir)
                 subprocess.check_call(
-                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo, 'requests'],
+                    [isolated_venv_python, '-m', 'pip', 'install', '-q', '-e', repo,
+                     'requests', fastavro_requirement],
                     env=pip_install_env,
                 )
         except Exception:
@@ -265,6 +272,36 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             ),
         )
         return entry
+
+    def test_manifest_bucket_and_level_stats(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry('a', bucket=2),
+                   self._create_manifest_entry('b', bucket=6)]
+        entries[0].file.level = 3
+        entries[1].file.level = 1
+        entries[1].kind = 1
+        for totals, expected in [([8, 8], 8), ([8, 16], None),
+                                 ([0, 8], None), ([8, -1], None)]:
+            with self.subTest(totals=totals):
+                for entry, total in zip(entries, totals):
+                    entry.total_buckets = total
+                metas = manager.rolling_write(entries, 1024 * 1024, 'bucket-stats')
+                self.assertEqual(len(metas), 1)
+                meta = metas[0]
+                self.assertEqual((meta.min_bucket, meta.max_bucket), (2, 6))
+                self.assertEqual((meta.min_level, meta.max_level), (1, 3))
+                self.assertEqual((meta.num_added_files, meta.num_deleted_files), (1, 1))
+                self.assertEqual(meta.total_buckets, expected)
+
+    def test_rolling_manifest_bucket_stats_are_per_file(self):
+        manager = self._make_manager()
+        entries = [self._create_manifest_entry(str(i), bucket=i) for i in range(4)]
+        for entry in entries:
+            entry.total_buckets = 8
+        metas = manager.rolling_write(entries, 1, 'rolling-bucket-stats')
+        self.assertEqual(len(metas), len(entries))
+        self.assertEqual([(m.min_bucket, m.max_bucket, m.total_buckets) for m in metas],
+                         [(i, i, 8) for i in range(4)])
 
     def test_filter_applied_after_read(self):
         manager = self._make_manager()
@@ -465,6 +502,74 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         )
         manager.write(name, [meta])
 
+    def test_bucket_and_level_stats_round_trip(self):
+        manager = self._make_manager()
+        legacy_meta = ManifestFileMeta(
+            'legacy', 1024, 1, 0, SimpleStats.empty_stats(), 0,
+            10, 109, ['extra'])
+        meta = replace(legacy_meta, file_name='new', min_bucket=0, max_bucket=7,
+                       min_level=0, max_level=3, total_buckets=8)
+        manager.write('stats-list', [legacy_meta, meta])
+        actual = manager.read('stats-list')
+        fields = ['min_bucket', 'max_bucket', 'min_level', 'max_level',
+                  'min_row_id', 'max_row_id', 'total_buckets', 'extra_files']
+        for expected, restored in zip([legacy_meta, meta], actual):
+            self.assertEqual([getattr(restored, f) for f in fields],
+                             [getattr(expected, f) for f in fields])
+
+        with manager.file_io.new_input_stream(f'{manager.manifest_path}/stats-list') as stream:
+            data = stream.read()
+        reader = fastavro.reader(BytesIO(data))
+        self.assertEqual([f['name'] for f in reader.writer_schema['fields']][7:],
+                         ['_MIN_BUCKET', '_MAX_BUCKET', '_MIN_LEVEL', '_MAX_LEVEL',
+                          '_MIN_ROW_ID', '_MAX_ROW_ID', '_TOTAL_BUCKETS', '_EXTRA_FILES'])
+        self.assertEqual([r['_VERSION'] for r in reader], [2, 2])
+        legacy_schema = reader.writer_schema
+        legacy_schema['fields'] = [f for f in legacy_schema['fields']
+                                   if f['name'] not in {'_MIN_BUCKET', '_MAX_BUCKET',
+                                                        '_MIN_LEVEL', '_MAX_LEVEL', '_TOTAL_BUCKETS'}]
+        records = list(fastavro.reader(BytesIO(data), reader_schema=legacy_schema))
+        self.assertEqual([r['_MIN_ROW_ID'] for r in records], [10, 10])
+        self.assertEqual([r['_EXTRA_FILES'] for r in records], [['extra'], ['extra']])
+
+    def test_extra_files_round_trip(self):
+        manager = self._make_manager()
+        expected_extra_files = [None, [], ["extra-1", "extra-2"]]
+        metas = []
+        for i, extra_files in enumerate(expected_extra_files):
+            meta = ManifestFileMeta(
+                file_name=f"manifest-{i}.avro", file_size=1024,
+                num_added_files=1, num_deleted_files=0,
+                partition_stats=SimpleStats.empty_stats(), schema_id=0,
+            )
+            self.assertIsNone(meta.extra_files)
+            meta.extra_files = extra_files
+            metas.append(meta)
+
+        name = "manifest-list-extra-files"
+        manager.write(name, metas)
+        actual = manager.read(name)
+        self.assertEqual([meta.file_name for meta in actual],
+                         [meta.file_name for meta in metas])
+        self.assertEqual([meta.extra_files for meta in actual], expected_extra_files)
+
+        with manager.file_io.new_input_stream(f"{manager.manifest_path}/{name}") as stream:
+            avro_bytes = stream.read()
+        reader = fastavro.reader(BytesIO(avro_bytes))
+        records = list(reader)
+        self.assertEqual([record["_VERSION"] for record in records], [2, 2, 2])
+        self.assertEqual([record["_EXTRA_FILES"] for record in records], expected_extra_files)
+
+        legacy_schema = reader.writer_schema
+        legacy_schema["fields"] = [
+            field for field in legacy_schema["fields"] if field["name"] != "_EXTRA_FILES"
+        ]
+        legacy_records = list(fastavro.reader(BytesIO(avro_bytes), reader_schema=legacy_schema))
+        self.assertEqual([record["_FILE_NAME"] for record in legacy_records],
+                         [meta.file_name for meta in metas])
+        for record in legacy_records:
+            self.assertNotIn("_EXTRA_FILES", record)
+
     def _make_snapshot(self, base_manifest_list, delta_manifest_list="delta-manifest-list"):
         from pypaimon.snapshot.snapshot import Snapshot
         return Snapshot(
@@ -505,10 +610,10 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         sys.version_info >= (3, 13),
         'fastavro >= 1.12 bundles zstd in compiled extension on Python 3.13+',
     )
-    def test_zstd_manifest_list_fastavro_requires_backports_zstd(self):
+    def test_zstd_manifest_list_requires_codec_backend(self):
         """Child venv runs ``manifest_list_zstd_read_subprocess`` (argv: warehouse, table id, list file name).
 
-        No ``backports.zstd`` in the venv → read fails; after ``pip install`` → read succeeds.
+        No zstd backend in the venv → read fails; after ``pip install`` → read succeeds.
         """
         if not _runner_can_write_zstandard_avro():
             self.skipTest('runner cannot write zstandard Avro')
@@ -528,7 +633,7 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         catalog_table_id = 'default.{}'.format(self._table_name)
         isolated_venv_python = _manifest_zstd_read_subprocess_venv_python()
         pip_install_env = _subprocess_env_for_pip()
-        subprocess.run(
+        subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'uninstall', '-y',
              'backports.zstd', 'zstandard'],
             stdout=subprocess.DEVNULL,
@@ -553,7 +658,8 @@ class ManifestListManagerTest(_ManifestManagerSetup):
         stderr_and_stdout = (
             read_without_zstd_backend.stdout + read_without_zstd_backend.stderr)
         self.assertIn('zstandard codec is supported but you need to install', stderr_and_stdout)
-        self.assertIn('backports.zstd', stderr_and_stdout)
+        # fastavro 1.11 uses zstandard; newer versions use backports.zstd.
+        self.assertRegex(stderr_and_stdout, r"'(?:backports\.zstd|zstandard)'")
 
         subprocess.check_call(
             [isolated_venv_python, '-m', 'pip', 'install', '-q',

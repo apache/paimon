@@ -18,7 +18,7 @@
 """Vector search read to read index files."""
 
 from abc import ABC, abstractmethod
-from concurrent.futures import wait
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
@@ -86,6 +86,31 @@ class AbstractVectorSearchReadImpl:
         self._filter = filter_
         self._partition_filter = partition_filter
         self._options = dict(options or {})
+        self._index_metric = None
+
+    def _search_metric(self, index_type=None):
+        if self._index_metric is not None:
+            return self._index_metric
+        return _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+
+    def _record_index_metric(self, reader, index_type):
+        """Keep one persisted metric for indexed scores, raw search and refinement."""
+        metric_getter = getattr(reader, "vector_metric", None)
+        if metric_getter is None:
+            return
+        metric = _normalize_metric(metric_getter())
+        requested = _configured_vector_metric(
+            self._options, self._vector_column, index_type)
+        if requested is not None and requested != metric:
+            raise ValueError(
+                "Query vector metric '%s' does not match index metric '%s' for column '%s'."
+                % (requested, metric, self._vector_column.name))
+        if self._index_metric is not None and self._index_metric != metric:
+            raise ValueError(
+                "Cannot merge vector indexes with different metrics '%s' and '%s' for column '%s'."
+                % (self._index_metric, metric, self._vector_column.name))
+        self._index_metric = metric
 
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
@@ -235,7 +260,12 @@ class AbstractVectorSearchReadImpl:
             index_io_meta_list,
             self._table.table_schema.options,
         )
-        return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        try:
+            self._record_index_metric(reader, vector_index_files[0].index_type)
+            return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        except Exception:
+            reader.close()
+            raise
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
               query_vector, search_limit, include_row_ids):
@@ -255,7 +285,11 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        future = offset_reader.visit_vector_search(vector_search)
+        try:
+            future = offset_reader.visit_vector_search(vector_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
@@ -271,23 +305,24 @@ class AbstractVectorSearchReadImpl:
             return DictBasedScoredIndexResult({})
 
         top_k_heap = []
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
-        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
-        vectors = table.column(self._vector_column.name).to_pylist()
-        for row_id, stored in zip(row_ids, vectors):
-            if score_candidates is not None and row_id not in score_candidates:
-                continue
-            if stored is None:
-                continue
-            stored_vector = _to_vector_list(stored)
-            _check_vector_dimension(query_vector, stored_vector)
-            _offer_score(
-                top_k_heap,
-                self._limit,
-                row_id,
-                _compute_score(query_vector, stored_vector, metric),
-            )
+        metric = self._search_metric(index_type)
+        block_size = _score_block_size(query_vector)
+        for start in range(0, table.num_rows, block_size):
+            block = table.slice(start, block_size)
+            row_ids = block.column(SpecialFields.ROW_ID.name).to_pylist()
+            vectors = block.column(self._vector_column.name)
+            if score_candidates is not None:
+                positions = [i for i, row_id in enumerate(row_ids)
+                             if row_id in score_candidates]
+                if not positions:
+                    continue
+                vectors = vectors.take(positions)
+                row_ids = [row_ids[i] for i in positions]
+            for row_id, score in zip(
+                row_ids, _iter_arrow_scores(vectors, query_vector, metric)
+            ):
+                if score is not None:
+                    _offer_score(top_k_heap, self._limit, row_id, score)
         return _scored_result(top_k_heap)
 
     def _read_raw_vectors(self, candidates, include_filter=True, snapshot=None):
@@ -316,6 +351,10 @@ class AbstractVectorSearchReadImpl:
         return raw_vectors
 
     def _read_raw_arrow(self, raw_row_ranges, include_filter, snapshot=None):
+        reader, splits = self._plan_raw_read(raw_row_ranges, include_filter, snapshot)
+        return reader.to_arrow(splits)
+
+    def _plan_raw_read(self, raw_row_ranges, include_filter, snapshot=None):
         read_table = global_index_live_row_filter.table_at_snapshot(
             self._table, snapshot)
         read_builder = read_table.new_read_builder()
@@ -327,21 +366,28 @@ class AbstractVectorSearchReadImpl:
         read_builder = read_builder.with_projection(
             self._raw_search_projection(include_filter))
         plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
-        return read_builder.new_read().to_arrow(plan.splits())
+        return read_builder.new_read(), plan.splits()
 
     def _score_raw_vectors(self, candidates, raw_vectors, query_vector, metric, top_k):
         top_k_heap = []
+        row_ids, vectors = [], []
+
+        def offer_block():
+            for row_id, score in zip(row_ids, _score_rows(vectors, query_vector, metric)):
+                _offer_score(top_k_heap, top_k, row_id, score)
+
+        block_size = _score_block_size(query_vector)
         for row_id in candidates:
             stored_vector = raw_vectors.get(row_id)
             if stored_vector is None:
                 continue
-            _check_vector_dimension(query_vector, stored_vector)
-            _offer_score(
-                top_k_heap,
-                top_k,
-                row_id,
-                _compute_score(query_vector, stored_vector, metric),
-            )
+            row_ids.append(row_id)
+            vectors.append(stored_vector)
+            if len(vectors) == block_size:
+                offer_block()
+                row_ids, vectors = [], []
+        if vectors:
+            offer_block()
         return _scored_result(top_k_heap)
 
     def _read_raw_refine_search(self, candidates, query_vector, index_type=None,
@@ -397,7 +443,11 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        try:
+            future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
@@ -436,8 +486,7 @@ class AbstractVectorSearchReadImpl:
 
         raw_vectors = self._read_raw_vectors(
             union_candidates, include_filter=False, snapshot=snapshot)
-        metric = _raw_search_metric(
-            self._table, self._vector_column, self._options, index_type)
+        metric = self._search_metric(index_type)
         return [
             self._score_raw_vectors(
                 candidates[i].results(),
@@ -480,6 +529,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         self._query_vector = query_vector
 
     def _read(self, splits, snapshot):
+        self._index_metric = None
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
@@ -542,6 +592,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         self._query_vectors = list(query_vectors)
 
     def _read_batch(self, splits, snapshot):
+        self._index_metric = None
         n = len(self._query_vectors)
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
@@ -588,13 +639,61 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         raw_pre_filter = self._raw_pre_filter(raw_splits, snapshot)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
-        results = []
-        for i in range(n):
-            raw = self._read_raw_search(
-                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type,
-                snapshot=snapshot)
-            results.append(indexed_results[i].or_(raw).top_k(self._limit))
-        return results
+        raw_results = self._read_raw_batch_search(
+            raw_ranges, raw_pre_filter, raw_index_type, snapshot)
+        return [
+            indexed.or_(raw).top_k(self._limit)
+            for indexed, raw in zip(indexed_results, raw_results)
+        ]
+
+    def _read_raw_batch_search(self, raw_row_ranges, pre_filter,
+                               index_type=None, snapshot=None):
+        """Scan raw rows once, keeping a separate top-k heap for each query."""
+        heaps = [[] for _ in self._query_vectors]
+        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
+        if not raw_row_ranges or not heaps:
+            return [_scored_result(heap) for heap in heaps]
+
+        table_read, splits = self._plan_raw_read(raw_row_ranges, True, snapshot)
+        metric = self._search_metric(index_type)
+        workers = min(len(splits), table_read._resolve_parallelism(None, len(splits)))
+        if workers <= 1:
+            return self._score_raw_splits(table_read, splits, metric)
+
+        # Keep only one streaming reader and Q top-k heaps per worker, even
+        # when the plan contains many splits. Each split is scanned once.
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(
+                self._score_raw_splits, table_read, splits[i::workers], metric)
+                for i in range(workers)]
+            for future in futures:
+                for heap, result in zip(heaps, future.result()):
+                    score_getter = result.score_getter()
+                    for row_id in result.results():
+                        _offer_score(heap, self._limit, row_id, score_getter(row_id))
+        return [_scored_result(heap) for heap in heaps]
+
+    def _score_raw_splits(self, table_read, splits, metric):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
+        heaps = [[] for _ in self._query_vectors]
+        reader, batches = table_read._new_arrow_batch_reader(splits)
+        # Close the underlying iterator as well if scoring fails mid-batch.
+        with _ClosableArrowBatchReader(reader, batches) as batch_reader:
+            for batch in batch_reader:
+                row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+                vectors = batch.column(self._vector_column.name).to_pylist()
+                for row_id, stored in zip(row_ids, vectors):
+                    if stored is None:
+                        continue
+                    stored_vector = _to_vector_list(stored)
+                    for query, heap in zip(self._query_vectors, heaps):
+                        _check_vector_dimension(query, stored_vector)
+                        _offer_score(
+                            heap, self._limit, row_id,
+                            _compute_score(query, stored_vector, metric))
+                del batch, row_ids, vectors
+        return [_scored_result(heap) for heap in heaps]
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
@@ -751,41 +850,32 @@ def _table_options_map(table):
     return table_options.to_map() if table_options is not None else {}
 
 
-def _raw_search_metric(table, vector_column, options, index_type=None):
-    candidates = []
+def _configured_vector_metric(options, vector_column, index_type=None):
     field_prefix = "fields.%s." % vector_column.name
     index_prefix = "%s." % index_type if index_type else None
-    for key in [
-        field_prefix + "distance.metric",
-        field_prefix + "metric",
-        *(([
-            index_prefix + "distance.metric",
-            index_prefix + "metric",
-        ]) if index_prefix is not None else []),
-        "test.vector.metric",
-        "lumina.distance.metric",
-        "distance.metric",
-        "metric",
-    ]:
+    keys = [field_prefix + "pk-vector.distance.metric",
+            field_prefix + "distance.metric", field_prefix + "metric"]
+    if index_prefix is not None:
+        keys.extend([index_prefix + "distance.metric", index_prefix + "metric"])
+    keys.extend(["test.vector.metric", "lumina.distance.metric", "distance.metric", "metric"])
+    for key in keys:
         if key in options:
-            candidates.append(options[key])
+            return _normalize_metric(options[key])
+    return None
+
+
+def _raw_search_metric(table, vector_column, options, index_type=None):
+    from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import VINDEX_IDENTIFIERS
+
     table_map = _table_options_map(table)
-    for key in [
-        field_prefix + "distance.metric",
-        field_prefix + "metric",
-        *(([
-            index_prefix + "distance.metric",
-            index_prefix + "metric",
-        ]) if index_prefix is not None else []),
-        "test.vector.metric",
-        "lumina.distance.metric",
-        "distance.metric",
-        "metric",
-    ]:
-        if key in table_map:
-            candidates.append(table_map[key])
-    if candidates:
-        return _normalize_metric(candidates[0])
+    for source in (options, table_map):
+        configured = _configured_vector_metric(source, vector_column, index_type)
+        if configured is not None:
+            return configured
+
+    # Before an index exists, use its writer's default, not another column's metric.
+    if index_type in VINDEX_IDENTIFIERS:
+        return "inner_product"
 
     inferred = None
     for key, value in list(options.items()) + list(table_map.items()):
@@ -800,6 +890,116 @@ def _raw_search_metric(table, vector_column, options, index_type=None):
 
 def _normalize_metric(metric):
     return str(metric).lower().replace("-", "_")
+
+
+def _score_block_size(query):
+    # Target 8 MiB per float64 matrix, allowing at least one vector.
+    return max(1, min(1024, (1 << 20) // max(1, len(query))))
+
+
+def _iter_arrow_scores(vectors, query, metric):
+    import numpy as np
+    import pyarrow as pa
+
+    block_size = _score_block_size(query)
+    for start in range(0, len(vectors), block_size):
+        block = vectors.slice(start, block_size)
+        if isinstance(block, pa.ChunkedArray):
+            block = block.combine_chunks()
+        dtype = block.type
+        scores = None
+        if (pa.types.is_list(dtype) or pa.types.is_large_list(dtype) or
+                pa.types.is_fixed_size_list(dtype)) and not block.null_count:
+            flat = block.flatten()
+            if pa.types.is_float32(flat.type) and not flat.null_count:
+                if pa.types.is_fixed_size_list(dtype):
+                    regular = dtype.list_size == len(query)
+                else:
+                    offsets = block.offsets.to_numpy(zero_copy_only=False)
+                    regular = bool(np.all(np.diff(offsets) == len(query)))
+                if regular and len(query):
+                    matrix = flat.to_numpy(zero_copy_only=False).astype(np.float64).reshape(
+                        len(block), len(query))
+                    scores = _compute_scores(query, matrix, metric)
+        if scores is None:
+            for vector in block.to_pylist():
+                if vector is None:
+                    yield None
+                else:
+                    vector = _to_vector_list(vector)
+                    _check_vector_dimension(query, vector)
+                    yield _compute_score(query, vector, metric)
+        else:
+            yield from scores
+
+
+def _score_rows(vectors, query, metric):
+    import numpy as np
+
+    scores = None
+    if vectors and all(vector is not None for vector in vectors):
+        try:
+            matrix = np.array(vectors, dtype=np.float64)
+        except (ValueError, TypeError, OverflowError):
+            matrix = None
+        if matrix is not None:
+            scores = _compute_scores(query, matrix, metric)
+    if scores is not None:
+        return scores
+    result = []
+    for vector in vectors:
+        if vector is None:
+            result.append(None)
+        else:
+            vector = _to_vector_list(vector)
+            _check_vector_dimension(query, vector)
+            result.append(_compute_score(query, vector, metric))
+    return result
+
+
+def _compute_scores(query, matrix, metric):
+    """Score an owned float64 matrix while preserving scalar reduction semantics.
+
+    L2/cosine use left-to-right accumulation, as in the scalar loops. Inner
+    product uses Python's sum on precomputed products, retaining its behavior
+    across Python versions (including compensated summation on Python 3.12+).
+    Returning None selects the scalar fallback.
+    """
+    import numpy as np
+
+    try:
+        query = np.asarray(query, dtype=np.float64)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if (matrix.ndim != 2 or query.ndim != 1 or not len(query) or
+            matrix.shape[1] != len(query) or not np.isfinite(matrix).all() or
+            not np.isfinite(query).all()):
+        return None
+    if metric not in ("l2", "cosine", "inner_product"):
+        return None
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        if metric == "l2":
+            np.subtract(query, matrix, out=matrix)
+            np.square(matrix, out=matrix)
+            np.add.accumulate(matrix, axis=1, out=matrix)
+            return (1.0 / (1.0 + matrix[:, -1])).tolist()
+        if metric == "cosine":
+            norms = np.square(matrix)
+            np.add.accumulate(norms, axis=1, out=norms)
+            stored_norms = norms[:, -1].copy()
+            del norms
+            query_norm = 0.0
+            for value in query:
+                value = float(value)
+                query_norm += value * value
+        np.multiply(matrix, query, out=matrix)
+        if metric == "inner_product":
+            return [sum(row) for row in matrix.tolist()]
+        matrix[:, 0] += 0.0  # Match a scalar accumulator initialized to +0.0.
+        np.add.accumulate(matrix, axis=1, out=matrix)
+        denominators = [query_norm ** 0.5 * float(norm) ** 0.5 for norm in stored_norms]
+        return [0.0 if denominator == 0 else float(dot) / denominator
+                for dot, denominator in zip(matrix[:, -1], denominators)]
 
 
 def _compute_score(query, stored, metric):

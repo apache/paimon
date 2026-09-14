@@ -25,116 +25,124 @@ under the License.
 
 # DLF Token
 
-DLF (Data Lake Formation) building is a fully-managed platform for unified metadata and data storage and management,
-aiming to provide customers with functions such as metadata management, storage management, permission management,
-storage analysis, and storage optimization.
+Use `token.provider = dlf` to authenticate a Paimon REST Catalog client with Alibaba Cloud DLF.
+The client signs requests using an access key and, for temporary credentials, an STS security token.
 
-DLF provides multiple authentication methods for different environments.
+In the examples below, `uri` is the catalog service endpoint and `warehouse` is the **server-side
+catalog instance name**, not a storage path or the local Flink catalog alias.
 
-:::info
+## Choose a Credential Source
 
-The `'warehouse'` is your catalog instance name on the server, not the path.
+| Source | Required options | Refresh behavior |
+| --- | --- | --- |
+| [Access key](#use-the-access-key) | `dlf.access-key-id`, `dlf.access-key-secret` | Uses the configured credentials. |
+| [Inline STS token](#use-the-sts-temporary-access-token) | Access key options and `dlf.security-token` | Does not refresh automatically. |
+| [Local token file](#local-token-file) | `dlf.token-path` | Reloads credentials according to the file's `Expiration`. |
+| [ECS instance role](#use-the-sts-token-from-aliyun-ecs-role) | `dlf.token-loader = ecs` | Loads and refreshes credentials through the ECS metadata service. |
 
-:::
+Choose one source. If several are configured, the client uses an explicit `dlf.token-loader`
+first, then `dlf.token-path`, then the inline access key options.
 
 ## Use the access key
 
 ```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
+CREATE CATALOG `paimon-rest-catalog` WITH (
     'type' = 'paimon',
-    'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'uri' = 'https://cn-hangzhou-vpc.dlf.aliyuncs.com',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
-    'dlf.access-key-id'='<access-key-id>',
-    'dlf.access-key-secret'='<access-key-secret>',
+    'dlf.access-key-id' = '<access-key-id>',
+    'dlf.access-key-secret' = '<access-key-secret>'
 );
 ```
 
-- `uri`: Access the URI of the DLF Rest Catalog Server.
-- `warehouse`: DLF Catalog name
-- `token.provider`: token provider
-- `dlf.access-key-id`: The Access Key ID required to access the DLF service, usually referring to the AccessKey of your
-  RAM user
-- `dlf.access-key-secret`:The Access Key Secret required to access the DLF service
-
-You can grant specific permissions to a RAM user and use the RAM user's access key for long-term access to your DLF
-resources. Compared to using the Alibaba Cloud account access key, accessing DLF resources with a RAM user access key
-is more secure.
+Replace the endpoint and instance name with those of your DLF catalog. See
+[endpoint configuration](#dlf-endpoint-configuration) for signing and region settings.
 
 ## Use the STS temporary access token
 
-Through the STS service, you can generate temporary access tokens for users, allowing them to access DLF resources
-restricted by policies within the validity period.
+An inline STS credential consists of an access key ID, access key secret, and security token:
 
 ```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
+CREATE CATALOG `paimon-rest-catalog` WITH (
     'type' = 'paimon',
-    'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'uri' = 'https://cn-hangzhou-vpc.dlf.aliyuncs.com',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
-    'dlf.access-key-id'='<access-key-id>',
-    'dlf.access-key-secret'='<access-key-secret>',
-    'dlf.security-token'='<security-token>'
+    'dlf.access-key-id' = '<temporary-access-key-id>',
+    'dlf.access-key-secret' = '<temporary-access-key-secret>',
+    'dlf.security-token' = '<security-token>'
 );
 ```
 
-In some environments, temporary access token can be periodically refreshed by using a local file:
+The client does not renew inline credentials. For a long-running client that needs refreshed STS
+credentials, use a local token file or an ECS instance role.
+
+### Local Token File
+
+Set `dlf.token-path` to a local UTF-8 JSON file accessible to each process that uses the catalog.
+This automatically selects the `local_file` token loader.
 
 ```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
+CREATE CATALOG `paimon-rest-catalog` WITH (
     'type' = 'paimon',
-    'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'uri' = 'https://cn-hangzhou-vpc.dlf.aliyuncs.com',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
-    'dlf.token-path' = 'my_token_path_in_disk'
+    'dlf.token-path' = '/path/to/dlf-token.json'
 );
 ```
+
+The JSON field names are case-sensitive. Set `Expiration` to the actual UTC expiry of the issued
+credentials, in `yyyy-MM-dd'T'HH:mm:ss'Z'` format:
+
+```json
+{
+  "AccessKeyId": "<temporary-access-key-id>",
+  "AccessKeySecret": "<temporary-access-key-secret>",
+  "SecurityToken": "<security-token>",
+  "Expiration": "2026-09-10T12:00:00Z"
+}
+```
+
+Your credential provider must keep this file up to date. When signing a request, Paimon loads the
+file if no token is cached, or reloads it when the cached token has less than one hour remaining.
+Without `Expiration`, the cached token is treated as non-expiring and file changes do not trigger
+a reload.
 
 ## Use the STS token from aliyun ecs role
 
-An instance RAM role refers to a RAM role granted to an ECS instance. This RAM role is a standard service role
-with the trusted entity being the cloud server. By using an instance RAM role, it is possible to obtain temporary
-access token (STS Token) within the ECS instance without configuring an AccessKey.
+On an ECS instance with an instance RAM role, the `ecs` loader retrieves temporary credentials
+from the instance metadata service:
 
 ```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
+CREATE CATALOG `paimon-rest-catalog` WITH (
     'type' = 'paimon',
-    'uri' = '<catalog server url>',
     'metastore' = 'rest',
+    'uri' = 'https://cn-hangzhou-vpc.dlf.aliyuncs.com',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
     'dlf.token-loader' = 'ecs'
-    -- optional, loader can obtain it through ecs metadata service
-    -- 'dlf.token-ecs-role-name' = 'my_ecs_role_name'
 );
 ```
+
+The loader discovers the role name through the metadata service. To specify it explicitly, add
+`'dlf.token-ecs-role-name' = 'my_ecs_role_name'` as another catalog option. Credentials are refreshed
+on request when they are within one hour of expiry.
 
 ## DLF Endpoint Configuration
 
-Paimon supports two types of DLF endpoints and automatically selects the appropriate signing algorithm:
+The client selects a request signer from the configured endpoint unless
+`dlf.signing-algorithm` is set explicitly:
 
-- **DLF VPC endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Recommended for VPC environments with better performance and lower latency.
-- **DLF OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Supports public network access through Alibaba Cloud API infrastructure. 
-  **Note:** Currently OpenAPI Endpoints only supports database and table names with alphanumeric characters (A-Z, a-z, 0-9) and specific symbols.
+| Example URI | Selected signer |
+| --- | --- |
+| `https://cn-hangzhou-vpc.dlf.aliyuncs.com` | `default` |
+| `https://dlfnext.cn-hangzhou.aliyuncs.com` | `openapi` |
 
-Simply configure the endpoint URI, and Paimon will automatically handle the authentication:
-
-```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
-    'type' = 'paimon',
-    'uri' = 'https://${region}-vpc.dlf.aliyuncs.com',  -- or OpenAPI endpoint: https://dlfnext.cn-hangzhou.aliyuncs.com
-    'metastore' = 'rest',
-    'warehouse' = 'my_instance_name',
-    'token.provider' = 'dlf',
-    'dlf.access-key-id'='<access-key-id>',
-    'dlf.access-key-secret'='<access-key-secret>'
-);
-```
+URIs containing `dlfnext` select the OpenAPI signer; other URIs select the default signer. The
+client also infers the region from the URI. Set `dlf.region` explicitly if the endpoint does not
+contain a recognizable region, for example when using a custom hostname.

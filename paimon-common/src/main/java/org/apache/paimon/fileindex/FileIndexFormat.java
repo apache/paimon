@@ -318,7 +318,10 @@ public final class FileIndexFormat {
                         }
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                // Callers wrap the constructor in try-with-resources on the stream,
+                // but a throwing constructor never assigns the resource, so both
+                // checked and unchecked validation failures must close here.
                 IOUtils.closeQuietly(seekableInputStream);
                 throw new RuntimeException(
                         "Exception happens while construct file index reader.", e);

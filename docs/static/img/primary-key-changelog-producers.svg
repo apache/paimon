@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="595" viewBox="0 0 960 595" role="img" aria-labelledby="title desc">
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<title id="title">Where the before image comes from</title>
+<desc id="desc">For an existing key whose value changes from 4 to 5: none sends an upsert without a before image; input preserves the source’s before and after records; lookup reads old state during compaction; full-compaction diffs successive full results. Timing differs by producer.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526277"/></marker></defs>
+<g font-family="Arial, Helvetica, sans-serif" fill="#172b4d">
+<rect x="1" y="1" width="958" height="593" rx="12" fill="#ffffff" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="28" y="43" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">Where the before image comes from</text>
+<text x="28" y="76" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Existing value = 4; new value = 5.  −U retracts the old value; +U supplies the new one.</text>
+<text x="28" y="120" font-size="18" font-weight="700" text-anchor="start" fill="#526277">Producer / input</text>
+<text x="303" y="120" font-size="18" font-weight="700" text-anchor="start" fill="#526277">How old state is obtained</text>
+<text x="681" y="120" font-size="18" font-weight="700" text-anchor="start" fill="#526277">Consumer receives</text>
+<rect x="28" y="137" width="226" height="81" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="44" y="167" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">none</text>
+<text x="44" y="197" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Upsert 5</text>
+<path d="M 259 178 L 288 178" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="298" y="137" width="337" height="81" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="314" y="167" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">No before image in output</text>
+<text x="314" y="197" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Consumer normalizes if needed</text>
+<path d="M 640 178 L 668 178" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="678" y="137" width="254" height="81" rx="8" fill="#eaf2ff" stroke="#2463b4" stroke-width="1.5"/>
+<text x="694" y="167" font-size="21" font-weight="700" text-anchor="start" fill="#2463b4">Upsert 5</text>
+<text x="694" y="197" font-size="17" font-weight="400" text-anchor="start" fill="#526277">After snapshot commit</text>
+<rect x="28" y="236" width="226" height="81" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="44" y="266" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">input</text>
+<text x="44" y="296" font-size="18" font-weight="400" text-anchor="start" fill="#526277">−U 4, +U 5</text>
+<path d="M 259 277 L 288 277" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="298" y="236" width="337" height="81" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="314" y="266" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Preserve source changelog</text>
+<text x="314" y="296" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Source must supply old values</text>
+<path d="M 640 277 L 668 277" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="678" y="236" width="254" height="81" rx="8" fill="#e5f5ef" stroke="#10705d" stroke-width="1.5"/>
+<text x="694" y="266" font-size="21" font-weight="700" text-anchor="start" fill="#10705d">−U 4, +U 5</text>
+<text x="694" y="296" font-size="17" font-weight="400" text-anchor="start" fill="#526277">After changelog commit</text>
+<rect x="28" y="335" width="226" height="81" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="44" y="365" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">lookup</text>
+<text x="44" y="395" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Upsert 5</text>
+<path d="M 259 376 L 288 376" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="298" y="335" width="337" height="81" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="314" y="365" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Look up stored value 4</text>
+<text x="314" y="395" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Reconcile during compaction</text>
+<path d="M 640 376 L 668 376" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="678" y="335" width="254" height="81" rx="8" fill="#f1ebfa" stroke="#7051a3" stroke-width="1.5"/>
+<text x="694" y="365" font-size="21" font-weight="700" text-anchor="start" fill="#7051a3">−U 4, +U 5</text>
+<text x="694" y="395" font-size="17" font-weight="400" text-anchor="start" fill="#526277">After lookup compaction</text>
+<rect x="28" y="434" width="226" height="81" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="44" y="464" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">full-compaction</text>
+<text x="44" y="494" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Upsert 5</text>
+<path d="M 259 475 L 288 475" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="298" y="434" width="337" height="81" rx="8" fill="#f8fafc" stroke="#d7dfeb" stroke-width="1.5"/>
+<text x="314" y="464" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Compare full results: 4 → 5</text>
+<text x="314" y="494" font-size="17" font-weight="400" text-anchor="start" fill="#526277">Changes between results collapse</text>
+<path d="M 640 475 L 668 475" fill="none" stroke="#526277" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="678" y="434" width="254" height="81" rx="8" fill="#fff2d7" stroke="#9a5200" stroke-width="1.5"/>
+<text x="694" y="464" font-size="21" font-weight="700" text-anchor="start" fill="#9a5200">−U 4, +U 5</text>
+<text x="694" y="494" font-size="17" font-weight="400" text-anchor="start" fill="#526277">After full compaction</text>
+<text x="28" y="567" font-size="18" font-weight="400" text-anchor="start" fill="#526277">Illustrative state transition; generated changelogs need not preserve every intermediate input event.</text>
+</g>
+</svg>

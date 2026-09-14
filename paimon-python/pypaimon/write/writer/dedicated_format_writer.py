@@ -68,7 +68,8 @@ class DedicatedFormatWriter(DataWriter):
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
                  write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None,
-                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE,
+                 blob_uri_reader_factory=None):
         super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols,
                          changelog_producer=changelog_producer)
 
@@ -181,6 +182,7 @@ class DedicatedFormatWriter(DataWriter):
                 options=options,
                 blob_consumer=blob_consumer,
                 video=blob_column in configured_video_fields,
+                uri_reader_factory=blob_uri_reader_factory,
             )
 
         # Initialize vector writer when vector.file.format is configured.
@@ -195,6 +197,7 @@ class DedicatedFormatWriter(DataWriter):
                 vector_columns=self.vector_write_columns,
                 vector_file_format=options.vector_file_format(),
                 options=options,
+                rolling_managed_by_parent=bool(self.video_frame_columns),
             )
 
         logger.info(
@@ -270,8 +273,8 @@ class DedicatedFormatWriter(DataWriter):
 
         self.record_count += data.num_rows
 
-        # Check if normal data rolling is needed
-        if self._should_roll_normal():
+        # Defer any active video-group roll to its Episode boundary.
+        if self._should_roll_active_group():
             self._roll_or_defer_for_video_group()
 
     def write_row(self, row):
@@ -325,7 +328,7 @@ class DedicatedFormatWriter(DataWriter):
                 self.vector_writer.write(vector_data)
 
             self.record_count += 1
-            if self._should_roll_normal():
+            if self._should_roll_active_group():
                 self._roll_or_defer_for_video_group()
 
         except Exception as e:
@@ -519,6 +522,39 @@ class DedicatedFormatWriter(DataWriter):
 
         # Check if normal data exceeds target size
         return self._normal_buffer.nbytes > self.target_file_size
+
+    def roll_before_group_if_needed(self, row_count: int):
+        """Roll current files before the next logical write group if needed."""
+        self._require_finished_flush()
+        if self._video_group_policy is None:
+            return
+
+        pending_rows = self.pending_row_count
+        should_roll = pending_rows > 0 and (
+            self._video_group_policy.pending_roll
+            or pending_rows + row_count > self.target_file_row_num
+            or (
+                not self._normal_buffer.is_empty
+                and self._normal_buffer.nbytes > self.target_file_size
+            )
+        )
+        should_roll = should_roll or any(
+            self.blob_writers[column].should_roll_before_group(row_count)
+            for column in self.video_frame_columns
+        )
+        should_roll = should_roll or (
+            self.vector_writer is not None
+            and self.vector_writer.should_roll_before_group(row_count)
+        )
+        if should_roll:
+            self._close_current_writers()
+
+    def _should_roll_active_group(self) -> bool:
+        return self._should_roll_normal() or (
+            self._video_group_policy is not None
+            and self.vector_writer is not None
+            and self.vector_writer.rolling_file()
+        )
 
     def _roll_or_defer_for_video_group(self):
         if self._video_group_policy is not None and self._video_group_policy.defer_roll():
