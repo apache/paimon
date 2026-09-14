@@ -633,16 +633,31 @@ class _WindowJoinRight(_AsOfJoinRight):
             [positions[row_id] for row_id in match]
             for match in matches
         ]
-        arrays = []
-        for _, source_name, aggregation in self.aggregations:
+        aggregations_by_source = {}
+        for index, (_, source_name, aggregation) in enumerate(self.aggregations):
+            aggregations_by_source.setdefault(source_name, []).append(
+                (index, aggregation))
+
+        arrays = [None] * len(self.aggregations)
+        for source_name, aggregations in aggregations_by_source.items():
             effective = fetcher.schema.field(source_name)
-            output_type = _aggregate_output_type(
-                effective.type, aggregation)
-            arrays.append(pa.array([
-                _aggregate_values(
-                    values[source_name], row_indices, aggregation)
-                for row_indices in indices
-            ], type=output_type))
+            output_types = [
+                _aggregate_output_type(effective.type, aggregation)
+                for _, aggregation in aggregations
+            ]
+            source_values = values[source_name]
+            results = [[] for _ in aggregations]
+            for row_indices in indices:
+                selected = (
+                    pc.take(source_values, pa.array(row_indices, type=pa.int64()))
+                    if row_indices else source_values.slice(0, 0)
+                )
+                for (_, aggregation), result in zip(aggregations, results):
+                    result.append(_aggregate_values(selected, aggregation))
+                del selected
+            for (index, _), result, output_type in zip(
+                    aggregations, results, output_types):
+                arrays[index] = pa.array(result, type=output_type)
         return arrays
 
 
@@ -695,10 +710,9 @@ def _aggregate_output_type(data_type, aggregation):
     return data_type
 
 
-def _aggregate_values(values, indices, aggregation):
-    if not indices:
+def _aggregate_values(selected, aggregation):
+    if len(selected) == 0:
         return 0 if aggregation == "count" else None
-    selected = pc.take(values, pa.array(indices, type=pa.int64()))
     if aggregation == "count":
         return pc.count(selected).as_py()
     if aggregation == "mean":
@@ -706,7 +720,7 @@ def _aggregate_values(values, indices, aggregation):
                  if item is not None]
         if not items:
             return None
-        if pa.types.is_integer(values.type):
+        if pa.types.is_integer(selected.type):
             return sum(items) / len(items)
         if not all(math.isfinite(item) for item in items):
             return pc.mean(selected).as_py()
