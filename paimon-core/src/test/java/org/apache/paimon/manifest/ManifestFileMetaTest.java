@@ -1555,6 +1555,33 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testManifestSortForceRewriteDryRunUsesFullCompaction() {
+        List<ManifestFileMeta> input =
+                Arrays.asList(
+                        makeManifest(makeEntry(true, "base", 0)),
+                        makeManifest(
+                                makeEntry(false, "base", 0), makeEntry(true, "replacement", 0)));
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_FORCE_REWRITE, true);
+        testOptions.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1B");
+        testOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+
+        FileStoreTable table = mock(FileStoreTable.class, RETURNS_DEEP_STUBS);
+        Snapshot snapshot = mock(Snapshot.class);
+        when(table.options()).thenReturn(testOptions.toMap());
+        when(table.store().snapshotManager().latestSnapshot()).thenReturn(snapshot);
+        when(table.store().manifestListFactory().create().readDataManifests(snapshot))
+                .thenReturn(input);
+        when(table.store().manifestFileFactory().create()).thenReturn(manifestFile);
+        when(table.schema().logicalPartitionType()).thenReturn(getPartitionType());
+
+        assertThat(ManifestCompactDryRun.execute(table))
+                .endsWith("Manifest sort level files: L0=0, L1=0, L2=0, L3=0, L4=0.");
+    }
+
+    @Test
     public void testManifestSortForceRewriteSingleManifest() {
         ManifestFileMeta physical =
                 makeManifest(makeBucketEntry("file-3", 0, 3), makeBucketEntry("file-0", 0, 0));

@@ -599,6 +599,7 @@ public class CoreOptions implements Serializable {
                                     + " skipped. Set to a larger value to allow more aggressive"
                                     + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
+    @ExcludeFromDocumentation("Only used by compact_manifest maintenance procedure")
     public static final ConfigOption<Boolean> MANIFEST_SORT_FORCE_REWRITE =
             key("manifest-sort.force-rewrite")
                     .booleanType()

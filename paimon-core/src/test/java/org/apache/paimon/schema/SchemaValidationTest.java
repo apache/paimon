@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 import static java.util.Collections.emptyList;
+import static java.util.Collections.singleton;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -2047,6 +2048,45 @@ class SchemaValidationTest {
                                                 options6,
                                                 "")))
                 .hasMessageContaining("is not a partition field");
+    }
+
+    @Test
+    void testManifestSortMaintenanceOptionsAreDynamicOnly() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+        Map<String, String> baseOptions = new HashMap<>();
+        baseOptions.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        baseOptions.put(BUCKET.key(), "-1");
+
+        Map<String, String> forceOptions = new HashMap<>(baseOptions);
+        forceOptions.put(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key(), "true");
+        TableSchema forceSchema =
+                new TableSchema(1, fields, 10, singletonList("f0"), emptyList(), forceOptions, "");
+        assertThatThrownBy(() -> validateTableSchema(forceSchema))
+                .hasMessage(
+                        "'manifest-sort.force-rewrite' is only supported as a dynamic option for explicit manifest compaction.");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        forceSchema,
+                                        singleton(CoreOptions.MANIFEST_SORT_FORCE_REWRITE.key())));
+
+        Map<String, String> orderOptions = new HashMap<>(baseOptions);
+        orderOptions.put(CoreOptions.MANIFEST_SORT_ORDER.key(), "partition-first");
+        TableSchema orderSchema =
+                new TableSchema(1, fields, 10, singletonList("f0"), emptyList(), orderOptions, "");
+        assertThatThrownBy(() -> validateTableSchema(orderSchema))
+                .hasMessage(
+                        "'manifest-sort.order' is only supported as a dynamic option for explicit manifest compaction.");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        orderSchema,
+                                        singleton(CoreOptions.MANIFEST_SORT_ORDER.key())));
     }
 
     @Test
