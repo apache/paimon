@@ -25,6 +25,7 @@ import pyarrow
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_json_parser import extract_referenced_fields
+from pypaimon.data.map_shared_shredding import map_selected_keys_field
 from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.reader.auth_masking_reader import (
@@ -36,7 +37,7 @@ from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
                                       SplitRead, deferred_blob_field_names)
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import DataField, MapType, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
 ROW_KIND_COLUMN = "_row_kind"
@@ -918,11 +919,18 @@ class TableRead:
         elif self.table.options.data_evolution_enabled():
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
-                raise NotImplementedError(
-                    "Nested-field projection on data-evolution tables is "
-                    "not yet supported")
-            outer_extract_name_paths = None
-            if read_type is None and self._needs_output_projection():
+                if not self._only_map_key_nested_paths():
+                    raise NotImplementedError(
+                        "ROW nested-field projection on data-evolution tables "
+                        "is not yet supported")
+                scan_read_type = self._with_predicate_extra_fields(
+                    self._widen_to_top_level_for_merge())
+                outer_extract_name_paths = self.nested_name_paths
+            else:
+                outer_extract_name_paths = None
+            if (outer_extract_name_paths is None
+                    and read_type is None
+                    and self._needs_output_projection()):
                 outer_extract_name_paths = self._output_extract_name_paths()
             return DataEvolutionSplitRead(
                 table=self.table,
@@ -930,7 +938,9 @@ class TableRead:
                 read_type=scan_read_type,
                 split=split,
                 row_tracking_enabled=True,
-                nested_name_paths=self.nested_name_paths,
+                nested_name_paths=(
+                    None if outer_extract_name_paths
+                    else self.nested_name_paths),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     self.read_type if outer_extract_name_paths else None),
@@ -1007,7 +1017,10 @@ class TableRead:
 
     def _widen_to_top_level_for_merge(self) -> List[DataField]:
         """Unique top-level fields from ``self.nested_name_paths``, in path order."""
-        table_fields_by_name = {f.name: f for f in self.table.fields}
+        table_fields_by_name = {f.name: f for f in self._table_read_fields()}
+        paths_by_top = {}
+        for path in self.nested_name_paths or []:
+            paths_by_top.setdefault(path[0], []).append(path)
         seen = set()
         widened: List[DataField] = []
         for path in self.nested_name_paths or []:
@@ -1020,8 +1033,49 @@ class TableRead:
                 raise ValueError(
                     "Nested projection top-level field %r not found in "
                     "table schema" % (top_name,))
+            paths = paths_by_top[top_name]
+            if (isinstance(field.type, MapType)
+                    and all(len(path) > 1 for path in paths)
+                    and not self._map_has_aggregator(top_name)):
+                keys = []
+                for path in paths:
+                    if path[1] not in keys:
+                        keys.append(path[1])
+                try:
+                    field = map_selected_keys_field(field, keys)
+                except ValueError:
+                    # Keys that cannot be encoded by the Java/Spark metadata
+                    # contract still work through the complete-MAP fallback.
+                    pass
             widened.append(field)
         return widened
+
+    def _only_map_key_nested_paths(self) -> bool:
+        table_fields = {field.name: field for field in self.table.fields}
+        for path in self.nested_name_paths or []:
+            if len(path) == 1:
+                continue
+            field = table_fields.get(path[0])
+            if len(path) != 2 or field is None \
+                    or not isinstance(field.type, MapType):
+                return False
+        return True
+
+    def _has_map_key_projection(self) -> bool:
+        table_fields = {field.name: field for field in self.table.fields}
+        for path in self.nested_name_paths or []:
+            field = table_fields.get(path[0])
+            if len(path) == 2 and field is not None \
+                    and isinstance(field.type, MapType):
+                return True
+        return False
+
+    def _map_has_aggregator(self, field_name: str) -> bool:
+        options = self.table.options.options.data
+        return (
+            "fields.{}.aggregate-function".format(field_name) in options
+            or "fields.default-aggregate-function" in options
+        )
 
     def __create_reader_for_split(self, split, blob_parallelism=1,
                                   limit: Optional[int] = None):
@@ -1044,6 +1098,9 @@ class TableRead:
 
     def __authed_reader(self, split, auth_result, blob_parallelism=1,
                         limit: Optional[int] = None):
+        if self._has_map_key_projection():
+            raise NotImplementedError(
+                "MAP-key projection with query authorization is not supported")
         table_fields = self.table.fields
         read_fields = self.read_type
 

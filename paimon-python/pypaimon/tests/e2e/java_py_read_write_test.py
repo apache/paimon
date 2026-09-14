@@ -1610,6 +1610,32 @@ class JavaPyReadWriteTest(unittest.TestCase):
                      for value in result.column('metrics').to_pylist()],
                 )
 
+    def test_read_selected_shared_shredding_keys_written_by_java(self):
+        for file_format in ('parquet', 'orc'):
+            with self.subTest(file_format=file_format):
+                table = self.catalog.get_table(
+                    'default.shared_shredding_map_java_test_{}'.format(
+                        file_format))
+                read_builder = table.new_read_builder().with_projection([
+                    'id', "metrics['hot']", "metrics['overflow']",
+                    "metrics['missing']",
+                ])
+                result = read_builder.new_read().to_arrow(
+                    read_builder.new_scan().plan().splits())
+                result = table_sort_by(result, 'id')
+
+                self.assertEqual(
+                    ['id', 'metrics_hot', 'metrics_overflow',
+                     'metrics_missing'],
+                    result.column_names,
+                )
+                self.assertEqual([10, None, None, None, 60],
+                                 result.column('metrics_hot').to_pylist())
+                self.assertEqual([30, None, None, None, None],
+                                 result.column('metrics_overflow').to_pylist())
+                self.assertEqual([None] * 5,
+                                 result.column('metrics_missing').to_pylist())
+
     def test_write_map_blob_for_java(self):
         map_blob_type = pa.map_(pa.int32(), pa.large_binary())
         boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())

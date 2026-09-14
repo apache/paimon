@@ -79,10 +79,28 @@ Nested `ROW` projections are supported for ordinary append tables and primary-ke
 merge reads. The reader may read the containing `ROW` and extract the requested
 leaf, so selecting a leaf does not guarantee physical leaf-only I/O.
 
+For a top-level `MAP<STRING, ...>`, use a quoted bracket selector. Dots inside
+the key are preserved:
+
+```python
+read_builder = read_builder.with_projection([
+    'id', "attributes['key.with.dots']"
+])
+# Result: id, attributes_key_with_dots
+```
+
+Dot notation is reserved for nested `ROW` fields. Exact top-level names win;
+conflicting derived names receive a `__N` suffix.
+
+Shared-shredding MAP files read only the required physical columns and
+overflow; normal MAP files fall back to reading the full MAP.
+
 Limitations:
 
-- Data-evolution tables do not support nested projection.
-- `ARRAY<ROW>` and `MAP` nested paths are not supported.
+- Data-evolution tables support MAP keys, but not nested ROW fields.
+- Filtering a projected MAP key is not supported.
+- MAP-key projection with query authorization is not supported.
+- `ARRAY<ROW>` paths are not supported.
 
 ### Generate Splits
 

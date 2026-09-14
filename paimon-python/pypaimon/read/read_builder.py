@@ -15,20 +15,36 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import ast
 from typing import List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.explain import ExplainResult, ExplainSplitInfo, PruningStat
 from pypaimon.read.explain_render import render_predicate
+from pypaimon.read.push_down_utils import predicate_field_names
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.scan_stats import ScanStats
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import AtomicType, DataField, MapType
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.utils.projection import Projection, is_row_type
+from pypaimon.utils.projection import MapKey, Projection, is_row_type
+
+
+class _ReadPredicateBuilder(PredicateBuilder):
+
+    def __init__(self, fields, unsupported_fields):
+        super().__init__(fields)
+        self._unsupported_fields = unsupported_fields
+
+    def _get_field_index(self, field: str) -> int:
+        if field in self._unsupported_fields:
+            raise NotImplementedError(
+                "Filtering projected MAP keys is not supported: {}".format(
+                    field))
+        return super()._get_field_index(field)
 
 
 class ReadBuilder:
@@ -40,7 +56,7 @@ class ReadBuilder:
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
         # ``_projection`` stores the user-facing name list from
-        # :meth:`with_projection`. When dotted names are present,
+        # :meth:`with_projection`. When nested selectors are present,
         # ``_nested_paths`` is also populated and takes precedence
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
@@ -60,17 +76,17 @@ class ReadBuilder:
         """Project to the given column names.
 
         Names containing a dot (e.g. ``"struct.subfield"``) walk into ROW
-        children and are translated into a nested projection. Top-level-
-        only callers see the same observable behaviour as before — the
-        dotted form is opt-in. Unknown names are silently skipped to
+        children. A quoted bracket selector on a top-level
+        ``MAP<STRING, ...>`` selects one literal key (e.g.
+        ``"attrs['key.with.dots']"``). Unknown names are silently skipped to
         preserve the pre-existing contract.
 
-        Precedence: if a dotted name matches an actual top-level field, the
-        top-level match wins and the name is not walked as a struct path.
+        An exact top-level field match takes precedence over both forms.
         """
         self._projection = projection
-        if projection and any('.' in name for name in projection):
-            self._nested_paths = self._resolve_dotted_paths(projection)
+        if projection and any(
+                '.' in name or '[' in name for name in projection):
+            self._nested_paths = self._resolve_projection_paths(projection)
         else:
             self._nested_paths = None
         return self
@@ -80,16 +96,18 @@ class ReadBuilder:
         return self
 
     def new_scan(self) -> TableScan:
+        self._validate_map_key_filter()
         scan = TableScan(
             table=self.table,
             predicate=self._predicate,
             limit=self._limit,
             partition_predicate=self._partition_filter,
         )
-        scan._read_type = self.read_type()
+        scan._read_type = self._scan_read_type()
         return scan
 
     def new_read(self) -> TableRead:
+        self._validate_map_key_filter()
         return TableRead(
             table=self.table,
             predicate=self._predicate,
@@ -111,7 +129,8 @@ class ReadBuilder:
         return Projection.of(self._nested_paths).to_name_paths(table_fields)
 
     def new_predicate_builder(self) -> PredicateBuilder:
-        return PredicateBuilder(self.read_type())
+        return _ReadPredicateBuilder(
+            self.read_type(), self._map_key_output_names())
 
     def explain(self, verbose: bool = False) -> ExplainResult:
         """Produce a structured scan plan for this builder.
@@ -164,11 +183,8 @@ class ReadBuilder:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_dotted_paths(self, names: List[str]) -> List[List[int]]:
-        """Translate dotted-name projection entries into integer paths
-        against the current table schema. Names without dots produce
-        length-1 paths.
-        """
+    def _resolve_projection_paths(self, names: List[str]) -> List[List[int]]:
+        """Translate ROW paths and MAP-key selectors into internal paths."""
         table_fields = self.table.fields
         if self.table.options.row_tracking_enabled():
             table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
@@ -181,16 +197,28 @@ class ReadBuilder:
             if name in top_index:
                 paths.append([top_index[name]])
                 continue
+
+            map_selector = _map_key_selector(name, table_fields)
+            if map_selector is not None:
+                top, key = map_selector
+                paths.append([top_index[top], MapKey(key)])
+                continue
+
             if '.' not in name:
                 continue
-            parts = name.split('.')
-            top = parts[0]
-            if top not in top_index:
+            candidates = [
+                field_name for field_name in top_index
+                if name.startswith(field_name + '.')
+                and is_row_type(table_fields[top_index[field_name]].type)
+            ]
+            if not candidates:
                 continue
+            top = max(candidates, key=len)
+            parts = name[len(top) + 1:].split('.')
             path = [top_index[top]]
             current_field = table_fields[path[0]]
             ok = True
-            for part in parts[1:]:
+            for part in parts:
                 if not is_row_type(current_field.type):
                     ok = False
                     break
@@ -206,6 +234,70 @@ class ReadBuilder:
             if ok:
                 paths.append(path)
         return paths
+
+    def _validate_map_key_filter(self):
+        if self._predicate is None or not self._nested_paths:
+            return
+        unsupported = (
+            predicate_field_names(self._predicate)
+            & self._map_key_output_names()
+        )
+        if unsupported:
+            raise NotImplementedError(
+                "Filtering projected MAP keys is not supported: {}".format(
+                    sorted(unsupported)))
+
+    def _map_key_output_names(self):
+        if not self._nested_paths:
+            return set()
+        return {
+            field.name
+            for field, path in zip(self.read_type(), self._nested_paths)
+            if any(isinstance(step, MapKey) for step in path)
+        }
+
+    def _scan_read_type(self):
+        if not self._nested_paths:
+            return self.read_type()
+        table_fields = self.table.fields
+        if self.table.options.row_tracking_enabled():
+            table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+        seen = set()
+        fields = []
+        for path in self._nested_paths:
+            if path[0] not in seen:
+                seen.add(path[0])
+                fields.append(table_fields[path[0]])
+        return fields
+
+
+def _map_key_selector(name, table_fields):
+    candidates = [
+        field for field in table_fields
+        if _is_string_key_map(field.type)
+        and name.startswith(field.name + '[')
+    ]
+    if not candidates:
+        return None
+    field = max(candidates, key=lambda candidate: len(candidate.name))
+    selector = name[len(field.name):]
+    if not selector.endswith(']'):
+        return None
+    try:
+        key = ast.literal_eval(selector[1:-1])
+    except (SyntaxError, ValueError):
+        return None
+    if not isinstance(key, str):
+        return None
+    return field.name, key
+
+
+def _is_string_key_map(data_type) -> bool:
+    return (
+        isinstance(data_type, MapType)
+        and isinstance(data_type.key, AtomicType)
+        and data_type.key.type.upper() == 'STRING'
+    )
 
 
 def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,

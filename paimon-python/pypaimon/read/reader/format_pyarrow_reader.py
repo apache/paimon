@@ -32,9 +32,15 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.map_shared_shredding import (
+    assemble_normal_map_selected_keys,
     assemble_shared_shredding_map,
+    assemble_shared_shredding_selected_keys,
+    is_map_selected_keys_field,
     is_shared_shredding,
+    map_selected_keys,
     parse_shared_shredding_metadata,
+    parse_shared_shredding_selection_metadata,
+    shared_shredding_selected_paths,
 )
 from pypaimon.data.variant_shredding import (
     VariantSchema,
@@ -406,7 +412,10 @@ class FormatPyArrowReader(RecordBatchReader):
         self._has_nested_path = has_nested_path
 
         file_schema = self.dataset.schema
-        has_logical_map = any(isinstance(field.type, MapType) for field in read_fields)
+        has_logical_map = any(
+            isinstance(field.type, MapType)
+            or is_map_selected_keys_field(field)
+            for field in read_fields)
         metadata_schema = (
             _orc_schema_with_field_metadata(file_io, file_path, file_schema)
             if file_format == 'orc' and has_logical_map else file_schema)
@@ -427,7 +436,10 @@ class FormatPyArrowReader(RecordBatchReader):
             options is None or options.variant_shredding_enabled())
         self._variant_schema_cache: Dict[pa.DataType, VariantSchema] = {}
         self._shared_shredding_maps = {}
+        self._selected_key_maps = {}
+        self._selected_shared_map_paths = {}
         logical_maps_by_source = {}
+        selected_maps_by_source = {}
         if nested_name_paths is None:
             source_names = [field.name for field in read_fields]
         else:
@@ -440,6 +452,9 @@ class FormatPyArrowReader(RecordBatchReader):
                     and isinstance(logical_field.type, MapType)):
                 logical_maps_by_source.setdefault(source_name, []).append(
                     logical_field)
+            elif (source_name is not None
+                  and is_map_selected_keys_field(logical_field)):
+                selected_maps_by_source[source_name] = logical_field
         for field in metadata_schema:
             logical_fields = logical_maps_by_source.get(field.name, [])
             if logical_fields and is_shared_shredding(field):
@@ -449,6 +464,20 @@ class FormatPyArrowReader(RecordBatchReader):
                         logical_field.type)
                     self._shared_shredding_maps[logical_field.name] = (
                         logical_arrow_type, metadata)
+            selected_field = selected_maps_by_source.get(field.name)
+            if selected_field is not None:
+                keys = map_selected_keys(selected_field.description)
+                value_type = PyarrowFieldParser.from_paimon_type(
+                    selected_field.type.fields[0].type)
+                selection_metadata = None
+                if is_shared_shredding(field):
+                    selection_metadata = \
+                        parse_shared_shredding_selection_metadata(field)
+                    self._selected_shared_map_paths[field.name] = \
+                        shared_shredding_selected_paths(
+                            field.name, keys, selection_metadata)
+                self._selected_key_maps[field.name] = (
+                    keys, value_type, selection_metadata)
 
         self._bounded_variant_read = (
             self._file_format == 'parquet' and self._has_projected_variant())
@@ -485,16 +514,27 @@ class FormatPyArrowReader(RecordBatchReader):
 
         # Read projected VARIANT columns in bounded batches.
         self._parquet_file = None
+        self._orc_file = None
+        self._orc_source = None
         if (self._bounded_variant_read
-                or self._selected_parquet_row_groups is not None):
+                or self._selected_parquet_row_groups is not None
+                or (file_format == 'parquet'
+                    and self._selected_shared_map_paths)):
             import pyarrow.parquet as pq
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
             self._parquet_file = pq.ParquetFile(
                 file_io.filesystem.open_input_file(file_path_for_pyarrow))
+        if file_format == 'orc' and self._selected_shared_map_paths:
+            import pyarrow.orc as orc
+            self._orc_source = file_io.filesystem.open_input_file(
+                file_path_for_pyarrow)
+            self._orc_file = orc.ORCFile(self._orc_source)
         if self._exhausted:
             self._raw_batches = iter(())
         elif self._parquet_file is not None:
             self._raw_batches = self._iter_row_group_batches()
+        elif self._orc_file is not None:
+            self._raw_batches = self._iter_orc_batches()
         else:
             reader = self.dataset.scanner(
                 columns=self._scan_columns,
@@ -574,6 +614,22 @@ class FormatPyArrowReader(RecordBatchReader):
             batch_size=self._scan_batch_size,
         )
 
+    def _iter_orc_batches(self):
+        columns = self._physical_read_columns()
+        for stripe in range(self._orc_file.nstripes):
+            batch = self._orc_file.read_stripe(stripe, columns=columns)
+            for offset in range(0, batch.num_rows, self._scan_batch_size):
+                current = batch.slice(offset, self._scan_batch_size)
+                if self._scan_filter is not None:
+                    table = ds.dataset(pa.Table.from_batches([current])).scanner(
+                        filter=self._scan_filter).to_table()
+                    batches = table.to_batches()
+                else:
+                    batches = [current]
+                for filtered in batches:
+                    if filtered.num_rows:
+                        yield self._select_existing_fields(filtered)
+
     def _row_group_read_columns(self):
         if self._has_nested_path:
             existing = set(self.existing_fields)
@@ -583,6 +639,18 @@ class FormatPyArrowReader(RecordBatchReader):
                     columns.append(path[0])
         else:
             columns = list(self.existing_fields)
+        return self._physical_read_columns(columns)
+
+    def _physical_read_columns(self, columns=None):
+        if columns is None:
+            columns = list(self.existing_fields)
+        else:
+            columns = list(columns)
+        for field_name, paths in self._selected_shared_map_paths.items():
+            columns = [name for name in columns if name != field_name]
+            for path in paths:
+                if path not in columns:
+                    columns.append(path)
         if self._scan_filter is not None:
             file_names = set(self.dataset.schema.names)
             for name in self._predicate_field_names:
@@ -656,6 +724,9 @@ class FormatPyArrowReader(RecordBatchReader):
         if self._shared_shredding_maps:
             batch = self._assemble_shared_shredding_maps(batch)
 
+        if self._selected_key_maps:
+            batch = self._assemble_selected_key_maps(batch)
+
         if self._variant_shredding_enabled:
             batch = self._assemble_shredded_variants(batch)
 
@@ -705,6 +776,29 @@ class FormatPyArrowReader(RecordBatchReader):
                 columns[index], map_type, name_by_id, num_columns)
             fields[index] = pa.field(
                 field.name, map_type, nullable=field.nullable)
+            changed = True
+        if not changed:
+            return batch
+        return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
+
+    def _assemble_selected_key_maps(
+            self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        columns = list(batch.columns)
+        fields = list(batch.schema)
+        changed = False
+        for index, field in enumerate(fields):
+            selected = self._selected_key_maps.get(field.name)
+            if selected is None:
+                continue
+            keys, value_type, metadata = selected
+            if metadata is None:
+                columns[index] = assemble_normal_map_selected_keys(
+                    columns[index], keys, value_type)
+            else:
+                columns[index] = assemble_shared_shredding_selected_keys(
+                    columns[index], keys, value_type, metadata)
+            fields[index] = pa.field(
+                field.name, columns[index].type, nullable=field.nullable)
             changed = True
         if not changed:
             return batch
@@ -760,6 +854,10 @@ class FormatPyArrowReader(RecordBatchReader):
             if close is not None:
                 close()
             self._parquet_file = None
+        if self._orc_source is not None:
+            self._orc_source.close()
+            self._orc_source = None
+            self._orc_file = None
 
 
 def _path_exists_in_arrow_schema(schema: pa.Schema, path: List[str]) -> bool:
