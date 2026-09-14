@@ -632,15 +632,14 @@ class SplitRead(ABC):
             self._all_data_fields_from(file_schema.fields))
 
     def _create_key_value_fields(self, value_field: List[DataField]):
-        all_fields: List[DataField] = self.table.fields
         all_data_fields = []
 
-        for field in all_fields:
-            if field.name in self.trimmed_primary_key:
-                key_field_name = f"{KEY_PREFIX}{field.name}"
-                key_field_id = field.id + KEY_FIELD_ID_START
-                key_field = DataField(key_field_id, key_field_name, field.type)
-                all_data_fields.append(key_field)
+        # Merge keys must follow the same declared order as the sorted files.
+        for field in self.table.trimmed_primary_keys_fields:
+            key_field_name = f"{KEY_PREFIX}{field.name}"
+            key_field_id = field.id + KEY_FIELD_ID_START
+            key_field = DataField(key_field_id, key_field_name, field.type)
+            all_data_fields.append(key_field)
 
         all_data_fields.append(SpecialFields.SEQUENCE_NUMBER)
         all_data_fields.append(SpecialFields.VALUE_KIND)
