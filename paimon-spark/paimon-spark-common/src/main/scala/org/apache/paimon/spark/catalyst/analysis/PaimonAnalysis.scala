@@ -116,11 +116,21 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
-    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val columnListWrite = containsColumnListWrite(v2WriteCommand.query)
+    val effectiveByName = v2WriteCommand.isByName || columnListWrite
+    val queryWithoutMarker = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val query =
+      if (columnListWrite) {
+        PaimonOutputResolver.renameNestedFieldsByPosition(
+          queryWithoutMarker,
+          table.output,
+          v2WriteCommand.isByName)
+      } else {
+        queryWithoutMarker
+      }
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
-      case Some(dynamicPartitionColumns)
-          if hiveStyleDynamicPartitionEnabled && !v2WriteCommand.isByName =>
+      case Some(dynamicPartitionColumns) if hiveStyleDynamicPartitionEnabled && !effectiveByName =>
         resolveDynamicPartitionWrite(
           query,
           table,
@@ -129,7 +139,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           mergeSchemaEnabled)
       case _ =>
         v2WriteCommand match {
-          case o: OverwritePartitionsDynamic if hiveStyleDynamicPartitionEnabled && !o.isByName =>
+          case _: OverwritePartitionsDynamic
+              if hiveStyleDynamicPartitionEnabled && !effectiveByName =>
             resolveDynamicPartitionWrite(
               query,
               table,
@@ -137,14 +148,8 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
               options,
               mergeSchemaEnabled)
           case _ =>
-            val expected =
-              expectedAttrsForWrite(query, table, options, v2WriteCommand.isByName)
-            resolveWriteOutput(
-              query,
-              table.name,
-              expected,
-              v2WriteCommand.isByName,
-              mergeSchemaEnabled)
+            val expected = expectedAttrsForWrite(query, table, options, effectiveByName)
+            resolveWriteOutput(query, table.name, expected, effectiveByName, mergeSchemaEnabled)
         }
     }
   }
@@ -158,6 +163,14 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   private def stripHiveDynamicPartitionMarker(query: LogicalPlan): LogicalPlan = {
     query.transformDown { case PaimonHiveDynamicPartitionQuery(_, child) => child }
+  }
+
+  private def containsColumnListWrite(query: LogicalPlan): Boolean = {
+    query
+      .collectFirst {
+        case node if node.getTagValue(COLUMN_LIST_WRITE).isDefined => true
+      }
+      .contains(true)
   }
 
   private def resolveDynamicPartitionWrite(
@@ -279,6 +292,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
 object PaimonAnalysis {
   val PAIMON_WRITE_RESOLVED: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.resolved")
+  val COLUMN_LIST_WRITE: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.columnList")
 }
 
 case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
