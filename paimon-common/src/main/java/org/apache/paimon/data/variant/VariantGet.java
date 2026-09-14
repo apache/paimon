@@ -34,7 +34,10 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 
 /** Utils for variant get. */
@@ -172,15 +175,84 @@ public class VariantGet {
 
             CastExecutor<Object, Object> resolve =
                     (CastExecutor<Object, Object>) CastExecutors.resolve(inputType, dataType);
-            if (resolve != null) {
-                try {
-                    return resolve.cast(input);
-                } catch (Exception e) {
-                    return invalidCast(v, dataType, castArgs);
-                }
-            }
+            Object result = castScalar(input, inputType, dataType, resolve);
+            return result == null ? invalidCast(v, dataType, castArgs) : result;
+        }
+    }
 
-            return invalidCast(v, dataType, castArgs);
+    /**
+     * Casts a non-null scalar read from a variant to {@code targetType}, returning null when the
+     * cast is invalid. The generic cast rules wrap a numeric value that does not fit the target, so
+     * an out-of-range value is rejected here first, matching Spark's TRY cast semantics.
+     */
+    @Nullable
+    static Object castScalar(
+            Object input,
+            DataType inputType,
+            DataType targetType,
+            @Nullable CastExecutor<Object, Object> executor) {
+        if (executor == null || !fitsIntegralTarget(input, inputType, targetType)) {
+            return null;
+        }
+        try {
+            return executor.cast(input);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Whether a numeric {@code input} lies within the range of an integral {@code targetType}. */
+    private static boolean fitsIntegralTarget(
+            Object input, DataType inputType, DataType targetType) {
+        long min;
+        long max;
+        switch (targetType.getTypeRoot()) {
+            case TINYINT:
+                min = Byte.MIN_VALUE;
+                max = Byte.MAX_VALUE;
+                break;
+            case SMALLINT:
+                min = Short.MIN_VALUE;
+                max = Short.MAX_VALUE;
+                break;
+            case INTEGER:
+                min = Integer.MIN_VALUE;
+                max = Integer.MAX_VALUE;
+                break;
+            case BIGINT:
+                min = Long.MIN_VALUE;
+                max = Long.MAX_VALUE;
+                break;
+            default:
+                return true;
+        }
+
+        switch (inputType.getTypeRoot()) {
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+                long value = ((Number) input).longValue();
+                return value >= min && value <= max;
+            case FLOAT:
+            case DOUBLE:
+                // The fractional part is truncated by the cast, so any finite value strictly
+                // between min - 1 and max + 1 fits. Both bounds are exact doubles; for BIGINT
+                // max + 1 is 2^63 and min - 1 rounds to -2^63, which is itself in range.
+                double d = ((Number) input).doubleValue();
+                if (Double.isNaN(d) || Double.isInfinite(d)) {
+                    return false;
+                }
+                return max == Long.MAX_VALUE
+                        ? d >= -0x1p63 && d < 0x1p63
+                        : d > min - 1.0 && d < max + 1.0;
+            case DECIMAL:
+                BigDecimal truncated =
+                        ((Decimal) input).toBigDecimal().setScale(0, RoundingMode.DOWN);
+                return truncated.compareTo(BigDecimal.valueOf(min)) >= 0
+                        && truncated.compareTo(BigDecimal.valueOf(max)) <= 0;
+            default:
+                return true;
         }
     }
 
