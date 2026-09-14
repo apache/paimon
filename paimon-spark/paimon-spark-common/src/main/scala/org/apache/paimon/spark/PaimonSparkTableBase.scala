@@ -27,8 +27,9 @@ import org.apache.paimon.spark.read.PaimonSplitScanBuilder
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
-import org.apache.paimon.table.{CatalogTableType, Table, _}
+import org.apache.paimon.table.{CatalogTableType, FileStoreTable, Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
+import org.apache.paimon.table.system.ChangelogEventMetadataTable
 
 import org.apache.spark.sql.connector.catalog._
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -47,6 +48,16 @@ abstract class PaimonSparkTableBase(val table: Table)
   with SupportsMetadataColumns {
 
   lazy val coreOptions = new CoreOptions(table.options())
+
+  override lazy val schema: org.apache.spark.sql.types.StructType = {
+    val baseRowType = table.rowType()
+    val extendedRowType = table match {
+      case fst: FileStoreTable if !coreOptions.changelogExposeFieldAsMetadata().isEmpty =>
+        ChangelogEventMetadataTable.computeExtendedRowType(fst, baseRowType)
+      case _ => baseRowType
+    }
+    SparkTypeUtils.fromPaimonRowType(extendedRowType)
+  }
 
   lazy val useV2Write: Boolean = {
     val v2WriteConfigured = OptionUtils.useV2Write()
