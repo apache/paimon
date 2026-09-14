@@ -282,8 +282,9 @@ public class LuminaVectorIndexOptions {
     }
 
     /**
-     * Ensures {@code encoding.pq.m} does not exceed the vector dimension. Lumina's QuantizerTrainer
-     * requires numChunks (pq.m) to be &gt; 0 and &le; dimension.
+     * Validates {@code encoding.pq.m} against the vector dimension. Lumina's QuantizerTrainer
+     * requires numChunks (pq.m) to be &gt; 0 and &le; dimension, so a non-positive value is
+     * rejected here rather than in the native trainer, and a value above the dimension is capped.
      */
     private static void capPqM(Map<String, String> opts, int dimension) {
         String encoding = opts.get(toLuminaKey(ENCODING_TYPE));
@@ -293,7 +294,7 @@ public class LuminaVectorIndexOptions {
         String pqMKey = toLuminaKey(ENCODING_PQ_M);
         String pqMStr = opts.get(pqMKey);
         if (pqMStr != null) {
-            int pqM = Integer.parseInt(pqMStr);
+            int pqM = validatePositive(Integer.parseInt(pqMStr), ENCODING_PQ_M.key());
             if (pqM > dimension) {
                 opts.put(pqMKey, String.valueOf(dimension));
             }

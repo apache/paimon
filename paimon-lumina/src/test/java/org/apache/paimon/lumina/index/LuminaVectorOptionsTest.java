@@ -27,6 +27,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Lumina vector options. */
 public class LuminaVectorOptionsTest {
@@ -146,6 +147,29 @@ public class LuminaVectorOptionsTest {
         nativeFormL2.put("lumina.index.dimension", "128");
         assertThat(new LuminaVectorIndexOptions(Options.fromMap(nativeFormL2)).toLuminaOptions())
                 .containsEntry("distance.metric", "l2");
+    }
+
+    @Test
+    public void testEncodingPqMBounds() {
+        // capPqM documents "> 0 and <= dimension" but enforced only the upper bound, so pq.m = 0
+        // was handed to the native trainer instead of being reported against its own key.
+        Map<String, String> zeroPqM = new HashMap<>();
+        zeroPqM.put("lumina.index.dimension", "128");
+        zeroPqM.put("lumina.encoding.type", "pq");
+        zeroPqM.put("lumina.encoding.pq.m", "0");
+
+        assertThatThrownBy(
+                        () ->
+                                new LuminaVectorIndexOptions(Options.fromMap(zeroPqM))
+                                        .toLuminaOptions())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("lumina.encoding.pq.m");
+
+        // The upper bound keeps clamping to the dimension rather than throwing.
+        Map<String, String> oversizedPqM = new HashMap<>(zeroPqM);
+        oversizedPqM.put("lumina.encoding.pq.m", "256");
+        assertThat(new LuminaVectorIndexOptions(Options.fromMap(oversizedPqM)).toLuminaOptions())
+                .containsEntry("encoding.pq.m", "128");
     }
 
     /** Builds the native lumina meta map (what gets serialized into the index file) for a field. */
