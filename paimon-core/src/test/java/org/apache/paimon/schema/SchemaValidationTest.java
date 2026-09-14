@@ -27,6 +27,8 @@ import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -1928,6 +1930,29 @@ class SchemaValidationTest {
                 1, fields, 10, partitionKeys, primaryKeys, options, "geospatial test");
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {1, 4, -2})
+    void testManifestSortForNonPartitionBucketedTable(int bucket) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(bucket));
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        singletonList(new DataField(0, "f0", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        singletonList("f0"),
+                        options,
+                        "");
+        assertThatNoException().isThrownBy(() -> validateTableSchema(schema));
+
+        options.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
+        assertThatThrownBy(() -> validateTableSchema(schema.copy(options)))
+                .hasMessageContaining(
+                        "'manifest-sort.partition-field' = 'f0' is not a partition field");
+    }
+
     @Test
     void testManifestSortValidation() {
         List<DataField> fields =
@@ -1935,7 +1960,7 @@ class SchemaValidationTest {
                         new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", DataTypes.INT()));
 
-        // Test 1: manifest-sort.enabled on non-partition table should fail
+        // Test 1: non-partition tables without bucket or RowID sorting should fail
         Map<String, String> options1 = new HashMap<>();
         options1.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
         options1.put(BUCKET.key(), String.valueOf(-1));
@@ -1951,7 +1976,7 @@ class SchemaValidationTest {
                                                 options1,
                                                 "")))
                 .hasMessageContaining(
-                        "Cannot enable 'manifest-sort.enabled' for non-partition table.");
+                        "Cannot enable 'manifest-sort.enabled' for non-partition table without fixed or postponed buckets or data evolution.");
 
         // Test 2: manifest-sort-partition-field not in partition keys should fail
         Map<String, String> options2 = new HashMap<>();

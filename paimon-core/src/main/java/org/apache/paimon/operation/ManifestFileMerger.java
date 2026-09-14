@@ -23,6 +23,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExceptionUtils;
 
@@ -61,9 +62,8 @@ public class ManifestFileMerger {
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            // If manifest-sort.enabled is enabled and there are sortable fields, use
-            // trySortRewrite. Data evolution tables sort by RowID when all manifest files contain
-            // RowID ranges, so they do not require partition fields.
+            // Bucketed tables and data evolution tables with complete RowID ranges do not require
+            // partition fields for manifest sort rewrite.
             if (canUseManifestSort(input, partitionType, options)) {
                 return ManifestFileSorter.trySortCompaction(
                         input, newFilesForAbort, manifestFile, partitionType, options, ioManager);
@@ -94,6 +94,8 @@ public class ManifestFileMerger {
             List<ManifestFileMeta> input, RowType partitionType, CoreOptions options) {
         return options.manifestSortEnabled()
                 && (partitionType.getFieldCount() > 0
+                        || options.bucket() > 0
+                        || options.bucket() == BucketMode.POSTPONE_BUCKET
                         || (options.dataEvolutionEnabled() && allContainsRowId(input)));
     }
 
