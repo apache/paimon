@@ -20,7 +20,9 @@
 No real OSS access is required.
 """
 
+import multiprocessing
 import os
+import pickle
 import unittest
 from unittest import mock
 
@@ -45,6 +47,20 @@ def _probe_response(status_code, body):
     response = mock.MagicMock(status_code=status_code)
     response.iter_content.return_value = iter([body])
     return response
+
+
+def _restore_oss_file_io(connection):
+    os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
+    connection.send("ready")
+    payload = connection.recv_bytes()
+    with mock.patch("pyarrow.fs.S3FileSystem", return_value=object()) as s3:
+        restored = pickle.loads(payload)
+    connection.send((
+        os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"),
+        s3.call_count,
+        restored.filesystem is s3.return_value,
+    ))
+    connection.close()
 
 
 class OssLegacyModeTest(unittest.TestCase):
@@ -285,8 +301,6 @@ class OssLegacyModeTest(unittest.TestCase):
     def test_file_io_pickle_roundtrip_recreates_lock(self):
         """The probe lock must not break pickling (FileIO travels to Ray or
         multiprocessing workers); probe state is carried over."""
-        import pickle
-
         options = Options({
             OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
@@ -306,6 +320,30 @@ class OssLegacyModeTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 restored._check_legacy_bucket_exists()
             get.assert_not_called()
+
+    def test_pickle_recreates_oss_client_with_worker_checksum_setting(self):
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=_restore_oss_file_io, args=(child,))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(15))
+            self.assertEqual("ready", parent.recv())
+
+            file_io = self._new_file_io(legacy=False)
+            file_io.filesystem = pafs.LocalFileSystem()
+            parent.send_bytes(pickle.dumps(file_io))
+
+            self.assertTrue(parent.poll(15))
+            self.assertEqual(("WHEN_REQUIRED", 1, True), parent.recv())
+        finally:
+            parent.close()
+            process.join(15)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        self.assertEqual(0, process.exitcode)
 
     def test_legacy_exists_true_for_plain_object(self):
         file_io = self._new_file_io(legacy=True)

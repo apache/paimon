@@ -100,11 +100,16 @@ class PyArrowFileIO(FileIO):
         state = self.__dict__.copy()
         # threading.Lock cannot be pickled; recreated in __setstate__.
         state.pop("_legacy_bucket_lock", None)
+        # Recreate legacy OSS clients with the worker's AWS SDK settings.
+        if state.get("_is_oss") and not state.get("_use_jindo"):
+            state.pop("filesystem", None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._legacy_bucket_lock = threading.Lock()
+        if self._is_oss and not self._use_jindo:
+            self.filesystem = self._initialize_oss_fs(None)
 
     @staticmethod
     def parse_location(location: str):
