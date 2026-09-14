@@ -744,6 +744,18 @@ class FileScanner:
         return not _get_all_fields(self.predicate).issubset(partition_keys)
 
     def _filter_manifest_file(self, file: ManifestFileMeta) -> bool:
+        # explain() counts bucket rejections at entry level, as with the early
+        # bucket filter. Keep reading those entries when collecting scan stats.
+        if self.scan_stats is None and file.min_bucket is not None and file.max_bucket is not None:
+            if self.only_read_real_buckets and file.max_bucket < 0:
+                return False
+            if (self._bucket_selector is not None
+                    and file.min_bucket >= 0
+                    and file.total_buckets is not None
+                    and file.total_buckets > 0
+                    and not self._bucket_selector.may_contain(
+                        file.min_bucket, file.max_bucket, file.total_buckets)):
+                return False
         if not self.partition_key_predicate:
             return True
         return self.partition_key_predicate.test_by_simple_stats(

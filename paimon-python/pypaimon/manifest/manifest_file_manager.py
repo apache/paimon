@@ -358,6 +358,13 @@ class ManifestFileManager:
         if schema_id is None:
             schema_id = self.table.table_schema.id
 
+        # Rescaling can mix bucket counts in one manifest. Only a common,
+        # positive count is safe for predicate-driven manifest pruning.
+        total_buckets = entries[0].total_buckets if entries else None
+        if total_buckets is not None and (
+                total_buckets <= 0 or any(e.total_buckets != total_buckets for e in entries)):
+            total_buckets = None
+
         partition_columns = list(zip(*(entry.partition.values for entry in entries))) if entries else []
         partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
         partition_min_stats = [
@@ -400,6 +407,11 @@ class ManifestFileManager:
                 null_counts=partition_null_counts,
             ),
             schema_id=schema_id,
+            min_bucket=min((e.bucket for e in entries), default=None),
+            max_bucket=max((e.bucket for e in entries), default=None),
+            min_level=min((e.file.level for e in entries), default=None),
+            max_level=max((e.file.level for e in entries), default=None),
             min_row_id=min_row_id,
             max_row_id=max_row_id,
+            total_buckets=total_buckets,
         )
