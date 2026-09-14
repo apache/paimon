@@ -568,7 +568,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             Description.builder()
-                                    .text("Whether to invoke manifest sort rewrite during commit.")
+                                    .text(
+                                            "Whether to invoke manifest sort rewrite during commit."
+                                                    + " Non-partitioned tables can sort by bucket"
+                                                    + " with fixed or postponed buckets, or by RowID"
+                                                    + " for data evolution tables when all input"
+                                                    + " manifests contain RowID ranges.")
                                     .linebreak()
                                     .text(
                                             "Note: enabling this changes the semantics of '"
@@ -587,7 +592,9 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Partition field name to sort manifest entries by. Validated by"
-                                    + " schema validation, if not configured, defaults to the first partition field.");
+                                    + " schema validation; must be unset for non-partitioned tables."
+                                    + " If not configured, defaults to the first partition field,"
+                                    + " or all partition fields for data evolution RowID sorting.");
 
     public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
             key("manifest-sort.max-rewrite-size")

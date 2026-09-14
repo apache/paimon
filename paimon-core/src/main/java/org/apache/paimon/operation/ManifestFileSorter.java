@@ -62,7 +62,7 @@ import java.util.function.Function;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /**
- * Manifest file sorter that sorts and rewrites manifest files by a configured partition field, or
+ * Manifest file sorter that sorts and rewrites manifest files by bucket and/or partition fields, or
  * by RowID for data evolution tables.
  */
 public class ManifestFileSorter {
@@ -697,7 +697,7 @@ public class ManifestFileSorter {
             } else if (sortKey.isAfterMax(file, earliestRun.get(earliestRun.size() - 1))) {
                 // Current file's min is after the run's max, append to this run
                 // Note: When min == max (boundary equality), files are considered
-                // non-overlapping for partition sort and can be placed in the same SortedRun.
+                // non-overlapping for bucket/partition sort and can share the same SortedRun.
                 // RowID sort uses inclusive ranges, so boundary equality is treated as overlap.
                 //
                 // See ManifestAdjacentSortedRun class comment for the full boundary equality
@@ -1207,29 +1207,32 @@ public class ManifestFileSorter {
             return new RowIdSortKey(partitionComparator, partitionType, partitionSortFields);
         }
 
-        if (partitionType.getFieldCount() == 0) {
-            throw new IllegalArgumentException(
-                    "Cannot resolve sort key for manifest sort rewrite.");
+        int sortFieldIndex = -1;
+        RecordComparator fieldComparator = null;
+        if (partitionType.getFieldCount() > 0) {
+            String sortField = resolveSortField(sortPartitionField, partitionType);
+            sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
+            if (sortFieldIndex < 0) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot resolve sort field '%s' for manifest sort rewrite.",
+                                sortField));
+            }
+            fieldComparator =
+                    CodeGenUtils.newRecordComparator(
+                            partitionType.getFieldTypes(), new int[] {sortFieldIndex});
         }
 
-        String sortField = resolveSortField(sortPartitionField, partitionType);
-        int sortFieldIndex = partitionType.getFieldNames().indexOf(sortField);
-        if (sortFieldIndex < 0) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot resolve sort field '%s' for manifest sort rewrite.",
-                            sortField));
-        }
-
-        RecordComparator fieldComparator =
-                CodeGenUtils.newRecordComparator(
-                        partitionType.getFieldTypes(), new int[] {sortFieldIndex});
         if (bucketed) {
             boolean compareManifestBuckets =
                     input.stream()
                             .allMatch(meta -> meta.minBucket() != null && meta.maxBucket() != null);
             return new BucketSortKey(
                     fieldComparator, partitionType, sortFieldIndex, compareManifestBuckets);
+        }
+        if (fieldComparator == null) {
+            throw new IllegalArgumentException(
+                    "Cannot resolve sort key for manifest sort rewrite.");
         }
         return new PartitionSortKey(fieldComparator, partitionType, sortFieldIndex);
     }
@@ -1355,31 +1358,38 @@ public class ManifestFileSorter {
 
     private static class BucketSortKey implements ManifestSortKey {
 
-        private final PartitionSortKey partitionSortKey;
-        private final InternalRow.FieldGetter sortFieldGetter;
+        @Nullable private final PartitionSortKey partitionSortKey;
+        @Nullable private final InternalRow.FieldGetter sortFieldGetter;
         private final RowType externalSortRowType;
         private final int[] externalSortKeyFields;
         private final int sortFieldNum;
         private final boolean compareManifestBuckets;
 
         private BucketSortKey(
-                RecordComparator fieldComparator,
+                @Nullable RecordComparator fieldComparator,
                 RowType partitionType,
                 int sortFieldIndex,
                 boolean compareManifestBuckets) {
-            this.partitionSortKey =
-                    new PartitionSortKey(fieldComparator, partitionType, sortFieldIndex);
             this.compareManifestBuckets = compareManifestBuckets;
-            DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
-            this.sortFieldGetter = InternalRow.createFieldGetter(sortFieldType, sortFieldIndex);
-            this.sortFieldNum = 4;
-            this.externalSortRowType =
-                    DataTypes.ROW(
-                            DataTypes.INT(),
-                            sortFieldType,
-                            DataTypes.TINYINT(),
-                            DataTypes.STRING(),
-                            ManifestEntry.MANIFEST_ROW_TYPE);
+            List<DataType> fieldTypes = new ArrayList<>();
+            fieldTypes.add(DataTypes.INT());
+            if (fieldComparator == null) {
+                this.partitionSortKey = null;
+                this.sortFieldGetter = null;
+            } else {
+                this.partitionSortKey =
+                        new PartitionSortKey(fieldComparator, partitionType, sortFieldIndex);
+                DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
+                this.sortFieldGetter = InternalRow.createFieldGetter(sortFieldType, sortFieldIndex);
+                fieldTypes.add(sortFieldType);
+            }
+            Collections.addAll(
+                    fieldTypes,
+                    DataTypes.TINYINT(),
+                    DataTypes.STRING(),
+                    ManifestEntry.MANIFEST_ROW_TYPE);
+            this.sortFieldNum = fieldTypes.size() - 1;
+            this.externalSortRowType = DataTypes.ROW(fieldTypes.toArray(new DataType[0]));
             this.externalSortKeyFields = createSequentialFields(sortFieldNum);
         }
 
@@ -1391,7 +1401,7 @@ public class ManifestFileSorter {
                     return bucketComparison;
                 }
             }
-            return partitionSortKey.compareMin(a, b);
+            return partitionSortKey == null ? 0 : partitionSortKey.compareMin(a, b);
         }
 
         @Override
@@ -1402,7 +1412,7 @@ public class ManifestFileSorter {
                     return bucketComparison;
                 }
             }
-            return partitionSortKey.compareMax(a, b);
+            return partitionSortKey == null ? 0 : partitionSortKey.compareMax(a, b);
         }
 
         @Override
@@ -1413,7 +1423,11 @@ public class ManifestFileSorter {
                     return bucketComparison > 0;
                 }
             }
-            return partitionSortKey.isAfterMax(file, maxFile);
+            // Without partition fields, equal bucket boundaries can share a run. Missing bucket
+            // statistics must conservatively be treated as overlapping ranges.
+            return partitionSortKey == null
+                    ? compareManifestBuckets
+                    : partitionSortKey.isAfterMax(file, maxFile);
         }
 
         @Override
@@ -1430,14 +1444,17 @@ public class ManifestFileSorter {
         public void replaceExternalSortRow(
                 GenericRow row, ManifestEntry entry, InternalRow binaryManifestRow) {
             row.setField(0, entry.bucket());
-            row.setField(1, sortFieldGetter.getFieldOrNull(entry.partition()));
-            row.setField(2, entry.kind().toByteValue());
+            int pos = 1;
+            if (sortFieldGetter != null) {
+                row.setField(pos++, sortFieldGetter.getFieldOrNull(entry.partition()));
+            }
+            row.setField(pos++, entry.kind().toByteValue());
             row.setField(
-                    3,
+                    pos++,
                     entry instanceof ProjectedManifestEntry
                             ? ((ProjectedManifestEntry) entry).file().fileNameBinary()
                             : BinaryString.fromString(entry.file().fileName()));
-            row.setField(4, binaryManifestRow);
+            row.setField(pos, binaryManifestRow);
         }
 
         @Override
