@@ -888,6 +888,20 @@ public class ManifestFileSorter {
         for (int i = 0; i < sections.size(); i++) {
             Section section = sections.get(i);
 
+            // Preserve the ordinary-compaction shortcut: an unchanged singleton must not consume
+            // the sort rewrite limit. Explicit full sort intentionally rewrites the singleton.
+            if (!ctx.fullSort && section.files.size() == 1) {
+                rewriteSection(
+                        section.files,
+                        output,
+                        sortNewFiles,
+                        ctx,
+                        manifestFile,
+                        manifestReadParallelism,
+                        false);
+                continue;
+            }
+
             // Phase 1: budget not yet exhausted -- perform aggressive sort rewrite.
             if (!budgetExhausted) {
                 // Phase 1a: section fits within the remaining budget -- sort and rewrite it

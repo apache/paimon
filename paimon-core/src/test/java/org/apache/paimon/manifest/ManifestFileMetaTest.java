@@ -1590,6 +1590,41 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertEquivalentEntries(input, rewritten);
     }
 
+    @Test
+    public void testManifestSortUnchangedSingletonDoesNotConsumeRewriteLimit() {
+        long targetSize = CoreOptions.MANIFEST_TARGET_FILE_SIZE.defaultValue().getBytes();
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(copyWithFileSize(makeManifest(makeEntry(true, "singleton", 0)), targetSize));
+        for (int i = 0; i < 5; i++) {
+            input.add(
+                    copyWithFileSize(
+                            makeManifest(
+                                    makeEntry(true, "range-" + i + "-1", 1),
+                                    makeEntry(true, "range-" + i + "-2", 2)),
+                            targetSize));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        testOptions.set(CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), "4M");
+        testOptions.set(CoreOptions.BUCKET, -1);
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        Set<String> inputNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        assertThat(merged).extracting(ManifestFileMeta::fileName).contains(input.get(0).fileName());
+        assertThat(merged)
+                .extracting(ManifestFileMeta::fileName)
+                .filteredOn(inputNames::contains)
+                .hasSize(4);
+        assertEquivalentEntries(input, merged);
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {-1, 4, -2})
     public void testManifestSortDryRunUsesBucketRangesForBucketedTable(int bucket) {
