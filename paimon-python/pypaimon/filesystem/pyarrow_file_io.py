@@ -194,10 +194,7 @@ class PyArrowFileIO(FileIO):
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
-        # Recent AWS SDKs enable streaming checksum trailers for PutObject.
-        # OSS does not implement that wire format, so request checksums only
-        # when the API requires them. Respect an explicit process setting;
-        # this setting is process-wide for AWS SDK clients.
+        # Disable optional checksum trailers unsupported by some S3-compatible services.
         os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
 
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
