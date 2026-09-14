@@ -2621,6 +2621,58 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     /**
+     * Regression for {@code scan.ignore-lost-files=true} on the DataEvolution path: two full-row
+     * parquet files hold f0 = 0..99 and 100..199; the first file is deleted after planning. The
+     * ordinary read returns the surviving file's f0 = 100..199, and a ranged read {@code
+     * RowRange.of(1, 2)} must return the matching slice (f0 = 101, 102) of that effective output,
+     * not {@code []}. The per-group range pushdown in DataEvolutionSplitRead indexes against
+     * manifest rowCount, so it must be disabled when files may be ignored, leaving the outer
+     * RangeSkipReader over the effective output in charge.
+     */
+    @Test
+    public void testRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        // build a data-evolution table with scan.ignore-lost-files=true
+        Schema schema = schemaDefault();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        Schema lostSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+        catalog.createTable(identifier(), lostSchema, true);
+        FileStoreTable table = getTableDefault();
+
+        // two full-row parquet files: file0 f0 = 0..99, file1 f0 = 0..99
+        writeFullRowRange(table, 0, 100);
+        writeFullRowRange(table, 100, 200);
+
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(1);
+        // the single split carries both files
+        DataSplit split =
+                splits.get(0) instanceof IndexedSplit
+                        ? ((IndexedSplit) splits.get(0)).dataSplit()
+                        : (DataSplit) splits.get(0);
+        assertThat(split.dataFiles().size()).isEqualTo(2);
+
+        // delete the first file (global effective rows 0..99) after planning
+        Path path = firstDataFilePath(table, split);
+        table.fileIO().deleteQuietly(path);
+
+        // ordinary read over the surviving file
+        List<Integer> ordinary = readRowRange(table, null);
+        assertThat(ordinary).isEqualTo(intRange(100, 199));
+
+        // ranged read must be the corresponding slice of the ordinary (effective) output
+        List<Integer> ranged = readRowRange(table, RowRange.of(1L, 2L));
+        assertThat(ranged).isEqualTo(intRange(101, 102));
+        assertThat(ranged).isEqualTo(ordinary.subList(1, 3));
+    }
+
+    /**
      * Writes {@code count} rows split across two column files (f0+f1, then f2) — a column merge.
      */
     private void writeColumnMerge(FileStoreTable table, int count) throws Exception {
@@ -2646,6 +2698,35 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
             setFirstRowId(commitables, rowId);
             commit.commit(commitables);
         }
+    }
+
+    /**
+     * Writes {@code count} full rows {@code (f0, "a"+f0, "b"+f0)} starting at f0 = {@code from}.
+     */
+    private void writeFullRowRange(FileStoreTable table, int from, int to) throws Exception {
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            for (int i = from; i < to; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    /** Resolves the physical path of the first data file carried by a planned split. */
+    private Path firstDataFilePath(FileStoreTable table, DataSplit dataSplit) {
+        DataFileMeta file = dataSplit.dataFiles().get(0);
+        DataFilePathFactory dataFilePathFactory =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(dataSplit.partition(), dataSplit.bucket());
+        return dataFilePathFactory.toPath(file);
     }
 
     /** Reads the f0 column of a slice via {@code TableRead::createReader(Split, RowRange)}. */

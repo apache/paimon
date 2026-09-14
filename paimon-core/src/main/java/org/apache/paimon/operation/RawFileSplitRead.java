@@ -224,7 +224,13 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         boolean hasFilter = filters != null && !filters.isEmpty();
         boolean hasDv = hasDeletionVector(files, dvFactories);
         boolean fullScanRange =
-                rowRange != null && !hasFilter && topN == null && limit == null && !hasDv;
+                rowRange != null
+                        && !hasFilter
+                        && topN == null
+                        && limit == null
+                        && !hasDv
+                        && !ignoreLostFiles
+                        && !ignoreCorruptFiles;
         boolean canPushdown = fullScanRange && !files.isEmpty();
         if (canPushdown) {
             for (DataFileMeta file : files) {

@@ -254,7 +254,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         // from the physical row count without reading any DV. See RawFileSplitRead for the same
         // pattern.
         boolean fullScanRange =
-                rowRange != null && rowRanges == null && deletionVectorFactory == null;
+                rowRange != null
+                        && rowRanges == null
+                        && deletionVectorFactory == null
+                        && !coreOptions.scanIgnoreLostFile()
+                        && !coreOptions.scanIgnoreCorruptFile();
         if (fullScanRange && !isNullOrEmpty(filters)) {
             fullScanRange = false;
         } else if (fullScanRange) {
