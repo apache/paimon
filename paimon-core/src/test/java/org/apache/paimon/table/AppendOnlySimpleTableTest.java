@@ -1106,6 +1106,53 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testParquetFilterOnUnprojectedColumn(boolean fileIndexEnabled) throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("status", DataTypes.STRING())
+                        .build();
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            options.set(WRITE_ONLY, true);
+                            if (fileIndexEnabled) {
+                                options.set("file-index.bitmap.columns", "status");
+                            }
+                        });
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(0, BinaryString.fromString("A")));
+            write.write(GenericRow.of(1, BinaryString.fromString("B")));
+            write.write(GenericRow.of(2, null));
+            write.write(GenericRow.of(3, BinaryString.fromString("A")));
+            commit.commit(write.prepareCommit());
+        }
+
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("A")))
+                        .withReadType(rowType.project(new int[] {0}));
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan().splits())) {
+            reader.forEachRemaining(
+                    row -> {
+                        assertThat(row.getFieldCount()).isEqualTo(1);
+                        ids.add(row.getInt(0));
+                    });
+        }
+        // ReadBuilder filtering is inclusive: all matching rows must survive projection.
+        assertThat(ids).contains(0, 3);
+    }
+
     @Test
     public void testTopNResultFilterParquetRowRanges() throws Exception {
         RowType rowType =
