@@ -1487,6 +1487,68 @@ class GenericIndexStreamingTest(unittest.TestCase):
         self.builder._table.file_io.delete_quietly.assert_called_once_with(
             '/index/completed.index')
 
+    def test_submit_failure_deletes_indexes_built_before_the_failure(self):
+        # ThreadPoolExecutor.submit() enqueues the work item before starting an
+        # extra worker, so a submission that raises can still have its shard run
+        # on an already running worker. Rollback must cover those outputs.
+        self.builder._core_options.global_index_build_parallelism.return_value = 2
+        shards = [
+            (_FakeSplit([]), Range(start, start + 9))
+            for start in (0, 10, 20, 30)
+        ]
+        started = threading.Semaphore(0)
+        release = threading.Event()
+
+        def build_shard(_split, row_range, *_args):
+            started.release()
+            self.assertTrue(release.wait(timeout=5))
+            index_file = types.SimpleNamespace(
+                external_path='/index/shard-%d.index' % row_range.from_,
+                file_name='shard-%d.index' % row_range.from_,
+            )
+            return CommitMessage(
+                partition=(row_range.from_,),
+                bucket=0,
+                new_files=[],
+                index_adds=[types.SimpleNamespace(index_file=index_file)],
+            )
+
+        self.builder._build_generic_shard = Mock(side_effect=build_shard)
+
+        real_start = threading.Thread.start
+        submits = []
+
+        def failing_start(thread):
+            if thread.name.startswith('paimon-global-index-build'):
+                submits.append(thread.name)
+                if len(submits) == 2:
+                    # The first worker already holds a queued shard; releasing it
+                    # here proves rollback sees work accepted before the failure.
+                    self.assertTrue(started.acquire(timeout=5))
+                    release.set()
+                    raise RuntimeError("can't start new thread")
+            return real_start(thread)
+
+        module = 'pypaimon.globalindex.create_global_index'
+        with patch(module + '._split_by_global_index_shard', return_value=shards), \
+                patch.object(threading.Thread, 'start', failing_start), \
+                self.assertRaisesRegex(RuntimeError, "can't start new thread"):
+            self.builder._build_generic_index(
+                [], [], Mock(), self.read, '/unused')
+
+        deleted = {
+            call[0][0]
+            for call in self.builder._table.file_io.delete_quietly.call_args_list
+        }
+        # Every shard that produced an index file is rolled back, and nothing
+        # that never ran is deleted.
+        built = {
+            '/index/shard-%d.index' % call[0][1].from_
+            for call in self.builder._build_generic_shard.call_args_list
+        }
+        self.assertTrue(built)
+        self.assertEqual(built, deleted)
+
     def test_serial_failure_deletes_completed_uncommitted_indexes(self):
         shards = [
             (_FakeSplit([]), Range(0, 9)),

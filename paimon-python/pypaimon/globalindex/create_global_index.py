@@ -17,6 +17,7 @@
 
 """Build global index files from Python."""
 
+import threading
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from functools import cmp_to_key
 from typing import Dict, List, Optional, Sequence, Union
@@ -319,23 +320,38 @@ class GlobalIndexBuilder:
                 self._delete_uncommitted_indexes(messages)
                 raise
 
+        # Workers record their own output so that rollback never depends on the
+        # future list being fully built. ThreadPoolExecutor.submit() enqueues the
+        # work item before it starts an extra worker, so a submission that raises
+        # (RuntimeError: can't start new thread) may still run its shard on an
+        # already running worker.
+        completed = []
+        completed_lock = threading.Lock()
+
+        def build_shard(index_split, index_range):
+            message = self._build_generic_shard(
+                index_split, index_range, index_field, table_read, index_path)
+            if message is not None:
+                with completed_lock:
+                    completed.append(message)
+            return message
+
         futures = []
         try:
             with ThreadPoolExecutor(
                 max_workers=min(parallelism, len(shards)),
                 thread_name_prefix="paimon-global-index-build",
             ) as executor:
-                futures = [
-                    executor.submit(
-                        self._build_generic_shard,
-                        index_split,
-                        index_range,
-                        index_field,
-                        table_read,
-                        index_path,
-                    )
-                    for index_split, index_range in shards
-                ]
+                try:
+                    for index_split, index_range in shards:
+                        futures.append(
+                            executor.submit(build_shard, index_split, index_range))
+                except BaseException:
+                    # Keep queued shards that have not started from building an
+                    # index file this build is about to delete.
+                    for future in futures:
+                        future.cancel()
+                    raise
                 done, _ = wait(futures, return_when=FIRST_EXCEPTION)
                 failed = next(
                     (future for future in futures
@@ -353,19 +369,10 @@ class GlobalIndexBuilder:
             return [message for message in results if message is not None]
         except BaseException:
             # Exiting the executor waits for in-flight shards to close their
-            # readers and writers. Delete every completed index because build()
-            # will not return commit messages after a shard failure.
-            messages = []
-            for future in futures:
-                if future.cancelled() or not future.done():
-                    continue
-                try:
-                    message = future.result()
-                except BaseException:
-                    continue
-                if message is not None:
-                    messages.append(message)
-            self._delete_uncommitted_indexes(messages)
+            # readers and writers, so ``completed`` is stable and fully visible
+            # here. Delete every index that was built because build() will not
+            # return commit messages after a failure.
+            self._delete_uncommitted_indexes(completed)
             raise
 
     def _build_generic_shard(
