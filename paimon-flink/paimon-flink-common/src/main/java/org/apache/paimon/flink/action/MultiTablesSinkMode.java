@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Locale;
 
 /**
  * There are two modes for database sink.
@@ -40,7 +41,7 @@ public enum MultiTablesSinkMode implements Serializable {
             return DIVIDED;
         }
 
-        switch (mode.toLowerCase()) {
+        switch (mode.toLowerCase(Locale.ROOT)) {
             case "divided":
                 return DIVIDED;
             case "combined":
@@ -51,6 +52,6 @@ public enum MultiTablesSinkMode implements Serializable {
     }
 
     public String configString() {
-        return name().toLowerCase().replace("_", "-");
+        return name().toLowerCase(Locale.ROOT).replace("_", "-");
     }
 }
