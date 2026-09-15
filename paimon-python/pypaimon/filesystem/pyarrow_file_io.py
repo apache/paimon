@@ -493,12 +493,12 @@ class PyArrowFileIO(FileIO):
         if file_info.type == pafs.FileType.Directory:
             if self._uses_s3_delete_fallback():
                 if recursive:
-                    return self._delete_s3_compatible_directory(path_str)
+                    return self._delete_s3_compatible_directory(path)
                 selector = pafs.FileSelector(
                     path_str, recursive=False, allow_not_found=True)
                 if self.filesystem.get_file_info(selector):
                     raise OSError(f"Directory {path} is not empty")
-                bucket, key = self._split_s3_path(path_str)
+                bucket, key = self._split_s3_path(path)
                 if key:
                     self._get_s3_delete_client().delete_object(
                         Bucket=bucket, Key=key.rstrip("/") + "/")

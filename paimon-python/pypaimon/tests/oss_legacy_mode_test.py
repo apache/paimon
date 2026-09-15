@@ -574,6 +574,38 @@ class CustomS3EndpointTest(unittest.TestCase):
         file_io.filesystem.delete_dir.assert_called_once_with(directory)
         file_io._s3_delete_client.delete_object.assert_not_called()
 
+    def test_recursive_delete_uses_bucket_from_target_uri(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+        _set_listed_keys(file_io, ["table/data.parquet"], [])
+
+        self.assertTrue(file_io.delete(
+            "s3://target-bucket/table", recursive=True))
+
+        self.assertEqual([
+            mock.call(Bucket="target-bucket", Key="table/data.parquet"),
+            mock.call(Bucket="target-bucket", Key="table/"),
+        ], file_io._s3_delete_client.delete_object.call_args_list)
+
+    def test_non_recursive_delete_uses_bucket_from_target_uri(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info("target-bucket/table", pafs.FileType.Directory)],
+            [],
+        ]
+
+        self.assertTrue(file_io.delete("s3://target-bucket/table"))
+
+        file_io._s3_delete_client.delete_object.assert_called_once_with(
+            Bucket="target-bucket", Key="table/")
+
     @unittest.skipUnless(
         parse(pyarrow.__version__) >= parse("22.0.0"),
         "requires PyArrow 22+ and boto3",
