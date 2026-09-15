@@ -55,7 +55,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.SequenceInputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -1131,8 +1133,13 @@ public class ManifestFileTest {
         int blockCount = 0;
         int rowCount = 0;
         byte[] bytes = Files.readAllBytes(tempDir.resolve("manifest").resolve(manifest.fileName()));
+        int split = bytes.length / 2;
 
-        try (ManifestAvroReader reader = openManifestReader(manifest)) {
+        try (ManifestAvroReader reader =
+                new ManifestAvroReader(
+                        new SequenceInputStream(
+                                new ByteArrayInputStream(bytes, 0, split),
+                                new ByteArrayInputStream(bytes, split, bytes.length - split)))) {
             byte[] header = reader.headerBytes();
             assertThat(header).isEqualTo(Arrays.copyOf(bytes, header.length));
             long nextOffset = header.length;
