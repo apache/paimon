@@ -17,6 +17,7 @@
 
 """Real bucket growth and cross-partition updates through native planning."""
 
+import json
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -75,6 +76,11 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         writer.write_arrow(pa.RecordBatch.from_pylist(rows, schema=schema))
         builder.new_commit().commit(writer.prepare_commit())
         table = catalog.get_table('default.t')
+        # Give incremental windows deterministic boundaries.
+        path = table.snapshot_manager().get_snapshot_path(snapshot_id)
+        snapshot = json.loads(table.file_io.read_file_utf8(path))
+        snapshot['timeMillis'] = snapshot_id * 100
+        table.file_io.write_file(path, json.dumps(snapshot), overwrite=True)
         pb = table.new_read_builder().new_predicate_builder()
         for predicate in (None, pb.equal('id', 1), pb.equal('p', 'a'), pb.equal('v', 'updated')):
             for shard in (None, (0, 2), (1, 2)):
@@ -99,3 +105,30 @@ def test_native_pk_bucket_growth_and_partition_migration(tmp_path, cross_partiti
         old_plan, old_rows = read(table.copy({'scan.snapshot-id': '1'}), native)
         assert old_plan.snapshot_id == 1
         assert old_rows == initial
+
+    # Java DeleteExistingProcessor emits DELETE in the old partition with
+    # the incoming non-partition values. Batch merging hides this distinction;
+    # incremental readers must preserve both the partition and the row kind.
+    events = [(row['id'], row['p'], row['v'], 0) for row in initial + updates]
+    if cross_partition:
+        events.append((1, 'a', 'moved', 3))
+    for native in (False, True):
+        for partition in (None, 'a', 'b'):
+            builder = table.copy({
+                'scan.native-plan.enabled': str(native).lower(),
+                'incremental-between-timestamp': '0,200',
+            }).new_read_builder()
+            if partition is not None:
+                builder.with_filter(pb.equal('p', partition))
+            scan = builder.new_scan()
+            if native:
+                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native fallback')):
+                    plan = scan.plan()
+            else:
+                plan = scan.plan()
+            assert all(split.is_streaming for split in plan.splits())
+            actual = [(row.get_field(0), row.get_field(1), row.get_field(2),
+                       row.get_row_kind().value)
+                      for row in builder.new_read().to_iterator(plan.splits())]
+            assert sorted(actual) == sorted(
+                event for event in events if partition is None or event[1] == partition)
