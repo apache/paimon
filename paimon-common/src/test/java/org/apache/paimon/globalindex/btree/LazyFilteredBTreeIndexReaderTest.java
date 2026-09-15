@@ -20,21 +20,28 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.UnionGlobalIndexReader;
 import org.apache.paimon.globalindex.btree.BTreeIndexReader.KeyRowIds;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SemaphoredDelegatingExecutor;
 
@@ -44,6 +51,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -64,6 +73,11 @@ import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 /** Test for {@link LazyFilteredBTreeReader} to read multiple files. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -92,6 +106,84 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         }
 
         return written;
+    }
+
+    @TestTemplate
+    public void testFusedRangeThroughEvaluatorAndWrappers() throws Exception {
+        List<Pair<Object, Long>> values = new ArrayList<>(data);
+        values.add(Pair.of(null, (long) dataNum));
+        List<GlobalIndexIOMeta> written = Collections.singletonList(writeData(values));
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(1, "testField", dataType)));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        LazyFilteredBTreeReader indexReader =
+                spy(
+                        (LazyFilteredBTreeReader)
+                                globalIndexer.createReader(
+                                        fileReader,
+                                        written,
+                                        dataNum + 1,
+                                        newDirectExecutorService()));
+        BTreeIndexReader btreeReader = spy(indexReader.openReader(written.get(0)));
+        doReturn(btreeReader).when(indexReader).openReader(written.get(0));
+        GlobalIndexReader wrapped =
+                new UnionGlobalIndexReader(
+                        Collections.singletonList(
+                                new OffsetGlobalIndexReader(indexReader, 1000L, 1000L + dataNum)));
+        try (GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(rowType, fieldId -> Collections.singletonList(wrapped))) {
+            Object from = data.get(dataNum / 4).getKey();
+            Object to = data.get(dataNum * 3 / 4).getKey();
+            // Include empty and singleton intervals, and both predicate orders.
+            for (Object[] bounds :
+                    Arrays.asList(
+                            new Object[] {from, to},
+                            new Object[] {from, from},
+                            new Object[] {to, from})) {
+                for (boolean lowerInclusive : Arrays.asList(false, true)) {
+                    for (boolean upperInclusive : Arrays.asList(false, true)) {
+                        Predicate lower =
+                                lowerInclusive
+                                        ? builder.greaterOrEqual(0, bounds[0])
+                                        : builder.greaterThan(0, bounds[0]);
+                        Predicate upper =
+                                upperInclusive
+                                        ? builder.lessOrEqual(0, bounds[1])
+                                        : builder.lessThan(0, bounds[1]);
+                        for (List<Predicate> order :
+                                Arrays.asList(
+                                        Arrays.asList(lower, upper), Arrays.asList(upper, lower))) {
+                            clearInvocations(btreeReader);
+                            GlobalIndexEvaluator.Evaluation result =
+                                    evaluator
+                                            .evaluateWithContributingFields(
+                                                    new CompoundPredicate(And.INSTANCE, order))
+                                            .get();
+                            List<Long> expected = new ArrayList<>();
+                            for (Pair<Object, Long> value : data) {
+                                int low = comparator.compare(value.getKey(), bounds[0]);
+                                int high = comparator.compare(value.getKey(), bounds[1]);
+                                if ((low > 0 || lowerInclusive && low == 0)
+                                        && (high < 0 || upperInclusive && high == 0)) {
+                                    expected.add(value.getValue() + 1000L);
+                                }
+                            }
+                            assertResult(result.result(), expected);
+                            assertThat(result.contributingFieldIds()).containsExactly(1);
+                            if (comparator.compare(bounds[0], bounds[1]) <= 0) {
+                                verify(btreeReader)
+                                        .visitRange(
+                                                bounds[0],
+                                                bounds[1],
+                                                lowerInclusive,
+                                                upperInclusive);
+                            }
+                            verifyNoMoreInteractions(btreeReader);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private int firstStrictlyGreaterKeyIndex() {

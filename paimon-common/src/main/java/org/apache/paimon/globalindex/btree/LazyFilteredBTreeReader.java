@@ -119,6 +119,16 @@ public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIn
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        return visitRange(
+                fieldRef,
+                from,
+                to,
+                reader -> reader.visitRange(from, to, fromInclusive, toInclusive));
+    }
+
+    @Override
     protected Optional<GlobalIndexResult> visitBetween(
             BTreeIndexReader reader, Object from, Object to) {
         return reader.visitBetween(from, to);
