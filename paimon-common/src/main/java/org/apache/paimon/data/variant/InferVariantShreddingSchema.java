@@ -354,16 +354,15 @@ public class InferVariantShreddingSchema {
 
             case DECIMAL:
                 BigDecimal dec = v.getDecimal();
-                int decPrecision = dec.precision();
+                if (dec.scale() < 0) {
+                    // getDecimal() strips trailing zeros, which turns 10.0 into 1E+1; a negative
+                    // scale is not a valid Paimon decimal, so fold the exponent back into digits
+                    dec = dec.setScale(0);
+                }
                 int decScale = dec.scale();
-                // Ensure precision is at least scale + 1 to be valid
-                if (decPrecision < decScale) {
-                    decPrecision = decScale;
-                }
-                // Ensure precision is at least 1
-                if (decPrecision == 0) {
-                    decPrecision = 1;
-                }
+                // precision() counts the digits of the unscaled value, so it is below the scale
+                // for a value under 0.1, which DecimalType rejects
+                int decPrecision = Math.max(dec.precision(), decScale);
                 return DataTypes.DECIMAL(decPrecision, decScale);
 
             case DATE:
