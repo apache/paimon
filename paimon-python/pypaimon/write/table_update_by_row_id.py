@@ -23,6 +23,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.data_evolution_split_generator import (
@@ -49,6 +50,7 @@ from pypaimon.write.row_utils import (
     value_for_arrow,
 )
 from pypaimon.write.writer.blob_writer import BlobWriter
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 @dataclass(frozen=True)
@@ -405,13 +407,15 @@ class TableUpdateByRowId:
             PyArrow Table containing the original data for columns that exist in the file,
             or None if no columns need to be read from the original file.
         """
+        table_read, origin_split = self._original_file_read(first_row_id, column_names)
+        original = table_read.to_arrow([origin_split])
+        return original.select(column_names)
+
+    def _original_file_read(self, first_row_id, column_names):
         wanted = set(column_names)
         read_fields: List[DataField] = [
             table_field for table_field in self.table.fields if table_field.name in wanted
         ]
-        if not read_fields:
-            return None
-
         entry = self._first_row_id_index.get(first_row_id)
         if entry is None:
             raise ValueError(f"No file found for first_row_id {first_row_id}")
@@ -432,8 +436,52 @@ class TableUpdateByRowId:
             predicate=None,
             read_type=read_fields + [SpecialFields.ROW_ID],
         )
-        original = table_read.to_arrow([origin_split])
-        return original.select([field.name for field in read_fields])
+        return table_read, origin_split
+
+    def _merged_batches(self, first_row_id, data, column_names):
+        """Merge ordinary columns a batch at a time in physical row order."""
+        table_read, split = self._original_file_read(first_row_id, column_names)
+        updates = sorted(enumerate(data[SpecialFields.ROW_ID.name].to_pylist()),
+                         key=lambda item: item[1])
+        update_index = 0
+        offset = first_row_id
+        with table_read._to_managed_arrow_batch_reader([split]) as reader:
+            for batch in reader:
+                end = offset + batch.num_rows
+                selected = []
+                while update_index < len(updates) and updates[update_index][1] < end:
+                    selected.append(updates[update_index][0])
+                    update_index += 1
+                original = pa.Table.from_batches([batch]).select(column_names)
+                if selected:
+                    merged, _ = self._merge_update_with_original(
+                        original, data.take(selected), column_names, offset)
+                else:
+                    merged = original
+                yield from merged.to_batches()
+                offset = end
+                del batch, original, merged
+        if update_index != len(updates):
+            raise ValueError('Update row IDs extend past the original file group')
+
+    def _write_group_streaming(self, partition, first_row_id, data, column_names):
+        writer = AppendOnlyDataWriter(
+            self.table, tuple(partition.values), 0, 0,
+            self.table.options, write_cols=column_names)
+        batches = self._merged_batches(first_row_id, data, column_names)
+        try:
+            files = writer.write_parquet_batches(batches)
+            self._assign_update_file_metadata(files, first_row_id, column_names, {})
+            if files:
+                self.commit_messages.append(CommitMessage(
+                    partition=tuple(partition.values), bucket=0, new_files=files,
+                    check_from_snapshot=self.snapshot_id))
+        except Exception:
+            writer.abort()
+            raise
+        finally:
+            batches.close()
+            writer.close()
 
     def _merge_update_with_original(
             self,
@@ -770,6 +818,18 @@ class TableUpdateByRowId:
         Reads the original file data, merges in the update values, and
         writes a single output file (rolling disabled) for the group.
         """
+        options = self.table.options
+        # Specialized writers still own their sidecars and physical encoding.
+        if (not self.table.is_primary_key_table
+                and options.file_format('parquet') == 'parquet'
+                and not (options.variant_shredding_enabled()
+                         and options.variant_shredding_schema())
+                and not options.data_evolution_row_sidecar_enabled(False)
+                and not options.with_vector_format()
+                and options.changelog_producer() == ChangelogProducer.NONE
+                and not any(is_blob_file_field(f) for f in self.table.fields)):
+            self._write_group_streaming(partition, first_row_id, data, column_names)
+            return
         original_data = self._read_original_file_data(first_row_id, column_names)
         _, target_files = self._first_row_id_index[first_row_id]
         blob_columns_with_baseline = {

@@ -16,11 +16,14 @@
 # under the License.
 
 import os
+from contextlib import contextmanager
 import unittest
 from unittest import mock
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 
+from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
@@ -60,6 +63,102 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
 
     def _apply_upsert_rows(self, table_update, rows, upsert_keys, cid):
         raise NotImplementedError
+
+    def test_partial_upsert_streams_original_file_group(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.list_(pa.struct([('text', pa.string())]))),
+            ('score', pa.int32()),
+        ])
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options, 'metadata.stats-mode': 'full'})
+        expected = [{'id': i, 'payload': [{'text': str(i)}], 'score': i}
+                    for i in range(12)]
+
+        def as_table(rows):
+            return pa.Table.from_pydict(
+                {name: [row[name] for row in rows] for name in schema.names},
+                schema=schema)
+
+        self._write_arrow(table, as_table(expected))
+        read_batches = TableRead._to_managed_arrow_batch_reader
+        write = pq.ParquetWriter.write_table
+        progress = {'read': 0, 'written': 0}
+        closed = []
+
+        @contextmanager
+        def bounded_reader(reader, splits, **kwargs):
+            source = read_batches(reader, splits, **kwargs)
+
+            def batches():
+                try:
+                    for batch in source:
+                        for start in range(0, batch.num_rows, 2):
+                            self.assertEqual(progress['read'], progress['written'])
+                            piece = batch.slice(start, 2)
+                            progress['read'] += piece.num_rows
+                            yield piece
+                finally:
+                    source.close()
+                    closed.append(True)
+            iterator = batches()
+            try:
+                yield iterator
+            finally:
+                iterator.close()
+
+        def record_write(writer, batch, **kwargs):
+            result = write(writer, batch, **kwargs)
+            progress['written'] += batch.num_rows
+            return result
+
+        for replacements in ([9, 1, 5], [0, 11]):
+            updates = [{'id': i, 'payload': None if i == 5 else
+                        [{'text': 'updated-' + str(i)}],
+                        'score': None if i == 5 else -i} for i in replacements]
+            progress.update(read=0, written=0)
+            with mock.patch.object(TableRead, 'to_arrow', side_effect=AssertionError(
+                    'upsert must not materialize the original file group')):
+                with mock.patch.object(TableRead, '_to_managed_arrow_batch_reader', bounded_reader):
+                    with mock.patch.object(pq.ParquetWriter, 'write_table', record_write):
+                        messages = self._upsert(
+                            table, as_table(updates),
+                            ['id'], ['payload', 'score'])
+            self.assertEqual(progress, {'read': 12, 'written': 12})
+            for row in updates:
+                expected[row['id']] = row
+            self.assertEqual(self._read_all(table).to_pydict(), as_table(expected).to_pydict())
+            files = [f for msg in messages for f in msg.new_files]
+            self.assertEqual(len(files), 1)
+            self.assertEqual((files[0].first_row_id, files[0].row_count), (0, 12))
+            scores = [r['score'] for r in expected if r['score'] is not None]
+            self.assertEqual(files[0].value_stats.min_values.values[1], min(scores))
+            self.assertEqual(files[0].value_stats.max_values.values[1], max(scores))
+            self.assertEqual(files[0].value_stats.null_counts, [1, 1])
+
+        # A failed streamed write must leave the committed table intact and
+        # remove the partially written overlay.
+        self.assertEqual(len(closed), 2)
+        progress.update(read=0, written=0)
+
+        def fail_second_write(writer, batch, **kwargs):
+            if progress['written']:
+                raise OSError('injected write failure')
+            return record_write(writer, batch, **kwargs)
+
+        with mock.patch.object(table.file_io, 'delete_quietly',
+                               wraps=table.file_io.delete_quietly) as delete:
+            with mock.patch.object(pq.ParquetWriter, 'write_table',
+                                   fail_second_write):
+                with mock.patch.object(TableRead, '_to_managed_arrow_batch_reader', bounded_reader):
+                    with self.assertRaisesRegex(OSError, 'injected write failure'):
+                        self._upsert(table, as_table(updates),
+                                     ['id'], ['payload', 'score'])
+        self.assertEqual(len(closed), 3)
+        self.assertTrue(delete.called)
+        for call in delete.call_args_list:
+            self.assertFalse(table.file_io.exists(call[0][0]))
+        self.assertEqual(self._read_all(table).to_pydict(), as_table(expected).to_pydict())
 
     # ------------------------------------------------------------------
     # Helpers built on the primitives
