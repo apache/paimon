@@ -90,7 +90,8 @@ supplied bytes directly and reports invalid containers with `IOException`.
 
 Version 1 uses the following layout. Container `int` and `long` fields are signed, fixed-width
 4-byte and 8-byte big-endian integers. Encoding IDs are unsigned bytes with separate namespaces.
-Payload integers use the variable-length encoding described below.
+Payload counts and envelopes use the same fixed-width types; delta/RLE runs use the
+variable-length encoding described below.
 
 ```text
 magic : 4 bytes                         // ASCII PMSC
@@ -143,9 +144,11 @@ Encoding 0 represents unavailable coverage, rather than encoding 1 with a zero c
 
 #### Delta and RLE Encoding
 
-Every integer inside an encoding-1 payload is a nonnegative unsigned LEB128 varint, using
-one to nine bytes for values from 0 through `Long.MAX_VALUE`. Seven value bits are stored
-per byte, least significant group first; the high bit indicates another byte follows.
+Each payload starts with a fixed-width count (`int`); row-ID payloads also have fixed-width
+`min` and `span` fields (`long`). Only integers in the following delta/RLE stream use
+nonnegative unsigned LEB128 varints, occupying one to nine bytes for values from 0 through
+`Long.MAX_VALUE`. Seven value bits are stored per byte, least significant group first; the
+high bit indicates another byte follows.
 Encodings use the shortest representation. There is no ZigZag transformation or padding.
 
 A sorted sequence is delta-encoded from a specified base. Consecutive equal deltas are
@@ -170,15 +173,16 @@ represented by its entries:
 
 ```text
 partitionPayload
-  partitionIdCount : varint            // N > 0
+  partitionIdCount : int               // N > 0
   runs[]                              // N dictionary IDs, base = 0
 ```
 
 An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
 IDs satisfy `0 <= id < partitionCount` and are strictly increasing. Tuple bytes appear only
 in the dictionary and are not repeated in each block. For IDs `[0, 1, 2, 3, 4]`, the deltas
-are `[0, 1, 1, 1, 1]` and the runs are `(1, 0), (4, 1)`. The complete payload bytes are
-`[5, 1, 0, 4, 1]`: 5 bytes, or 10 bytes including the encoding and length fields.
+are `[0, 1, 1, 1, 1]` and the runs are `(1, 0), (4, 1)`. The payload contains a four-byte
+count of 5 followed by the run bytes `[1, 0, 4, 1]`: 8 bytes, or 13 bytes including the
+encoding and length fields.
 
 With a partition filter, a block matches if any referenced tuple matches. A tuple containing
 a null partition value still has a dictionary ID. Unpartitioned tables record the empty
@@ -193,9 +197,9 @@ sorted and disjoint; they are never expanded into individual row IDs or coarsene
 
 ```text
 rowIdPayload
-  rangeCount : varint                  // N > 0
-  min : varint                         // first interval's start
-  span : varint                        // last interval's end minus min
+  rangeCount : int                     // N > 0
+  min : long                           // first interval's start
+  span : long                          // last interval's end minus min
   runs[]                              // 2 * (N - 1) interior endpoints, base = min
 ```
 
@@ -207,8 +211,10 @@ Pairing the reconstructed endpoints recovers the intervals. Each pair satisfies
 
 For `[(10, 19), (30, 39)]`, the count is 2, minimum is 10, and span is 29. The interior
 endpoints `[19, 30]` have deltas `[9, 11]` from base 10, encoded as `(1, 9), (1, 11)`.
-The complete payload bytes are `[2, 10, 29, 1, 9, 1, 11]`: 7 bytes, or 12 bytes with framing.
-For a single interval, the envelope completely defines the interval and no runs follow.
+The payload starts with a four-byte count of 2, an eight-byte minimum of 10, and an eight-byte
+span of 29, followed by the run bytes `[1, 9, 1, 11]`: 24 bytes, or 29 bytes with framing.
+For a single interval, the 20-byte fixed-width prefix completely defines the interval and
+no runs follow.
 
 The reader first tests the envelope without expanding any runs. A query for row ID 25
 passes the example's envelope check but matches neither interval. Unknown or invalid row-ID
@@ -220,7 +226,7 @@ When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
 
 ```text
 bucketPayload
-  pairCount : varint                   // N > 0
+  pairCount : int                      // N > 0
   runs[]                              // N packed pairs, base = 0
 
 packedPair = ((long) bucket << 32) | totalBuckets
@@ -234,7 +240,7 @@ The same bucket may occur with different totals after rescaling.
 
 For `[(1, 4), (1, 8), (3, 4)]`, the packed values are `[4294967300, 4294967304, 12884901892]`
 and deltas are `[4294967300, 4, 8589934588]`. The payload contains count 3 and three runs
-of length 1, occupying 15 bytes, or 20 bytes with framing. Repeated bucket strides with the
+of length 1, occupying 18 bytes, or 23 bytes with framing. Repeated bucket strides with the
 same total bucket count form a single run.
 
 Missing, invalid or negative/synthetic bucket metadata makes the block's bucket coverage

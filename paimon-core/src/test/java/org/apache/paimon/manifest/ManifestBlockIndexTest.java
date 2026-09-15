@@ -403,7 +403,7 @@ class ManifestBlockIndexTest {
         }
         byte[] data = builder.serialize(header.length + 800, 8);
         List<int[]> positions = positions(data);
-        int[] presentSizes = {8, 8, 8};
+        int[] presentSizes = {11, 25, 11};
         for (int mask = 0; mask < 8; mask++) {
             for (int dimension = 0; dimension < 3; dimension++) {
                 int start = positions.get(mask)[dimension + 1];
@@ -484,8 +484,10 @@ class ManifestBlockIndexTest {
 
     @Test
     void rowMissSkipsPartitionAndBucketDecoding() throws Exception {
-        byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 1, varints(2, 1, 999, 1, 1));
-        data = replacePayload(data, 0, 3, varints(2, 1, 0, 1, 0));
+        byte[] data =
+                replacePayload(
+                        fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 1, 999, 1, 1));
+        data = replacePayload(data, 0, 3, compressedPayload(2, 1, 0, 1, 0));
         BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
         assertThat(
                         ManifestSidecar.select(
@@ -497,7 +499,8 @@ class ManifestBlockIndexTest {
 
     @Test
     void partitionMissSkipsBucketDecodingWithOrWithoutRowQuery() throws Exception {
-        byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, varints(2, 1, 0, 1, 0));
+        byte[] data =
+                replacePayload(fixture("indexWithBuckets"), 0, 3, compressedPayload(2, 1, 0, 1, 0));
         for (RowRangeIndex rows : Arrays.asList(null, query(0))) {
             BiPredicate<Integer, Integer> buckets = mock(BiPredicate.class);
             assertThat(
@@ -511,7 +514,9 @@ class ManifestBlockIndexTest {
 
     @Test
     void absentPartitionFilterDoesNotDecodePartitionIds() throws Exception {
-        byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 1, varints(2, 1, 999, 1, 1));
+        byte[] data =
+                replacePayload(
+                        fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 1, 999, 1, 1));
         BiPredicate<Integer, Integer> buckets = spy(bucketFilter(1));
         assertThat(
                         ManifestSidecar.select(data, goldenMeta(), query(20), null, type, buckets)
@@ -527,7 +532,8 @@ class ManifestBlockIndexTest {
     @Test
     void matchesSkipUnusedDeltaRuns() throws Exception {
         byte[] partitions =
-                replacePayload(fixture("indexWithBuckets"), 0, 1, varints(2, 1, 0, 1, 999));
+                replacePayload(
+                        fixture("indexWithBuckets"), 0, 1, compressedPayload(2, 1, 0, 1, 999));
         assertThat(
                         ManifestSidecar.select(partitions, goldenMeta(), query(0), part(7), type)
                                 .blocks())
@@ -542,7 +548,7 @@ class ManifestBlockIndexTest {
                         fixture("indexWithBuckets"),
                         0,
                         3,
-                        varints(2, 1, (1L << 32) | 4, 1, Long.MAX_VALUE));
+                        compressedPayload(2, 1, (1L << 32) | 4, 1, Long.MAX_VALUE));
         assertThat(
                         ManifestSidecar.select(
                                         buckets,
@@ -576,7 +582,7 @@ class ManifestBlockIndexTest {
                         builder.serialize(header.length + 100, 3),
                         0,
                         2,
-                        varints(3, 0, 49, 1, 9, 1, 11, 1, 9, 1, 99));
+                        rowPayload(3, 0, 49, 1, 9, 1, 11, 1, 9, 1, 99));
         ManifestFileMeta meta = meta("m", header.length + 100, 3);
         assertThat(ManifestSidecar.select(rows, meta, query(0)).blocks()).hasSize(1);
         assertThat(ManifestSidecar.select(rows, meta, query(20)).blocks()).hasSize(1);
@@ -589,19 +595,23 @@ class ManifestBlockIndexTest {
     void malformedCompressedPayloadsFailWhenConsumed() throws Exception {
         List<byte[]> badRows =
                 Arrays.asList(
-                        varints(2, 0, 24, 0, 9), // Zero-length run.
-                        varints(2, 0, 24, 3, 9), // More values than the interval count allows.
-                        varints(2, 0, 24, 1, 9, 1), // Truncated delta.
-                        varints(2, 0, 24, 1, 9, 1, 0), // Overlapping intervals.
-                        varints(2, 0, 24, 2, Long.MAX_VALUE), // Run exceeds the envelope.
-                        varints(1, Long.MAX_VALUE, 1), // Envelope overflows.
-                        varints(1, 0, 24, 1, 0)); // Unexpected run for a single interval.
+                        rowPayload(2, 0, 24, 0, 9), // Zero-length run.
+                        rowPayload(2, 0, 24, 3, 9), // More values than the interval count allows.
+                        rowPayload(2, 0, 24, 1, 9, 1), // Truncated delta.
+                        rowPayload(2, 0, 24, 1, 9, 1, 0), // Overlapping intervals.
+                        rowPayload(2, 0, 24, 2, Long.MAX_VALUE), // Run exceeds the envelope.
+                        rowPayload(1, Long.MAX_VALUE, 1), // Envelope overflows.
+                        rowPayload(1, -1, 24), // Negative minimum.
+                        rowPayload(1, 0, -1), // Negative span.
+                        Arrays.copyOf(rowPayload(1, 0, 24), 19), // Truncated fixed-width envelope.
+                        rowPayload(1, 0, 24, 1, 0)); // Unexpected run for a single interval.
         for (byte[] payload : badRows) {
             byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 2, payload);
             assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(15)))
                     .isInstanceOf(IOException.class);
         }
-        for (byte[] payload : Arrays.asList(varints(2, 1, 999, 1, 0), varints(2, 2, 0))) {
+        for (byte[] payload :
+                Arrays.asList(compressedPayload(2, 1, 999, 1, 0), compressedPayload(2, 2, 0))) {
             byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 1, payload);
             assertThatThrownBy(
                             () ->
@@ -611,7 +621,9 @@ class ManifestBlockIndexTest {
         }
         for (byte[] payload :
                 Arrays.asList(
-                        varints(2, 1, 0, 1, 4), varints(2, 1, 1L << 31, 1, 4), varints(2, 2, 0))) {
+                        compressedPayload(2, 1, 0, 1, 4),
+                        compressedPayload(2, 1, 1L << 31, 1, 4),
+                        compressedPayload(2, 2, 0))) {
             byte[] data = replacePayload(fixture("indexWithBuckets"), 0, 3, payload);
             assertThatThrownBy(
                             () ->
@@ -627,26 +639,50 @@ class ManifestBlockIndexTest {
     }
 
     @Test
-    void invalidVarintsFramingAndDirectoryFailEvenWhenFiltersMiss() throws Exception {
-        List<byte[]> bad =
+    void malformedRunVarintsFailWhenConsumed() throws Exception {
+        byte[] overlong = new byte[10];
+        Arrays.fill(overlong, (byte) 0x80);
+        for (byte[] runs :
                 Arrays.asList(
                         new byte[] {(byte) 0x80},
-                        new byte[] {(byte) 0x81, 0, 1, 1}, // Noncanonical count.
-                        new byte[] {
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            (byte) 0x80,
-                            1
-                        },
-                        varints(0, 1, 1),
-                        varints(4, 1, 1),
-                        varints(1));
+                        new byte[] {1, (byte) 0x80}, // Truncated delta.
+                        new byte[] {(byte) 0x81, 0, 0}, // Noncanonical repeat count.
+                        new byte[] {1, (byte) 0x80, 0}, // Noncanonical delta.
+                        overlong)) {
+            for (int dimension = 1; dimension <= 3; dimension++) {
+                ByteArrayOutputStream payload = new ByteArrayOutputStream();
+                payload.write(dimension == 2 ? rowPayload(2, 0, 24) : compressedPayload(2));
+                payload.write(runs);
+                byte[] data =
+                        replacePayload(
+                                fixture("indexWithBuckets"), 0, dimension, payload.toByteArray());
+                int dim = dimension;
+                assertThatThrownBy(
+                                () ->
+                                        ManifestSidecar.select(
+                                                data,
+                                                goldenMeta(),
+                                                query(0),
+                                                dim == 1 ? part(99) : null,
+                                                type,
+                                                dim == 3 ? bucketFilter(99) : null))
+                        .isInstanceOf(IOException.class);
+            }
+        }
+    }
+
+    @Test
+    void invalidCountFramingAndDirectoryFailEvenWhenFiltersMiss() throws Exception {
+        List<byte[]> bad =
+                Arrays.asList(
+                        new byte[0],
+                        new byte[3], // Incomplete int count.
+                        compressedPayload(-1, 1, 1),
+                        compressedPayload(0, 1, 1),
+                        compressedPayload(4, 1, 1),
+                        compressedPayload(Integer.MAX_VALUE, 1, 1),
+                        compressedPayload(1), // Count without payload data.
+                        Arrays.copyOf(compressedPayload(1, 1, 1), 5));
         for (int dimension = 1; dimension <= 3; dimension++) {
             for (byte[] payload : bad) {
                 byte[] data = replacePayload(fixture("indexWithBuckets"), 0, dimension, payload);
@@ -660,6 +696,11 @@ class ManifestBlockIndexTest {
             assertThatThrownBy(() -> ManifestSidecar.select(data, goldenMeta(), query(999)))
                     .isInstanceOf(IOException.class);
         }
+        byte[] missingEnvelope =
+                replacePayload(
+                        fixture("indexWithBuckets"), 0, 2, Arrays.copyOf(rowPayload(1, 0, 24), 19));
+        assertThatThrownBy(() -> ManifestSidecar.select(missingEnvelope, goldenMeta(), null))
+                .isInstanceOf(IOException.class);
         byte[] data = fixture("indexWithBuckets");
         int block = positions(data).get(0)[0];
         ByteBuffer.wrap(data).putLong(block + 16, 2);
@@ -709,7 +750,26 @@ class ManifestBlockIndexTest {
         return checksum(buffer.toByteArray());
     }
 
-    private static byte[] varints(long... values) {
+    private static byte[] compressedPayload(int count, long... values) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(buffer);
+        out.writeInt(count);
+        out.write(runBytes(values));
+        return buffer.toByteArray();
+    }
+
+    private static byte[] rowPayload(int count, long min, long span, long... values)
+            throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(buffer);
+        out.writeInt(count);
+        out.writeLong(min);
+        out.writeLong(span);
+        out.write(runBytes(values));
+        return buffer.toByteArray();
+    }
+
+    private static byte[] runBytes(long... values) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         for (long value : values) {
             while ((value & ~0x7fL) != 0) {

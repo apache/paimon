@@ -272,9 +272,9 @@ public final class ManifestSidecar {
             DataOutputStream out = new DataOutputStream(buffer);
             long min = ranges.firstKey();
             long max = ranges.lastEntry().getValue();
-            encodeLong(out, ranges.size());
-            encodeLong(out, min);
-            encodeLong(out, max - min);
+            out.writeInt(ranges.size());
+            out.writeLong(min);
+            out.writeLong(max - min);
             // The envelope supplies the first start and last end. Encode only interior endpoints.
             DeltaRleWriter encoder = new DeltaRleWriter(out, min);
             int index = 0;
@@ -322,7 +322,7 @@ public final class ManifestSidecar {
                 throws IOException {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(buffer);
-            encodeLong(out, count);
+            out.writeInt(count);
             DeltaRleWriter encoder = new DeltaRleWriter(out, 0);
             for (Number value : values) {
                 encoder.add(value.longValue());
@@ -474,14 +474,15 @@ public final class ManifestSidecar {
             Payload rowPayload = payload(in, records);
             Payload bucketPayload = payload(in, records);
             require(partitionPayload == null || partitionPayload.count <= partitions);
+            require(rowPayload == null || rowPayload.data.remaining() >= 2 * Long.BYTES);
             long blockFirstRecord = firstRecord;
             nextOffset = offset + length;
             firstRecord += records;
 
             if (query != null && rowPayload != null) {
-                long min = readVarLong(rowPayload.data);
-                long span = readVarLong(rowPayload.data);
-                require(span <= Long.MAX_VALUE - min);
+                long min = rowPayload.data.getLong();
+                long span = rowPayload.data.getLong();
+                require(min >= 0 && span >= 0 && span <= Long.MAX_VALUE - min);
                 long max = min + span;
                 DeltaRleReader endpoints =
                         new DeltaRleReader(rowPayload.data, 2L * (rowPayload.count - 1), min, max);
@@ -572,11 +573,10 @@ public final class ManifestSidecar {
         if (encoding != 1) {
             return null;
         }
-        long count = readVarLong(result);
-        require(count > 0 && count <= records && count <= Integer.MAX_VALUE);
-        // At least an envelope (row IDs) or one delta run (partitions/buckets) must follow.
-        require(result.remaining() >= 2);
-        return new Payload((int) count, result);
+        require(result.remaining() >= Integer.BYTES + 2);
+        int count = result.getInt();
+        require(count > 0 && count <= records);
+        return new Payload(count, result);
     }
 
     /** Writes equal consecutive deltas as (run length, delta), both unsigned varints. */
