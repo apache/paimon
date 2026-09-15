@@ -25,12 +25,13 @@ The REST Management API is an experimental OpenAPI 3.1 control-plane extension f
 object privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract
 version is `1.0` and may evolve incompatibly while the design is being validated.
 
-`RESTCatalog` exposes `permissionManagement()` and `policyManagement()` directly. These methods are
-intentionally not part of the generic `Catalog` interface. Other catalog implementations do not
-expose this management contract.
+`RESTCatalog` exposes `labelManagement()`, `permissionManagement()`, and `policyManagement()`
+directly. These methods are intentionally not part of the generic `Catalog` interface. Other
+catalog implementations do not expose this management contract.
 
-`RESTApi` also exposes generic label operations. Their wire contract and Java client are provided
-here; the REST server must implement entity resolution, authorization, and atomic label storage.
+`LabelManagement` provides generic label operations backed by the catalog's existing `RESTApi`
+client, authentication, and prefix configuration. The REST server must implement entity resolution,
+authorization, and atomic label storage.
 
 ## Find the Right Operation
 
@@ -84,6 +85,25 @@ server may identify a table as `sales.orders` and a column as `sales.orders.orde
 must define unambiguous names, including how to quote or escape identifier components. The client
 passes names unchanged and never splits them on dots. Path parameters use REST Catalog URL
 encoding as individual UTF-8 segments; JSON responses contain the original unencoded strings.
+
+### Java catalog access
+
+Obtain `LabelManagement` from a configured `RESTCatalog`. Read methods return `Label` objects with
+the entity type, canonical entity name, key, and value:
+
+```java
+import org.apache.paimon.management.LabelManagement;
+
+LabelManagement labels = restCatalog.labelManagement();
+labels.upsertLabel("TABLE", "sales.orders", "domain", "sales");
+String domain = labels.getLabel("TABLE", "sales.orders", "domain").getValue();
+labels.listLabels("TABLE", "sales.orders"); // Follows all pages.
+labels.listLabelsPaged("TABLE", "sales.orders", 100, null); // Reads one page.
+labels.deleteLabel("TABLE", "sales.orders", "domain");
+```
+
+The standalone `RESTApi` client also exposes these operations; see
+[Java REST API](../../program-api/rest-api#entity-labels).
 
 ### Set a label
 
