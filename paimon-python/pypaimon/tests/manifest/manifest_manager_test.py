@@ -328,6 +328,24 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(read_record.call_count, 1)
         self.assertEqual(skip_record.call_count, 2)
 
+    def test_single_manifest_read_does_not_create_executor(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        _, manager, entries = self._partitioned_manifest()
+        manifests = manager.rolling_write(
+            entries, 1024 * 1024, 'single-manifest')
+
+        with mock.patch.object(
+                manager_module, 'ThreadPoolExecutor') as executor:
+            actual = manager.read_entries_parallel(
+                manifests,
+                early_entry_filter=lambda bucket, _: bucket == 1)
+
+        executor.assert_not_called()
+        self.assertEqual(
+            [entry.file.file_name for entry in actual],
+            ['selected.parquet', 'partition-pruned.parquet'])
+
     def test_reordered_manifest_fields_use_compatible_reader(self):
         import pypaimon.manifest.manifest_file_manager as manager_module
 

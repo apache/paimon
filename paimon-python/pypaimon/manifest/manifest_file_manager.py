@@ -151,14 +151,23 @@ class ManifestFileManager:
 
         deleted_entry_keys = set()
         added_entries = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_results = executor.map(_process_single_manifest, manifest_files)
-            for entries in future_results:
-                for entry in entries:
-                    if entry.kind == 0:  # ADD
-                        added_entries.append(entry)
-                    else:  # DELETE
-                        deleted_entry_keys.add(_entry_identifier(entry))
+
+        def _collect(entries):
+            for entry in entries:
+                if entry.kind == 0:  # ADD
+                    added_entries.append(entry)
+                else:  # DELETE
+                    deleted_entry_keys.add(_entry_identifier(entry))
+
+        if len(manifest_files) == 1:
+            # Avoid executor overhead and keep native block decoding on the
+            # caller thread for the common single-manifest case.
+            _collect(_process_single_manifest(manifest_files[0]))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for entries in executor.map(
+                        _process_single_manifest, manifest_files):
+                    _collect(entries)
 
         final_entries = [
             entry for entry in added_entries
