@@ -40,6 +40,7 @@ public class ResourcePaths {
     protected static final String CONSUMERS = "consumers";
     protected static final String SCHEMAS = "schemas";
     protected static final String VIEWS = "views";
+    protected static final String SEMANTIC_VIEWS = "semantic-views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
     protected static final String ROLLBACK = "rollback";
@@ -75,21 +76,36 @@ public class ResourcePaths {
         checkArgument(
                 entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
         return SLASH.join(
-                V1, prefix, LABELS, encodeLabelSegment(entityType), encodeLabelSegment(entityName));
+                V1, prefix, LABELS, encodePathSegment(entityType), encodePathSegment(entityName));
     }
 
     @Experimental
     public String label(String entityType, String entityName, String key) {
         checkArgument(key != null && !key.trim().isEmpty(), "key must not be blank");
-        return SLASH.join(labels(entityType, entityName), encodeLabelSegment(key));
+        return SLASH.join(labels(entityType, entityName), encodePathSegment(key));
     }
 
-    private static String encodeLabelSegment(String value) {
+    private static String encodePathSegment(String value) {
         // Form encoding leaves dot segments unchanged, but they must be treated as names here.
         if (".".equals(value) || "..".equals(value)) {
             return value.replace(".", "%2E");
         }
         return encodeString(value);
+    }
+
+    /** Semantic view names are encoded as independent path segments. */
+    @Experimental
+    public String semanticViews(String database) {
+        checkArgument(database != null && !database.trim().isEmpty(), "database must not be blank");
+        return SLASH.join(V1, prefix, DATABASES, encodePathSegment(database), SEMANTIC_VIEWS);
+    }
+
+    @Experimental
+    public String semanticView(String database, String semanticView) {
+        checkArgument(
+                semanticView != null && !semanticView.trim().isEmpty(),
+                "semanticView must not be blank");
+        return SLASH.join(semanticViews(database), encodePathSegment(semanticView));
     }
 
     @Experimental
