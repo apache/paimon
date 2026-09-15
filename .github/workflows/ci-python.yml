@@ -226,6 +226,8 @@ jobs:
                 'commit', source['vcs_info']['commit_id'])
           assert hasattr(PaimonCatalog, 'get_table'), 'Missing PaimonCatalog.get_table'
           assert hasattr(Split, 'serialize'), 'Missing Split.serialize'
+          assert hasattr(Split, 'is_streaming'), 'Missing stream-aware Split.is_streaming'
+          assert hasattr(ReadBuilder, 'new_incremental_scan'), 'Missing ReadBuilder.new_incremental_scan'
           assert hasattr(ReadBuilder, 'with_row_ranges'), 'Missing ReadBuilder.with_row_ranges'
           PY
 
