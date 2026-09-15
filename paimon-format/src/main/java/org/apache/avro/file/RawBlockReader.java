@@ -18,40 +18,48 @@
 
 package org.apache.avro.file;
 
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
+
 import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 
-import java.io.ByteArrayOutputStream;
-import java.io.FilterInputStream;
+import javax.annotation.Nullable;
+
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.Arrays;
 import java.util.NoSuchElementException;
 
 /** Package bridge exposing Avro's compressed blocks without reflection. */
 public final class RawBlockReader extends DataFileStream<Void> {
 
-    private final CountingInput input;
-    private final byte[] headerBytes;
+    private final SeekableInputStream input;
+    private final long headerLength;
+    @Nullable private byte[] headerBytes;
     private long blockOffset;
     private long blockLength;
     private boolean pending;
 
-    public RawBlockReader(InputStream input) throws IOException {
-        this(new CountingInput(input));
-    }
-
-    private RawBlockReader(CountingInput input) throws IOException {
+    public RawBlockReader(SeekableInputStream input) throws IOException {
         super(input, new NoOpDatumReader<Void>());
         this.input = input;
-        long length = position();
-        this.headerBytes = Arrays.copyOf(input.prefix.toByteArray(), (int) length);
-        input.prefix = null;
+        this.headerLength = position();
     }
 
-    /** Returns a copy of the complete OCF header, including its sync marker. */
-    public byte[] headerBytes() {
+    /** Returns a copy of the complete OCF header, reading and caching it on first access. */
+    public byte[] headerBytes() throws IOException {
+        if (headerBytes == null) {
+            byte[] bytes = new byte[Math.toIntExact(headerLength)];
+            long resumePosition = input.getPos();
+            try {
+                input.seek(0);
+                IOUtils.readFully(input, bytes);
+            } finally {
+                // Preserve the position past any bytes already buffered by the Avro decoder.
+                input.seek(resumePosition);
+            }
+            headerBytes = bytes;
+        }
         return headerBytes.clone();
     }
 
@@ -69,7 +77,7 @@ public final class RawBlockReader extends DataFileStream<Void> {
 
     private long position() throws IOException {
         // This is the same read-ahead adjustment used by DataFileReader.blockFinished().
-        return input.position - vin.inputStream().available();
+        return input.getPos() - vin.inputStream().available();
     }
 
     public boolean hasNextRawBlock() throws IOException {
@@ -90,39 +98,6 @@ public final class RawBlockReader extends DataFileStream<Void> {
         return reuse == null
                 ? new RawBlock(raw, resolveCodec(), getSchema())
                 : reuse.replace(raw, resolveCodec(), getSchema());
-    }
-
-    private static final class CountingInput extends FilterInputStream {
-        private long position;
-        private ByteArrayOutputStream prefix = new ByteArrayOutputStream();
-
-        private CountingInput(InputStream input) {
-            super(input);
-        }
-
-        @Override
-        public int read() throws IOException {
-            int value = in.read();
-            if (value >= 0) {
-                position++;
-                if (prefix != null) {
-                    prefix.write(value);
-                }
-            }
-            return value;
-        }
-
-        @Override
-        public int read(byte[] bytes, int offset, int length) throws IOException {
-            int n = in.read(bytes, offset, length);
-            if (n > 0) {
-                position += n;
-                if (prefix != null) {
-                    prefix.write(bytes, offset, n);
-                }
-            }
-            return n;
-        }
     }
 
     private static final class NoOpDatumReader<D> implements DatumReader<D> {

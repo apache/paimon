@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -30,7 +31,6 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Collections;
 
 /**
@@ -45,7 +45,7 @@ public final class AvroBlockReader implements Closeable {
 
     private @Nullable AvroRawBlock borrowedRawBlock;
 
-    public AvroBlockReader(InputStream input) throws IOException {
+    public AvroBlockReader(SeekableInputStream input) throws IOException {
         try {
             this.reader = new RawBlockReader(input);
         } catch (IOException | RuntimeException | Error e) {
@@ -55,7 +55,7 @@ public final class AvroBlockReader implements Closeable {
     }
 
     /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
-    public byte[] headerBytes() {
+    public byte[] headerBytes() throws IOException {
         return reader.headerBytes();
     }
 

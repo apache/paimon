@@ -26,6 +26,7 @@ import org.apache.paimon.format.avro.AvroRawBlock;
 import org.apache.paimon.format.avro.AvroRecordDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldDecoder;
 import org.apache.paimon.format.avro.AvroRecordDecoder.FieldType;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -34,7 +35,6 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -56,7 +56,7 @@ public final class ManifestAvroReader implements AutoCloseable {
 
     private long blockOrdinal = -1;
 
-    ManifestAvroReader(InputStream input) throws IOException {
+    ManifestAvroReader(SeekableInputStream input) throws IOException {
         AvroBlockReader blockReader = null;
         try {
             blockReader = new AvroBlockReader(input);
@@ -71,7 +71,7 @@ public final class ManifestAvroReader implements AutoCloseable {
     }
 
     /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
-    public byte[] headerBytes() {
+    public byte[] headerBytes() throws IOException {
         return blockReader.headerBytes();
     }
 
