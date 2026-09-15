@@ -392,7 +392,7 @@ class TableUpdateByRowId:
                 group_blob_object_columns,
             )
 
-    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> Optional[pa.Table]:
+    def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> pa.Table:
         """Read original file data for the given first_row_id.
 
         Only reads columns that exist in the original file and need to be updated.
@@ -404,8 +404,7 @@ class TableUpdateByRowId:
             column_names: The column names to update
 
         Returns:
-            PyArrow Table containing the original data for columns that exist in the file,
-            or None if no columns need to be read from the original file.
+            PyArrow Table containing the original values for the requested columns.
         """
         table_read, origin_split = self._original_file_read(first_row_id, column_names)
         original = table_read.to_arrow([origin_split])
@@ -470,7 +469,7 @@ class TableUpdateByRowId:
             self.table.options, write_cols=column_names)
         batches = self._merged_batches(first_row_id, data, column_names)
         try:
-            files = writer.write_parquet_batches(batches)
+            files = writer.write_batches(batches)
             self._assign_update_file_metadata(files, first_row_id, column_names, {})
             if files:
                 self.commit_messages.append(CommitMessage(

@@ -160,6 +160,25 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             self.assertFalse(table.file_io.exists(call[0][0]))
         self.assertEqual(self._read_all(table).to_pydict(), as_table(expected).to_pydict())
 
+        # Closing the format writer is part of the file transaction too.
+        close = pq.ParquetWriter.close
+
+        def fail_close(writer):
+            was_open = writer.is_open
+            close(writer)
+            if was_open:
+                raise OSError('injected close failure')
+
+        with mock.patch.object(table.file_io, 'delete_quietly',
+                               wraps=table.file_io.delete_quietly) as delete:
+            with mock.patch.object(pq.ParquetWriter, 'close', fail_close):
+                with self.assertRaisesRegex(OSError, 'injected close failure'):
+                    self._upsert(table, as_table(updates), ['id'], ['payload', 'score'])
+        self.assertTrue(delete.called)
+        for call in delete.call_args_list:
+            self.assertFalse(table.file_io.exists(call[0][0]))
+        self.assertEqual(self._read_all(table).to_pydict(), as_table(expected).to_pydict())
+
     # ------------------------------------------------------------------
     # Helpers built on the primitives
     # ------------------------------------------------------------------

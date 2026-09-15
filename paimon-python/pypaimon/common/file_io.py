@@ -539,32 +539,6 @@ class FileIO(ABC):
                       zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_parquet must be implemented by FileIO subclasses")
 
-    def write_parquet_batches(self, path: str, batches, compression: str = 'zstd',
-                              zstd_level: int = 1):
-        """Incrementally write batches to one Parquet file.
-
-        The caller owns file metadata and removal of incomplete output.
-        All filesystems use their existing output-stream implementation.
-        """
-        import pyarrow.parquet as pq
-
-        kwargs = {'compression': compression}
-        if compression.lower() == 'zstd':
-            kwargs['compression_level'] = zstd_level
-        with self.new_output_stream(path) as stream:
-            writer = None
-            try:
-                for batch in batches:
-                    if not batch.num_rows:
-                        continue
-                    if writer is None:
-                        writer = pq.ParquetWriter(stream, batch.schema, **kwargs)
-                    writer.write_table(pyarrow.Table.from_batches([batch]))
-                    del batch
-            finally:
-                if writer is not None:
-                    writer.close()
-
     @staticmethod
     def _cast_time_columns_for_orc(data):
         """Cast time32 columns to int32 before writing ORC.
