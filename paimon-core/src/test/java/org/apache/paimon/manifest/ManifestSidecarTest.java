@@ -23,7 +23,6 @@ import org.apache.paimon.data.SingleSegments;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestSidecar.ManifestSidecarSegment;
 import org.apache.paimon.memory.MemorySegment;
@@ -1030,54 +1029,6 @@ class ManifestSidecarTest {
                 }
             }
             assertThat(stream.closed).isTrue();
-        }
-    }
-
-    @Test
-    void selectedStreamsSeekInVirtualCoordinates() throws Exception {
-        byte[] header = header();
-        byte[] manifest = Arrays.copyOf(header, header.length + 400);
-        for (int i = header.length; i < manifest.length; i++) {
-            manifest[i] = (byte) i;
-        }
-        ByteArrayOutputStream expected = new ByteArrayOutputStream();
-        expected.write(header);
-        expected.write(manifest, header.length, 100);
-        expected.write(manifest, header.length + 300, 100);
-        byte[] selectedBytes = expected.toByteArray();
-        ManifestSidecar.Selection selected = select(golden(), goldenMeta(), 20);
-        Path path = new Path(temp.toString(), "manifest-golden");
-        for (int maxElementSize : new int[] {0, 50, 400}) {
-            SegmentsCache<Path> cache =
-                    maxElementSize == 0
-                            ? null
-                            : new SegmentsCache<>(
-                                    1024, MemorySize.ofMebiBytes(1), maxElementSize, null, false);
-            FileIO io = mock(FileIO.class);
-            when(io.newInputStream(path)).thenAnswer(ignored -> new CountingInput(manifest, 7));
-            try (SeekableInputStream input =
-                    ManifestSidecar.openManifest(io, path, selected, cache)) {
-                for (int position :
-                        new int[] {
-                            0,
-                            header.length + 117,
-                            header.length - 1,
-                            selectedBytes.length,
-                            header.length + 100,
-                            header.length + 17
-                        }) {
-                    input.seek(position);
-                    assertThat(input.getPos()).isEqualTo(position);
-                    assertThat(IOUtils.readFully(input, false))
-                            .isEqualTo(
-                                    Arrays.copyOfRange(
-                                            selectedBytes, position, selectedBytes.length));
-                    assertThat(input.getPos()).isEqualTo(selectedBytes.length);
-                }
-                assertThatThrownBy(() -> input.seek(-1)).isInstanceOf(IOException.class);
-                assertThatThrownBy(() -> input.seek(selectedBytes.length + 1))
-                        .isInstanceOf(EOFException.class);
-            }
         }
     }
 

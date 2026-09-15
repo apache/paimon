@@ -776,12 +776,12 @@ public final class ManifestSidecar {
         }
     }
 
-    static SeekableInputStream openManifest(FileIO io, Path path, @Nullable Selection selected)
+    static InputStream openManifest(FileIO io, Path path, @Nullable Selection selected)
             throws IOException {
         return openManifest(io, path, selected, null);
     }
 
-    static SeekableInputStream openManifest(
+    static InputStream openManifest(
             FileIO io, Path path, @Nullable Selection selected, @Nullable SegmentsCache<Path> cache)
             throws IOException {
         return selected == null
@@ -804,14 +804,13 @@ public final class ManifestSidecar {
     }
 
     /** An OCF stream comprising the original header and selected complete compressed blocks. */
-    private static final class SelectedBlockInput extends SeekableInputStream {
+    private static final class SelectedBlockInput extends InputStream {
         private final FileIO io;
         private final Path path;
         private final Selection selected;
         @Nullable private final SegmentsCache<Path> cache;
         @Nullable private SeekableInputStream input;
         private boolean closed;
-        private long position;
         private int headerPosition;
         private int blockPosition;
         private long remaining;
@@ -831,14 +830,9 @@ public final class ManifestSidecar {
         public int read() throws IOException {
             ensureOpen();
             if (headerPosition < selected.header.length) {
-                position++;
                 return selected.header[headerPosition++] & 255;
             }
-            if (!fillBuffer()) {
-                return -1;
-            }
-            position++;
-            return buffer[bufferPosition++] & 255;
+            return fillBuffer() ? buffer[bufferPosition++] & 255 : -1;
         }
 
         @Override
@@ -851,7 +845,6 @@ public final class ManifestSidecar {
                 int n = Math.min(length, selected.header.length - headerPosition);
                 System.arraycopy(selected.header, headerPosition, bytes, offset, n);
                 headerPosition += n;
-                position += n;
                 return n;
             }
             if (!fillBuffer()) {
@@ -860,54 +853,7 @@ public final class ManifestSidecar {
             int copied = Math.min(length, bufferLimit - bufferPosition);
             System.arraycopy(buffer, bufferPosition, bytes, offset, copied);
             bufferPosition += copied;
-            position += copied;
             return copied;
-        }
-
-        @Override
-        public long getPos() throws IOException {
-            ensureOpen();
-            return position;
-        }
-
-        @Override
-        public void seek(long desired) throws IOException {
-            ensureOpen();
-            if (desired == position) {
-                return;
-            }
-            if (desired < 0) {
-                throw new IOException("Negative selected manifest position: " + desired);
-            }
-            long blockStart = selected.header.length;
-            int index = 0;
-            while (index < selected.blocks.size()
-                    && desired >= blockStart + selected.blocks.get(index).length) {
-                blockStart += selected.blocks.get(index++).length;
-            }
-            if (index == selected.blocks.size() && desired > blockStart) {
-                throw new EOFException("Seek past selected manifest: " + desired);
-            }
-
-            headerPosition = (int) Math.min(desired, selected.header.length);
-            blockPosition = index;
-            remaining = 0;
-            buffer = null;
-            bufferPosition = 0;
-            bufferLimit = 0;
-            position = desired;
-            if (desired > blockStart) {
-                Block block = selected.blocks.get(index);
-                long offset = desired - blockStart;
-                if (cache != null && block.length <= cache.maxElementSize()) {
-                    readCachedBlocks(block);
-                    bufferPosition = (int) offset;
-                } else {
-                    seekInput(block.offset + offset);
-                    blockPosition++;
-                    remaining = block.length - offset;
-                }
-            }
         }
 
         private boolean fillBuffer() throws IOException {
