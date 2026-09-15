@@ -22,8 +22,8 @@ import numpy as np
 import pyarrow as pa
 
 from pypaimon.table.source.vector_search_read import (
-    DataEvolutionVectorRead, _compute_score, _compute_scores, _iter_arrow_scores,
-    _score_block_size, _score_rows,
+    DataEvolutionVectorRead, _compute_score, _compute_scores,
+    _iter_arrow_batch_scores, _iter_arrow_scores, _score_block_size, _score_rows,
 )
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.tests.vector_search_filter_test import _StubTable, _field
@@ -69,6 +69,28 @@ class VectorScoringTest(unittest.TestCase):
                 for metric in ("l2", "cosine", "inner_product"):
                     expected = [_compute_score(query, row, metric) for row in values[2:1029]]
                     self.assertEqual(expected, list(_iter_arrow_scores(data, query, metric)))
+
+    def test_batch_arrow_scores_exactly_match_scalar_accumulation(self):
+        rng = np.random.default_rng(17)
+        values = rng.standard_normal((2051, 128)).astype(np.float32)
+        vectors = pa.array(values.tolist(), type=pa.list_(pa.float32(), 128))
+        queries = rng.standard_normal((5, 128)).astype(np.float32).tolist()
+        for metric in ("l2", "cosine", "inner_product"):
+            with self.subTest(metric=metric):
+                actual = [[] for unused in queries]
+                for start, query_index, scores in _iter_arrow_batch_scores(
+                    vectors, queries, metric
+                ):
+                    self.assertEqual(start, len(actual[query_index]))
+                    actual[query_index].extend(scores)
+                for query, scores in zip(queries, actual):
+                    expected = [
+                        _compute_score(query, row, metric)
+                        for row in values.tolist()
+                    ]
+                    self.assertEqual(expected, scores)
+                    self.assertEqual(
+                        np.array(expected).tobytes(), np.array(scores).tobytes())
 
     def test_null_and_unsupported_data_preserve_scalar_behavior(self):
         for dtype in (pa.list_(pa.float32()), pa.list_(pa.float64()), pa.list_(pa.int64())):
