@@ -40,10 +40,8 @@ public class RESTSemanticViewManagement implements SemanticViewManagement {
 
     @Override
     public SemanticView upsertSemanticView(
-            Identifier identifier,
-            SemanticViewDefinition definition,
-            @Nullable String expectedRevision) {
-        return toSemanticView(api.upsertSemanticView(identifier, definition, expectedRevision));
+            Identifier identifier, SemanticViewDefinition definition) {
+        return toSemanticView(api.upsertSemanticView(identifier, definition));
     }
 
     @Override
@@ -58,15 +56,11 @@ public class RESTSemanticViewManagement implements SemanticViewManagement {
     }
 
     @Override
-    public void deleteSemanticView(Identifier identifier, @Nullable String expectedRevision) {
-        api.deleteSemanticView(identifier, expectedRevision);
+    public void deleteSemanticView(Identifier identifier) {
+        api.deleteSemanticView(identifier);
     }
 
     private static SemanticView toSemanticView(GetSemanticViewResponse response) {
-        return new SemanticView(
-                response.getName(),
-                response.getEntityName(),
-                response.getDefinition(),
-                response.getRevision());
+        return new SemanticView(response.getName(), response.getDefinition());
     }
 }

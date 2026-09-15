@@ -21,20 +21,15 @@ package org.apache.paimon.rest;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.rest.auth.RESTAuthFunction;
-import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.RESTException;
-import org.apache.paimon.rest.exceptions.ServiceUnavailableException;
 import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.ListSemanticViewsResponse;
 import org.apache.paimon.view.SemanticViewDefinition;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -49,7 +44,6 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,14 +113,11 @@ class RESTApiSemanticViewTest {
 
     @Test
     void testCompleteDefinitionUpsertAndReadPreserveText() throws Exception {
-        for (String revision : Arrays.asList(null, "r17")) {
+        for (int i = 0; i < 2; i++) {
             enqueue(200, responseJson());
-            GetSemanticViewResponse result =
-                    api.upsertSemanticView(IDENTIFIER, DEFINITION, revision);
+            GetSemanticViewResponse result = api.upsertSemanticView(IDENTIFIER, DEFINITION);
             assertThat(result.getDefinition()).isEqualTo(DEFINITION);
-            assertThat(result.getRevision()).isEqualTo("r18");
             assertThat(result.getName()).isEqualTo("revenue");
-            assertThat(result.getEntityName()).isEqualTo("opaque/view:123");
         }
         enqueue(200, responseJson());
         assertThat(api.getSemanticView(IDENTIFIER).getDefinition()).isEqualTo(DEFINITION);
@@ -138,13 +129,12 @@ class RESTApiSemanticViewTest {
             assertThat(request.query).isNull();
             assertThat(request.authorization).isEqualTo("Bearer test-token");
             Map<?, ?> body = RESTApi.fromJson(request.body, Map.class);
-            assertThat(body.keySet()).hasSize(i == 0 ? 1 : 2);
+            assertThat(body.keySet()).extracting(Object::toString).containsExactly("definition");
             Map<String, String> definition = (Map<String, String>) body.get("definition");
             assertThat(definition)
                     .containsOnlyKeys("format", "content")
                     .containsEntry("format", "provider-v2-yaml")
                     .containsEntry("content", DEFINITION.getContent());
-            assertThat(body.get("expectedRevision")).isEqualTo(i == 0 ? null : "r17");
         }
         assertThat(requests.get(2).method).isEqualTo("GET");
     }
@@ -196,64 +186,27 @@ class RESTApiSemanticViewTest {
     }
 
     @Test
-    void testDeleteConditionIsAQueryParameterWithoutBody() throws Exception {
-        enqueue(200, "");
-        api.deleteSemanticView(IDENTIFIER, "r +/%?&");
+    void testDeleteUsesIdentityWithoutBodyOrQuery() {
         enqueue(200, "");
         api.deleteSemanticView(IDENTIFIER);
-        assertThat(queryParameters(requests.get(0).query))
-                .containsOnlyKeys("expectedRevision")
-                .containsEntry("expectedRevision", "r +/%?&");
-        assertThat(requests.get(1).query).isNull();
-        assertThat(requests)
-                .allSatisfy(
-                        r -> {
-                            assertThat(r.method).isEqualTo("DELETE");
-                            assertThat(r.path).isEqualTo(BASE_PATH + "/revenue");
-                            assertThat(r.body).isEmpty();
-                        });
-    }
-
-    @Test
-    void testDeleteQueryIsIncludedInAuthentication() throws Exception {
-        enqueue(200, "");
-        List<RESTAuthParameter> authInputs = new java.util.ArrayList<>();
-        RESTAuthFunction auth =
-                new RESTAuthFunction(Collections.emptyMap(), null) {
-                    @Override
-                    public Map<String, String> apply(RESTAuthParameter input) {
-                        authInputs.add(input);
-                        return Collections.singletonMap("Authorization", "signed");
-                    }
-                };
-        new HttpClient("http://127.0.0.1:" + server.getAddress().getPort())
-                .delete(
-                        BASE_PATH + "/revenue",
-                        Collections.singletonMap("expectedRevision", "r +/%?&"),
-                        null,
-                        auth);
-        assertThat(authInputs).hasSize(1);
-        RESTAuthParameter input = authInputs.get(0);
-        assertThat(input.resourcePath()).isEqualTo(BASE_PATH + "/revenue");
-        assertThat(input.method()).isEqualTo("DELETE");
-        assertThat(input.data()).isNull();
-        assertThat(input.parameters())
-                .containsOnlyKeys("expectedRevision")
-                .containsEntry("expectedRevision", "r+%2B%2F%25%3F%26");
-        assertThat(requests.get(0).authorization).isEqualTo("signed");
-        assertThat(queryParameters(requests.get(0).query).get("expectedRevision"))
-                .isEqualTo("r +/%?&");
+        assertThat(requests).hasSize(1);
+        Request request = requests.get(0);
+        assertThat(request.method).isEqualTo("DELETE");
+        assertThat(request.path).isEqualTo(BASE_PATH + "/revenue");
+        assertThat(request.query).isNull();
+        assertThat(request.body).isEmpty();
+        assertThat(request.authorization).isEqualTo("Bearer test-token");
     }
 
     @Test
     void testMissingObjectsPropagateWithoutFallback() {
         List<Consumer<RESTApi>> operations =
                 Arrays.asList(
-                        client -> client.upsertSemanticView(IDENTIFIER, DEFINITION, "old"),
+                        client -> client.upsertSemanticView(IDENTIFIER, DEFINITION),
                         client -> client.getSemanticView(IDENTIFIER),
                         client -> client.listSemanticViews("sales"),
                         client -> client.listSemanticViewsPaged("sales", 1, null),
-                        client -> client.deleteSemanticView(IDENTIFIER, "old"));
+                        client -> client.deleteSemanticView(IDENTIFIER));
         for (Consumer<RESTApi> operation : operations) {
             enqueue(
                     404,
@@ -266,28 +219,17 @@ class RESTApiSemanticViewTest {
     }
 
     @Test
-    void testConflictsNeverBecomeUnconditionalWrites() throws Exception {
-        enqueue(409, "{\"code\":409,\"message\":\"stale revision\"}");
-        assertThatThrownBy(() -> api.upsertSemanticView(IDENTIFIER, DEFINITION, "old"))
+    void testNameAndDependencyConflictsHaveNoFallback() {
+        enqueue(409, "{\"code\":409,\"message\":\"SQL view already exists\"}");
+        assertThatThrownBy(() -> api.upsertSemanticView(IDENTIFIER, DEFINITION))
                 .isInstanceOf(AlreadyExistsException.class)
-                .hasMessageContaining("stale revision");
-        enqueue(409, "{\"code\":409,\"message\":\"stale revision\"}");
-        assertThatThrownBy(() -> api.deleteSemanticView(IDENTIFIER, "old"))
-                .isInstanceOf(AlreadyExistsException.class);
-        assertThat(requests).hasSize(2);
-        assertThat(
-                        RESTApi.fromJson(requests.get(0).body, UpsertSemanticViewRequest.class)
-                                .getExpectedRevision())
-                .isEqualTo("old");
-        assertThat(queryParameters(requests.get(1).query)).containsEntry("expectedRevision", "old");
-    }
-
-    @Test
-    void testConditionalUpsertDoesNotAutomaticallyReplayAfterServiceFailure() {
-        enqueue(503, "{\"code\":503,\"message\":\"temporarily unavailable\"}");
-        assertThatThrownBy(() -> api.upsertSemanticView(IDENTIFIER, DEFINITION, "old"))
-                .isInstanceOf(ServiceUnavailableException.class);
-        assertThat(requests).hasSize(1);
+                .hasMessageContaining("SQL view already exists");
+        enqueue(409, "{\"code\":409,\"message\":\"dependent objects\"}");
+        assertThatThrownBy(() -> api.deleteSemanticView(IDENTIFIER))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("dependent objects");
+        assertThat(requests).extracting(r -> r.method).containsExactly("POST", "DELETE");
+        assertThat(requests).allSatisfy(r -> assertThat(r.path).isEqualTo(BASE_PATH + "/revenue"));
     }
 
     @Test
@@ -316,10 +258,6 @@ class RESTApiSemanticViewTest {
                     .isInstanceOf(IllegalArgumentException.class);
         }
         for (String invalid : Arrays.asList("", " ")) {
-            assertThatThrownBy(() -> api.upsertSemanticView(IDENTIFIER, DEFINITION, invalid))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> api.deleteSemanticView(IDENTIFIER, invalid))
-                    .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> api.getSemanticView(Identifier.create("sales", invalid)))
                     .isInstanceOf(IllegalArgumentException.class);
         }
@@ -349,22 +287,15 @@ class RESTApiSemanticViewTest {
     }
 
     @Test
-    void testIncompleteResponsesCannotRemoveARevisionCondition() throws Exception {
-        for (String field : Arrays.asList("name", "entityName", "definition", "revision")) {
+    void testIncompleteResponsesAreRejected() throws Exception {
+        for (String field : Arrays.asList("name", "definition")) {
             Map<String, Object> response = RESTApi.fromJson(responseJson(), Map.class);
             response.remove(field);
             enqueue(200, RESTApi.toJson(response));
             assertThatThrownBy(() -> api.getSemanticView(IDENTIFIER))
                     .isInstanceOf(RESTException.class);
         }
-        for (String revision : Arrays.asList(null, "", " ")) {
-            Map<String, Object> response = RESTApi.fromJson(responseJson(), Map.class);
-            response.put("revision", revision);
-            enqueue(200, RESTApi.toJson(response));
-            assertThatThrownBy(() -> api.getSemanticView(IDENTIFIER))
-                    .isInstanceOf(RESTException.class);
-        }
-        assertThat(requests).hasSize(7);
+        assertThat(requests).hasSize(2);
     }
 
     @Test
@@ -374,11 +305,7 @@ class RESTApiSemanticViewTest {
             // The REST layer transports provider-defined text without interpreting its grammar.
             SemanticViewDefinition definition =
                     new SemanticViewDefinition(format, DEFINITION.getContent());
-            enqueue(
-                    200,
-                    RESTApi.toJson(
-                            new GetSemanticViewResponse(
-                                    "revenue", "opaque/view:123", definition, "r18")));
+            enqueue(200, RESTApi.toJson(new GetSemanticViewResponse("revenue", definition)));
             assertThat(api.upsertSemanticView(IDENTIFIER, definition).getDefinition())
                     .isEqualTo(definition);
             String body = requests.get(requests.size() - 1).body;
@@ -389,7 +316,8 @@ class RESTApiSemanticViewTest {
                     .containsEntry("format", format)
                     .containsEntry("content", DEFINITION.getContent());
             UpsertSemanticViewRequest external =
-                    new ObjectMapper().readValue(body, UpsertSemanticViewRequest.class);
+                    new com.fasterxml.jackson.databind.ObjectMapper()
+                            .readValue(body, UpsertSemanticViewRequest.class);
             assertThat(external.getDefinition()).isEqualTo(definition);
         }
         assertThat(requests).hasSize(4);
@@ -397,18 +325,18 @@ class RESTApiSemanticViewTest {
 
     @Test
     void testNestedJacksonCompatibilityAndRequiredFields() throws Exception {
-        String json = RESTApi.toJson(new UpsertSemanticViewRequest(DEFINITION, "r17"));
+        String json = RESTApi.toJson(new UpsertSemanticViewRequest(DEFINITION));
         UpsertSemanticViewRequest external =
-                new ObjectMapper().readValue(json, UpsertSemanticViewRequest.class);
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(json, UpsertSemanticViewRequest.class);
         assertThat(external.getDefinition()).isEqualTo(DEFINITION);
-        assertThat(external.getExpectedRevision()).isEqualTo("r17");
         assertThat(
                         RESTApi.fromJson(RESTApi.toJson(external), UpsertSemanticViewRequest.class)
                                 .getDefinition())
                 .isEqualTo(DEFINITION);
         assertThat(
                         RESTApi.fromJson(
-                                RESTApi.toJson(new UpsertSemanticViewRequest(DEFINITION, null)),
+                                RESTApi.toJson(new UpsertSemanticViewRequest(DEFINITION)),
                                 Map.class))
                 .containsOnlyKeys("definition");
         for (String invalid :
@@ -426,6 +354,13 @@ class RESTApiSemanticViewTest {
                         responseJson().replace("\"name\":", "\"future\":true,\"name\":"),
                         GetSemanticViewResponse.class);
         assertThat(response.getDefinition()).isEqualTo(DEFINITION);
+        assertThat(RESTApi.fromJson(RESTApi.toJson(response), Map.class))
+                .containsOnlyKeys("name", "definition");
+        assertThat(
+                        new com.fasterxml.jackson.databind.ObjectMapper()
+                                .readValue(responseJson(), GetSemanticViewResponse.class)
+                                .getDefinition())
+                .isEqualTo(DEFINITION);
         ListSemanticViewsResponse empty =
                 RESTApi.fromJson("{\"future\":true}", ListSemanticViewsResponse.class);
         assertThat(empty.getSemanticViews()).isEmpty();
@@ -435,8 +370,7 @@ class RESTApiSemanticViewTest {
     }
 
     private static String responseJson() throws Exception {
-        return RESTApi.toJson(
-                new GetSemanticViewResponse("revenue", "opaque/view:123", DEFINITION, "r18"));
+        return RESTApi.toJson(new GetSemanticViewResponse("revenue", DEFINITION));
     }
 
     private void enqueue(int code, String body) {

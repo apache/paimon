@@ -966,34 +966,24 @@ public class RESTApi {
         client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
     }
 
-    /** Creates or atomically replaces the complete semantic model definition. */
-    @Experimental
-    public GetSemanticViewResponse upsertSemanticView(
-            Identifier identifier, SemanticViewDefinition definition) {
-        return upsertSemanticView(identifier, definition, null);
-    }
-
     /**
-     * Replaces a matching existing revision, or upserts unconditionally when expectedRevision is
-     * null. HTTP 409 (including revision and SQL view name conflicts) is reported as
-     * AlreadyExistsException by the standard REST error handler. Conditional writes never fall back
-     * to unconditional upserts; after an ambiguous result, GET and reconcile the definition.
+     * Creates or atomically replaces the complete semantic model definition. The last successful
+     * write takes effect. SQL view name conflicts return HTTP 409, mapped to
+     * AlreadyExistsException.
      */
     @Experimental
     public GetSemanticViewResponse upsertSemanticView(
-            Identifier identifier,
-            SemanticViewDefinition definition,
-            @Nullable String expectedRevision) {
+            Identifier identifier, SemanticViewDefinition definition) {
         checkArgument(identifier != null, "identifier must not be null");
         return client.post(
                 resourcePaths.semanticView(
                         identifier.getDatabaseName(), identifier.getObjectName()),
-                new UpsertSemanticViewRequest(definition, expectedRevision),
+                new UpsertSemanticViewRequest(definition),
                 GetSemanticViewResponse.class,
                 restAuthFunction);
     }
 
-    /** Gets the complete model definition and revision. Missing objects return HTTP 404. */
+    /** Gets the complete model definition. Missing objects return HTTP 404. */
     @Experimental
     public GetSemanticViewResponse getSemanticView(Identifier identifier) {
         checkArgument(identifier != null, "identifier must not be null");
@@ -1030,25 +1020,10 @@ public class RESTApi {
     /** Deletes a semantic view; an absent object returns HTTP 404. */
     @Experimental
     public void deleteSemanticView(Identifier identifier) {
-        deleteSemanticView(identifier, null);
-    }
-
-    /** Deletes atomically if expectedRevision matches, or unconditionally when null. */
-    @Experimental
-    public void deleteSemanticView(Identifier identifier, @Nullable String expectedRevision) {
         checkArgument(identifier != null, "identifier must not be null");
-        checkArgument(
-                expectedRevision == null || !expectedRevision.trim().isEmpty(),
-                "expectedRevision must not be blank");
-        Map<String, String> queryParams = Maps.newHashMap();
-        if (expectedRevision != null) {
-            queryParams.put("expectedRevision", expectedRevision);
-        }
         client.delete(
                 resourcePaths.semanticView(
                         identifier.getDatabaseName(), identifier.getObjectName()),
-                queryParams,
-                null,
                 restAuthFunction);
     }
 

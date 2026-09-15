@@ -77,5 +77,5 @@ server also rejects additive statistics for a partition that already has a custo
 ## Semantic views
 
 See [Semantic Views](semantic-views.md) for experimental definition management, complete-document
-POST upserts, and conditional updates. These use dedicated catalog routes and preserve the
+POST upserts, and pagination. These use dedicated catalog routes and preserve the
 existing SQL View contract.

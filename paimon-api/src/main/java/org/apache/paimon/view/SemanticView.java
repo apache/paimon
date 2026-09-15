@@ -25,33 +25,18 @@ import org.apache.paimon.annotation.Experimental;
 public class SemanticView {
 
     private final String name;
-    private final String entityName;
     private final SemanticViewDefinition definition;
-    private final String revision;
 
-    public SemanticView(
-            String name, String entityName, SemanticViewDefinition definition, String revision) {
+    public SemanticView(String name, SemanticViewDefinition definition) {
         this.name = name;
-        this.entityName = entityName;
         this.definition = definition;
-        this.revision = revision;
     }
 
     public String getName() {
         return name;
     }
 
-    /** Canonical server-generated identity for labels; do not reconstruct it from name segments. */
-    public String getEntityName() {
-        return entityName;
-    }
-
     public SemanticViewDefinition getDefinition() {
         return definition;
-    }
-
-    /** Opaque concurrency token, independent of the model syntax version. */
-    public String getRevision() {
-        return revision;
     }
 }

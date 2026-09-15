@@ -54,8 +54,7 @@ POST creates or atomically replaces one complete definition in an existing datab
   "definition": {
     "format": "databricks-yaml",
     "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
-  },
-  "expectedRevision": "r17"
+  }
 }
 ```
 
@@ -72,29 +71,20 @@ POST and GET return HTTP 200 with the full object:
 ```json
 {
   "name": "order_metrics",
-  "entityName": "sales.order_metrics",
   "definition": {
     "format": "databricks-yaml",
     "content": "version: '1.1'\nsource: main.sales.orders\nmeasures:\n  - name: revenue\n    expr: SUM(paid_amount)\n"
-  },
-  "revision": "r18"
+  }
 }
 ```
 
-`entityName` is a canonical server-generated identity. Use it directly for labels; the dot notation
-above is illustrative, not a client-side concatenation rule. `revision` is an opaque concurrency
-token, independent of a syntax `version` inside the document. POST returns the committed object.
-Subsequent reads must expose the complete committed definition.
+`name` is the local object name within the database addressed by the path. POST returns the
+committed object, and subsequent reads must expose the complete committed definition.
 
-Omitting `expectedRevision`, or supplying null, performs unconditional upsert. A nonblank revision
-requires an atomic match against an existing object: missing objects return 404 and mismatches
-return 409 without changes. Replacement preserves identity, creation metadata, owner, permissions,
-and labels. Definition-level comments and synonyms are part of the complete replacement.
-
-The Java client disables automatic replay of conditional POSTs. After a lost response, GET the
-object and reconcile its definition and revision before another conditional write. Never silently
-remove a revision condition to overcome a conflict. Repeating an unconditional upsert leaves the
-same definition state, with the last successful writer taking effect.
+Upserts are unconditional: the last successful write takes effect. Each update replaces the
+whole definition, so concurrent edits can overwrite one another. Replacement preserves identity,
+creation metadata, owner, permissions, and labels. Definition-level comments and synonyms are
+part of the complete replacement.
 
 ### List and delete
 
@@ -108,11 +98,8 @@ Lists return visible names only; GET retrieves a full definition. The last page 
 An empty page terminates pagination and must not carry a continuation token. A missing database
 returns 404; an existing database with no visible models returns an empty array.
 
-DELETE accepts optional `expectedRevision` **in query parameters**, with no request body. It returns
-200 without a body; an absent object returns 404, and a stale revision or blocking dependency returns
-409. Revision comparison and deletion must be atomic. Deleting and recreating an object must
-produce a different revision, so old requests cannot affect its replacement. Retries retain the
-same condition and can report a conflict after an earlier successful deletion.
+DELETE uses the object path with no query parameters or request body. It returns 200 without a
+body; an absent object returns 404, and a blocking dependency returns 409.
 
 ## Java catalog access
 
@@ -127,11 +114,10 @@ Identifier id = Identifier.create("sales", "order_metrics");
 SemanticViewDefinition definition = new SemanticViewDefinition("databricks-yaml", yamlText);
 SemanticView saved = models.upsertSemanticView(id, definition);
 SemanticView current = models.getSemanticView(id);
-models.upsertSemanticView(id, replacementDefinition, current.getRevision());
+models.upsertSemanticView(id, replacementDefinition);
 models.listSemanticViews("sales"); // Follows all pages.
 models.listSemanticViewsPaged("sales", 100, null);
-restCatalog.labelManagement().upsertLabel("VIEW", saved.getEntityName(), "domain", "sales");
-models.deleteSemanticView(id, models.getSemanticView(id).getRevision());
+models.deleteSemanticView(id);
 ```
 
 The accessor reuses the catalog's REST client, prefix, authentication, and configured headers.
@@ -150,9 +136,11 @@ upsert/get/list/paged-list/delete operations; its read and upsert methods return
   the parent database's `CREATEVIEW`; replacement checks `ALTER`; deletion checks `DROP`; reads
   check `SELECT`. Discovery follows database `LIST` and object visibility rules. Server resource
   resolution must understand the semantic subtype. Source access is checked separately at execution.
-- Labels use `entityType=VIEW` and the returned canonical `entityName`. The label resolver must
-  support semantic views. Definition replacement preserves bindings; deletion cleans up direct
-  labels and permissions without deleting referenced sources.
+- Labels use `entityType=VIEW` and a canonical `entityName` supplied according to the provider's
+  naming and escaping rules; the semantic view response does not supply that label identity.
+  Clients must not assume that concatenating database and view names with a dot produces it.
+  The label resolver must support semantic views. Definition replacement preserves bindings;
+  deletion cleans up direct labels and permissions without deleting referenced sources.
 - Semantic views count when determining whether a database is empty. Database cascade deletion
   follows existing catalog rules and cleans up semantic metadata and its direct bindings.
 - Unsupported model semantics must be rejected without side effects or dropping fields. SQL
@@ -171,7 +159,7 @@ Errors use `ErrorResponse`; semantic view errors use `resourceType=SEMANTIC_VIEW
 | 400 | Invalid input or unsupported model format, syntax version, or feature | `BadRequestException` |
 | 401 / 403 | Authentication or permission failure | `NotAuthorizedException` / `ForbiddenException` |
 | 404 | Missing database or model | `NoSuchResourceException` |
-| 409 | Name/revision conflict or dependency blocks deletion | `AlreadyExistsException` (existing REST mapping) |
+| 409 | Name conflict or dependency blocks deletion | `AlreadyExistsException` (existing REST mapping) |
 | 413 | Content exceeds the size limit | `RESTException` |
 | 501 | Server does not implement semantic views | `NotImplementedException` |
 

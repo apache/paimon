@@ -90,11 +90,8 @@ class RESTCatalogSemanticViewManagementTest {
     }
 
     @Test
-    void testLifecycleUsesSharedConfigurationAndReturnedCanonicalIdentity() throws Exception {
-        String response =
-                RESTApi.toJson(
-                        new GetSemanticViewResponse(
-                                "revenue", "opaque:metric/42", DEFINITION, "r2"));
+    void testLifecycleUsesSharedConfiguration() throws Exception {
+        String response = RESTApi.toJson(new GetSemanticViewResponse("revenue", DEFINITION));
         enqueue(200, response);
         SemanticView model = models.upsertSemanticView(ID, DEFINITION);
         Map<?, ?> body =
@@ -105,30 +102,15 @@ class RESTCatalogSemanticViewManagementTest {
         assertModel(model);
 
         enqueue(200, response);
-        assertModel(models.upsertSemanticView(ID, DEFINITION, "r1"));
-        assertThat(
-                        RESTApi.fromJson(
-                                takeRequest("POST", BASE_PATH + "/revenue").getBody().readUtf8(),
-                                Map.class))
-                .containsEntry("expectedRevision", "r1");
-
-        enqueue(200, response);
         assertModel(models.getSemanticView(ID));
         takeRequest("GET", BASE_PATH + "/revenue");
 
         enqueue(200, "");
-        catalog.labelManagement().upsertLabel("VIEW", model.getEntityName(), "domain", "sales");
-        takeRequest("POST", "/v1/catalog%2Fid/labels/VIEW/opaque%3Ametric%2F42/domain");
-
-        enqueue(200, "");
-        models.deleteSemanticView(ID, model.getRevision());
-        RecordedRequest conditional = takeRequest("DELETE", BASE_PATH + "/revenue");
-        assertThat(conditional.getRequestUrl().queryParameter("expectedRevision")).isEqualTo("r2");
-        assertThat(conditional.getBodySize()).isZero();
-        enqueue(200, "");
         models.deleteSemanticView(ID);
-        assertThat(takeRequest("DELETE", BASE_PATH + "/revenue").getRequestUrl().query()).isNull();
-        assertThat(server.getRequestCount()).isEqualTo(7);
+        RecordedRequest deletion = takeRequest("DELETE", BASE_PATH + "/revenue");
+        assertThat(deletion.getRequestUrl().query()).isNull();
+        assertThat(deletion.getBodySize()).isZero();
+        assertThat(server.getRequestCount()).isEqualTo(4);
     }
 
     @Test
@@ -151,9 +133,7 @@ class RESTCatalogSemanticViewManagementTest {
 
     private static void assertModel(SemanticView model) {
         assertThat(model.getName()).isEqualTo("revenue");
-        assertThat(model.getEntityName()).isEqualTo("opaque:metric/42");
         assertThat(model.getDefinition()).isEqualTo(DEFINITION);
-        assertThat(model.getRevision()).isEqualTo("r2");
     }
 
     private void enqueue(int status, String body) {

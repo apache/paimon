@@ -30,44 +30,28 @@ import java.beans.ConstructorProperties;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** A committed semantic view definition and its opaque revision. */
+/** A semantic view's name and complete committed definition. */
 @Experimental
 public class GetSemanticViewResponse implements RESTResponse {
 
     private static final String FIELD_NAME = "name";
-    private static final String FIELD_ENTITY_NAME = "entityName";
     private static final String FIELD_DEFINITION = "definition";
-    private static final String FIELD_REVISION = "revision";
 
     @JsonProperty(FIELD_NAME)
     private final String name;
 
-    @JsonProperty(FIELD_ENTITY_NAME)
-    private final String entityName;
-
     @JsonProperty(FIELD_DEFINITION)
     private final SemanticViewDefinition definition;
 
-    @JsonProperty(FIELD_REVISION)
-    private final String revision;
-
     @JsonCreator
-    @ConstructorProperties({FIELD_NAME, FIELD_ENTITY_NAME, FIELD_DEFINITION, FIELD_REVISION})
+    @ConstructorProperties({FIELD_NAME, FIELD_DEFINITION})
     public GetSemanticViewResponse(
             @JsonProperty(FIELD_NAME) String name,
-            @JsonProperty(FIELD_ENTITY_NAME) String entityName,
-            @JsonProperty(FIELD_DEFINITION) SemanticViewDefinition definition,
-            @JsonProperty(FIELD_REVISION) String revision) {
+            @JsonProperty(FIELD_DEFINITION) SemanticViewDefinition definition) {
         checkArgument(name != null && !name.trim().isEmpty(), "name must not be blank");
-        checkArgument(
-                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
         checkArgument(definition != null, "definition must not be null");
-        // A missing revision must never turn a subsequent conditional write into an upsert.
-        checkArgument(revision != null && !revision.trim().isEmpty(), "revision must not be blank");
         this.name = name;
-        this.entityName = entityName;
         this.definition = definition;
-        this.revision = revision;
     }
 
     @JsonGetter(FIELD_NAME)
@@ -75,18 +59,8 @@ public class GetSemanticViewResponse implements RESTResponse {
         return name;
     }
 
-    @JsonGetter(FIELD_ENTITY_NAME)
-    public String getEntityName() {
-        return entityName;
-    }
-
     @JsonGetter(FIELD_DEFINITION)
     public SemanticViewDefinition getDefinition() {
         return definition;
-    }
-
-    @JsonGetter(FIELD_REVISION)
-    public String getRevision() {
-        return revision;
     }
 }

@@ -24,52 +24,28 @@ import org.apache.paimon.view.SemanticViewDefinition;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-
-import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Complete definition replacement, optionally conditioned on an existing revision. */
+/** Unconditional replacement of the complete semantic view definition. */
 @Experimental
 public class UpsertSemanticViewRequest implements RESTRequest {
 
     private final SemanticViewDefinition definition;
-    @Nullable private final String expectedRevision;
 
     @JsonCreator
-    @ConstructorProperties({"definition", "expectedRevision"})
+    @ConstructorProperties({"definition"})
     public UpsertSemanticViewRequest(
-            @JsonProperty("definition") SemanticViewDefinition definition,
-            @Nullable @JsonProperty("expectedRevision") String expectedRevision) {
+            @JsonProperty("definition") SemanticViewDefinition definition) {
         checkArgument(definition != null, "definition must not be null");
-        checkArgument(
-                expectedRevision == null || !expectedRevision.trim().isEmpty(),
-                "expectedRevision must not be blank");
         this.definition = definition;
-        this.expectedRevision = expectedRevision;
     }
 
     @JsonGetter("definition")
     public SemanticViewDefinition getDefinition() {
         return definition;
-    }
-
-    @Nullable
-    @JsonGetter("expectedRevision")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getExpectedRevision() {
-        return expectedRevision;
-    }
-
-    @Override
-    @JsonIgnore
-    public boolean isRetrySafe() {
-        // A successful conditional write consumes its revision; replay can mask that success.
-        return expectedRevision == null;
     }
 }

@@ -2242,7 +2242,7 @@ paths:
           type: string
           minLength: 1
     get:
-      tags: [ metric-view ]
+      tags: [ semantic-view ]
       summary: List Semantic Views
       operationId: listSemanticViews
       description: >-
@@ -2305,10 +2305,10 @@ paths:
           type: string
           minLength: 1
     get:
-      tags: [ metric-view ]
+      tags: [ semantic-view ]
       summary: Get Semantic View
       operationId: getSemanticView
-      description: Returns the complete stored definition and its current opaque revision.
+      description: Returns the name and complete stored definition.
       responses:
         "200":
           description: Success
@@ -2329,15 +2329,14 @@ paths:
         "501":
           $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
     post:
-      tags: [ metric-view ]
+      tags: [ semantic-view ]
       summary: Upsert Semantic View
       operationId: upsertSemanticView
       description: >-
         Creates or atomically replaces the complete definition in an existing database.
         Replacements preserve identity, creation metadata, owner, permissions, and labels.
-        A non-null expectedRevision atomically conditions replacement on an existing revision;
-        missing objects return 404 and stale revisions return 409 without mutation.
-        Omission or null means unconditional upsert. Ordinary SQL views share the view namespace;
+        Upserts are unconditional; the last successful write takes effect.
+        Ordinary SQL views share the view namespace;
         both SQL view creation and semantic view upsert reject cross-type name collisions with 409.
         The server validates supported model formats, syntax versions, and model features,
         rejecting unsupported semantics without side effects or silently dropping fields.
@@ -2357,7 +2356,6 @@ paths:
                   measures:
                     - name: revenue
                       expr: SUM(paid_amount)
-              expectedRevision: r17
       responses:
         "200":
           description: Success
@@ -2382,21 +2380,13 @@ paths:
         "501":
           $ref: '#/components/responses/SemanticViewNotImplementedErrorResponse'
     delete:
-      tags: [ metric-view ]
+      tags: [ semantic-view ]
       summary: Delete Semantic View
       operationId: deleteSemanticView
       description: >-
         Deletes the object and its direct labels and permissions, never referenced sources.
-        A supplied expectedRevision requires an atomic revision match; mismatch returns 409.
-        Missing objects return 404. Recreated objects must not reuse an old revision token.
-        Dependencies may prevent deletion with 409. No request body is accepted.
-      parameters:
-        - name: expectedRevision
-          in: query
-          description: Opaque revision to match, or omit for unconditional deletion. Must not be blank.
-          schema:
-            type: string
-            minLength: 1
+        Missing objects return 404. Dependencies may prevent deletion with 409.
+        No query parameters or request body are accepted.
       responses:
         "200":
           description: Success, no content
@@ -2431,13 +2421,13 @@ components:
             code: 404
             resourceType: SEMANTIC_VIEW
     SemanticViewConflictErrorResponse:
-      description: SQL view name collision, revision mismatch, or dependency prevents deletion.
+      description: SQL view name collision or dependency prevents deletion.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            message: SQL view name collision, revision mismatch, or dependency prevents deletion.
+            message: SQL view name collision or dependency prevents deletion.
             code: 409
             resourceType: SEMANTIC_VIEW
     SemanticViewTooLargeErrorResponse:
@@ -2694,7 +2684,7 @@ components:
           description: >-
             Complete nonblank document, preserved verbatim, including future fields.
             Maximum 1048576 UTF-8 bytes (not characters). Servers must never silently truncate.
-            A version inside the document identifies model syntax, independently of object revision.
+            A version inside the document identifies model syntax.
           x-max-utf8-bytes: 1048576
     UpsertSemanticViewRequest:
       type: object
@@ -2702,28 +2692,14 @@ components:
       properties:
         definition:
           $ref: '#/components/schemas/SemanticViewDefinition'
-        expectedRevision:
-          type: [ string, "null" ]
-          minLength: 1
-          description: >-
-            Optional opaque revision of the existing object, nonblank when supplied.
-            Null or omission means unconditional upsert. A mismatch returns 409, absence returns 404.
-            After an ambiguous result, read and reconcile; never silently retry unconditionally.
     GetSemanticViewResponse:
       type: object
-      required: [ name, entityName, definition, revision ]
+      required: [ name, definition ]
       properties:
         name:
           type: string
-        entityName:
-          type: string
-          description: Canonical server-generated identity for labels with entityType VIEW; clients must not reconstruct it.
         definition:
           $ref: '#/components/schemas/SemanticViewDefinition'
-        revision:
-          type: string
-          minLength: 1
-          description: Opaque concurrency token; distinct after deletion and recreation. POST returns the committed revision.
     ListSemanticViewsResponse:
       type: object
       required: [ semanticViews ]

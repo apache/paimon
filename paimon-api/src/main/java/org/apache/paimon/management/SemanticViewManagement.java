@@ -32,21 +32,11 @@ import java.util.List;
 @Experimental
 public interface SemanticViewManagement {
 
-    /** Creates or atomically replaces the complete definition, preserving identity and grants. */
-    default SemanticView upsertSemanticView(
-            Identifier identifier, SemanticViewDefinition definition) {
-        return upsertSemanticView(identifier, definition, null);
-    }
-
     /**
-     * Upserts unconditionally when expectedRevision is null. Otherwise, atomically replaces an
-     * existing matching revision; missing objects fail with 404 and stale revisions with 409. A
-     * conflict must be reconciled by the caller, never retried as an unconditional write.
+     * Creates or atomically replaces the complete definition, preserving identity and grants. The
+     * last successful write takes effect.
      */
-    SemanticView upsertSemanticView(
-            Identifier identifier,
-            SemanticViewDefinition definition,
-            @Nullable String expectedRevision);
+    SemanticView upsertSemanticView(Identifier identifier, SemanticViewDefinition definition);
 
     SemanticView getSemanticView(Identifier identifier);
 
@@ -60,13 +50,9 @@ public interface SemanticViewManagement {
     PagedList<String> listSemanticViewsPaged(
             String database, @Nullable Integer maxResults, @Nullable String pageToken);
 
-    default void deleteSemanticView(Identifier identifier) {
-        deleteSemanticView(identifier, null);
-    }
-
     /**
-     * Deletes the object and its direct management bindings, never its sources. A non-null
-     * expectedRevision requires an atomic revision match. Missing objects fail with 404.
+     * Deletes the object and its direct management bindings, never its sources. Missing objects
+     * fail with 404.
      */
-    void deleteSemanticView(Identifier identifier, @Nullable String expectedRevision);
+    void deleteSemanticView(Identifier identifier);
 }

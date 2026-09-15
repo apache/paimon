@@ -121,22 +121,12 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        return delete(path, Collections.emptyMap(), body, restAuthFunction);
-    }
-
-    /** Deletes with query parameters included in both the URL and authentication input. */
-    public <T extends RESTResponse> T delete(
-            String path,
-            Map<String, String> queryParams,
-            RESTRequest body,
-            RESTAuthFunction restAuthFunction) {
-        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, queryParams));
+        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
             httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
-        Header[] authHeaders =
-                getHeaders(path, queryParams, "DELETE", encodedBody, restAuthFunction);
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
         return exec(httpDelete, null);
     }

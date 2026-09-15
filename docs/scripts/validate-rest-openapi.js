@@ -375,11 +375,8 @@ function validateCatalogOpenApi() {
   const semanticDelete = contract.requireOperation('deleteSemanticView');
   contract.checkSpec(
     !semanticDelete.requestBody &&
-      semanticDelete.parameters.some(
-        (parameter) =>
-          parameter.name === 'expectedRevision' && parameter.in === 'query' && !parameter.required,
-      ),
-    'Semantic view DELETE must carry its optional revision in query parameters without a body',
+      !(semanticDelete.parameters || []).some((parameter) => parameter.in === 'query'),
+    'Semantic view DELETE must use only the resource path without query parameters or a body',
   );
   const pageSize = contract.requireOperation('listSemanticViews').parameters.find(
     (parameter) => parameter.name === 'maxResults',
@@ -396,10 +393,12 @@ function validateCatalogOpenApi() {
     'Semantic definitions require only an extensible format and content with a 1 MiB UTF-8 limit',
   );
   contract.requireRequiredProperties('UpsertSemanticViewRequest', ['definition']);
-  requireNullableStringProperty(contract, 'UpsertSemanticViewRequest', 'expectedRevision');
-  contract.requireRequiredProperties('GetSemanticViewResponse', [
-    'name', 'entityName', 'definition', 'revision',
-  ]);
+  contract.requireRequiredProperties('GetSemanticViewResponse', ['name', 'definition']);
+  contract.checkSpec(
+    Object.keys(contract.requireProperties('UpsertSemanticViewRequest', ['definition'])).length === 1 &&
+      Object.keys(contract.requireProperties('GetSemanticViewResponse', ['name', 'definition'])).length === 2,
+    'Semantic upserts contain only a definition; responses contain only a name and definition',
+  );
   const semanticNames = contract.requireProperties('ListSemanticViewsResponse', ['semanticViews', 'nextPageToken']);
   contract.checkSpec(
     semanticNames.semanticViews.type === 'array' && semanticNames.semanticViews.items.type === 'string',
