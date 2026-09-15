@@ -499,8 +499,9 @@ class PyArrowFileIO(FileIO):
                 if self.filesystem.get_file_info(selector):
                     raise OSError(f"Directory {path} is not empty")
                 bucket, key = self._split_s3_path(path_str)
-                self._get_s3_delete_client().delete_object(
-                    Bucket=bucket, Key=key.rstrip("/") + "/")
+                if key:
+                    self._get_s3_delete_client().delete_object(
+                        Bucket=bucket, Key=key.rstrip("/") + "/")
                 return True
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -519,12 +520,15 @@ class PyArrowFileIO(FileIO):
     def _delete_s3_compatible_directory(self, path_str: str) -> bool:
         client = self._get_s3_delete_client()
         bucket, key = self._split_s3_path(path_str)
-        prefix = key.rstrip("/") + "/"
+        prefix = key.rstrip("/")
+        if prefix:
+            prefix += "/"
         while True:
             keys = self._iter_s3_keys(client, bucket, prefix)
             if self._delete_s3_objects(client, bucket, keys):
                 continue
-            client.delete_object(Bucket=bucket, Key=prefix)
+            if prefix:
+                client.delete_object(Bucket=bucket, Key=prefix)
             response = client.list_objects_v2(
                 Bucket=bucket, Prefix=prefix, MaxKeys=2)
             if not any(item["Key"] != prefix
@@ -567,6 +571,8 @@ class PyArrowFileIO(FileIO):
 
         path_str = path_str.lstrip("/")
         expected_bucket = self._oss_bucket if self._is_oss else self._s3_bucket
+        if expected_bucket and path_str == expected_bucket:
+            return expected_bucket, ""
         if expected_bucket and path_str.startswith(expected_bucket + "/"):
             return path_str.split("/", 1)
         if expected_bucket:

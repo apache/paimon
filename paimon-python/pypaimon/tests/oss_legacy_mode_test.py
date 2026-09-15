@@ -402,6 +402,18 @@ class OssLegacyModeTest(unittest.TestCase):
         file_io._s3_delete_client.delete_object.assert_called_once_with(
             Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
 
+    def test_modern_non_recursive_delete_keeps_bucket_root(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info("/", pafs.FileType.Directory)],
+            [],
+        ]
+
+        self.assertTrue(file_io.delete("oss://test-bucket/"))
+
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
     def test_modern_non_recursive_delete_rejects_non_empty_directory(self):
         file_io = self._new_file_io(legacy=False)
         directory = file_io.to_filesystem_path(TABLE_PATH)
