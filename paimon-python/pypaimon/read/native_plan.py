@@ -258,9 +258,7 @@ def native_plan(
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
-    splits = [deserialize_split_v1(
-        split.serialize(allow_streaming=True) if incremental_range is not None else split.serialize(),
-        pfields, kfields) for split in rust_splits]
+    splits = [deserialize_split_v1(split.serialize(), pfields, kfields) for split in rust_splits]
     _restore_python_partition_paths(table, splits)
     snapshot_id = getattr(rust_plan, 'snapshot_id', None)
     if callable(snapshot_id):
