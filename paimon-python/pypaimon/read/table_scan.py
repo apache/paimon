@@ -447,9 +447,7 @@ class TableScan:
 
         if has_time_travel:
             def time_travel_manifest_scanner():
-                snapshot = TimeTravelUtil.try_travel_to_snapshot(
-                    options, self.table.tag_manager(), snapshot_manager
-                )
+                snapshot = TimeTravelUtil.resolve_snapshot(self.table)
                 if snapshot is None:
                     raise ValueError(
                         "Could not resolve time travel snapshot from scan options."
@@ -466,7 +464,7 @@ class TableScan:
             )
 
         def all_manifests():
-            snapshot = snapshot_manager.get_latest_snapshot()
+            snapshot = TimeTravelUtil.resolve_snapshot(self.table)
             return manifest_list_manager.read_all(snapshot), snapshot
 
         return FileScanner(
