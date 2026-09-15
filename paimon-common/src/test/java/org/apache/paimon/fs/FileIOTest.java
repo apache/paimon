@@ -57,16 +57,18 @@ public class FileIOTest {
         FileIO fileIO = Mockito.spy(LocalFileIO.create());
         Path file = new Path(tempDir.resolve("file").toUri());
         fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("404 Not Found");
         Mockito.doAnswer(
                         invocation -> {
                             fileIO.deleteQuietly(file);
-                            throw new IOException("404 Not Found");
+                            throw readFailure;
                         })
                 .when(fileIO)
                 .newInputStream(file);
 
         assertThatThrownBy(() -> fileIO.readFileUtf8(file))
-                .isInstanceOf(FileNotFoundException.class);
+                .isInstanceOf(FileNotFoundException.class)
+                .hasCause(readFailure);
     }
 
     @Test
@@ -78,6 +80,31 @@ public class FileIOTest {
         Mockito.doThrow(readFailure).when(fileIO).newInputStream(file);
 
         assertThatThrownBy(() -> fileIO.readFileUtf8(file)).isSameAs(readFailure);
+    }
+
+    @Test
+    public void testReadFileUtf8KeepsReadFailureWhenExistenceCheckFails() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("Read failure");
+        Mockito.doThrow(readFailure).when(fileIO).newInputStream(file);
+        IOException checkFailure = new IOException("Exists failure");
+        Mockito.doThrow(checkFailure).when(fileIO).exists(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isSameAs(readFailure)
+                .satisfies(e -> assertThat(e.getSuppressed()).containsExactly(checkFailure));
+
+        IOException secondReadFailure = new IOException("Read failure");
+        Mockito.doThrow(secondReadFailure).when(fileIO).newInputStream(file);
+        RuntimeException uncheckedCheckFailure = new RuntimeException("Exists failure");
+        Mockito.doThrow(uncheckedCheckFailure).when(fileIO).exists(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isSameAs(secondReadFailure)
+                .satisfies(
+                        e -> assertThat(e.getSuppressed()).containsExactly(uncheckedCheckFailure));
     }
 
     @Test
