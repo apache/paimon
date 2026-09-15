@@ -40,7 +40,10 @@ class RecordReaderToBatchAdapter(RecordBatchReader):
         self._exhausted = False
         self._pending_iterator = None
         self._include_row_kind = include_row_kind
+        self.file_io = getattr(inner, 'file_io', None)
         self.blob_field_indices = getattr(inner, 'blob_field_indices', None)
+        self.descriptor_field_indices = getattr(inner, 'descriptor_field_indices', None)
+        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
         self.vector_field_indices = getattr(inner, 'vector_field_indices', None)
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
@@ -66,6 +69,7 @@ class RecordReaderToBatchAdapter(RecordBatchReader):
                 self._exhausted = True
                 break
             self._pending_iterator = row_iterator
+            self._refresh_blob_view_lookup(self._inner)
 
         if not row_tuples:
             return None
@@ -95,12 +99,25 @@ class BatchToRecordReaderAdapter(RecordReader):
 
     def __init__(self, inner: RecordBatchReader):
         self._inner = inner
+        self.file_io = getattr(inner, 'file_io', None)
+        self.blob_field_indices = getattr(inner, 'blob_field_indices', None)
+        self.descriptor_field_indices = getattr(inner, 'descriptor_field_indices', None)
+        self.blob_view_lookup = getattr(inner, 'blob_view_lookup', None)
+        self.vector_field_indices = getattr(inner, 'vector_field_indices', None)
 
     def read_batch(self):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
-        return _ArrowBatchIterator(batch)
+        self._refresh_blob_view_lookup(self._inner)
+        return _ArrowBatchIterator(
+            batch,
+            file_io=self.file_io,
+            blob_field_indices=self.blob_field_indices,
+            descriptor_field_indices=self.descriptor_field_indices,
+            blob_view_lookup=self.blob_view_lookup,
+            vector_field_indices=self.vector_field_indices,
+        )
 
     def close(self):
         self._inner.close()
@@ -108,7 +125,10 @@ class BatchToRecordReaderAdapter(RecordReader):
 
 class _ArrowBatchIterator(RecordIterator):
 
-    def __init__(self, batch: pa.RecordBatch):
+    def __init__(self, batch: pa.RecordBatch,
+                 file_io=None, blob_field_indices=None,
+                 descriptor_field_indices=None, blob_view_lookup=None,
+                 vector_field_indices=None):
         self._batch = batch
         self._idx = 0
         self._has_rk = "_row_kind" in batch.schema.names
@@ -118,6 +138,11 @@ class _ArrowBatchIterator(RecordIterator):
         else:
             self._rk_idx = -1
             self._data_cols = list(range(batch.num_columns))
+        self._file_io = file_io
+        self._blob_field_indices = blob_field_indices
+        self._descriptor_field_indices = descriptor_field_indices
+        self._blob_view_lookup = blob_view_lookup
+        self._vector_field_indices = vector_field_indices
 
     def next(self):
         if self._idx >= self._batch.num_rows:
@@ -126,7 +151,13 @@ class _ArrowBatchIterator(RecordIterator):
             self._batch.column(j)[self._idx].as_py()
             for j in self._data_cols
         )
-        row = OffsetRow(row_tuple, 0, len(self._data_cols))
+        row = OffsetRow(
+            row_tuple, 0, len(self._data_cols),
+            file_io=self._file_io,
+            blob_field_indices=self._blob_field_indices,
+            descriptor_field_indices=self._descriptor_field_indices,
+            blob_view_lookup=self._blob_view_lookup,
+            vector_field_indices=self._vector_field_indices)
         if self._has_rk:
             from pypaimon.table.row.row_kind import RowKind
             kind_str = self._batch.column(self._rk_idx)[self._idx].as_py()
@@ -146,6 +177,7 @@ class AuthFilterReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         mask = self._filter_fn(batch)
         return batch.filter(mask)
 
@@ -184,6 +216,7 @@ class AuthMaskingReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         original_batch = batch
         masked_columns = {}
         for col_name, transform in self._parsed_rules.items():
@@ -223,6 +256,7 @@ class ColumnProjectReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
+        self._refresh_blob_view_lookup(self._inner)
         columns = self._columns
         if "_row_kind" in batch.schema.names and "_row_kind" not in columns:
             columns = ["_row_kind"] + list(columns)

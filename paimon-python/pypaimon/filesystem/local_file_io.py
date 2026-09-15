@@ -490,6 +490,11 @@ class LocalFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
+    def close(self):
+        uri_reader_factory = getattr(self, 'uri_reader_factory', None)
+        if uri_reader_factory is not None:
+            uri_reader_factory.close()
+
 
 class FuseLocalFileIO(LocalFileIO):
     """LocalFileIO that translates remote OSS paths to FUSE-mounted local paths.
