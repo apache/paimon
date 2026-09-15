@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover - supported fastavro versions provide th
 from datetime import datetime
 
 from pypaimon.manifest.manifest_sidecar import (
-    Query, read_sidecar, read_selected_bytes,
+    Settings, SUFFIX, Query, build_from_entries, read_sidecar, read_selected_bytes,
 )
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
@@ -342,12 +342,15 @@ class ManifestFileManager:
             fields = [data_field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
         return fields
 
+    def _sidecar_settings(self):
+        return Settings.from_options(self.table.options)
+
     def write(self, file_name, entries: List[ManifestEntry]):
         buf = BytesIO()
         fastavro.writer(
             buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries),
             codec=self._codec)
-        self._flush(file_name, buf.getvalue())
+        return self._flush(file_name, buf.getvalue(), entries)
 
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
@@ -371,10 +374,9 @@ class ManifestFileManager:
                     writer.flush()
                     avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
-                    self._flush(file_name, avro_bytes)
-                    written_files.append(file_name)
-                    result.append(self._build_meta(
-                        file_name, entries[chunk_start:i + 1], len(avro_bytes)))
+                    meta = self._flush(file_name, avro_bytes, entries[chunk_start:i + 1])
+                    written_files.append(meta)
+                    result.append(meta)
                     chunk_start = i + 1
                     buf = BytesIO()
                     writer = Writer(
@@ -385,13 +387,12 @@ class ManifestFileManager:
                 writer.flush()
                 avro_bytes = buf.getvalue()
                 file_name = f"{name_prefix}-{len(result)}"
-                self._flush(file_name, avro_bytes)
-                written_files.append(file_name)
-                result.append(self._build_meta(
-                    file_name, entries[chunk_start:], len(avro_bytes)))
-        except Exception:
-            for fname in written_files:
-                self.file_io.delete_quietly(f"{self.manifest_path}/{fname}")
+                meta = self._flush(file_name, avro_bytes, entries[chunk_start:])
+                written_files.append(meta)
+                result.append(meta)
+        except BaseException:
+            for meta in written_files:
+                self.delete(meta)
             raise
         return result
 
@@ -438,17 +439,37 @@ class ManifestFileManager:
     def _to_avro_records(self, entries: List[ManifestEntry]) -> List[dict]:
         return [self._to_avro_record(e) for e in entries]
 
-    def _flush(self, file_name: str, avro_bytes: bytes):
+    def delete(self, manifest: ManifestFileMeta):
+        self.file_io.delete_quietly(f"{self.manifest_path}/{manifest.file_name}")
+        for extra_file in manifest.extra_files or []:
+            self.file_io.delete_quietly(f"{self.manifest_path}/{extra_file}")
+
+    def _flush(self, file_name: str, avro_bytes: bytes, entries) -> ManifestFileMeta:
         manifest_path = f"{self.manifest_path}/{file_name}"
+        sidecar_file_name = None
         try:
             with self.file_io.new_output_stream(manifest_path) as output_stream:
                 output_stream.write(avro_bytes)
-        except Exception as e:
+            settings = self._sidecar_settings()
+            if settings.enabled:
+                data = build_from_entries(avro_bytes, entries, settings)
+                if data is not None:
+                    sidecar_file_name = file_name + SUFFIX
+                    with self.file_io.new_output_stream(f"{self.manifest_path}/{sidecar_file_name}") as output_stream:
+                        output_stream.write(data)
+            # Publish the reference only after both objects close successfully.
+            return self._build_meta(file_name, entries, len(avro_bytes),
+                                    [sidecar_file_name] if sidecar_file_name is not None else None)
+        except BaseException as e:
             self.file_io.delete_quietly(manifest_path)
+            if sidecar_file_name is not None:
+                self.file_io.delete_quietly(f"{self.manifest_path}/{sidecar_file_name}")
+            if not isinstance(e, Exception) or isinstance(e, InterruptedError):
+                raise
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
 
     def _build_meta(self, file_name: str, entries: List[ManifestEntry],
-                    file_size: int = None) -> ManifestFileMeta:
+                    file_size: int = None, extra_files: Optional[List[str]] = None) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
@@ -480,7 +501,9 @@ class ManifestFileManager:
         min_row_id = None
         max_row_id = None
         for entry in entries:
-            if entry.file.first_row_id is None:
+            if (entry.file.first_row_id is None or entry.file.first_row_id < 0
+                    or entry.file.row_count <= 0
+                    or entry.file.row_count - 1 > (1 << 63) - 1 - entry.file.first_row_id):
                 min_row_id = None
                 max_row_id = None
                 break
@@ -516,5 +539,6 @@ class ManifestFileManager:
             max_level=max((e.file.level for e in entries), default=None),
             min_row_id=min_row_id,
             max_row_id=max_row_id,
+            extra_files=extra_files,
             total_buckets=total_buckets,
         )

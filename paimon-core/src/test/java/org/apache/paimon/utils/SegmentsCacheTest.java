@@ -91,4 +91,19 @@ public class SegmentsCacheTest {
         assertThat(cache.totalCacheBytes()).isLessThanOrEqualTo(budget.getBytes());
         assertThat(cache.estimatedSize()).isLessThan(100);
     }
+
+    @Test
+    public void testRangeKeysAreDistinctFromWholeObjectsAndOtherRanges() {
+        SegmentsCache<String> cache =
+                new SegmentsCache<>(1024, MemorySize.ofKibiBytes(64), 100L, null, false);
+        SingleSegments whole = new SingleSegments(MemorySegment.wrap(new byte[] {1}), 1);
+        SingleSegments block = new SingleSegments(MemorySegment.wrap(new byte[] {2, 3}), 2);
+        cache.put("manifest", whole);
+        cache.put("manifest", 10, 2, block);
+        assertThat(cache.getIfPresents("manifest")).isSameAs(whole);
+        assertThat(cache.getIfPresents("manifest", 10, 2)).isSameAs(block);
+        assertThat(cache.getIfPresents("other", 10, 2)).isNull();
+        assertThat(cache.getIfPresents("manifest", 11, 2)).isNull();
+        assertThat(cache.getIfPresents("manifest", 10, 3)).isNull();
+    }
 }
