@@ -2881,12 +2881,12 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     /**
-     * ORC fallback: orc does not support row-range skipping, so the range is enforced by an outer
-     * RangeSkipReader with the real skip (not 0). RowRange [2, 4] returns a = 2, 3, 4 — guards the
-     * OrcReaderFactory supportsRowRangeSkip()=false fix.
+     * ORC range read: orc has no page-level row-range filtering, but OrcReaderFactory overrides
+     * supportsRowRangeSkip() to true because the selection bitmap is applied downstream by
+     * ApplyBitmapIndexRecordReader, so the range is pushed down and returns exactly a = 2, 3, 4.
      */
     @Test
-    public void testAppendOrcRowRangeFallsBackToSkipAndLimit() throws Exception {
+    public void testAppendOrcRowRangePushesDownExactSlice() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FILE_FORMAT_ORC));
         writeAppendRows(table, 0, 10);
@@ -2901,8 +2901,18 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
      */
     @Test
     public void testAppendParquetRowRangeWithFilterWrapsOutsideFilter() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        checkAppendRowRangeWithFilterWrapsOutsideFilter(FILE_FORMAT_PARQUET);
+    }
+
+    /** Same executeFilter+range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testAppendOrcRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        checkAppendRowRangeWithFilterWrapsOutsideFilter(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkAppendRowRangeWithFilterWrapsOutsideFilter(String fileFormat)
+            throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, fileFormat));
         writeAppendRows(table, 0, 10);
         // field "a" is index 1 ; filtered stream: a = 5..9 ; RowRange [1, 2] -> a = 6, 7
         Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(1, 5);
@@ -2916,8 +2926,17 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
      */
     @Test
     public void testAppendParquetRowRangeAcrossMultipleFiles() throws Exception {
-        FileStoreTable table =
-                createFileStoreTable(conf -> conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET));
+        checkAppendRowRangeAcrossMultipleFiles(FILE_FORMAT_PARQUET);
+    }
+
+    /** Same multi-file range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testAppendOrcRowRangeAcrossMultipleFiles() throws Exception {
+        checkAppendRowRangeAcrossMultipleFiles(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkAppendRowRangeAcrossMultipleFiles(String fileFormat) throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, fileFormat));
         writeAppendRows(table, 0, 5);
         writeAppendRows(table, 5, 10);
         // global effective rows: file0 -> [0,4], file1 -> [5,9] ; RowRange [3, 6] -> a = 3,4,5,6
@@ -2926,11 +2945,10 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     /**
-     * Regression: a split mixing formats after an append table changes from parquet to orc. The
-     * range pushdown check must cover every file: if only the first (parquet) file is checked,
-     * canPushdown is true, the outer RangeSkipReader is disabled, and the orc file (which cannot
-     * push down) returns its whole file — leaking rows beyond the range. With the all-files check,
-     * canPushdown is false and the single outer RangeSkipReader slices the concatenated stream.
+     * A split mixing formats after an append table changes from parquet to orc. Both parquet and
+     * orc now report supportsRowRangeSkip()=true, so each file receives its local range and the
+     * concatenated output is exactly the slice — guarding that the per-file range is applied
+     * consistently across formats in one split.
      *
      * <p>file0 (parquet): a = 0..4 ; file1 (orc): a = 5..9 ; RowRange [3, 6] -> a = 3,4,5,6.
      */
@@ -2959,10 +2977,24 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
      */
     @Test
     public void testAppendRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkAppendRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(FILE_FORMAT_PARQUET);
+    }
+
+    /**
+     * Same regression as the parquet case, but stored as ORC (range pushed down via selection
+     * bitmap, since OrcReaderFactory overrides supportsRowRangeSkip() to true).
+     */
+    @Test
+    public void testAppendOrcRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkAppendRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkAppendRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(String fileFormat)
+            throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(FILE_FORMAT, fileFormat);
                             conf.set(CoreOptions.SCAN_IGNORE_LOST_FILE, true);
                         });
         writeAppendRows(table, 0, 5);
@@ -2998,10 +3030,23 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
      */
     @Test
     public void testAppendRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored() throws Exception {
+        checkAppendRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored(FILE_FORMAT_PARQUET);
+    }
+
+    /** Same regression as the parquet case, but stored as ORC. */
+    @Test
+    public void testAppendOrcRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored()
+            throws Exception {
+        checkAppendRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored(
+                CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkAppendRowRangeKeepsEffectiveFallbackWhenCorruptFileIgnored(String fileFormat)
+            throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                            conf.set(FILE_FORMAT, fileFormat);
                             conf.set(CoreOptions.SCAN_IGNORE_CORRUPT_FILE, true);
                         });
         writeAppendRows(table, 0, 5);

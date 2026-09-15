@@ -2538,8 +2538,18 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
      */
     @Test
     public void testRowRangeReadReturnsExactSlice() throws Exception {
+        checkRowRangeReadReturnsExactSlice(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same exact-slice behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcReadReturnsExactSlice() throws Exception {
+        checkRowRangeReadReturnsExactSlice(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeReadReturnsExactSlice(String fileFormat) throws Exception {
         int count = 100;
-        write(count);
+        writeFormat(fileFormat, count);
         // write() produces f0 = 0..count-1, so RowRange [10, 19] -> f0 = 10..19
         List<Integer> actual = readRowRange(getTableDefault(), RowRange.of(10L, 19L));
         assertThat(actual).isEqualTo(intRange(10, 19));
@@ -2553,8 +2563,18 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
      */
     @Test
     public void testRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        checkRowRangeWithFilterWrapsOutsideFilter(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same executeFilter+range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcWithFilterWrapsOutsideFilter() throws Exception {
+        checkRowRangeWithFilterWrapsOutsideFilter(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeWithFilterWrapsOutsideFilter(String fileFormat) throws Exception {
         int count = 100;
-        write(count);
+        writeFormat(fileFormat, count);
         PredicateBuilder builder = new PredicateBuilder(schemaDefault().rowType());
         Predicate filter = builder.greaterOrEqual(0, 50);
         // filtered stream: f0 = 50..99 ; RowRange [10, 19] -> f0 = 60..69
@@ -2570,9 +2590,19 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
      */
     @Test
     public void testRowRangeAcrossMultipleFiles() throws Exception {
+        checkRowRangeAcrossMultipleFiles(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /** Same multi-file range behavior as the parquet case, but stored as ORC. */
+    @Test
+    public void testRowRangeOrcAcrossMultipleFiles() throws Exception {
+        checkRowRangeAcrossMultipleFiles(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeAcrossMultipleFiles(String fileFormat) throws Exception {
         int count = 100;
-        write(count);
-        write(count);
+        writeFormat(fileFormat, count);
+        writeFormat(fileFormat, count);
         // file0: f0 = 0..99 ; file1: f0 = 0..99 (each file-internal index 0..99).
         // global effective rows: file0 -> [0, 99], file1 -> [100, 199].
         // RowRange [95, 104] -> file0 last 5 (f0 95..99) + file1 first 5 (f0 0..4).
@@ -2588,10 +2618,11 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     /**
-     * Regression: a partial-column ORC read over a DataEvolution column merge. ORC cannot push a
-     * row range down (supportsRowRangeSkip() == false), so the range must be enforced exactly once
-     * by an outer RangeSkipReader, not both by a selection bitmap (ApplyBitmapIndexRecordReader)
-     * and a RangeSkipReader — the double application used to yield [] for RowRange.of(10, 19).
+     * A partial-column ORC read over a DataEvolution column merge. ORC has no page-level row-range
+     * filtering, but {@code supportsRowRangeSkip()} is overridden to {@code true} because the
+     * selection bitmap is applied downstream by ApplyBitmapIndexRecordReader, so the range is
+     * pushed down and the merged output is exactly [start, end] — no outer RangeSkipReader, hence
+     * no double application (which used to yield [] for RowRange.of(10, 19)).
      *
      * <p>The table is stored as two ORC column files (f0+f1 in one, f2 in another) so the read goes
      * through the column-merge / DataBunch path; the existing parquet case does not cover this
@@ -2631,10 +2662,25 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
      */
     @Test
     public void testRowRangeKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(CoreOptions.FILE_FORMAT_PARQUET);
+    }
+
+    /**
+     * Same regression as the parquet case, but stored as ORC (range pushed down via selection
+     * bitmap, since OrcReaderFactory overrides supportsRowRangeSkip() to true).
+     */
+    @Test
+    public void testRowRangeOrcKeepsEffectiveFallbackWhenLostFileIgnored() throws Exception {
+        checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(CoreOptions.FILE_FORMAT_ORC);
+    }
+
+    private void checkRowRangeKeepsEffectiveFallbackWhenLostFileIgnored(String fileFormat)
+            throws Exception {
         // build a data-evolution table with scan.ignore-lost-files=true
         Schema schema = schemaDefault();
         Map<String, String> options = new HashMap<>(schema.options());
         options.put(CoreOptions.SCAN_IGNORE_LOST_FILE.key(), "true");
+        options.put(CoreOptions.FILE_FORMAT.key(), fileFormat);
         Schema lostSchema =
                 new Schema(
                         schema.rowType().getFields(),
@@ -2645,7 +2691,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         catalog.createTable(identifier(), lostSchema, true);
         FileStoreTable table = getTableDefault();
 
-        // two full-row parquet files: file0 f0 = 0..99, file1 f0 = 0..99
+        // two full-row files: file0 f0 = 0..99, file1 f0 = 100..199
         writeFullRowRange(table, 0, 100);
         writeFullRowRange(table, 100, 200);
 
@@ -2670,6 +2716,47 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         List<Integer> ranged = readRowRange(table, RowRange.of(1L, 2L));
         assertThat(ranged).isEqualTo(intRange(101, 102));
         assertThat(ranged).isEqualTo(ordinary.subList(1, 3));
+    }
+
+    /**
+     * Creates a data-evolution table in the given format (default parquet) and writes {@code count}
+     * rows split across two column files (f0+f1, then f2) — a column merge — mirroring {@code
+     * write(count)} but with a chosen file format.
+     */
+    private void writeFormat(String fileFormat, long count) throws Exception {
+        Schema schema = schemaDefault();
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.put(CoreOptions.FILE_FORMAT.key(), fileFormat);
+        Schema formatSchema =
+                new Schema(
+                        schema.rowType().getFields(),
+                        schema.partitionKeys(),
+                        schema.primaryKeys(),
+                        options,
+                        schema.comment());
+        catalog.createTable(identifier(), formatSchema, true);
+
+        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = 0; i < count; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = 0; i < count; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = builder.newCommit();
+            List<CommitMessage> commitables = write1.prepareCommit();
+            setFirstRowId(commitables, rowId);
+            commit.commit(commitables);
+        }
     }
 
     /**
