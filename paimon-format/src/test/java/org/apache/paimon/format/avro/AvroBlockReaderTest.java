@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
@@ -184,6 +185,68 @@ class AvroBlockReaderTest {
             assertThat(reader.blockOffset()).isEqualTo(secondBlockOffset);
             assertBlockReadable(
                     header, bytes, reader.blockOffset(), reader.blockLength(), new long[] {22L});
+            assertThat(reader.hasNextBlock()).isFalse();
+        }
+    }
+
+    @Test
+    void headerFromMemoryCanRestoreEof() throws IOException {
+        for (int records : new int[] {0, 1}) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            long headerLength;
+            try (DataFileWriter<Long> writer =
+                    new DataFileWriter<>(new GenericDatumWriter<>(SCHEMA))) {
+                writer.create(SCHEMA, output);
+                headerLength = writer.sync();
+                if (records > 0) {
+                    writer.append(17L);
+                }
+            }
+            byte[] bytes = output.toByteArray();
+            ByteArraySeekableStream input = new ByteArraySeekableStream(bytes);
+            try (AvroBlockReader reader = new AvroBlockReader(input)) {
+                assertThat(input.getPos()).isEqualTo(bytes.length);
+                byte[] header = reader.headerBytes();
+                assertThat(header).isEqualTo(Arrays.copyOf(bytes, (int) headerLength));
+                assertThat(input.getPos()).isEqualTo(bytes.length);
+                if (records > 0) {
+                    assertThat(reader.nextBorrowedRawBlock().recordCount()).isEqualTo(records);
+                    assertBlockReadable(
+                            header,
+                            bytes,
+                            reader.blockOffset(),
+                            reader.blockLength(),
+                            new long[] {17L});
+                }
+                assertThat(reader.hasNextBlock()).isFalse();
+            }
+        }
+    }
+
+    @Test
+    void headerStartsAtInitialStreamPosition() throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        long headerLength;
+        try (DataFileWriter<Long> writer = new DataFileWriter<>(new GenericDatumWriter<>(SCHEMA))) {
+            writer.create(SCHEMA, output);
+            headerLength = writer.sync();
+            writer.append(17L);
+        }
+        byte[] avro = output.toByteArray();
+        int prefixLength = 13;
+        byte[] bytes = new byte[prefixLength + avro.length];
+        System.arraycopy(avro, 0, bytes, prefixLength, avro.length);
+        SeekableInputStream input = open(bytes);
+        input.seek(prefixLength);
+        try (AvroBlockReader reader = new AvroBlockReader(input)) {
+            long resumePosition = input.getPos();
+            byte[] header = reader.headerBytes();
+            assertThat(header).isEqualTo(Arrays.copyOf(avro, (int) headerLength));
+            assertThat(input.getPos()).isEqualTo(resumePosition);
+            assertThat(reader.nextBorrowedRawBlock().recordCount()).isEqualTo(1);
+            assertThat(reader.blockOffset()).isEqualTo(prefixLength + headerLength);
+            assertBlockReadable(
+                    header, bytes, reader.blockOffset(), reader.blockLength(), new long[] {17L});
             assertThat(reader.hasNextBlock()).isFalse();
         }
     }

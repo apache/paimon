@@ -34,6 +34,7 @@ import java.util.NoSuchElementException;
 public final class RawBlockReader extends DataFileStream<Void> {
 
     private final SeekableInputStream input;
+    private final long headerOffset;
     private final long headerLength;
     @Nullable private byte[] headerBytes;
     private long blockOffset;
@@ -41,9 +42,14 @@ public final class RawBlockReader extends DataFileStream<Void> {
     private boolean pending;
 
     public RawBlockReader(SeekableInputStream input) throws IOException {
+        this(input, input.getPos());
+    }
+
+    private RawBlockReader(SeekableInputStream input, long headerOffset) throws IOException {
         super(input, new NoOpDatumReader<Void>());
         this.input = input;
-        this.headerLength = position();
+        this.headerOffset = headerOffset;
+        this.headerLength = position() - headerOffset;
     }
 
     /** Returns a copy of the complete OCF header, reading and caching it on first access. */
@@ -52,7 +58,7 @@ public final class RawBlockReader extends DataFileStream<Void> {
             byte[] bytes = new byte[Math.toIntExact(headerLength)];
             long resumePosition = input.getPos();
             try {
-                input.seek(0);
+                input.seek(headerOffset);
                 IOUtils.readFully(input, bytes);
             } finally {
                 // Preserve the position past any bytes already buffered by the Avro decoder.

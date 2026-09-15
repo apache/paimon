@@ -92,7 +92,7 @@ public class ByteArraySeekableStream extends SeekableInputStream {
         }
 
         public void seek(int position) throws IOException {
-            if (position >= count) {
+            if (position > count) {
                 throw new EOFException("Can't seek position: " + position + ", length is " + count);
             }
             pos = position;
