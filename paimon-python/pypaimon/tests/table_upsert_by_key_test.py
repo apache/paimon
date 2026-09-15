@@ -25,6 +25,7 @@ import pyarrow.parquet as pq
 
 from pypaimon.read.table_read import TableRead
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -64,6 +65,65 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
     def _apply_upsert_rows(self, table_update, rows, upsert_keys, cid):
         raise NotImplementedError
 
+    def test_upsert_row_groups_do_not_follow_read_batches(self):
+        schema = pa.schema([('id', pa.int32()), ('score', pa.int32())])
+        for read_size in (73, 1024):
+            with self.subTest(read_size=read_size):
+                table = self._create_table(pa_schema=schema, options={
+                    **self.table_options, 'read.batch-size': str(read_size)})
+                original = pa.Table.from_pydict(
+                    {'id': list(range(5000)), 'score': list(range(5000))}, schema=schema)
+                self._write_arrow(table, original)
+                updates = pa.Table.from_pydict({'id': [13], 'score': [-1]}, schema=schema)
+                messages = self._upsert(table, updates, ['id'], ['score'])
+                files = [f for message in messages for f in message.new_files]
+                self.assertEqual(len(files), 1)
+                metadata = pq.read_metadata(files[0].file_path)
+                self.assertEqual(metadata.num_row_groups, 1)
+                self.assertEqual(metadata.row_group(0).num_rows, 5000)
+                scores = self._read_all(table).to_pydict()['score']
+                expected = list(range(5000))
+                expected[13] = -1
+                self.assertEqual(scores, expected)
+
+    def test_row_group_byte_budget_and_oversized_row(self):
+        schema = pa.schema([('id', pa.int32())])
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options, 'file.block-size': '400 b'})
+        writer = AppendOnlyDataWriter(table, (), 0, 0, table.options)
+        data = pa.Table.from_pydict({'id': list(range(250))}, schema=schema)
+        try:
+            for batch_size in (1, 73, 250):
+                groups = list(writer._row_groups(data.to_batches(max_chunksize=batch_size)))
+                self.assertEqual([group.num_rows for group in groups], [100, 100, 50])
+                self.assertTrue(pa.concat_tables(groups).equals(data))
+                self.assertTrue(all(group.nbytes <= 400 for group in groups))
+            large = pa.Table.from_pydict({'text': ['a', 'x' * 500, 'b']})
+            groups = list(writer._row_groups(large.to_batches()))
+            self.assertEqual([group.num_rows for group in groups], [1, 1, 1])
+            self.assertTrue(pa.concat_tables(groups).equals(large))
+            # Empty batches, nulls and sliced variable-width columns must not
+            # lose rows or make the output depend on input batch boundaries.
+            mixed = pa.Table.from_pydict({'text': ['skip', None, '', 'a' * 300,
+                                                 'b' * 300, None, 'last', 'skip']}).slice(1, 6)
+            layouts = []
+            for batch_size in (1, 2, 6):
+                batches = mixed.to_batches(max_chunksize=batch_size)
+                batches.insert(0, batches[0].slice(0, 0))
+                groups = list(writer._row_groups(batches))
+                self.assertTrue(pa.concat_tables(groups).equals(mixed))
+                self.assertTrue(all(group.nbytes <= 400 for group in groups))
+                layouts.append([group.num_rows for group in groups])
+            self.assertTrue(all(layout == layouts[0] for layout in layouts))
+            self.assertEqual(list(writer._row_groups([])), [])
+            with mock.patch.object(AppendOnlyDataWriter, '_ROW_GROUP_MAX_ROWS', 17):
+                groups = list(writer._row_groups(data.to_batches(max_chunksize=73)))
+                self.assertEqual([group.num_rows for group in groups], [17] * 14 + [12])
+                self.assertTrue(pa.concat_tables(groups).equals(data))
+        finally:
+            writer.close()
+
+    @mock.patch.object(AppendOnlyDataWriter, '_ROW_GROUP_MAX_ROWS', 2)
     def test_partial_upsert_streams_original_file_group(self):
         schema = pa.schema([
             ('id', pa.int32()),

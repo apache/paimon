@@ -469,7 +469,7 @@ class TableUpdateByRowId:
             self.table.options, write_cols=column_names)
         batches = self._merged_batches(first_row_id, data, column_names)
         try:
-            files = writer.write_batches(batches)
+            files = writer._write_batches(batches)
             self._assign_update_file_metadata(files, first_row_id, column_names, {})
             if files:
                 self.commit_messages.append(CommitMessage(
