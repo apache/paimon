@@ -352,6 +352,10 @@ function validateCatalogOpenApi() {
 function validateManagementOpenApi() {
   const contract = validateCommon('rest-management-open-api.yaml');
   const operationIds = [
+    'upsertLabel',
+    'listLabels',
+    'getLabel',
+    'deleteLabel',
     'listPermissions',
     'grantPermission',
     'revokePermission',
@@ -360,6 +364,8 @@ function validateManagementOpenApi() {
     'dropTablePolicy',
   ];
   const resourcePaths = [
+    '/v1/{prefix}/labels/{entityType}/{entityName}',
+    '/v1/{prefix}/labels/{entityType}/{entityName}/{key}',
     '/v1/{prefix}/permissions',
     '/v1/{prefix}/permissions/grant',
     '/v1/{prefix}/permissions/revoke',
@@ -384,6 +390,43 @@ function validateManagementOpenApi() {
     ),
   );
   operationIds.forEach(contract.requireOperation);
+  ['upsertLabel', 'listLabels', 'getLabel', 'deleteLabel'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '429', '500', '503']),
+  );
+  contract.requireRequiredProperties('UpsertLabelRequest', ['value']);
+  const labelFields = contract.requireProperties('UpsertLabelRequest', ['value']);
+  contract.checkSpec(
+    Object.keys(labelFields).length === 1 &&
+      labelFields.value.type === 'string' &&
+      !labelFields.value.minLength,
+    'Label writes must contain only a string value, permitting empty strings but rejecting null',
+  );
+  contract.checkSpec(
+    contract.schema('LabelEntityType').type === 'string' && !contract.schema('LabelEntityType').enum,
+    'Label entity types must remain extensible strings',
+  );
+  const labelFieldNames = ['entityType', 'entityName', 'key', 'value'];
+  contract.requireRequiredProperties('GetLabelResponse', labelFieldNames);
+  contract.requireProperties('GetLabelResponse', labelFieldNames);
+  contract.requireRequiredProperties('ListLabelsResponse', ['labels']);
+  const labelList = contract.requireProperties('ListLabelsResponse', ['labels', 'nextPageToken']);
+  contract.checkSpec(
+    labelList.labels.items.$ref === '#/components/schemas/GetLabelResponse',
+    'Label listings must return complete bindings',
+  );
+  const labelRoot = contract.spec.paths['/v1/{prefix}/labels'];
+  const labelEntity = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}'];
+  const labelKey = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}/{key}'];
+  contract.checkSpec(
+    !labelRoot &&
+      labelEntity.get.operationId === 'listLabels' &&
+      labelKey.get.operationId === 'getLabel' &&
+      labelKey.post.operationId === 'upsertLabel' &&
+      labelKey.delete.operationId === 'deleteLabel' &&
+      !labelKey.patch &&
+      !labelKey.put,
+    'Labels must use POST/GET/DELETE on the single-key path with no collection-level write endpoint',
+  );
   ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
     contract.requireResponses(operationId, [
       '200',

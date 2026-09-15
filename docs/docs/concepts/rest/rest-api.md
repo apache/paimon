@@ -27,8 +27,8 @@ The [REST Catalog OpenAPI specification](/rest-catalog-open-api.yaml) defines th
 wire contract for catalog servers and clients. Open the YAML specification to inspect request and
 response schemas, generate SDK models, or validate an implementation.
 
-For client configuration, start with the [REST Catalog overview](./). For privilege grants, row
-filters, and column masks, use the separate [REST Management API](./management-api).
+For client configuration, start with the [REST Catalog overview](./). For entity labels, privilege
+grants, row filters, and column masks, use the separate [REST Management API](./management-api).
 
 ## Connect to a Catalog
 
