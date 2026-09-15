@@ -213,6 +213,7 @@ class TableUpdateByRowId:
 
         if not column_names:
             raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
 
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
@@ -259,6 +260,7 @@ class TableUpdateByRowId:
     ) -> List[CommitMessage]:
         if not column_names:
             raise ValueError("column_names cannot be empty")
+        column_names = list(dict.fromkeys(column_names))
         if len(rows) != len(row_ids_by_row):
             raise ValueError(
                 "rows and row_ids_by_row must have the same length: "

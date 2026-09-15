@@ -104,8 +104,12 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             self.assertTrue(pa.concat_tables(groups).equals(large))
             # Empty batches, nulls and sliced variable-width columns must not
             # lose rows or make the output depend on input batch boundaries.
-            mixed = pa.Table.from_pydict({'text': ['skip', None, '', 'a' * 300,
-                                                 'b' * 300, None, 'last', 'skip']}).slice(1, 6)
+            mixed = pa.Table.from_pydict({
+                'text': [
+                    'skip', None, '', 'a' * 300,
+                    'b' * 300, None, 'last', 'skip',
+                ],
+            }).slice(1, 6)
             layouts = []
             for batch_size in (1, 2, 6):
                 batches = mixed.to_batches(max_chunksize=batch_size)
@@ -1130,6 +1134,35 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         ))
         self.assertEqual((1, 'Alice', 99, 'NYC'), rows[0])
         self.assertEqual((2, 'Bob',   88, 'LA'),  rows[1])
+
+    def test_duplicate_update_cols_are_deduplicated(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'age': [25],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+
+        messages = self._upsert(
+            table,
+            pa.Table.from_pydict({
+                'id': [1],
+                'name': ['ignored'],
+                'age': [99],
+                'city': ['ignored'],
+            }, schema=self.pa_schema),
+            upsert_keys=['id'],
+            # Matching the schema width must not mean "update all columns".
+            update_cols=['age'] * len(table.field_names),
+        )
+
+        self.assertEqual(
+            self._read_all(table).to_pydict(),
+            {'id': [1], 'name': ['Alice'], 'age': [99], 'city': ['NYC']},
+        )
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual([file.write_cols for file in files], [['age']])
 
     # ==================================================================
     # Duplicate-key dedup tests — parametrised
