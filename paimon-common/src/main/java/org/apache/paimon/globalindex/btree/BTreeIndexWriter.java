@@ -30,11 +30,13 @@ import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -68,10 +70,11 @@ import java.util.zip.CRC32;
  * <p>For efficiency, we combine entries with the same keys and store a compact list of row ids for
  * each key.
  */
-public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
+public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private final String fileName;
     private final PositionOutputStream out;
+    private boolean closed;
 
     private final SstFileWriter writer;
     private final KeySerializer keySerializer;
@@ -92,10 +95,15 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             throws IOException {
         this.fileName = indexFileWriter.newFileName(BTreeGlobalIndexerFactory.IDENTIFIER);
         this.out = indexFileWriter.newOutputStream(this.fileName);
-        this.keySerializer = keySerializer;
-        this.comparator = keySerializer.createComparator();
-        // todo: we may enable bf to accelerate equal and in predicate in the future
-        this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        try {
+            this.keySerializer = keySerializer;
+            this.comparator = keySerializer.createComparator();
+            // todo: we may enable bf to accelerate equal and in predicate in the future
+            this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        } catch (RuntimeException | Error e) {
+            IOUtils.closeQuietly(out);
+            throw e;
+        }
     }
 
     @Override
@@ -164,7 +172,10 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             writer.writeSlice(footerEncoding);
 
             out.close();
+            closed = true;
         } catch (IOException e) {
+            IOUtils.closeQuietly(out);
+            closed = true;
             throw new RuntimeException("Error in closing BTree index writer", e);
         }
 
@@ -201,5 +212,18 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
         writer.writeSlice(sliceOutput.toSlice());
 
         return nullBitmapHandle;
+    }
+
+    /**
+     * Releases the output stream for a build that is abandoned without {@link #finish()}. The owner
+     * cleanup paths reach a writer only through {@code instanceof AutoCloseable}, so without this
+     * the stream opened in the constructor stays open for the life of the process.
+     */
+    @Override
+    public void close() throws IOException {
+        if (!closed) {
+            closed = true;
+            out.close();
+        }
     }
 }
