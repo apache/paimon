@@ -29,7 +29,7 @@ import pypaimon.multimodal as pmm
 from pypaimon.multimodal import temporal
 from pypaimon.catalog.table_query_auth import TableQueryAuthResult
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.table_scan import TableScan
 
 
 class MultimodalTemporalTest(unittest.TestCase):
@@ -2065,15 +2065,15 @@ class MultimodalTemporalTest(unittest.TestCase):
             on="event_time", by="episode_id",
             direction="nearest", tolerance=0,
         )
-        original_scan = FileScanner.scan
+        original_plan = TableScan.plan
 
         with mock.patch.object(
-                FileScanner, "scan", autospec=True,
-                side_effect=original_scan) as scan:
+                TableScan, "plan", autospec=True,
+                side_effect=original_plan) as plan:
             reader = aligned.to_arrow_batch_reader(batch_size=1)
             self.assertEqual(8, sum(batch.num_rows for batch in reader))
 
-        self.assertEqual(4, scan.call_count)
+        self.assertEqual(4, plan.call_count)
 
     def test_empty_source_stays_pinned_after_first_append(self):
         anchors = self._table("pinned_empty_anchors", {

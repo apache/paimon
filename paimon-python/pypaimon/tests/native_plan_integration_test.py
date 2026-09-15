@@ -137,6 +137,45 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
+    def test_append_distribution_matches_interleaved_partition_buckets(self):
+        self.schema = pa.schema([('k', pa.int64()), ('v', pa.string()), ('p', pa.string())])
+        self.cat.create_table('default.interleaved_t', Schema.from_pyarrow_schema(
+            self.schema, partition_keys=['p'], options={'bucket': '5', 'bucket-key': 'k'}), False)
+        partitions = ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1']
+        self._write('interleaved_t', [
+            {'k': 1001 + i, 'v': 'first', 'p': partition} for i, partition in enumerate(partitions)])
+        self._write('interleaved_t', [
+            {'k': 1005 + i, 'v': 'second', 'p': partition}
+            for i, partition in enumerate(['p2', 'p1', 'p2', 'p2'])])
+
+        def read(native, shard=None, slice_=None, limit=None):
+            table = self.cat.get_table('default.interleaved_t').copy(
+                {'scan.native-plan.enabled': str(native).lower()})
+            builder = table.new_read_builder()
+            if limit is not None:
+                builder.with_limit(limit)
+            scan = builder.new_scan()
+            if shard is not None:
+                scan.with_shard(*shard)
+            if slice_ is not None:
+                scan.with_slice(*slice_)
+            if native:
+                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native plan fell back')):
+                    plan = scan.plan()
+            else:
+                plan = scan.plan()
+            # Parallel reads with a limit can return any subset; compare planned order serially.
+            rows = builder.new_read().to_arrow(plan.splits(), parallelism=1).to_pylist()
+            return plan.snapshot_id, sorted(rows, key=lambda row: (row['k'], row['v'], row['p']))
+
+        selections = [{'shard': (i, 3)} for i in range(3)] + [
+            {'slice_': (0, 6)}, {'slice_': (4, 10)}, {'slice_': (10, 18)},
+            {'slice_': (0, 99)}, {'shard': (1, 3), 'limit': 2}, {'slice_': (4, 10), 'limit': 2},
+        ]
+        for selection in selections:
+            with self.subTest(selection=selection):
+                self.assertEqual(read(False, **selection), read(True, **selection))
+
     @unittest.skipUnless(native_family_search_modes_available(),
                          "pypaimon-rust 0.4+ required")
     def test_dynamic_family_search_mode_uses_native_plan(self):
