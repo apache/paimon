@@ -20,10 +20,13 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.read.native_plan import native_family_search_modes_available
+from pypaimon.read.native_plan import (
+    native_family_search_modes_available, native_method_available,
+)
 from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
 
@@ -44,6 +47,7 @@ def _has_native_row_ranges():
     return hasattr(ReadBuilder, 'with_row_ranges')
 
 
+@pytest.mark.native_plan
 @unittest.skipUnless(_has_native_planner(),
                      "pypaimon_rust with split-planning API not installed")
 class NativePlanIntegrationTest(unittest.TestCase):
@@ -96,7 +100,7 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._assert_matches('pk_t')
 
     def test_pk_equal_to_partition_key_falls_back(self):
-        # Empty trimmed PK: native would skip merge and return duplicates -> must fall back.
+        # Rust rejects empty trimmed PK schemas; Python must retain its supported behavior.
         self.cat.create_table('default.pkpart_t', Schema.from_pyarrow_schema(
             self.schema, partition_keys=['k'], primary_keys=['k'], options={'bucket': '1'}), False)
         self._write('pkpart_t', [{'k': 1, 'v': 'a1'}, {'k': 2, 'v': 'b1'}])
@@ -132,6 +136,45 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
+
+    def test_append_distribution_matches_interleaved_partition_buckets(self):
+        self.schema = pa.schema([('k', pa.int64()), ('v', pa.string()), ('p', pa.string())])
+        self.cat.create_table('default.interleaved_t', Schema.from_pyarrow_schema(
+            self.schema, partition_keys=['p'], options={'bucket': '5', 'bucket-key': 'k'}), False)
+        partitions = ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1']
+        self._write('interleaved_t', [
+            {'k': 1001 + i, 'v': 'first', 'p': partition} for i, partition in enumerate(partitions)])
+        self._write('interleaved_t', [
+            {'k': 1005 + i, 'v': 'second', 'p': partition}
+            for i, partition in enumerate(['p2', 'p1', 'p2', 'p2'])])
+
+        def read(native, shard=None, slice_=None, limit=None):
+            table = self.cat.get_table('default.interleaved_t').copy(
+                {'scan.native-plan.enabled': str(native).lower()})
+            builder = table.new_read_builder()
+            if limit is not None:
+                builder.with_limit(limit)
+            scan = builder.new_scan()
+            if shard is not None:
+                scan.with_shard(*shard)
+            if slice_ is not None:
+                scan.with_slice(*slice_)
+            if native:
+                with patch.object(scan.file_scanner, 'scan', side_effect=AssertionError('native plan fell back')):
+                    plan = scan.plan()
+            else:
+                plan = scan.plan()
+            # Parallel reads with a limit can return any subset; compare planned order serially.
+            rows = builder.new_read().to_arrow(plan.splits(), parallelism=1).to_pylist()
+            return plan.snapshot_id, sorted(rows, key=lambda row: (row['k'], row['v'], row['p']))
+
+        selections = [{'shard': (i, 3)} for i in range(3)] + [
+            {'slice_': (0, 6)}, {'slice_': (4, 10)}, {'slice_': (10, 18)},
+            {'slice_': (0, 99)}, {'shard': (1, 3), 'limit': 2}, {'slice_': (4, 10), 'limit': 2},
+        ]
+        for selection in selections:
+            with self.subTest(selection=selection):
+                self.assertEqual(read(False, **selection), read(True, **selection))
 
     @unittest.skipUnless(native_family_search_modes_available(),
                          "pypaimon-rust 0.4+ required")
@@ -433,17 +476,43 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.snapshot_id, normal.snapshot_id)
         self.assertIn('native', str(native))   # render shows the Planner line
 
-    def test_empty_table_explain_reflects_python_fallback(self):
+    @unittest.skipUnless(native_method_available('Plan', 'snapshot_id'),
+                         "pypaimon_rust snapshot metadata API not installed")
+    def test_native_explain_reports_split_metadata_without_pruning_counters(self):
+        self.cat.create_table(
+            'default.explain_metadata_t', Schema.from_pyarrow_schema(
+                self.schema, options={'metadata.stats-mode': 'full'}), False)
+        self._write('explain_metadata_t', [{'k': 1, 'v': 'a'}])
+        self._write('explain_metadata_t', [{'k': 8, 'v': 'b'}])
+        table = self.cat.get_table('default.explain_metadata_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        builder = table.new_read_builder()
+        builder.with_filter(builder.new_predicate_builder().equal('k', 8))
+        result = builder.explain()
+        self.assertTrue(result.native_planned)
+        self.assertEqual(result.snapshot_id, 2)
+        self.assertEqual(result.split_count, 1)
+        self.assertEqual(result.file_count, 1)
+        self.assertIn('pruning not tracked', str(result))
+        self.assertIsNone(result.file_skipping)
+        builder.with_filter(builder.new_predicate_builder().equal('k', 99))
+        empty = builder.explain()
+        self.assertTrue(empty.native_planned)
+        self.assertEqual(empty.snapshot_id, 2)
+        self.assertEqual(empty.split_count, 0)
+
+    def test_empty_table_explain_preserves_native_metadata(self):
         self.cat.create_table(
             'default.empty_t', Schema.from_pyarrow_schema(self.schema), False)
         normal = self.cat.get_table('default.empty_t').new_read_builder().explain()
-        fallback = self.cat.get_table('default.empty_t').copy(
+        native = self.cat.get_table('default.empty_t').copy(
             {'scan.native-plan.enabled': 'true'}).new_read_builder().explain()
 
-        self.assertFalse(fallback.native_planned)
-        self.assertEqual(fallback.snapshot_id, normal.snapshot_id)
-        self.assertEqual(fallback.split_count, 0)
-        self.assertNotIn('Planner:', str(fallback))
+        self.assertEqual(native.native_planned,
+                         native_method_available('Plan', 'snapshot_id'))
+        self.assertEqual(native.snapshot_id, normal.snapshot_id)
+        self.assertEqual(native.split_count, 0)
+        self.assertEqual('Planner:' in str(native), native.native_planned)
 
 
 if __name__ == '__main__':
