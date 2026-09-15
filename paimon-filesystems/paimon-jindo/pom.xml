@@ -34,6 +34,7 @@
     <properties>
         <fs.oss.sdk.version>3.17.4</fs.oss.sdk.version>
         <jindodata.version>6.9.1</jindodata.version>
+        <oss.plugin.directory>paimon-plugin-jindo-oss</oss.plugin.directory>
     </properties>
 
     <repositories>
@@ -55,6 +56,12 @@
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-oss-impl</artifactId>
             <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -160,6 +167,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
+                    <excludes>
+                        <exclude>org/apache/paimon/jindo/JindoBlobPresigner*.class</exclude>
+                    </excludes>
                     <archive>
                         <manifestEntries>
                             <Multi-Release>true</Multi-Release>
@@ -170,30 +180,123 @@
 
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-oss-presigner-implementation</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/${oss.plugin.directory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.outputDirectory}</directory>
+                                    <includes>
+                                        <include>org/apache/paimon/jindo/JindoBlobPresigner*.class</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>unpack-oss-runtime</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>unpack-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <excludeArtifactIds>paimon-oss-impl,slf4j-api,commons-logging,jsr305</excludeArtifactIds>
+                            <outputDirectory>${project.build.outputDirectory}/${oss.plugin.directory}</outputDirectory>
+                            <excludes>META-INF/*.SF,META-INF/*.DSA,META-INF/*.RSA,META-INF/maven/**</excludes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>unpack-oss-presigner</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.paimon</groupId>
+                                    <artifactId>paimon-oss-impl</artifactId>
+                                    <version>${project.version}</version>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>${project.build.outputDirectory}/${oss.plugin.directory}</outputDirectory>
+                                    <includes>org/apache/paimon/oss/OSSBlobPresigner*.class</includes>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-test</id>
+                        <configuration>
+                            <excludedGroups>plugin-isolation</excludedGroups>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>integration-tests</id>
+                        <configuration>
+                            <groups>plugin-isolation</groups>
+                            <includes>
+                                <include>**/JindoFileIOTest.java</include>
+                            </includes>
+                            <excludes combine.self="override">
+                                <exclude/>
+                            </excludes>
+                            <systemPropertyVariables>
+                                <jindo.plugin.jar>${project.build.directory}/${project.build.finalName}.jar</jindo.plugin.jar>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <configuration>
                     <artifactSet>
                         <includes combine.children="append">
-                            <include>org.apache.paimon:paimon-oss-impl</include>
-                            <include>com.aliyun.oss:aliyun-sdk-oss</include>
-                            <include>com.aliyun:*</include>
-                            <include>com.google.code.gson:gson</include>
-                            <include>commons-codec:commons-codec</include>
-                            <include>commons-logging:commons-logging</include>
-                            <include>io.opentracing:*</include>
-                            <include>org.apache.httpcomponents:*</include>
-                            <include>org.codehaus.jettison:jettison</include>
-                            <include>org.ini4j:ini4j</include>
-                            <include>org.jdom:jdom2</include>
-                            <include>stax:stax-api</include>
+                            <include>*:*</include>
                         </includes>
+                        <excludes>
+                            <exclude>org.slf4j:slf4j-api</exclude>
+                            <exclude>commons-logging:commons-logging</exclude>
+                            <exclude>com.google.code.findbugs:jsr305</exclude>
+                        </excludes>
                     </artifactSet>
                     <filters>
                         <filter>
-                            <artifact>org.apache.paimon:paimon-oss-impl</artifact>
+                            <artifact>*:*</artifact>
                             <includes>
-                                <include>org/apache/paimon/oss/OSSBlobPresigner.class</include>
-                                <include>META-INF/versions/11/**</include>
+                                <include>org/apache/paimon/jindo/**</include>
+                                <include>${oss.plugin.directory}/**</include>
+                                <include>META-INF/MANIFEST.MF</include>
+                                <include>META-INF/LICENSE*</include>
+                                <include>META-INF/NOTICE*</include>
+                                <include>META-INF/DEPENDENCIES</include>
+                                <include>META-INF/maven/**</include>
+                                <include>META-INF/services/org.apache.paimon.fs.FileIOLoader</include>
+                                <include>META-INF/versions/11/javax/xml/bind/**</include>
                             </includes>
                         </filter>
                     </filters>
