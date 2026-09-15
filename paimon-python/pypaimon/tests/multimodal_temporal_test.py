@@ -248,6 +248,64 @@ class MultimodalTemporalTest(unittest.TestCase):
         self.assertIsNone(rows[2]["average"])
         self.assertEqual(0, rows[2]["valid_count"])
 
+    def test_window_join_reuses_gathered_values(self):
+        source = temporal._WindowJoinRight.__new__(temporal._WindowJoinRight)
+        source.by = ("group",)
+        source._index = {(1,): (0, 3), (2,): (3, 4)}
+        source._time_keys = np.array([5, 10, 15, 10], dtype=np.int64)
+        source._row_ids = pa.array([11, 12, 13, 14], type=pa.int64())
+        source.time_type = pa.int64()
+        source._preceding_key = 5
+        source._following_key = 0
+        source.closed = "both"
+        specifications = (
+            ("average", "value", "mean"),
+            ("first_label", "label", "first"),
+            ("minimum", "value", "min"),
+            ("last_label", "label", "last"),
+            ("maximum", "value", "max"),
+            ("valid_count", "label", "count"),
+        )
+        values = pa.table({
+            "value": pa.array([1, None, 5, None], type=pa.int32()),
+            "label": pa.array(["a", None, "c", None], type=pa.string()),
+        })
+        anchors = [
+            {"group": group, temporal._TIME_KEY: time}
+            for group, time in [(1, 10), (1, 15), (2, 10), (3, 10)]
+        ]
+        expected = {
+            "mean": pa.array([1.0, 5.0, None, None], type=pa.float64()),
+            "min": pa.array([1, 5, None, None], type=pa.int32()),
+            "max": pa.array([1, 5, None, None], type=pa.int32()),
+            "first": pa.array(["a", "c", None, None], type=pa.string()),
+            "last": pa.array(["a", "c", None, None], type=pa.string()),
+            "count": pa.array([1, 1, 0, 0], type=pa.int64()),
+        }
+        for aggregations in (specifications[:1], specifications[::2],
+                             specifications):
+            with self.subTest(aggregations=aggregations):
+                source.aggregations = aggregations
+                fetcher = mock.Mock(schema=values.schema)
+                fetcher.fetch.return_value = values
+                with mock.patch.object(
+                        temporal.pc, "take", wraps=temporal.pc.take) as take:
+                    arrays = source.build_arrays(anchors, fetcher)
+
+                fetcher.fetch.assert_called_once_with([11, 12, 13, 14])
+                self.assertEqual(len(aggregations), len(arrays))
+                for (_, _, operation), array in zip(aggregations, arrays):
+                    self.assertEqual(expected[operation].type, array.type)
+                    self.assertEqual(expected[operation], array)
+                source_names = {name for _, name, _ in aggregations}
+                self.assertEqual(3 * len(source_names), take.call_count)
+                for name in source_names:
+                    gathered_indices = [
+                        call[0][1].to_pylist() for call in take.call_args_list
+                        if call[0][0].equals(values[name])
+                    ]
+                    self.assertEqual([[0, 1], [1, 2], [3]], gathered_indices)
+
     def test_window_join_supports_asymmetric_timestamp_bounds(self):
         anchors = self._table("window_timestamp_anchors", {
             "episode_id": pa.int32(),
