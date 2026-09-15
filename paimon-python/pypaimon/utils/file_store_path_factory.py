@@ -16,14 +16,15 @@
 # under the License.
 
 import struct
-from datetime import date
+from datetime import date, timezone
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from pypaimon.casting.row_to_string import cast_value_to_string, _is_unsupported
+from pypaimon.casting.row_to_string import cast_value_to_string, _format_timestamp, _is_unsupported
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.schema.data_types import DataType
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.row.generic_row import _is_ltz_type, _normalize_ltz, _parse_type_precision_scale
 
 
 def _is_null_or_whitespace_only(value) -> bool:
@@ -156,6 +157,12 @@ class FileStorePathFactory:
         for i, value in enumerate(partition):
             data_type = self.partition_types[i] if self.partition_types is not None else None
             type_name = str(data_type).split('(', 1)[0].split()[0]
+            if value is not None and _is_ltz_type(str(data_type).upper()):
+                # Legacy Timestamp.toString() uses UTC fields. Java's non-legacy
+                # cast uses TimeZone.getDefault(); neither includes an offset.
+                value = _normalize_ltz(value)
+                if not self.legacy_partition_name:
+                    value = value.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
             if _is_null_or_whitespace_only(value):
                 text = self.default_part_value
             elif type_name in ('FLOAT', 'REAL', 'DOUBLE'):
@@ -168,6 +175,9 @@ class FileStorePathFactory:
                     text = value.isoformat(timespec='microseconds' if value.microsecond else 'seconds')
                     if value.microsecond and value.microsecond % 1000 == 0:
                         text = text[:-3]
+            elif type_name.startswith('TIMESTAMP'):
+                precision, _ = _parse_type_precision_scale(data_type)
+                text = _format_timestamp(value, precision)
             elif self.legacy_partition_name and type_name.startswith('TIME'):
                 text = str(((value.hour * 60 + value.minute) * 60 + value.second) * 1000
                            + value.microsecond // 1000)

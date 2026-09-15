@@ -17,9 +17,13 @@
 
 """Deletion-vector locations must survive writes, further deletes and time travel."""
 
+import os
+import subprocess
+import sys
+import time as system_time
 from pathlib import Path
 from dataclasses import replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -29,6 +33,7 @@ import pytest
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.read.native_plan import native_plan, native_version_at_least
+from pypaimon.schema.data_types import AtomicType
 from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
@@ -277,6 +282,73 @@ def test_java_canonical_bucket_dv_without_external_path(tmp_path, planner, value
 ])
 def test_java_legacy_bucket_dv_without_external_path(tmp_path, planner, value, partition_type, canonical_name):
     _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_name, True)
+
+
+@pytest.mark.skipif(not hasattr(system_time, 'tzset'), reason='requires POSIX timezone support')
+@pytest.mark.parametrize('local_zone', ['UTC', 'Asia/Shanghai'])
+@pytest.mark.parametrize('type_name', ['TIMESTAMP_LTZ(3)', 'TIMESTAMP(3) WITH LOCAL TIME ZONE'])
+@pytest.mark.parametrize('value', [
+    datetime(2026, 9, 15, 20, 0, 0, 120000),
+    datetime(2026, 9, 15, 20, 0, 0, 120000, tzinfo=timezone.utc),
+    datetime(2026, 9, 16, 4, 0, 0, 120000, tzinfo=timezone(timedelta(hours=8))),
+])
+@pytest.mark.parametrize('legacy', [False, True])
+def test_ltz_canonical_partition_normalizes_timezone(tmp_path, monkeypatch, local_zone, type_name, value, legacy):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        pa.schema([('p', pa.timestamp('ms', tz='UTC'))]), partition_keys=['p'],
+        options={'partition.legacy-name': str(legacy).lower()}), False)
+    factory = catalog.get_table('db.t').path_factory()
+    factory.partition_types = [AtomicType(type_name)]
+    # Naive LTZ values represent UTC, just as GenericRow serialization does.
+    with monkeypatch.context() as context:
+        context.setenv('TZ', local_zone)
+        system_time.tzset()
+        try:
+            if legacy:
+                expected = '2026-09-15T20%3A00%3A00.120'
+            elif local_zone == 'UTC':
+                expected = '2026-09-15 20%3A00%3A00.120'
+            else:
+                expected = '2026-09-16 04%3A00%3A00.120'
+            assert factory.relative_bucket_path((value,), 2, True) == 'p=' + expected + '/bucket-2'
+        finally:
+            context.undo()
+            system_time.tzset()
+
+
+@pytest.mark.skipif(not hasattr(system_time, 'tzset'), reason='requires POSIX timezone support')
+@pytest.mark.parametrize('planner', _PLANNERS)
+@pytest.mark.parametrize('local_zone', ['UTC', 'Asia/Shanghai'])
+@pytest.mark.parametrize('legacy,unit,micros,fraction', [
+    (False, 'ms', 0, '.000'), (False, 'us', 120100, '.120100'),
+    (True, 'ms', 120000, '.120'), (True, 'us', 120100, '.120100'),
+])
+def test_java_ltz_bucket_dv_without_external_path(tmp_path, planner, local_zone, legacy, unit, micros, fraction):
+    if legacy:
+        canonical_name = '2026-09-15T20%3A00%3A00' + fraction
+    elif local_zone == 'UTC':
+        canonical_name = '2026-09-15 20%3A00%3A00' + fraction
+    else:
+        canonical_name = '2026-09-16 04%3A00%3A00' + fraction
+    # A fresh process gives Python and Rust the same default timezone without
+    # changing Rust's process-global timezone cache between test cases.
+    script = '''
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+import pyarrow as pa
+from pypaimon.tests.deletion_vector_path_test import _check_java_bucket_dv
+_check_java_bucket_dv(
+    Path(sys.argv[1]), sys.argv[2],
+    datetime(2026, 9, 15, 20, 0, 0, int(sys.argv[4]), tzinfo=timezone.utc),
+    pa.timestamp(sys.argv[3], tz='UTC'), sys.argv[5], sys.argv[6] == 'True')
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', script, str(tmp_path), planner, unit, str(micros), canonical_name, str(legacy)],
+        env=dict(os.environ, TZ=local_zone), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    assert result.returncode == 0, result.stdout
 
 
 def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_name, legacy_partition_name):
