@@ -557,6 +557,13 @@ class CoreOptions:
         .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
+    SCAN_VERSION: ConfigOption[str] = (
+        ConfigOptions.key("scan.version")
+        .string_type()
+        .no_default_value()
+        .with_description("Time-travel version: tag name, watermark-<value>, or snapshot id; tags take precedence.")
+    )
+
     SCAN_SNAPSHOT_ID: ConfigOption[int] = (
         ConfigOptions.key("scan.snapshot-id")
         .long_type()
@@ -1409,7 +1416,8 @@ class CoreOptions:
                 return StartupMode.FROM_TIMESTAMP
             elif (self.options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
                   or self.options.contains(CoreOptions.SCAN_TAG_NAME)
-                  or self.options.contains(CoreOptions.SCAN_WATERMARK)):
+                  or self.options.contains(CoreOptions.SCAN_WATERMARK)
+                  or self.options.contains(CoreOptions.SCAN_VERSION)):
                 return StartupMode.FROM_SNAPSHOT
             elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
                 return StartupMode.INCREMENTAL

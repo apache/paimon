@@ -73,3 +73,9 @@ dropped, no data is deleted, and the request needs `replaceStatistics=true` with
 `partitionStatistics` entry for the same spec. Any other path under the table location stays
 invalid, so a server that does not implement this rejects the request rather than storing it. A
 server also rejects additive statistics for a partition that already has a custom location.
+
+## Semantic views
+
+See [Semantic Views](semantic-views.md) for experimental definition management, complete-document
+POST upserts, and pagination. These use dedicated catalog routes and preserve the
+existing SQL View contract.

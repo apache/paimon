@@ -29,6 +29,10 @@ version is `1.0` and may evolve incompatibly while the design is being validated
 directly. These methods are intentionally not part of the generic `Catalog` interface. Other
 catalog implementations do not expose this management contract.
 
+`RESTCatalog.semanticViewManagement()` provides [Semantic View definition management](semantic-views.md).
+Its object CRUD routes are defined in the Catalog OpenAPI; permissions and labels use this
+management contract.
+
 `LabelManagement` provides generic label operations backed by the catalog's existing `RESTApi`
 client, authentication, and prefix configuration. The REST server must implement entity resolution,
 authorization, and atomic label storage.

@@ -155,6 +155,7 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         class Collator:
             video_column = "video"
+            output_column = "video"
 
             def __init__(self):
                 self.calls = []

@@ -459,6 +459,10 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
+        # Snapshot reads still merge the two versions of user_id=2.
+        snapshot_rows = self._read_test_table(table.new_read_builder()).sort_by('user_id')
+        self.assertEqual(self.expected, snapshot_rows)
+
         snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
@@ -467,11 +471,18 @@ class PkReaderTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder)
         self.assertEqual(len(actual), 0)
-        # test 2
+        # The full incremental window retains both committed versions of user_id=2.
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp) + ',' + str(t2)})
         read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(self.expected, actual)
+        actual = self._read_test_table(read_builder).sort_by([
+            ('user_id', 'ascending'), ('behavior', 'ascending')])
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+        }, schema=self.pa_schema)
+        self.assertEqual(expected, actual)
         # test 3
         table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
         read_builder = table.new_read_builder()

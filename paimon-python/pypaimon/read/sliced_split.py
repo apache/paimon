@@ -90,6 +90,10 @@ class SlicedSplit(Split):
         return self._data_split.file_size
 
     @property
+    def is_streaming(self):
+        return getattr(self._data_split, 'is_streaming', False)
+
+    @property
     def raw_convertible(self):
         return self._data_split.raw_convertible
 

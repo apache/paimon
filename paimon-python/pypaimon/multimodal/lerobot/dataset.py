@@ -26,6 +26,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 import pyarrow as pa
@@ -64,6 +65,7 @@ _TORCH_DTYPE_NAMES = {
 }
 
 _IMAGE_READ_ATTEMPTS = 3
+_MAX_VIDEO_DECODE_WORKERS = 8
 
 _CONTROL_FEATURES = frozenset({
     "index",
@@ -1546,6 +1548,7 @@ def _identity(values):
 
 
 def _decode_video_rows(row_groups, collators):
+    tasks = []
     for collator in collators:
         targets = []
         input_rows = []
@@ -1556,9 +1559,22 @@ def _decode_video_rows(row_groups, collators):
                     input_rows.append(row)
         if not input_rows:
             continue
-        decoded = collator(input_rows)
+        tasks.append((collator, targets, input_rows))
+
+    if not tasks:
+        return
+    if len(tasks) == 1:
+        decoded_groups = [tasks[0][0](tasks[0][2])]
+    else:
+        with ThreadPoolExecutor(
+                max_workers=min(
+                    len(tasks), _MAX_VIDEO_DECODE_WORKERS)) as executor:
+            decoded_groups = list(executor.map(
+                lambda task: task[0](task[2]), tasks))
+
+    for (collator, targets, _), decoded in zip(tasks, decoded_groups):
         for (rows, index), row in zip(targets, decoded):
-            rows[index] = row
+            rows[index][collator.output_column] = row[collator.output_column]
 
 
 def _normalize_index(index, size):
