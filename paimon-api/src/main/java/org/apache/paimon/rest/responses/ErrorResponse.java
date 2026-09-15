@@ -50,6 +50,7 @@ public class ErrorResponse implements RESTResponse {
     public static final String RESOURCE_TYPE_LABEL = "LABEL";
 
     public static final String RESOURCE_TYPE_VIEW = "VIEW";
+    public static final String RESOURCE_TYPE_SEMANTIC_VIEW = "SEMANTIC_VIEW";
 
     public static final String RESOURCE_TYPE_DIALECT = "DIALECT";
 
