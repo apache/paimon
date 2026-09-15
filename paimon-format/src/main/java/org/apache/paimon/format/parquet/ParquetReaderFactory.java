@@ -26,6 +26,7 @@ import org.apache.paimon.data.shredding.MapSharedShreddingReadPlanFactory;
 import org.apache.paimon.data.shredding.ShreddingReadPlan;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.parquet.ParquetListLayoutResolver.LayoutContext;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.shredding.ShreddingFormatReader;
@@ -56,7 +57,6 @@ import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
@@ -76,8 +76,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntFunction;
 
 import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.isLegacyNestedList;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.isList;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.isThreeLevelList;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.resolveElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
 
@@ -239,9 +242,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private RequestedSchema createRequestedSchema(MessageType fileSchema, DataField[] readFields) {
+        LayoutContext listLayout = LayoutContext.fromFileSchema(fileSchema);
         MessageType rs = clipParquetSchema(fileSchema, readFields);
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(rs);
-        List<ParquetField> f = buildFieldsList(readFields, columnIO, rs);
+        List<ParquetField> f = buildFieldsList(readFields, columnIO, rs, listLayout);
         return new RequestedSchema(rs, f);
     }
 
@@ -343,31 +347,37 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 Preconditions.checkArgument(
                         listSubFields == 1,
                         "Parquet list group type should only have one middle level REPEATED field.");
-                // There are two representations for array type in parquet.
-                // See link:
-                // https://impala.apache.org/docs/build/html/topics/impala_parquet_array_resolution.html.
-                int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
-                Type elementType =
-                        clipParquetType(elementReadType, parquetListElementType(arrayGroup));
-
-                if (level == 3) {
-                    // In case that the name in middle level is not "list".
-                    Type groupMiddle =
-                            new GroupType(
-                                    Type.Repetition.REPEATED,
-                                    arrayGroup.getType(0).getName(),
-                                    elementType);
-                    return new GroupType(
-                            arrayGroup.getRepetition(),
-                            arrayGroup.getName(),
-                            OriginalType.LIST,
-                            groupMiddle);
+                if (isList(arrayGroup)) {
+                    boolean threeLevel = isThreeLevelList(arrayGroup);
+                    Type originalElement = resolveElementType(arrayGroup);
+                    Type elementType = clipParquetType(elementReadType, originalElement);
+                    if (threeLevel) {
+                        Type clippedMiddle =
+                                arrayGroup
+                                        .getType(0)
+                                        .asGroupType()
+                                        .withNewFields(Collections.singletonList(elementType));
+                        return arrayGroup.withNewFields(Collections.singletonList(clippedMiddle));
+                    } else {
+                        // Rules 1-4: the repeated field itself is the element. Keep it (clipped)
+                        // in place so that reader construction unwraps by path against the file
+                        // schema instead of guessing from this reshaped requested shape.
+                        return arrayGroup.withNewFields(Collections.singletonList(elementType));
+                    }
+                } else if (isLegacyNestedList(arrayGroup)) {
+                    // Rule 3: an unannotated repeated group is itself the element of the annotated
+                    // outer list, and its single repeated child is the element of the nested inner
+                    // list.
+                    Type originalElement = arrayGroup.getType(0);
+                    Type elementType = clipParquetType(elementReadType, originalElement);
+                    return arrayGroup.withNewFields(Collections.singletonList(elementType));
                 } else {
-                    return new GroupType(
-                            arrayGroup.getRepetition(),
-                            arrayGroup.getName(),
-                            OriginalType.LIST,
-                            elementType);
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Cannot read Parquet group '%s' as an ARRAY: it is neither "
+                                            + "LIST-annotated nor a legacy nested list. Parquet type: %s, "
+                                            + "read type: %s",
+                                    arrayGroup.getName(), arrayGroup, readType));
                 }
             default:
                 return parquetType;

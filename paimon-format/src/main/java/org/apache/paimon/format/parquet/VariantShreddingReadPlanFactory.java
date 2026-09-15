@@ -56,7 +56,7 @@ import java.util.Map;
 
 import static org.apache.paimon.data.variant.Variant.METADATA;
 import static org.apache.paimon.data.variant.Variant.VALUE;
-import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
+import static org.apache.paimon.format.parquet.ParquetListLayoutResolver.resolveElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 
 /**
@@ -194,7 +194,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
                         arrayType.isNullable(),
                         buildPhysicalType(
                                 arrayType.getElementType(),
-                                parquetListElementType(fileType.asGroupType()),
+                                resolveElementType(fileType.asGroupType()),
                                 caseSensitive));
             case VECTOR:
                 VectorType vectorType = (VectorType) logicalType;
@@ -203,7 +203,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
                         vectorType.getLength(),
                         buildPhysicalType(
                                 vectorType.getElementType(),
-                                parquetListElementType(fileType.asGroupType()),
+                                resolveElementType(fileType.asGroupType()),
                                 caseSensitive));
             case MAP:
                 MapType mapType = (MapType) logicalType;
