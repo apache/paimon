@@ -484,19 +484,64 @@ class AbstractVectorSearchReadImpl:
         if union_candidates.is_empty():
             return candidates
 
-        raw_vectors = self._read_raw_vectors(
-            union_candidates, include_filter=False, snapshot=snapshot)
+        return self._stream_rerank_candidates(
+            candidates, union_candidates, query_vectors, index_type, snapshot)
+
+    def _stream_rerank_candidates(self, candidates, union_candidates, query_vectors,
+                                  index_type, snapshot):
+        # Retain only candidate membership, not all candidate vectors as Python lists.
+        queries_by_row = {}
+        for query_index, result in enumerate(candidates):
+            for row_id in result.results():
+                queries_by_row.setdefault(row_id, []).append(query_index)
+        table_read, splits = self._plan_raw_read(
+            union_candidates.to_range_list(), include_filter=False, snapshot=snapshot)
         metric = self._search_metric(index_type)
-        return [
-            self._score_raw_vectors(
-                candidates[i].results(),
-                raw_vectors,
-                query_vectors[i],
-                metric,
-                self._limit,
-            )
-            for i in range(len(candidates))
-        ]
+        workers = min(len(splits), table_read._resolve_parallelism(None, len(splits)))
+        if workers <= 1:
+            return self._score_refine_splits(
+                table_read, splits, queries_by_row, query_vectors, metric)
+
+        # Preserve split read parallelism with one streaming reader per worker.
+        # Candidate membership is shared; vectors are released after each batch.
+        heaps = [[] for _ in query_vectors]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(
+                self._score_refine_splits, table_read, splits[i::workers],
+                queries_by_row, query_vectors, metric) for i in range(workers)]
+            for future in futures:
+                for heap, result in zip(heaps, future.result()):
+                    score_getter = result.score_getter()
+                    for row_id in result.results():
+                        _offer_score(heap, self._limit, row_id, score_getter(row_id))
+        return [_scored_result(heap) for heap in heaps]
+
+    def _score_refine_splits(self, table_read, splits, queries_by_row, query_vectors, metric):
+        from pypaimon.read.table_read import _ClosableArrowBatchReader
+
+        heaps = [[] for _ in query_vectors]
+        reader, batches = table_read._new_arrow_batch_reader(splits)
+        with _ClosableArrowBatchReader(reader, batches) as batch_reader:
+            for batch in batch_reader:
+                row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
+                vectors = batch.column(self._vector_column.name)
+                positions = {}
+                for position, row_id in enumerate(row_ids):
+                    for query_index in queries_by_row.get(row_id, ()):
+                        positions.setdefault(query_index, []).append(position)
+                for query_index, selected in positions.items():
+                    query = query_vectors[query_index]
+                    # Bound Arrow take allocations as well as the scoring scratch matrix.
+                    block_size = _score_block_size(query)
+                    for start in range(0, len(selected), block_size):
+                        block = selected[start:start + block_size]
+                        scores = _iter_arrow_scores(vectors.take(block), query, metric)
+                        for position, score in zip(block, scores):
+                            if score is not None:
+                                _offer_score(heaps[query_index], self._limit,
+                                             row_ids[position], score)
+                del batch, row_ids, vectors
+        return [_scored_result(heap) for heap in heaps]
 
     def _configured_refine_factor(self, index_type):
         value = _configured_refine_factor(
