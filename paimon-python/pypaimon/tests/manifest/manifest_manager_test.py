@@ -370,6 +370,24 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
                          ['selected.parquet', 'partition-pruned.parquet'])
         self.assertEqual(read_record.call_count, 0)
 
+    def test_file_schema_named_type_reference(self):
+        table, manager, entries = self._partitioned_manifest()
+        schema = copy.deepcopy(MANIFEST_ENTRY_SCHEMA)
+        file_fields = schema['fields'][5]['type']['fields']
+        file_fields[6]['type'] = 'record_KEY_STATS'
+        buffer = BytesIO()
+        fastavro.writer(buffer, schema, manager._to_avro_records(entries))
+        name = 'named-type-manifest.avro'
+        path = '{}/{}'.format(manager.manifest_path, name)
+        with table.file_io.new_output_stream(path) as output:
+            output.write(buffer.getvalue())
+
+        actual = manager.read(
+            name, early_entry_filter=lambda bucket, _: bucket == 1)
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet', 'partition-pruned.parquet'])
+
     def test_manifest_bucket_and_level_stats(self):
         manager = self._make_manager()
         entries = [self._create_manifest_entry('a', bucket=2),

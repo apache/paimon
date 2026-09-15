@@ -72,9 +72,6 @@ def _read_manifest_records(buffer, early_entry_filter, partition_filter,
 
     file_schema = fields[5]['type']
     named_schemas = getattr(blocks, '_named_schemas', {})
-    # fastavro 1.12 separates writer and reader named schemas; older supported
-    # versions expose the writer mapping directly.
-    named_schemas = named_schemas.get('writer', named_schemas)
 
     for block in blocks:
         stream = block.bytes_
