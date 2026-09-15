@@ -397,3 +397,12 @@ increase route limits when a small candidate set restricts final recall.
 
 For Java and Python, the subsequent table scan does not preserve ranking order.
 See [Read Scored Results](./manage-indexes#read-scored-results) to access scores by row ID.
+
+## Row Filters
+
+A row filter given to a hybrid search (`WHERE` on the Spark `hybrid_search`
+result, or `withFilter` on the Java builder) is applied to every route before
+its own top-k, so vector and full-text candidates are drawn from the same
+filtered row set before the ranker merges them. Full-text routes follow the same
+rules as a standalone full-text search; see
+[Full-Text Row Filters](./full-text#row-filters).
