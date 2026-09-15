@@ -37,6 +37,10 @@ class VideoFrameCollator:
     order to avoid unnecessary decoder seeks. Rows are restored to their input
     order before ``collate_fn`` is called.
 
+    Optional ``decode_batch_fn`` replaces ``decode_fn`` for each payload group.
+    It receives the cached decoder, sorted frame indices, and corresponding row
+    dictionaries, and returns a sequence with one frame per row in that order.
+
     The cache is process-local and keyed by physical video payload identity.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
     for decoders that already return batched objects.
@@ -51,13 +55,16 @@ class VideoFrameCollator:
             decode_fn,
             output_column="frame",
             max_open_videos=8,
-            collate_fn=None):
+            collate_fn=None,
+            decode_batch_fn=None):
         if not video_column:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
             raise ValueError("decoder_factory must be callable.")
         if not callable(decode_fn):
             raise ValueError("decode_fn must be callable.")
+        if decode_batch_fn is not None and not callable(decode_batch_fn):
+            raise ValueError("decode_batch_fn must be callable or None.")
         if (
             isinstance(max_open_videos, bool)
             or not isinstance(max_open_videos, int)
@@ -76,6 +83,7 @@ class VideoFrameCollator:
         self.video_column = video_column
         self.decoder_factory = decoder_factory
         self.decode_fn = decode_fn
+        self.decode_batch_fn = decode_batch_fn
         self.output_column = output_column
         self.max_open_videos = max_open_videos
         self.collate_fn = collate_fn
@@ -126,11 +134,23 @@ class VideoFrameCollator:
 
         for payload, frames in grouped.items():
             decoder = self._decoder(payload)
-            for frame_index, position, output in sorted(
-                    frames, key=lambda frame: frame[0]):
-                output[self.output_column] = self.decode_fn(
-                    decoder, frame_index, output
+            frames.sort(key=lambda frame: frame[0])
+            if self.decode_batch_fn is not None:
+                values = self.decode_batch_fn(
+                    decoder,
+                    [index for index, _, _ in frames],
+                    [output for _, _, output in frames],
                 )
+                if len(values) != len(frames):
+                    raise ValueError(
+                        "decode_batch_fn must return one frame per row.")
+            else:
+                values = (
+                    self.decode_fn(decoder, index, output)
+                    for index, _, output in frames
+                )
+            for (_, position, output), value in zip(frames, values):
+                output[self.output_column] = value
                 decoded[position] = output
         return decoded
 
