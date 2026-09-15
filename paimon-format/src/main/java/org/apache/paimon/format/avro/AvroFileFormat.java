@@ -97,7 +97,7 @@ public class AvroFileFormat extends FileFormat {
         DataFileWriter<InternalRow> writer = new DataFileWriter<>(datumWriter);
         writer.setCodec(createCodecFactory(compression));
         if (blockSize != null) {
-            writer.setSyncInterval(Math.toIntExact(blockSize.getBytes()));
+            writer.setSyncInterval((int) blockSize.getBytes());
         }
         writer.setFlushOnEveryBlock(false);
         writer.create(schema, new CloseShieldOutputStream(out));
