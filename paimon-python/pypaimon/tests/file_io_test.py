@@ -35,6 +35,28 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 class FileIOTest(unittest.TestCase):
     """Test cases for FileIO.to_filesystem_path method."""
 
+    def test_write_parquet_batches(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO(directory, Options({}))
+            data = pa.Table.from_pydict({'id': [1, 2, 3], 'value': ['a', None, 'c']})
+            for compression in ('zstd', 'snappy'):
+                with self.subTest(compression=compression):
+                    path = os.path.join(directory, compression + '.parquet')
+                    batches = iter([data.slice(0, 0).to_batches(),
+                                    data.slice(0, 1).to_batches(),
+                                    data.slice(1).to_batches()])
+                    file_io.write_parquet_batches(
+                        path, (batch for group in batches for batch in group),
+                        compression=compression, zstd_level=3)
+                    self.assertTrue(pq.read_table(path).equals(data))
+                    metadata = pq.read_metadata(path)
+                    self.assertEqual(metadata.num_row_groups, 2)
+                    self.assertEqual(metadata.row_group(0).column(0).compression,
+                                     compression.upper())
+
     @patch('pypaimon.common.file_io.uuid.uuid4', return_value='test-uuid')
     def test_create_temp_path(self, _):
         self.assertEqual(
