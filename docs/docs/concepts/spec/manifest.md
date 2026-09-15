@@ -74,8 +74,9 @@ derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
 The utility includes construction, validation, block selection and optional caching. Table
 writers and scans do not yet invoke it automatically. Callers are responsible for publishing
 sidecar references, managing file ownership, applying entry filters and reconciling ADD/DELETE
-entries after block selection. `build` reads the completed physical manifest and returns sidecar
-bytes; it does not write or publish another file.
+entries after block selection. `build` returns null without opening files when `Settings.write`
+is false. Otherwise it reads the completed physical manifest and returns sidecar bytes; it does
+not write or publish another file.
 
 `Settings` contains `write` and `read` switches for the calling writer and scan, and enables
 row-ID and bucket payload generation independently. Partition generation is always enabled,

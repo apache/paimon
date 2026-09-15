@@ -360,9 +360,16 @@ public final class ManifestSidecar {
         return ProjectedManifestEntry.Projection.create(new RowType(false, fields));
     }
 
-    /** Rebuild from the final physical blocks, including raw-copy and encoded rewrite paths. */
+    /**
+     * Rebuild from the final physical blocks, including raw-copy and encoded rewrite paths. Returns
+     * null without accessing files when sidecar writing is disabled.
+     */
+    @Nullable
     public static byte[] build(FileIO io, Path path, long size, long records, Settings settings)
             throws IOException {
+        if (!settings.write) {
+            return null;
+        }
         try (ManifestAvroReader reader = new ManifestAvroReader(io.newInputStream(path))) {
             Builder builder = new Builder(settings, reader.headerBytes());
             ProjectedManifestEntry.Projection projection = BLOCK_INDEX_PROJECTION;

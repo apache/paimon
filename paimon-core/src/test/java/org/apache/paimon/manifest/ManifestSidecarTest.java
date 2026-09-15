@@ -116,6 +116,20 @@ class ManifestSidecarTest {
     }
 
     @Test
+    void disabledBuildDoesNotAccessFiles() throws Exception {
+        FileIO io = mock(FileIO.class);
+        assertThat(
+                        ManifestSidecar.build(
+                                io,
+                                new Path(temp.toString(), "missing-manifest"),
+                                100,
+                                1,
+                                new ManifestSidecar.Settings(false, true, true, true)))
+                .isNull();
+        verifyNoInteractions(io);
+    }
+
+    @Test
     void buildAndReadSelectedBlocksFromPhysicalManifests() throws Exception {
         FileIO io = LocalFileIO.create();
         ManifestTestDataGenerator generator = ManifestTestDataGenerator.builder().build();
