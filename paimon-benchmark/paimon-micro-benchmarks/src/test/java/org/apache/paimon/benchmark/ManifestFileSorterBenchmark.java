@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -300,7 +301,9 @@ public class ManifestFileSorterBenchmark {
                         "zstd",
                         pathFactory,
                         TARGET_MANIFEST_SIZE,
-                        null)
+                        null,
+                        new ManifestSidecar.Settings(
+                                new CoreOptions(new Options()), PARTITION_TYPE.getFieldCount()))
                 .create();
     }
 

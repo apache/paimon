@@ -63,6 +63,10 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
         this.cacheMetrics = cacheMetrics;
     }
 
+    public SegmentsCache<K> segmentsCache() {
+        return cache;
+    }
+
     public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
         return read(key, fileSize, filters, Function.identity());
     }

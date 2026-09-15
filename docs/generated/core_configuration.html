@@ -1114,6 +1114,24 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Whether to skip automatic manifest merging during commit when write-only is true. This also skips automatic manifest sort rewrite. Explicit manifest compaction is not affected.</td>
         </tr>
         <tr>
+            <td><h5>manifest.sidecar.max-bytes</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Maximum serialized manifest sidecar size, including header and checksum. Defaults to twice manifest.target-file-size. Optional payloads are dropped before omitting a sidecar whose complete block directory cannot fit.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.sidecar.read</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Read optional manifest sidecars for partition, row-id or bucket filters after coarse pruning. Missing or invalid sidecars fall back to manifest reads. Defaults to manifest-sort.enabled when unset.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest.sidecar.write</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Write sidecars with independent partition, row-id and bucket coverage for newly created manifests. Defaults to manifest-sort.enabled when unset.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.target-file-size</h5></td>
             <td style="word-wrap: break-word;">8 mb</td>
             <td>MemorySize</td>

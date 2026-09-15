@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -49,6 +50,7 @@ public final class ProjectedManifestEntry implements ManifestEntry {
     private static final Projection FULL_PROJECTION = Projection.create(MANIFEST_ROW_TYPE);
     public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
     public static final Projection ROW_RANGE_PROJECTION = createRowRangeProjection();
+    public static final Projection BLOCK_INDEX_PROJECTION = createBlockIndexProjection();
     public static final Projection ENTRY_LAYOUT_PROJECTION = createEntryLayoutProjection();
 
     private final Projection projection;
@@ -131,6 +133,13 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                                 DataFileMeta.SCHEMA.project(
                                                         DataFileMeta.ROW_COUNT,
                                                         DataFileMeta.FIRST_ROW_ID)))));
+    }
+
+    private static Projection createBlockIndexProjection() {
+        List<DataField> fields = new ArrayList<>(ROW_RANGE_PROJECTION.projectedType().getFields());
+        fields.add(MANIFEST_ROW_TYPE.getField(ManifestEntry.BUCKET));
+        fields.add(MANIFEST_ROW_TYPE.getField(ManifestEntry.TOTAL_BUCKETS));
+        return Projection.create(new RowType(false, fields));
     }
 
     private static Projection createEntryLayoutProjection() {

@@ -39,6 +39,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestFileMetaTestBase;
+import org.apache.paimon.manifest.ManifestSidecar;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -668,7 +669,9 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
                                 false,
                                 null),
                         suggestedFileSize,
-                        null)
+                        null,
+                        new ManifestSidecar.Settings(
+                                new CoreOptions(new Options()), PARTITION_TYPE.getFieldCount()))
                 .create();
     }
 

@@ -489,9 +489,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         // data manifests
         skippingSet.add(skippingSnapshot.baseManifestList());
         skippingSet.add(skippingSnapshot.deltaManifestList());
-        manifestList.readDataManifests(skippingSnapshot).stream()
-                .map(ManifestFileMeta::fileName)
-                .forEach(skippingSet::add);
+        manifestList
+                .readDataManifests(skippingSnapshot)
+                .forEach(manifest -> addManifestToSkippingSet(skippingSet, manifest));
 
         // index manifests
         String indexManifest = skippingSnapshot.indexManifest();
@@ -509,6 +509,14 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
 
         return skippingSet;
+    }
+
+    protected static void addManifestToSkippingSet(
+            Set<String> skippingSet, ManifestFileMeta manifest) {
+        skippingSet.add(manifest.fileName());
+        if (manifest.extraFiles() != null) {
+            skippingSet.addAll(manifest.extraFiles());
+        }
     }
 
     private boolean tryDeleteEmptyDirectory(Path path) {
