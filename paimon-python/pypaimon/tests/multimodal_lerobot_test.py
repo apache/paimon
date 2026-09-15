@@ -48,10 +48,12 @@ from pypaimon.multimodal.lerobot.dataset import (
     _PyAVVideoDecoder,
     _arrow_rows,
     _decode_video_rows,
+    _decode_video_windows,
     _image_tensor,
     _index_names,
     _open_video_decoder,
     _selected_episodes,
+    _stack_visual_windows,
     _torch_row,
 )
 from pypaimon.multimodal.lerobot.api import _create_target_table
@@ -948,6 +950,134 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(torch.uint8, sample["observation.image"].dtype)
         self.assertEqual([3, 4, 5], list(
             sample["observation.image"].shape))
+
+    def test_video_windows_decode_directly_and_fall_back(self):
+        try:
+            import torch
+        except ImportError as error:
+            self.skipTest(str(error))
+        from pypaimon.multimodal.video import VideoFrameCollator
+        from pypaimon.table.row.blob import VideoFrameDescriptor
+
+        key = "camera"
+        feature = {key: {"dtype": "video", "shape": [4, 5, 3]}}
+        rows = {i: {key: VideoFrameDescriptor("a.video", 0, 1, i).serialize()}
+                for i in range(2)}
+        plans = [{"windows": {key: [1, 0, 0]}}] * 2
+        pixels = torch.arange(120).reshape(2, 4, 5, 3).to(torch.uint8)
+        frames = pixels.permute(0, 3, 1, 2)
+        batch = frames.contiguous()
+        decoder = SimpleNamespace(get_frames_at=Mock(
+            return_value=SimpleNamespace(data=batch)))
+        collator = VideoFrameCollator(
+            SimpleNamespace(file_io=Mock()), video_column=key,
+            decoder_factory=Mock(), decode_fn=Mock())
+        with patch.object(collator, "_decoder", return_value=decoder) as open_decoder, \
+                patch("torch.get_num_threads", return_value=1):
+            for uint8, batch in ((True, frames), (False, frames),
+                                 (True, frames.contiguous()),
+                                 (False, frames.contiguous())):
+                decoder.get_frames_at.reset_mock()
+                decoder.get_frames_at.return_value = SimpleNamespace(data=batch)
+                result = _decode_video_windows(
+                    plans, rows, [collator], feature, uint8)[key]
+                expected = batch[[1, 0, 0]]
+                if not uint8:
+                    expected = expected.float().div(255)
+                self.assertTrue(torch.equal(result[0], expected))
+                self.assertTrue(result[0].is_contiguous())
+                result[0][1].zero_()
+                self.assertTrue(torch.equal(result[0][2], expected[2]))
+                self.assertTrue(torch.equal(result[1], expected))
+                self.assertTrue(torch.equal(batch, frames))
+                decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+
+            for indices in ([0, 1], [1, 0, 0]):
+                decoder.get_frames_at.reset_mock()
+                decoder.get_frames_at.return_value = SimpleNamespace(data=frames)
+                result = _decode_video_windows(
+                    [{"windows": {key: indices}}], rows, [collator], feature, True)[key][0]
+                decoder.get_frames_at.assert_called_once_with(indices=[0, 1])
+                self.assertTrue(torch.equal(result, batch[indices]))
+                self.assertTrue(result.is_contiguous())
+                result.zero_()
+                self.assertTrue(torch.equal(batch, frames))
+
+            decoder.get_frames_at.reset_mock()
+            separate = dict(rows)
+            separate[2] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
+            separate[3] = {key: VideoFrameDescriptor("b.video", 0, 1, 1).serialize()}
+            interleaved = [{"windows": {key: window}}
+                           for window in ([1, 0, 0], [2, 3], [0, 1], [3, 2, 2])]
+            result = _decode_video_windows(
+                interleaved, separate, [collator], feature, True)[key]
+            self.assertEqual(2, decoder.get_frames_at.call_count)
+            self.assertEqual(
+                [[0, 1], [0, 1]],
+                [c.kwargs["indices"] for c in decoder.get_frames_at.call_args_list])
+            for actual, indices in zip(result, ([1, 0, 0], [0, 1], [0, 1], [1, 0, 0])):
+                self.assertTrue(torch.equal(actual, batch[indices]))
+                self.assertTrue(actual.is_contiguous())
+            result[2].zero_()
+            self.assertTrue(torch.equal(result[1], batch))
+            self.assertTrue(torch.equal(batch, frames))
+
+            open_decoder.reset_mock()
+            mixed = dict(rows)
+            mixed[1] = {key: VideoFrameDescriptor("b.video", 0, 1, 0).serialize()}
+            self.assertEqual({}, _decode_video_windows(
+                plans, mixed, [collator], feature, True))
+            open_decoder.assert_not_called()
+            self.assertEqual({}, _decode_video_windows(
+                plans, {0: {key: None}, 1: rows[1]}, [collator], feature, True))
+            open_decoder.return_value = SimpleNamespace()
+            self.assertEqual({}, _decode_video_windows(
+                plans, rows, [collator], feature, True))
+            open_decoder.return_value = decoder
+            decoder.get_frames_at.return_value = SimpleNamespace(data=batch[:1])
+            with self.assertRaisesRegex(ValueError, "one frame per index"):
+                _decode_video_windows(plans, rows, [collator], feature, True)
+
+    def test_visual_windows_preserve_order_padding_and_isolation(self):
+        try:
+            import torch
+            from torch.utils.data import default_collate
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        keys = ["left", "right"]
+        plans = [{"windows": {key: indices for key in keys}}
+                 for indices in ([1, 0, 0], [0, 1, 1], [1, 0, 0])]
+        for dtype in (torch.uint8, torch.float32):
+            frames = torch.arange(120).reshape(2, 4, 5, 3).to(dtype)
+            frames = frames.permute(0, 3, 1, 2)
+            rows = {i: {key: frames[i] for key in keys} for i in range(2)}
+            with patch("torch.get_num_threads", return_value=1):
+                actual = _stack_visual_windows(plans, rows, keys)
+            for key in keys:
+                expected = [torch.stack([rows[i][key] for i in
+                            plan["windows"][key]]) for plan in plans]
+                self.assertTrue(torch.equal(
+                    default_collate(actual[key]), default_collate(expected)))
+                self.assertTrue(all(value.is_contiguous()
+                                    for value in actual[key]))
+                actual[key][0][1].zero_()
+                self.assertTrue(torch.equal(actual[key][0][2], expected[0][2]))
+                self.assertTrue(torch.equal(actual[key][2], expected[2]))
+                self.assertTrue(torch.equal(frames[0], expected[0][1]))
+            with patch("torch.get_num_threads", return_value=2):
+                self.assertEqual({}, _stack_visual_windows(plans, rows, keys))
+            self.assertEqual({}, _stack_visual_windows(plans, rows, ["left"]))
+
+        rows = {i: {key: torch.ones(2, requires_grad=True) for key in keys}
+                for i in range(2)}
+        with patch("torch.get_num_threads", return_value=1), torch.no_grad():
+            result = _stack_visual_windows(plans, rows, keys)
+        self.assertFalse(result["left"][0].requires_grad)
+        with patch("torch.get_num_threads", return_value=1), \
+                torch.inference_mode():
+            result = _stack_visual_windows(plans, rows, keys)
+        self.assertTrue(result["left"][0].is_inference())
 
     def test_dataset_return_uint8_requires_bool(self):
         loaded = (
