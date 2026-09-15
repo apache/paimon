@@ -82,6 +82,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     private static final String PAIMON_COMMIT_IDENTITY = "paimon-commit-identity";
 
+    private static final int MAX_COMMIT_ATTEMPTS = 3;
+
     private static final Logger LOG = LoggerFactory.getLogger(IcebergRestMetadataCommitter.class);
 
     private static final String REST_CATALOG_NAME = "rest-catalog";
@@ -142,11 +144,26 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     @Override
     public void commitMetadata(
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
-        try {
-            commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+            try {
+                commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+                return;
+            } catch (CommitStateUnknownException | CommitFailedException e) {
+                if (attempt == MAX_COMMIT_ATTEMPTS) {
+                    throw new RuntimeException(
+                            "Fail to commit iceberg metadata for table: " + icebergTableIdentifier,
+                            e);
+                }
+                LOG.warn(
+                        "Commit attempt {} to rest catalog failed for table {}; reloading catalog"
+                                + " state before retrying.",
+                        attempt,
+                        icebergTableIdentifier,
+                        e);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
+            }
         }
     }
 
@@ -253,45 +270,20 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         }
 
         try {
-            ((BaseTable) icebergTable)
-                    .operations()
-                    .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
-        } catch (CommitStateUnknownException e) {
-            // The catalog returned an ambiguous response, so we cannot tell whether this commit
-            // was applied server-side. Either way the next attempt reloads the table and runs
-            // checkBase() against that live state: if it landed, the base matches and the next
-            // commit proceeds normally; if it did not, checkBase() sees the drift and the table
-            // is rebuilt from the current file set. Failing here does not resolve the ambiguity,
-            // it only takes down every other table the job is syncing.
-            LOG.warn(
-                    "Commit to rest catalog returned an ambiguous response for table {}, snapshot"
-                            + " {}; not failing the commit, the next attempt will reconcile.",
-                    icebergTableIdentifier,
-                    updatedForCommit.currentSnapshot() == null
-                            ? null
-                            : updatedForCommit.currentSnapshot().snapshotId(),
-                    e);
-        } catch (CommitFailedException e) {
-            // The catalog rejected the compare-and-swap because the table moved between our read
-            // of the base metadata and this commit. Unlike the ambiguous case above this one is
-            // unambiguous: CommitFailedException implements CleanableFailure, so nothing landed
-            // server-side. It reconciles through the same path on the next attempt, and Paimon's
-            // own commit has already durably applied the write, so only the Iceberg metadata
-            // lags, by one commit.
-            LOG.warn(
-                    "Commit to rest catalog was rejected for table {}, snapshot {}, because the"
-                            + " table changed concurrently; not failing the commit, the next"
-                            + " attempt will reconcile.",
-                    icebergTableIdentifier,
-                    updatedForCommit.currentSnapshot() == null
-                            ? null
-                            : updatedForCommit.currentSnapshot().snapshotId(),
-                    e);
+            BaseTable table = (BaseTable) icebergTable;
+            commit(table, table.operations().current(), updatedForCommit);
+        } catch (CommitStateUnknownException | CommitFailedException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(
                     "Fail to commit metadata to rest catalog for table: " + icebergTableIdentifier,
                     e);
         }
+    }
+
+    @VisibleForTesting
+    protected void commit(BaseTable table, TableMetadata base, TableMetadata updated) {
+        table.operations().commit(base, updated);
     }
 
     private TableMetadata.Builder updatesForCorrectBase(
