@@ -25,32 +25,46 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
+import org.apache.flink.table.connector.ParallelismProvider;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.data.RowData;
 
+import java.util.Optional;
 import java.util.function.Function;
 
 /**
  * Paimon {@link DataStreamScanProvider} that also implements {@link LineageVertexProvider} so
  * Flink's lineage graph discovers the Paimon source table.
  */
-public class PaimonDataStreamScanProvider implements DataStreamScanProvider, LineageVertexProvider {
+public class PaimonDataStreamScanProvider
+        implements DataStreamScanProvider, ParallelismProvider, LineageVertexProvider {
 
     private final boolean isBounded;
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
     private final String name;
     private final Table table;
+    private final Optional<Integer> parallelism;
 
     public PaimonDataStreamScanProvider(
             boolean isBounded,
             Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
             String name,
             Table table) {
+        this(isBounded, producer, name, table, Optional.empty());
+    }
+
+    public PaimonDataStreamScanProvider(
+            boolean isBounded,
+            Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
+            String name,
+            Table table,
+            Optional<Integer> parallelism) {
         this.isBounded = isBounded;
         this.producer = producer;
         this.name = name;
         this.table = table;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -62,6 +76,11 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider, Lin
     @Override
     public boolean isBounded() {
         return isBounded;
+    }
+
+    @Override
+    public Optional<Integer> getParallelism() {
+        return parallelism;
     }
 
     @Override

@@ -48,6 +48,7 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsRowLevelModificationScan.RowLevelModificationType;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -80,6 +81,7 @@ class DataTableSourceTest {
                 new DataTableSource(
                         ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        assertThat(runtimeProvider.getParallelism()).isEmpty();
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
         DataStream<RowData> sourceStream1 =
@@ -100,6 +102,46 @@ class DataTableSourceTest {
         // The default parallelism is not 1
         assertThat(sourceStream2.getParallelism()).isNotEqualTo(1);
         assertThat(sourceStream2.getParallelism()).isEqualTo(sEnv2.getParallelism());
+    }
+
+    @Test
+    void testConfiguredScanParallelism() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket", "1",
+                                "bucket-key", "a",
+                                "scan.parallelism", "3"));
+
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+
+        assertThat(runtimeProvider.getParallelism()).contains(3);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        env.setParallelism(7);
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+        assertThat(sourceStream.getParallelism()).isEqualTo(3);
+    }
+
+    @Test
+    void testEmptyRowLevelModificationScanParallelism() throws Exception {
+        FileStoreTable fileStoreTable =
+                createTable(
+                        ImmutableMap.of(
+                                "bucket", "-1",
+                                "row-tracking.enabled", "true",
+                                "data-evolution.enabled", "true"));
+
+        DataTableSource tableSource =
+                new DataTableSource(
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
+        tableSource.applyRowLevelModificationScan(RowLevelModificationType.DELETE, null);
+
+        assertThat(runtimeProvider(tableSource).getParallelism()).contains(1);
     }
 
     @Test
@@ -168,6 +210,7 @@ class DataTableSourceTest {
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
+        assertThat(runtimeProvider.getParallelism()).contains(3);
         assertThat(sourceStream1.getParallelism()).isEqualTo(3);
     }
 
