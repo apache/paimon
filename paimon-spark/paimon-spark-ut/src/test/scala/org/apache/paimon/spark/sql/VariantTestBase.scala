@@ -1085,6 +1085,20 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     )
   }
 
+  test("Paimon Variant pushdown: out-of-range extraction is NULL rather than a wrapped value") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"n":99999999999,"d":1e30}')),
+          | (2, parse_json('{"n":7,"d":1.5}'))
+          |""".stripMargin)
+
+    // With pushdown the cast runs in the Paimon reader, which must agree with Spark's TRY cast.
+    checkAnswer(
+      sql(
+        "SELECT id, try_variant_get(v, '$.n', 'int'), try_variant_get(v, '$.d', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, null, null), Row(2, 7, 1L)))
+  }
+
   test("Paimon Variant pushdown: nested variant column inside a struct") {
     assume(gteqSpark4_1)
     sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
