@@ -1164,6 +1164,32 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         files = [file for message in messages for file in message.new_files]
         self.assertEqual([file.write_cols for file in files], [['age']])
 
+    def test_not_null_update_across_read_batches(self):
+        schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            pa.field('score', pa.int32(), nullable=False),
+        ])
+        table = self._create_table(pa_schema=schema, options={
+            **self.table_options, 'read.batch-size': '2'})
+        original = pa.Table.from_pydict({
+            'id': list(range(4)),
+            'score': list(range(4)),
+        }, schema=schema)
+        self._write_arrow(table, original)
+
+        updates = pa.Table.from_pydict({'id': [2], 'score': [99]}, schema=schema)
+        messages = self._upsert(table, updates, ['id'], ['score'])
+
+        expected = original.set_column(
+            1,
+            schema.field('score'),
+            pa.array([0, 1, 99, 3], type=pa.int32()),
+        )
+        self.assertTrue(self._read_all(table).equals(expected))
+        files = [file for message in messages for file in message.new_files]
+        self.assertEqual(len(files), 1)
+        self.assertFalse(pq.read_schema(files[0].file_path).field('score').nullable)
+
     # ==================================================================
     # Duplicate-key dedup tests — parametrised
     # ==================================================================

@@ -582,7 +582,13 @@ class TableUpdateByRowId:
             merged_columns[col_name] = self._merge_chunked_column(
                 original_col, update_col, sorted_updates)
 
-        merged_table = pa.table(merged_columns) if merged_columns else None
+        merged_table = None
+        if merged_columns:
+            merged_schema = pa.schema([
+                original_data.schema.field(name)
+                for name in merged_columns
+            ])
+            merged_table = pa.table(merged_columns, schema=merged_schema)
 
         return merged_table, blob_columns
 
