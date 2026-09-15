@@ -84,8 +84,9 @@ including the empty partition tuple for unpartitioned tables. Missing or invalid
 metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
 construction keeps complete coverage and `read` consumes the entire file once it is opened.
 
-`read` returns null for an absent sidecar reference or an `IOException`, allowing the caller
-to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
+`read` returns null immediately when `Settings.read` is false, without inspecting metadata,
+accessing the cache or opening files. An absent sidecar reference or an `IOException` also
+returns null, allowing the caller to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
 `UncheckedIOException`. Other exceptions and errors propagate unchanged. `select` validates
 supplied bytes directly and reports invalid containers with `IOException`.
 

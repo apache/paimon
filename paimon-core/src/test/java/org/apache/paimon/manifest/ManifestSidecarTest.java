@@ -130,6 +130,22 @@ class ManifestSidecarTest {
     }
 
     @Test
+    void disabledReadsDoNotAccessMetadataCacheOrFiles() {
+        FileIO io = mock(FileIO.class);
+        ManifestFileMeta manifest = mock(ManifestFileMeta.class);
+        SegmentsCache<Object> cache = mock(SegmentsCache.class);
+        Path path = new Path(temp.toString(), "missing-manifest");
+        ManifestSidecar.Settings disabled = new ManifestSidecar.Settings(true, false, true, true);
+        assertThat(ManifestSidecar.read(io, path, manifest, disabled, null)).isNull();
+        assertThat(ManifestSidecar.read(io, path, manifest, disabled, null, null, null)).isNull();
+        assertThat(
+                        ManifestSidecar.read(
+                                io, path, manifest, disabled, null, null, null, null, cache))
+                .isNull();
+        verifyNoInteractions(io, manifest, cache);
+    }
+
+    @Test
     void buildAndReadSelectedBlocksFromPhysicalManifests() throws Exception {
         FileIO io = LocalFileIO.create();
         ManifestTestDataGenerator generator = ManifestTestDataGenerator.builder().build();
@@ -474,7 +490,8 @@ class ManifestSidecarTest {
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, cancelled, null, null, null, cache))
+                                        io, path, meta, settings, cancelled, null, null, null,
+                                        cache))
                 .isInstanceOf(CancellationException.class);
         assertThat(cache.getIfPresents(sidecar)).isNull();
 
@@ -482,7 +499,8 @@ class ManifestSidecarTest {
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, cancelled, null, null, null, cache))
+                                        io, path, meta, settings, cancelled, null, null, null,
+                                        cache))
                 .isInstanceOf(CancellationException.class);
         assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         verify(io, times(2)).newInputStream(sidecar);
@@ -494,6 +512,7 @@ class ManifestSidecarTest {
                 io,
                 path,
                 meta,
+                settings,
                 RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
                 null,
                 null,
@@ -508,13 +527,15 @@ class ManifestSidecarTest {
         ManifestFileMeta meta = goldenMeta();
         RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(11, 11)));
 
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
+                .isNull();
         byte[] good = golden();
         for (int position : new int[] {0, 9, 11, 15, 16, 55, 63, 67, 75, good.length - 1}) {
             byte[] bad = good.clone();
             bad[position] ^= 2;
             Files.write(index, bad);
-            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
+            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
+                    .isNull();
         }
         // A valid checksum cannot make an unsupported container version readable.
         for (int version : new int[] {0, 2, 99}) {
@@ -528,9 +549,12 @@ class ManifestSidecarTest {
                     .isInstanceOf(IOException.class);
         }
         Files.write(index, Arrays.copyOf(good, good.length - 1));
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query))
+                .isNull();
         Files.write(index, good);
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query).blocks())
+        assertThat(
+                        ManifestSidecar.read(LocalFileIO.create(), manifest, meta, settings, query)
+                                .blocks())
                 .isEmpty();
         // The sidecar is bound to physical coverage, not to a particular file name.
         assertThat(
@@ -568,7 +592,8 @@ class ManifestSidecarTest {
                         suppressed)) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null)).isNull();
+            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), settings, null))
+                    .isNull();
             assertThat(Thread.currentThread().isInterrupted()).isFalse();
         }
     }
@@ -581,7 +606,10 @@ class ManifestSidecarTest {
         when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
         try {
             Thread.currentThread().interrupt();
-            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
+            assertThatThrownBy(
+                            () ->
+                                    ManifestSidecar.read(
+                                            fileIO, path, meta("m", 1, 1), settings, null))
                     .isInstanceOf(java.io.UncheckedIOException.class)
                     .hasCauseReference(failure);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
@@ -601,7 +629,10 @@ class ManifestSidecarTest {
                         new AssertionError("error"))) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
+            assertThatThrownBy(
+                            () ->
+                                    ManifestSidecar.read(
+                                            fileIO, path, meta("m", 1, 1), settings, null))
                     .isSameAs(failure);
         }
     }
@@ -628,6 +659,7 @@ class ManifestSidecarTest {
                             io,
                             path,
                             meta,
+                            settings,
                             RowRangeIndex.create(Collections.singletonList(new Range(0, 0))));
             assertThat(actual.blocks()).hasSize(1);
             assertThat(actual.blocks().get(0).offset).isEqualTo(header.length);
@@ -660,6 +692,7 @@ class ManifestSidecarTest {
                                         io,
                                         path,
                                         meta("manifest-large", header.length + 100, 1),
+                                        settings,
                                         null)
                                 .blocks())
                 .hasSize(1);
@@ -682,6 +715,7 @@ class ManifestSidecarTest {
                             io,
                             path,
                             goldenMeta(),
+                            settings,
                             RowRangeIndex.create(Collections.singletonList(new Range(20, 20))));
             assertThat(actual.blocks())
                     .extracting(block -> block.firstRecord)

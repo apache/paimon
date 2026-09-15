@@ -587,11 +587,15 @@ public final class ManifestSidecar {
         return new Payload(count, result);
     }
 
-    /** Reads the complete sidecar. Null means read the original manifest. */
+    /** Reads the complete sidecar when enabled. Null means read the original manifest. */
     @Nullable
     public static Selection read(
-            FileIO io, Path path, ManifestFileMeta manifest, @Nullable RowRangeIndex query) {
-        return read(io, path, manifest, query, null, null);
+            FileIO io,
+            Path path,
+            ManifestFileMeta manifest,
+            Settings settings,
+            @Nullable RowRangeIndex query) {
+        return read(io, path, manifest, settings, query, null, null);
     }
 
     @Nullable
@@ -599,10 +603,12 @@ public final class ManifestSidecar {
             FileIO io,
             Path path,
             ManifestFileMeta manifest,
+            Settings settings,
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable RowType partitionType) {
-        return read(io, path, manifest, query, partitionFilter, partitionType, null, null);
+        return read(
+                io, path, manifest, settings, query, partitionFilter, partitionType, null, null);
     }
 
     @Nullable
@@ -610,11 +616,15 @@ public final class ManifestSidecar {
             FileIO io,
             Path path,
             ManifestFileMeta manifest,
+            Settings settings,
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable RowType partitionType,
             @Nullable BiPredicate<Integer, Integer> bucketFilter,
             @Nullable SegmentsCache<Object> cache) {
+        if (!settings.read) {
+            return null;
+        }
         String sidecarFileName = fileName(manifest);
         if (sidecarFileName == null) {
             return null;
