@@ -341,6 +341,14 @@ public interface FileIO extends Serializable, Closeable {
                 builder.append(line);
             }
             return builder.toString();
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            // Some object stores throw a plain IOException for a file deleted during reading.
+            if (exists(path)) {
+                throw e;
+            }
+            throw new FileNotFoundException("File " + path + " does not exist.");
         }
     }
 

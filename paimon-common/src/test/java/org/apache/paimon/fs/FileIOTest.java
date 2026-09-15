@@ -25,6 +25,7 @@ import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -50,6 +51,34 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileIOTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testReadFileUtf8ReportsFileDeletedDuringReadAsNotFound() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(file);
+                            throw new IOException("404 Not Found");
+                        })
+                .when(fileIO)
+                .newInputStream(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isInstanceOf(FileNotFoundException.class);
+    }
+
+    @Test
+    public void testReadFileUtf8KeepsReadFailureOfExistingFile() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("Read failure");
+        Mockito.doThrow(readFailure).when(fileIO).newInputStream(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file)).isSameAs(readFailure);
+    }
 
     @Test
     public void testRequireOptions() throws IOException {

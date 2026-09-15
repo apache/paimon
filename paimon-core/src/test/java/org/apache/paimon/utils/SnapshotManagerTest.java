@@ -141,40 +141,6 @@ public class SnapshotManagerTest {
     }
 
     @Test
-    public void testTryFromPathReportsSnapshotDeletedDuringReadAsNotFound() throws IOException {
-        FileIO fileIO = Mockito.spy(LocalFileIO.create());
-        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
-        Path path = snapshotManager.snapshotPath(1);
-        fileIO.tryToWriteAtomic(path, createSnapshotWithMillis(1, 1000).toJson());
-        IOException readFailure = new IOException("404 Not Found");
-        Mockito.doAnswer(
-                        invocation -> {
-                            fileIO.deleteQuietly(path);
-                            throw readFailure;
-                        })
-                .when(fileIO)
-                .readFileUtf8(path);
-
-        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path))
-                .isInstanceOf(FileNotFoundException.class)
-                .hasCause(readFailure);
-    }
-
-    @Test
-    public void testTryFromPathKeepsReadFailureOfExistingSnapshot() throws IOException {
-        FileIO fileIO = Mockito.spy(LocalFileIO.create());
-        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
-        Path path = snapshotManager.snapshotPath(1);
-        fileIO.tryToWriteAtomic(path, createSnapshotWithMillis(1, 1000).toJson());
-        Mockito.doThrow(new IOException("Read failure")).when(fileIO).readFileUtf8(path);
-
-        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Fails to read snapshot from path")
-                .hasRootCauseMessage("Read failure");
-    }
-
-    @Test
     public void testLatestSnapshotOfUserStopsAtSnapshotDeletedDuringRead() throws IOException {
         FileIO fileIO = Mockito.spy(LocalFileIO.create());
         SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
@@ -190,7 +156,7 @@ public class SnapshotManagerTest {
                             throw new IOException("404 Not Found");
                         })
                 .when(fileIO)
-                .readFileUtf8(expiring);
+                .newInputStream(expiring);
 
         assertThat(snapshotManager.latestSnapshotOfUser("currentCommitUser")).isEmpty();
     }
