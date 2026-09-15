@@ -16,6 +16,7 @@
 # under the License.
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import pytest
@@ -33,11 +34,12 @@ from pypaimon.tests.vector_search_filter_test import _StubTable, _field, _entry,
 MODULE = "pypaimon.table.source.vector_search_read"
 
 
-def make_read(batch, options=None, count=4):
+def make_read(batch, table_options=None, count=4):
     field = _field(1, "embedding", "FLOAT")
     table = _StubTable([field], [])
+    table.options = CoreOptions(Options(table_options or {}))
     cls = BatchVectorSearchReadImpl if batch else DataEvolutionVectorRead
-    read = cls(table, 2, field, [[1.0], [2.0]] if batch else [1.0], options=options)
+    read = cls(table, 2, field, [[1.0], [2.0]] if batch else [1.0])
     splits = []
     for i in range(count):
         entry = _entry(None, 1, "ivf-flat", str(i), i * 10, i * 10 + 9)
@@ -47,7 +49,7 @@ def make_read(batch, options=None, count=4):
 
 @pytest.mark.parametrize("batch", [False, True])
 def test_parallel_open_search_close_and_ordered_results(batch):
-    read, splits = make_read(batch, {"vector.search.parallelism": "2"})
+    read, splits = make_read(batch, {"global-index.thread-num": "2"})
     barrier = threading.Barrier(2, timeout=5)
     lock = threading.Lock()
     active, peak, closed, filters = set(), [0], set(), {}
@@ -103,7 +105,7 @@ def test_parallel_open_search_close_and_ordered_results(batch):
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("failure", ["search", "metric"])
 def test_parallel_failure_closes_all_started_readers(batch, failure):
-    read, splits = make_read(batch, {"vector.search.parallelism": "2"}, count=2)
+    read, splits = make_read(batch, {"global-index.thread-num": "2"}, count=2)
     barrier = threading.Barrier(2, timeout=5)
     closed = set()
     original = ValueError("native search failed")
@@ -145,29 +147,46 @@ def test_parallel_failure_closes_all_started_readers(batch, failure):
     assert closed == {0, 1}
 
 
-@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid", True])
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "invalid", True, 1.5])
 def test_invalid_parallelism(value):
-    read, splits = make_read(False, {"vector.search.parallelism": value})
-    with pytest.raises(ValueError, match="positive integer"):
+    read, splits = make_read(False, {"global-index.thread-num": value})
+    with pytest.raises(ValueError, match="'global-index.thread-num' must be a positive integer"):
         read._search_index_splits(splits, [1.0], 2, None)
 
 
-def test_serial_default_query_override_and_single_split_fast_path():
-    for count, table_value, query_options in (
-            (3, None, {}), (3, "4", {"vector.search.parallelism": "1"}),
-            (1, "4", {}), (0, "4", {})):
-        read, splits = make_read(False, query_options, count)
-        read._table.options = CoreOptions(Options(
-            {} if table_value is None else {"vector.search.parallelism": table_value}))
+@pytest.mark.parametrize("batch", [False, True])
+def test_explicit_serial_and_single_split_fast_path(batch):
+    for count, table_value in ((3, "1"), (1, None), (0, None), (1, "4"), (0, "4")):
+        read, splits = make_read(
+            batch, {} if table_value is None else {"global-index.thread-num": table_value}, count)
+        query = [[1.0], [2.0]] if batch else [1.0]
+        method = "_eval_batch" if batch else "_eval"
         with mock.patch(MODULE + ".ThreadPoolExecutor", side_effect=AssertionError("pool")), \
-                mock.patch.object(read, "_eval", return_value=_completed_future(None)) as evaluate:
-            assert read._search_index_splits(splits, [1.0], 2, None) == [None] * count
+                mock.patch.object(read, method, return_value=_completed_future(None)) as evaluate:
+            assert read._search_index_splits(
+                splits, query, 2, None, batch=batch) == [None] * count
         assert evaluate.call_count == count
 
 
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("count, table_value, workers", [(2, None, 2), (33, None, 32), (4, "3", 3)])
+def test_default_and_configured_worker_limits(batch, count, table_value, workers):
+    read, splits = make_read(
+        batch, {} if table_value is None else {"global-index.thread-num": table_value}, count)
+    query = [[1.0], [2.0]] if batch else [1.0]
+    method = "_eval_batch" if batch else "_eval"
+    with mock.patch(MODULE + ".ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor, \
+            mock.patch.object(read, method, return_value=_completed_future(None)) as evaluate:
+        assert read._search_index_splits(
+            splits, query, 2, None, batch=batch) == [None] * count
+    executor.assert_called_once_with(max_workers=workers)
+    assert evaluate.call_count == count
+
+
 def test_parallelism_from_table_options():
-    read, splits = make_read(False, count=2)
-    read._table.options = CoreOptions(Options({"vector.search.parallelism": "2"}))
+    read, splits = make_read(False, {"global-index.thread-num": "2"}, count=2)
+    # Like Java, shard concurrency comes from the table, not native query options.
+    read._options["global-index.thread-num"] = "1"
     barrier = threading.Barrier(2, timeout=5)
 
     def evaluate(*args):

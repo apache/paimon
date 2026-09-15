@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -463,8 +464,9 @@ class AbstractVectorSearchReadImpl:
     def _search_index_splits(self, splits, query, search_limit, pre_filters, batch=False):
         # Native readers finish their search before returning a completed Future.
         # Schedule the entire open/search/close operation, not just Future.result().
-        key = "vector.search.parallelism"
-        value = self._options.get(key, _table_options_map(self._table).get(key, "1"))
+        option = CoreOptions.GLOBAL_INDEX_THREAD_NUM
+        key = option.key()
+        value = _table_options_map(self._table).get(key, option.default_value())
         try:
             parallelism = int(str(value))
         except (ValueError, TypeError):
