@@ -25,6 +25,7 @@ import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -50,6 +51,61 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileIOTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testReadFileUtf8ReportsFileDeletedDuringReadAsNotFound() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("404 Not Found");
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(file);
+                            throw readFailure;
+                        })
+                .when(fileIO)
+                .newInputStream(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isInstanceOf(FileNotFoundException.class)
+                .hasCause(readFailure);
+    }
+
+    @Test
+    public void testReadFileUtf8KeepsReadFailureOfExistingFile() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("Read failure");
+        Mockito.doThrow(readFailure).when(fileIO).newInputStream(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file)).isSameAs(readFailure);
+    }
+
+    @Test
+    public void testReadFileUtf8KeepsReadFailureWhenExistenceCheckFails() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        Path file = new Path(tempDir.resolve("file").toUri());
+        fileIO.writeFile(file, "content", false);
+        IOException readFailure = new IOException("Read failure");
+        Mockito.doThrow(readFailure).when(fileIO).newInputStream(file);
+        IOException checkFailure = new IOException("Exists failure");
+        Mockito.doThrow(checkFailure).when(fileIO).exists(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isSameAs(readFailure)
+                .satisfies(e -> assertThat(e.getSuppressed()).containsExactly(checkFailure));
+
+        IOException secondReadFailure = new IOException("Read failure");
+        Mockito.doThrow(secondReadFailure).when(fileIO).newInputStream(file);
+        RuntimeException uncheckedCheckFailure = new RuntimeException("Exists failure");
+        Mockito.doThrow(uncheckedCheckFailure).when(fileIO).exists(file);
+
+        assertThatThrownBy(() -> fileIO.readFileUtf8(file))
+                .isSameAs(secondReadFailure)
+                .satisfies(
+                        e -> assertThat(e.getSuppressed()).containsExactly(uncheckedCheckFailure));
+    }
 
     @Test
     public void testRequireOptions() throws IOException {

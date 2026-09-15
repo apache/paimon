@@ -341,6 +341,27 @@ public interface FileIO extends Serializable, Closeable {
                 builder.append(line);
             }
             return builder.toString();
+        } catch (FileNotFoundException e) {
+            throw e;
+        } catch (IOException e) {
+            // Some object stores throw a plain IOException for a file deleted during reading.
+            boolean missing;
+            try {
+                missing = !exists(path);
+            } catch (IOException | RuntimeException checkFailure) {
+                // Keep the original failure when the file cannot be confirmed to be gone.
+                e.addSuppressed(checkFailure);
+                throw e;
+            }
+            if (!missing) {
+                throw e;
+            }
+            LOG.debug(
+                    "Read of {} failed and the file is gone, reporting it as not found.", path, e);
+            FileNotFoundException notFound =
+                    new FileNotFoundException("File " + path + " does not exist.");
+            notFound.initCause(e);
+            throw notFound;
         }
     }
 
