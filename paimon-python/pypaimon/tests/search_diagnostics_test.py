@@ -315,7 +315,7 @@ def test_native_profile_reports_indexed_raw_and_refine_work(tmp_path, batch):
     assert profile.lookup_snapshot_ids == [route.snapshot_id] * (2 if batch else 1)
 
 
-def test_profile_reports_actual_lookup_snapshot_after_concurrent_append(tmp_path):
+def test_profile_keeps_lookup_snapshot_after_concurrent_append(tmp_path):
     from pypaimon.table.source.search_diagnostics import SearchDiagnostics
 
     connection = pmm.connect(options={"warehouse": str(tmp_path)})
@@ -335,7 +335,8 @@ def test_profile_reports_actual_lookup_snapshot_after_concurrent_append(tmp_path
     with mock.patch.object(SearchDiagnostics, "profile", append_after_search):
         profile = table.search([1, 0]).select(["id"]).limit(1).profile()
     assert profile.result.column("id").to_pylist() == [1]
-    assert profile.lookup_snapshot_ids[0] > profile.plan.routes[0].snapshot_id
+    assert profile.lookup_snapshot_ids == [profile.plan.routes[0].snapshot_id]
+    assert table.raw_table.snapshot_manager().get_latest_snapshot().id > profile.lookup_snapshot_ids[0]
 
 
 def test_profiled_index_cannot_close_reader_before_native_search_completes():

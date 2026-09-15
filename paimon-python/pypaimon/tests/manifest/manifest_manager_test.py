@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import copy
 import os
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ import threading
 import unittest
 from dataclasses import replace
 from io import BytesIO
+from unittest import mock
 
 import fastavro
 import pyarrow as pa
@@ -36,7 +38,8 @@ from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
+                                                     ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -272,6 +275,136 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             ),
         )
         return entry
+
+    def _partitioned_manifest(self):
+        table_id = 'default.selective_manifest'
+        identifier = Identifier.from_string(table_id)
+        path = self.catalog.get_table_path(identifier)
+        if self.catalog.file_io.exists(path):
+            self.catalog.file_io.delete(path, recursive=True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('pt', pa.string()), ('id', pa.int32())]),
+            partition_keys=['pt'])
+        self.catalog.create_table(table_id, schema, False)
+        table = self.catalog.get_table(table_id)
+        manager = ManifestFileManager(table)
+        entries = []
+        for name, partition, bucket in [
+                ('selected.parquet', 'keep', 1),
+                ('partition-pruned.parquet', 'drop', 1),
+                ('bucket-pruned.parquet', 'keep', 2)]:
+            entry = self._create_manifest_entry(name, bucket)
+            entry.total_buckets = 4
+            entry.partition = GenericRow(
+                [partition], table.partition_keys_fields)
+            entries.append(entry)
+        return table, manager, entries
+
+    def test_partition_and_bucket_filters_skip_file_decoding(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        _, manager, entries = self._partitioned_manifest()
+        name = 'selective-manifest.avro'
+        manager.write(name, entries)
+
+        class KeepPartition:
+            @staticmethod
+            def test(row):
+                return row.get_field(0) == 'keep'
+
+        with mock.patch.object(
+                manager_module, '_read_record',
+                wraps=manager_module._read_record) as read_record, \
+                mock.patch.object(
+                    manager_module, '_skip_record',
+                    wraps=manager_module._skip_record) as skip_record:
+            actual = manager.read(
+                name,
+                early_entry_filter=lambda bucket, _: bucket == 1,
+                partition_filter=KeepPartition())
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet'])
+        self.assertEqual(read_record.call_count, 1)
+        self.assertEqual(skip_record.call_count, 2)
+
+    def test_single_manifest_read_does_not_create_executor(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        _, manager, entries = self._partitioned_manifest()
+        manifests = manager.rolling_write(
+            entries, 1024 * 1024, 'single-manifest')
+
+        with mock.patch.object(
+                manager_module, 'ThreadPoolExecutor') as executor:
+            actual = manager.read_entries_parallel(
+                manifests,
+                early_entry_filter=lambda bucket, _: bucket == 1)
+
+        executor.assert_not_called()
+        self.assertEqual(
+            [entry.file.file_name for entry in actual],
+            ['selected.parquet', 'partition-pruned.parquet'])
+
+    def test_reordered_manifest_fields_use_compatible_reader(self):
+        import pypaimon.manifest.manifest_file_manager as manager_module
+
+        table, manager, entries = self._partitioned_manifest()
+        schema = copy.deepcopy(MANIFEST_ENTRY_SCHEMA)
+        fields = schema['fields']
+        schema['fields'] = [fields[1], fields[0]] + fields[2:]
+        buffer = BytesIO()
+        fastavro.writer(buffer, schema, manager._to_avro_records(entries))
+        name = 'reordered-manifest.avro'
+        path = '{}/{}'.format(manager.manifest_path, name)
+        with table.file_io.new_output_stream(path) as output:
+            output.write(buffer.getvalue())
+
+        with mock.patch.object(
+                manager_module, '_read_record',
+                wraps=manager_module._read_record) as read_record:
+            actual = manager.read(
+                name, early_entry_filter=lambda bucket, _: bucket == 1)
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet', 'partition-pruned.parquet'])
+        self.assertEqual(read_record.call_count, 0)
+
+    def test_file_schema_named_type_reference(self):
+        table, manager, entries = self._partitioned_manifest()
+        schema = copy.deepcopy(MANIFEST_ENTRY_SCHEMA)
+        file_fields = schema['fields'][5]['type']['fields']
+        file_fields[6]['type'] = 'record_KEY_STATS'
+        buffer = BytesIO()
+        fastavro.writer(buffer, schema, manager._to_avro_records(entries))
+        name = 'named-type-manifest.avro'
+        path = '{}/{}'.format(manager.manifest_path, name)
+        with table.file_io.new_output_stream(path) as output:
+            output.write(buffer.getvalue())
+
+        actual = manager.read(
+            name, early_entry_filter=lambda bucket, _: bucket == 1)
+
+        self.assertEqual([entry.file.file_name for entry in actual],
+                         ['selected.parquet', 'partition-pruned.parquet'])
+
+    def test_union_manifest_schema_uses_compatible_reader(self):
+        table, manager, entries = self._partitioned_manifest()
+        buffer = BytesIO()
+        # Rust Avro manifests wrap the record schema in a top-level union.
+        fastavro.writer(buffer, [MANIFEST_ENTRY_SCHEMA], manager._to_avro_records(entries))
+        name = 'union-manifest.avro'
+        with table.file_io.new_output_stream('{}/{}'.format(manager.manifest_path, name)) as output:
+            output.write(buffer.getvalue())
+
+        class KeepPartition:
+            @staticmethod
+            def test(row):
+                return row.get_field(0) == 'keep'
+
+        actual = manager.read(name, early_entry_filter=lambda bucket, _: bucket == 1,
+                              partition_filter=KeepPartition())
+        self.assertEqual([entry.file.file_name for entry in actual], ['selected.parquet'])
 
     def test_manifest_bucket_and_level_stats(self):
         manager = self._make_manager()

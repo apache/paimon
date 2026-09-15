@@ -25,6 +25,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
 import static org.apache.paimon.rest.RESTUtil.encodeString;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Resource paths for REST catalog. */
 public class ResourcePaths {
@@ -47,6 +48,7 @@ public class ResourcePaths {
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
     protected static final String POLICIES = "policies";
+    protected static final String LABELS = "labels";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -63,6 +65,31 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = encodeString(prefix);
+    }
+
+    /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
+    @Experimental
+    public String labels(String entityType, String entityName) {
+        checkArgument(
+                entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
+        checkArgument(
+                entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
+        return SLASH.join(
+                V1, prefix, LABELS, encodeLabelSegment(entityType), encodeLabelSegment(entityName));
+    }
+
+    @Experimental
+    public String label(String entityType, String entityName, String key) {
+        checkArgument(key != null && !key.trim().isEmpty(), "key must not be blank");
+        return SLASH.join(labels(entityType, entityName), encodeLabelSegment(key));
+    }
+
+    private static String encodeLabelSegment(String value) {
+        // Form encoding leaves dot segments unchanged, but they must be treated as names here.
+        if (".".equals(value) || "..".equals(value)) {
+            return value.replace(".", "%2E");
+        }
+        return encodeString(value);
     }
 
     @Experimental

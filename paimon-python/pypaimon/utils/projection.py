@@ -21,18 +21,23 @@ A projection maps a source row type to a flat list of ``DataField``: the
 columns the user wants to read. Two flavours:
 
 * :class:`TopLevelProjection` selects fields by their top-level index.
-* :class:`NestedProjection` accepts paths that walk into ROW children, e.g.
-  ``[[1, 0], [1, 2]]`` means "the 0th and 2nd children of the field at top
-  level index 1". The result is flattened into top-level fields whose
-  names are the underscore-joined original path (``a_b`` for ``a.b``,
-  with a ``__N`` suffix on collisions) and whose IDs are inherited from
-  the leaf so schema-evolution remapping by field ID still works.
+* :class:`NestedProjection` accepts paths that walk into ROW children or end
+  in a literal MAP key. The result is flattened into top-level fields whose
+  names are the underscore-joined original path (``a_b`` for ``a.b``, with a
+  ``__N`` suffix on collisions).
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Sequence
+from copy import copy
+from typing import List, NamedTuple, Optional, Sequence
 
-from pypaimon.schema.data_types import DataField, RowType
+from pypaimon.schema.data_types import DataField, MapType, RowType
+
+
+class MapKey(NamedTuple):
+    """A literal MAP key in an internal projection path."""
+
+    value: str
 
 
 class Projection(ABC):
@@ -57,11 +62,11 @@ class Projection(ABC):
 
     @abstractmethod
     def to_nested_indexes(self) -> List[List[int]]:
-        """Return the projection as a list of paths, one per output field."""
+        """Return the internal paths, one per output field."""
 
     @abstractmethod
     def to_name_paths(self, row_type) -> List[List[str]]:
-        """Translate integer paths to field-name paths against ``row_type``.
+        """Translate internal paths to field-name paths against ``row_type``.
 
         For a path ``[1, 0]`` against a row whose top-level field at index 1
         is a struct ``mv_col`` with sub-fields ``[LATEST_VERSION, ...]``,
@@ -153,13 +158,14 @@ class TopLevelProjection(Projection):
 
 
 class NestedProjection(Projection):
-    """Projection over paths that may walk into ROW children.
+    """Projection over paths that may walk into ROW children or MAP keys.
 
     Each path navigates from a top-level field through successive ROW
-    children. A path of length 1 is equivalent to a top-level selection.
+    children, or ends with a literal :class:`MapKey`. A path of length 1 is
+    equivalent to a top-level selection.
     """
 
-    def __init__(self, paths: Sequence[Sequence[int]]):
+    def __init__(self, paths: Sequence[Sequence]):
         if not paths:
             raise ValueError("NestedProjection requires at least one path")
         self.paths = [list(p) for p in paths]
@@ -194,6 +200,13 @@ class NestedProjection(Projection):
             names = [field.name]
             for idx in path[1:]:
                 child_type = field.type
+                if isinstance(idx, MapKey):
+                    if not isinstance(child_type, MapType):
+                        raise ValueError(
+                            "Map-key projection expected a MAP type but got %s "
+                            "for field '%s'" % (child_type, field.name))
+                    names.append(idx.value)
+                    break
                 if not is_row_type(child_type):
                     raise ValueError(
                         "Nested projection step expected a ROW type but got %s "
@@ -206,14 +219,31 @@ class NestedProjection(Projection):
 
     def project(self, row_type) -> List[DataField]:
         fields = _row_fields(row_type)
+        top_level_names = {field.name for field in fields}
         out: List[DataField] = []
         seen_names = set()
         dup_count = 0
         for path in self.paths:
             field = fields[path[0]]
             name_parts = [field.name]
+            is_map_key = False
             for idx in path[1:]:
                 child_type = field.type
+                if isinstance(idx, MapKey):
+                    if not isinstance(child_type, MapType):
+                        raise ValueError(
+                            "Map-key projection expected a MAP type but got %s "
+                            "for field '%s'" % (child_type, field.name))
+                    value_type = copy(child_type.value)
+                    value_type.nullable = True
+                    field = DataField(
+                        id=field.id,
+                        name=idx.value,
+                        type=value_type,
+                    )
+                    name_parts.extend(idx.value.split('.'))
+                    is_map_key = True
+                    break
                 if not is_row_type(child_type):
                     raise ValueError(
                         "Nested projection step expected a ROW type but got %s "
@@ -223,7 +253,8 @@ class NestedProjection(Projection):
                 name_parts.append(field.name)
             base_name = "_".join(name_parts)
             final_name = base_name
-            while final_name in seen_names:
+            while (final_name in seen_names
+                   or (is_map_key and final_name in top_level_names)):
                 final_name = "%s__%d" % (base_name, dup_count)
                 dup_count += 1
             seen_names.add(final_name)

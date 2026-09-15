@@ -242,8 +242,13 @@ class SchemaEvolutionPkReadTest(unittest.TestCase):
         self._write(table, pa.Table.from_pydict(
             {'id': [1], 'v': ['second'], 'w': ['W']}, schema=s1))
 
-        # first-row keeps the earliest row; it predates column w, so w is NULL.
-        self.assertEqual(self._read_sorted(table), [
+        # Batch first-row scans hide L0, as in Java. Inspect the un-compacted
+        # files explicitly to verify schema evolution in the merge reader.
+        builder = table.new_read_builder()
+        scan = builder.new_scan()
+        self.assertEqual(scan.plan().splits(), [])
+        rows = builder.new_read().to_arrow(scan.plan_for_write().splits()).to_pylist()
+        self.assertEqual(rows, [
             {'id': 1, 'v': 'first', 'w': None}])
 
     # -- B8: multi-version chain (add + promotion) + partial-update ------

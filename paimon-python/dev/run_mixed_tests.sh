@@ -1027,7 +1027,8 @@ run_shared_shredding_map_test() {
 
     cd "$PAIMON_PYTHON_DIR"
     echo "Running Python shared-shredding MAP read test..."
-    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_shared_shredding_map_written_by_java -v; then
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest \
+        -k "test_read_shared_shredding_map_written_by_java or test_read_selected_shared_shredding_keys_written_by_java" -v; then
         echo -e "${RED}✗ Python shared-shredding MAP read test failed${NC}"
         return 1
     fi

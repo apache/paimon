@@ -2199,7 +2199,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(1, 1))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search([0.0, 1.0, 0.0])
@@ -2250,7 +2252,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         docs.search(
             [1.0, 0.0, 0.0],
@@ -2400,7 +2404,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = docs.search((v for v in [1.0, 0.0, 0.0])).limit(1).to_list()
 
@@ -2435,7 +2441,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_vector_search_builder", return_value=FakeVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search([1.0, 0.0, 0.0], column="embedding")
@@ -2505,8 +2513,10 @@ class MultimodalTableTest(unittest.TestCase):
                     GlobalIndexResult.from_range(Range(2, 2)),
                 ]
 
-        docs.raw_table.new_batch_vector_search_builder = (
-            lambda: FakeBatchVectorBuilder())
+        patcher = patch.object(type(docs.raw_table), "new_batch_vector_search_builder",
+                               return_value=FakeBatchVectorBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_vectors(
@@ -2573,7 +2583,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_full_text_search_builder = lambda: FakeFullTextBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_full_text_search_builder", return_value=FakeFullTextBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search("paimon vector")
@@ -2664,7 +2676,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 1))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(
@@ -2726,7 +2740,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(
@@ -2805,7 +2821,9 @@ class MultimodalTableTest(unittest.TestCase):
             def execute_local(self):
                 return GlobalIndexResult.from_range(Range(0, 0))
 
-        docs.raw_table.new_hybrid_search_builder = lambda: FakeHybridBuilder()
+        patcher = patch.object(type(docs.raw_table), "new_hybrid_search_builder", return_value=FakeHybridBuilder())
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         result = (
             docs.search_hybrid(

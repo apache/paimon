@@ -38,6 +38,8 @@ def _native_plan_enabled():
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "python_plan: keep Python planner assertions on the Python lane")
+    config.addinivalue_line(
+        "markers", "native_plan: exercise the real Rust planner in the Rust main CI job")
     if not _native_plan_enabled():
         return
 
@@ -61,7 +63,8 @@ def enable_native_plan(request, monkeypatch):
     if (not _native_plan_enabled()
             or request.node.get_closest_marker("python_plan") is not None
             or request.path.name in (
-                "native_plan_test.py", "native_plan_integration_test.py")):
+                "native_plan_test.py", "native_plan_integration_test.py",
+                "native_plan_capabilities_test.py")):
         yield
         return
 

@@ -18,26 +18,77 @@
 
 package org.apache.avro.file;
 
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
+
 import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.NoSuchElementException;
 
 /** Package bridge exposing Avro's compressed blocks without reflection. */
 public final class RawBlockReader extends DataFileStream<Void> {
 
-    public RawBlockReader(InputStream input) throws IOException {
-        super(input, new NoOpDatumReader<Void>());
+    private final SeekableInputStream input;
+    private final byte[] headerBytes;
+    private long blockOffset;
+    private long blockLength;
+    private boolean pending;
+
+    public RawBlockReader(SeekableInputStream input) throws IOException {
+        this(input, input.getPos());
     }
 
-    public boolean hasNextRawBlock() {
-        return super.hasNextBlock();
+    private RawBlockReader(SeekableInputStream input, long headerOffset) throws IOException {
+        super(input, new NoOpDatumReader<Void>());
+        this.input = input;
+        this.headerBytes = new byte[Math.toIntExact(position() - headerOffset)];
+        long resumePosition = input.getPos();
+        input.seek(headerOffset);
+        IOUtils.readFully(input, headerBytes);
+        // Preserve the position past any bytes already buffered by the Avro decoder.
+        input.seek(resumePosition);
+    }
+
+    /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
+    public byte[] headerBytes() {
+        return headerBytes.clone();
+    }
+
+    /**
+     * Returns the physical block offset; read immediately after {@link #nextRawBlock(RawBlock)}.
+     */
+    public long blockOffset() {
+        return blockOffset;
+    }
+
+    /** Returns the last-read block's encoded length, including its header and sync marker. */
+    public long blockLength() {
+        return blockLength;
+    }
+
+    private long position() throws IOException {
+        // This is the same read-ahead adjustment used by DataFileReader.blockFinished().
+        return input.getPos() - vin.inputStream().available();
+    }
+
+    public boolean hasNextRawBlock() throws IOException {
+        if (!pending) {
+            blockOffset = position();
+            pending = super.hasNextBlock();
+        }
+        return pending;
     }
 
     public RawBlock nextRawBlock(RawBlock reuse) throws IOException {
+        if (!hasNextRawBlock()) {
+            throw new NoSuchElementException();
+        }
         DataBlock raw = super.nextRawBlock(reuse == null ? null : reuse.dataBlock());
+        blockLength = position() - blockOffset;
+        pending = false;
         return reuse == null
                 ? new RawBlock(raw, resolveCodec(), getSchema())
                 : reuse.replace(raw, resolveCodec(), getSchema());

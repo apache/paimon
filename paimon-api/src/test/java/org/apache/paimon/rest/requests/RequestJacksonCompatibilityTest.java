@@ -157,7 +157,12 @@ public class RequestJacksonCompatibilityTest {
                             RollbackSchemaRequest.class,
                             "{\"schemaId\":44}",
                             request -> assertThat(request.getSchemaId()).isEqualTo(44L),
-                            "schemaId"));
+                            "schemaId"),
+                    requestCase(
+                            UpsertLabelRequest.class,
+                            "{\"value\":\"identifier\"}",
+                            request -> assertThat(request.getValue()).isEqualTo("identifier"),
+                            "value"));
 
     private static final Set<Class<? extends RESTRequest>> COMPLEX_REQUESTS =
             Stream.<Class<? extends RESTRequest>>of(

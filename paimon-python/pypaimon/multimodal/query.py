@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -450,7 +451,7 @@ class _PreFilterQuery(ScanQuery):
 
     def explain(self):
         """Plan this search without executing it or fetching result rows."""
-        plan = self._search_builder().explain()
+        plan = self._for_execution()._search_builder().explain()
         plan.projection = self._effective_projection()
         plan.has_post_filter = self._predicate is not None
         return plan
@@ -460,17 +461,18 @@ class _PreFilterQuery(ScanQuery):
         import time
 
         start = time.perf_counter()
-        profile = self._search_builder().profile()
+        query = self._for_execution()
+        profile = query._search_builder().profile()
         profile.plan.projection = self._effective_projection()
         profile.plan.has_post_filter = self._predicate is not None
         lookup_start = time.perf_counter()
         profile.lookup_snapshot_ids = []
         if isinstance(profile.result, list):
-            profile.result = [self._read_global_index_result(result, profile.lookup_snapshot_ids)
+            profile.result = [query._read_global_index_result(result, profile.lookup_snapshot_ids)
                               for result in profile.result]
             profile.output_rows = sum(table.num_rows for table in profile.result)
         else:
-            profile.result = self._read_global_index_result(profile.result, profile.lookup_snapshot_ids)
+            profile.result = query._read_global_index_result(profile.result, profile.lookup_snapshot_ids)
             profile.output_rows = profile.result.num_rows
         profile.lookup_ms = (time.perf_counter() - lookup_start) * 1000
         profile.elapsed_ms = (time.perf_counter() - start) * 1000
@@ -478,6 +480,15 @@ class _PreFilterQuery(ScanQuery):
 
     def _search_builder(self):
         raise NotImplementedError
+
+    def _for_execution(self):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        query = copy(self)
+        query._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
+        return query
+
+    def to_arrow(self):
+        return ScanQuery.to_arrow(self._for_execution())
 
     def __init__(
             self,
@@ -644,9 +655,10 @@ class BatchVectorQuery(_PreFilterQuery):
         super().__init__(table, pre_filter=pre_filter)
 
     def to_arrow(self):
+        query = self._for_execution()
         return [
-            self._read_global_index_result(result)
-            for result in self._execute_batch_vector(self)
+            query._read_global_index_result(result)
+            for result in query._execute_batch_vector(query)
         ]
 
     def to_pandas(self):

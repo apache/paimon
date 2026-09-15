@@ -22,13 +22,15 @@ Predicates and limits are pushed into Rust planning. The normal pypaimon reader
 still applies them while reading, so pushdown remains an optimization.
 """
 
-import re
 from typing import List, Optional, Tuple
+
+from packaging.version import InvalidVersion, Version
 
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options_utils import OptionsUtils
 from pypaimon.common.predicate import Predicate
+from pypaimon.read.plan import Plan
 from pypaimon.read.split import Split
 from pypaimon.read.split_serializer import deserialize_split_v1
 
@@ -49,6 +51,11 @@ def native_runtime_available() -> bool:
 
 def native_family_search_modes_available() -> bool:
     """Whether Rust supports family-specific global-index search modes."""
+    return native_version_at_least(0, 4)
+
+
+def native_version_at_least(major: int, minor: int, patch: int = 0) -> bool:
+    """Compare complete package versions, including patch and pre-release ordering."""
     if not native_runtime_available():
         return False
     try:
@@ -56,11 +63,18 @@ def native_family_search_modes_available() -> bool:
     except ImportError:
         return False
     try:
-        rust_version = version('pypaimon-rust')
-    except PackageNotFoundError:
+        rust_version = Version(version('pypaimon-rust'))
+    except (PackageNotFoundError, InvalidVersion):
         return False
-    match = re.match(r'^(\d+)\.(\d+)', rust_version)
-    return match is not None and tuple(map(int, match.groups())) >= (0, 4)
+    return rust_version >= Version('%d.%d.%d' % (major, minor, patch))
+
+
+def native_method_available(type_name: str, method: str) -> bool:
+    try:
+        from pypaimon_rust import datafusion
+        return callable(getattr(getattr(datafusion, type_name, None), method, None))
+    except ImportError:
+        return False
 
 
 def _partition_fields(table):
@@ -128,12 +142,15 @@ def _read_options(table) -> dict:
             table.options.source_split_target_size()),
         CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(): str(
             table.options.source_split_open_file_cost()),
+        CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(): _option_value_to_string(
+            table.options.options.get(CoreOptions.DELETION_VECTORS_MERGE_ON_READ)),
     }
     table_options = table.options.options
     for option in (
             CoreOptions.SCAN_SNAPSHOT_ID,
             CoreOptions.SCAN_TAG_NAME,
             CoreOptions.SCAN_TIMESTAMP_MILLIS,
+            CoreOptions.SCAN_WATERMARK,
             CoreOptions.GLOBAL_INDEX_SEARCH_MODE,
             CoreOptions.SCALAR_INDEX_SEARCH_MODE,
             CoreOptions.VECTOR_INDEX_SEARCH_MODE,
@@ -201,8 +218,11 @@ def native_plan(
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
         projection: Optional[List[str]] = None,
-        row_ranges: Optional[List[Tuple[int, int]]] = None) -> List[Split]:
-    """Plan with pypaimon_rust and return the decoded pypaimon splits.
+        row_ranges: Optional[List[Tuple[int, int]]] = None,
+        incremental_range: Optional[Tuple[int, int]] = None,
+        row_position_slice: Optional[Tuple[int, int]] = None,
+        row_position_shard: Optional[Tuple[int, int]] = None) -> Plan:
+    """Plan with pypaimon_rust, preserving snapshot metadata.
 
     Native conversion or planning failures are handled by TableScan, which
     falls back to the Python planner.
@@ -213,6 +233,10 @@ def native_plan(
     from pypaimon_rust.datafusion import PaimonCatalog
 
     rt = PaimonCatalog(_catalog_options(table)).get_table(table.identifier.get_full_name())
+    if table.current_branch() != 'main':
+        branch = getattr(rt, 'branch', None)
+        if not callable(branch) or branch() != table.current_branch():
+            raise RuntimeError("Native table did not resolve the requested branch")
     builder = rt.new_read_builder(_read_options(table))
     if projection is not None:
         builder = builder.with_projection(projection)
@@ -222,10 +246,26 @@ def native_plan(
         builder = builder.with_limit(limit)
     if row_ranges is not None:
         builder = builder.with_row_ranges(row_ranges)
-    rust_splits = builder.new_scan().plan().splits()
+    scan = (builder.new_scan() if incremental_range is None
+            else builder.new_incremental_scan(*incremental_range))
+    if row_position_slice is not None:
+        scan = scan.with_row_position_slice(*row_position_slice)
+    if row_position_shard is not None:
+        scan = scan.with_row_position_shard(*row_position_shard)
+    rust_plan = scan.plan()
+    rust_splits = rust_plan.splits()
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
     splits = [deserialize_split_v1(s.serialize(), pfields, kfields) for s in rust_splits]
     _restore_python_partition_paths(table, splits)
-    return splits
+    snapshot_id = getattr(rust_plan, 'snapshot_id', None)
+    if callable(snapshot_id):
+        snapshot_id = snapshot_id()
+    elif splits:
+        snapshot_id = splits[0].snapshot_id
+    else:
+        # Older bindings cannot distinguish an empty committed snapshot from a
+        # table without snapshots. Let the Python scanner recover the metadata.
+        raise RuntimeError("Native runtime cannot report an empty plan's snapshot")
+    return Plan(splits, snapshot_id=snapshot_id)

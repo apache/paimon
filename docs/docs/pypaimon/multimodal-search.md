@@ -63,6 +63,14 @@ filter the rows read from the search result. Both `pre_filter` and `where()`
 accept SQL-like predicate strings. For full-text search, `pre_filter` must only
 reference partition columns.
 
+Each execution of `search`, `search_vectors`, or `search_hybrid` reads one
+snapshot across candidate search, filtering, reranking, and result lookup.
+Concurrent commits become visible on the next execution, including when reusing
+the same query object. Explicit snapshot, tag, and timestamp selectors are
+honored. All routes in a hybrid search and all vectors in a batch share that
+execution's snapshot. Keep the snapshot's data files available for the duration
+of the query; capturing a read view does not prevent snapshot expiration.
+
 ```python
 neighbors = (
     docs.search(
@@ -243,14 +251,12 @@ batch_neighbors = batch_profile.result  # One Arrow table per query vector
 ```
 
 `SearchProfileResult.plan` describes that execution's plan. A separate earlier
-`explain()` may describe a different snapshot if the table changes. Profiling
-preserves the normal search and lookup behavior; it does not create a
-transaction across hybrid routes or pin subsequent lookups. Each route's
-`snapshot_id` describes its planning snapshot. `lookup_snapshot_ids` records the
-actual result-lookup snapshots, one per batch query, so concurrent writes can be
-identified. Full-text raw fallback and live-row filtering retain the normal
-reader's snapshot behavior and are not guaranteed to use the planning snapshot.
-Use a table opened at a specific snapshot when a fixed view is required.
+`explain()` may describe a different snapshot if the table changes. Each
+`profile()` execution shares one snapshot across hybrid routes, filtering,
+raw fallback, and result lookup, just like normal search. Each route's
+`snapshot_id` and the entries in `lookup_snapshot_ids` describe that same read
+view, with one lookup entry per batch query. Reusing the query captures a fresh
+snapshot unless it has an explicit time-travel selector.
 
 The built-in local vector, batch vector, full-text, and hybrid search builders
 also expose `explain()` and `profile()`. Builder profiles return their normal

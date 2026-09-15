@@ -21,6 +21,14 @@ from typing import Callable, List, Optional
 
 import fastavro
 
+try:
+    from fastavro._read import (read_bytes as _read_bytes,
+                                read_long as _read_long,
+                                read_record as _read_record,
+                                skip_record as _skip_record)
+except ImportError:  # pragma: no cover - supported fastavro versions provide these
+    _read_bytes = _read_long = _read_record = _skip_record = None
+
 from datetime import datetime
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -32,6 +40,69 @@ from pypaimon.table.row.generic_row import (GenericRow,
                                             GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
+
+
+_MANIFEST_FIELD_NAMES = (
+    '_VERSION', '_KIND', '_PARTITION', '_BUCKET', '_TOTAL_BUCKETS', '_FILE')
+_MANIFEST_PREFIX_TYPES = ('int', 'int', 'bytes', 'int', 'int')
+
+
+def _read_manifest_records(buffer, early_entry_filter, partition_filter,
+                           partition_fields):
+    """Yield manifest records, skipping ``_FILE`` before decoding when possible."""
+    if ((early_entry_filter is None and partition_filter is None)
+            or _read_record is None):
+        for record in fastavro.reader(buffer):
+            yield record, None, False
+        return
+
+    blocks = fastavro.block_reader(buffer)
+    schema = blocks.writer_schema
+    fields = schema.get('fields', []) if isinstance(schema, dict) else []
+    if (tuple(field.get('name') for field in fields) != _MANIFEST_FIELD_NAMES
+            or tuple(field.get('type') for field in fields[:5])
+            != _MANIFEST_PREFIX_TYPES
+            or not isinstance(fields[5].get('type'), dict)
+            or fields[5]['type'].get('type') != 'record'):
+        # Avro values follow writer field order. Keep the generic reader for
+        # reordered fields or a top-level union, as written by Rust.
+        buffer.seek(0)
+        for record in fastavro.reader(buffer):
+            yield record, None, False
+        return
+
+    file_schema = fields[5]['type']
+    named_schemas = getattr(blocks, '_named_schemas', {})
+
+    for block in blocks:
+        stream = block.bytes_
+        for _ in range(block.num_records):
+            version = _read_long(stream)
+            kind = _read_long(stream)
+            partition_bytes = _read_bytes(stream)
+            bucket = _read_long(stream)
+            total_buckets = _read_long(stream)
+            if (early_entry_filter is not None
+                    and not early_entry_filter(bucket, total_buckets)):
+                _skip_record(stream, file_schema, named_schemas)
+                continue
+
+            partition = None
+            if partition_filter is not None:
+                partition = GenericRowDeserializer.from_bytes(
+                    partition_bytes, partition_fields)
+                if not partition_filter.test(partition):
+                    _skip_record(stream, file_schema, named_schemas)
+                    continue
+
+            yield {
+                '_VERSION': version,
+                '_KIND': kind,
+                '_PARTITION': partition_bytes,
+                '_BUCKET': bucket,
+                '_TOTAL_BUCKETS': total_buckets,
+                '_FILE': _read_record(stream, file_schema, named_schemas),
+            }, partition, True
 
 
 class ManifestFileManager:
@@ -78,14 +149,23 @@ class ManifestFileManager:
 
         deleted_entry_keys = set()
         added_entries = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_results = executor.map(_process_single_manifest, manifest_files)
-            for entries in future_results:
-                for entry in entries:
-                    if entry.kind == 0:  # ADD
-                        added_entries.append(entry)
-                    else:  # DELETE
-                        deleted_entry_keys.add(_entry_identifier(entry))
+
+        def _collect(entries):
+            for entry in entries:
+                if entry.kind == 0:  # ADD
+                    added_entries.append(entry)
+                else:  # DELETE
+                    deleted_entry_keys.add(_entry_identifier(entry))
+
+        if len(manifest_files) == 1:
+            # Avoid executor overhead and keep native block decoding on the
+            # caller thread for the common single-manifest case.
+            _collect(_process_single_manifest(manifest_files[0]))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for entries in executor.map(
+                        _process_single_manifest, manifest_files):
+                    _collect(entries)
 
         final_entries = [
             entry for entry in added_entries
@@ -113,10 +193,12 @@ class ManifestFileManager:
         with self.file_io.new_input_stream(manifest_file_path) as input_stream:
             avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
-        reader = fastavro.reader(buffer)
+        records = _read_manifest_records(
+            buffer, early_entry_filter, partition_filter,
+            self.partition_keys_fields)
 
-        for record in reader:
-            if early_entry_filter is not None:
+        for record, partition, prefix_filtered in records:
+            if not prefix_filtered and early_entry_filter is not None:
                 try:
                     bucket = record['_BUCKET']
                     total_buckets = record['_TOTAL_BUCKETS']
@@ -127,8 +209,7 @@ class ManifestFileManager:
                         continue
             if early_record_filter is not None and not early_record_filter(record):
                 continue
-            partition = None
-            if partition_filter is not None:
+            if partition_filter is not None and partition is None:
                 partition = GenericRowDeserializer.from_bytes(
                     record['_PARTITION'], self.partition_keys_fields)
                 if not partition_filter.test(partition):

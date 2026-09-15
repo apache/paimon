@@ -33,6 +33,7 @@ from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
+from pypaimon.read.scan_distribution import validate_shard, validate_slice
 from pypaimon.read.push_down_utils import (_get_all_fields,
                                            exclude_predicate_with_fields,
                                            remove_row_id_filter,
@@ -221,7 +222,8 @@ class FileScanner:
         manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
-        partition_predicate: Optional[Predicate] = None
+        partition_predicate: Optional[Predicate] = None,
+        skip_level0: bool = False,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -273,6 +275,7 @@ class FileScanner:
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self.skip_level0 = skip_level0
         self._global_index_result = None
         self._row_ranges = None
         self._scanned_snapshot = None
@@ -486,21 +489,25 @@ class FileScanner:
                 None,
             )
 
-        # Filter manifest files by row ranges if available
-        if row_ranges is not None:
-            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
+        # Position selection counts the complete candidate row-id space. Early
+        # range pruning would renumber later files; the split generator applies
+        # the range intersection after assigning slice/shard positions.
+        positional = self.idx_of_this_subtask is not None or self.start_pos_of_this_subtask is not None
+        early_row_ranges = None if positional else row_ranges
+        if early_row_ranges is not None:
+            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, early_row_ranges)
 
         stats_predicate = getattr(self, 'predicate_for_stats', None)
         group_stats_enabled = stats_predicate is not None and score_getter is None
         entries = self.read_manifest_entries(
             manifest_files,
-            row_ranges=row_ranges,
+            row_ranges=early_row_ranges,
             keep_stats=group_stats_enabled,
         )
 
         # Redundant when early_record_filter ran; kept for explain mode and as safety net.
-        if row_ranges is not None:
-            entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        if early_row_ranges is not None:
+            entries = _filter_manifest_entries_by_row_ranges(entries, early_row_ranges)
 
         group_stats_filter = None
         if group_stats_enabled:
@@ -632,19 +639,19 @@ class FileScanner:
         return _filter
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
-        if idx_of_this_subtask >= number_of_para_subtasks:
-            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
+        validate_shard(idx_of_this_subtask, number_of_para_subtasks)
         if self.start_pos_of_this_subtask is not None:
-            raise Exception("with_shard and with_slice cannot be used simultaneously")
+            raise ValueError("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FileScanner':
-        if start_pos >= end_pos:
-            raise ValueError("start_pos must be less than end_pos")
+        validate_slice(start_pos, end_pos)
+        if self.table.is_primary_key_table:
+            raise NotImplementedError("Primary key tables do not support with_slice(); use with_shard instead")
         if self.idx_of_this_subtask is not None:
-            raise Exception("with_slice and with_shard cannot be used simultaneously")
+            raise ValueError("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
         return self
@@ -729,11 +736,12 @@ class FileScanner:
         limited_splits: List[DataSplit] = []
         for split in splits:
             merged = split.merged_row_count()
-            if merged is not None:
-                limited_splits.append(split)
-                scanned_row_count += merged
-                if scanned_row_count >= self.limit:
-                    return limited_splits
+            if merged is None:
+                return splits
+            limited_splits.append(split)
+            scanned_row_count += merged
+            if scanned_row_count >= self.limit:
+                return limited_splits
         return splits
 
     def _has_non_partition_filter(self) -> bool:
@@ -863,7 +871,7 @@ class FileScanner:
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
-            if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            if self.skip_level0 and entry.file.level == 0:
                 return False
             if self.primary_key_predicate:
                 if not self.primary_key_predicate.test_by_simple_stats(
@@ -871,9 +879,9 @@ class FileScanner:
                     entry.file.row_count
                 ):
                     return False
-            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
-            # so we can safely filter by value stats per file.
-            if self.deletion_vectors_enabled and self.predicate_for_stats:
+            # Java enables value filtering only when batch scans exclude L0.
+            # With L0 present, pruning an update can expose an older value.
+            if self.skip_level0 and self.predicate_for_stats:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:
@@ -944,7 +952,7 @@ class FileScanner:
             # Convert to deletion files
             deletion_files = self._to_deletion_files(entry)
             if deletion_files:
-                result[partition_bucket] = deletion_files
+                result.setdefault(partition_bucket, {}).update(deletion_files)
 
         return result
 
@@ -960,10 +968,8 @@ class FileScanner:
         if not index_file.dv_ranges:
             return deletion_files
 
-        # Build deletion file path
-        # Format: manifest/index-manifest-{uuid}
-        index_path = self.table.table_path.rstrip('/') + '/index'
-        dv_file_path = f"{index_path}/{index_file.file_name}"
+        dv_file_path = self.table.path_factory().bucket_index_path(
+            tuple(index_entry.partition.values), index_entry.bucket, index_file, self.table.file_io)
 
         # Convert each DeletionVectorMeta to DeletionFile
         for data_file_name, dv_meta in index_file.dv_ranges.items():
