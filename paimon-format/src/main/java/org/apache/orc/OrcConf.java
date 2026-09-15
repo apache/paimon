@@ -281,6 +281,12 @@ public enum OrcConf {
                     + "added to all of the writers.  Valid range is [1,10000] and is primarily meant for"
                     + "testing.  Setting this too low may negatively affect performance."
                     + " Use orc.stripe.row.count instead if the value larger than orc.stripe.row.count."),
+    STRIPE_SIZE_CHECKRATIO(
+            "orc.stripe.size.check.ratio",
+            "orc.stripe.size.check.ratio",
+            0.0,
+            "Flush stripe if the tree writer size in bytes is larger than "
+                    + "(this * orc.stripe.size). Use 0 to disable this check."),
     OVERWRITE_OUTPUT_FILE(
             "orc.overwrite.output.file",
             "orc.overwrite.output.file",
