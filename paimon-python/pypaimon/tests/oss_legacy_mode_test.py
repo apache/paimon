@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Unit tests for PyArrow-backed OSS compatibility modes.
+"""Unit tests for PyArrow-backed S3-compatible storage.
 
 No real OSS access is required.
 """
@@ -29,7 +29,7 @@ from unittest import mock
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions
+from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.filesystem.pyarrow_file_io import (
     LegacyOssDirectoryListingError,
     PyArrowFileIO,
@@ -49,7 +49,7 @@ def _probe_response(status_code, body):
     return response
 
 
-def _restore_oss_file_io(connection):
+def _restore_s3_file_io(connection):
     os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
     connection.send("ready")
     payload = connection.recv_bytes()
@@ -324,7 +324,7 @@ class OssLegacyModeTest(unittest.TestCase):
     def test_pickle_recreates_oss_client_with_worker_checksum_setting(self):
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()
-        process = context.Process(target=_restore_oss_file_io, args=(child,))
+        process = context.Process(target=_restore_s3_file_io, args=(child,))
         process.start()
         child.close()
         try:
@@ -367,6 +367,85 @@ class OssLegacyModeTest(unittest.TestCase):
 
         self.assertEqual(file_io.list_status(TABLE_PATH), [])
         file_io.filesystem.get_file_info.assert_called_once()
+
+
+class CustomS3EndpointTest(unittest.TestCase):
+    def _new_file_io(self, scheme="s3"):
+        options = Options({
+            S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+            S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+            S3Options.S3_ENDPOINT.key(): "http://minio:9000",
+            S3Options.S3_REGION.key(): "us-east-1",
+        })
+        with mock.patch.object(
+                PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()):
+            file_io = PyArrowFileIO(
+                "{}://test-bucket/warehouse".format(scheme), options)
+        file_io.filesystem = mock.Mock()
+        return file_io
+
+    def test_initialization_configures_all_s3_schemes(self):
+        options = Options({
+            S3Options.S3_ENDPOINT.key(): "http://minio:9000",
+        })
+        for scheme in ("s3", "s3a", "s3n"):
+            with self.subTest(scheme=scheme), \
+                    mock.patch.dict("os.environ", {}, clear=True), \
+                    mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+                PyArrowFileIO(
+                    "{}://test-bucket/warehouse".format(scheme), options)
+                self.assertEqual(
+                    "WHEN_REQUIRED",
+                    os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
+
+    def test_native_s3_does_not_change_checksum_setting(self):
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+            PyArrowFileIO("s3://test-bucket/warehouse", Options({}))
+            self.assertNotIn(
+                "AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
+
+    def test_pyarrow_22_recursive_delete_uses_individual_objects(self):
+        for scheme in ("s3", "s3a", "s3n"):
+            with self.subTest(scheme=scheme):
+                file_io = self._new_file_io(scheme)
+                file_io._pyarrow_gte_22 = True
+                path = "{}://test-bucket/table".format(scheme)
+                directory = file_io.to_filesystem_path(path)
+                data_file = directory + "/data.parquet"
+                file_io.filesystem.get_file_info.side_effect = [
+                    [_file_info(directory, pafs.FileType.Directory)],
+                    [_file_info(data_file, pafs.FileType.File)],
+                ]
+
+                self.assertTrue(file_io.delete(path, recursive=True))
+
+                file_io.filesystem.delete_file.assert_called_once_with(data_file)
+                file_io.filesystem.delete_dir_contents.assert_not_called()
+
+    def test_pickle_recreates_client_with_worker_checksum_setting(self):
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=_restore_s3_file_io, args=(child,))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(15))
+            self.assertEqual("ready", parent.recv())
+
+            file_io = self._new_file_io()
+            file_io.filesystem = pafs.LocalFileSystem()
+            parent.send_bytes(pickle.dumps(file_io))
+
+            self.assertTrue(parent.poll(15))
+            self.assertEqual(("WHEN_REQUIRED", 1, True), parent.recv())
+        finally:
+            parent.close()
+            process.join(15)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        self.assertEqual(0, process.exitcode)
 
 
 if __name__ == "__main__":

@@ -64,6 +64,11 @@ class PyArrowFileIO(FileIO):
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
+        self._is_s3 = scheme in {"s3", "s3a", "s3n"}
+        self._s3_endpoint = (
+            self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
+            if self._is_s3 else None
+        )
         self._oss_bucket = None
         _oss_impl = self.properties.get(OssOptions.OSS_IMPL)
         self._use_jindo = False
@@ -87,7 +92,7 @@ class PyArrowFileIO(FileIO):
                     "Falling back to legacy PyArrow S3FileSystem implementation. "
                     "Install pyjindosdk for better performance: pip install pyjindosdk")
                 self.filesystem = self._initialize_oss_fs(path)
-        elif scheme in {"s3", "s3a", "s3n"}:
+        elif self._is_s3:
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
             self.filesystem = self._initialize_hdfs_fs(scheme, netloc)
@@ -100,16 +105,19 @@ class PyArrowFileIO(FileIO):
         state = self.__dict__.copy()
         # threading.Lock cannot be pickled; recreated in __setstate__.
         state.pop("_legacy_bucket_lock", None)
-        # Recreate legacy OSS clients with the worker's AWS SDK settings.
-        if state.get("_is_oss") and not state.get("_use_jindo"):
+        # Recreate S3-compatible clients with the worker's AWS SDK settings.
+        if self._uses_s3_compatibility():
             state.pop("filesystem", None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._legacy_bucket_lock = threading.Lock()
-        if self._is_oss and not self._use_jindo:
-            self.filesystem = self._initialize_oss_fs(None)
+        if self._uses_s3_compatibility():
+            self.filesystem = (
+                self._initialize_oss_fs(None)
+                if self._is_oss else self._initialize_s3_fs()
+            )
 
     @staticmethod
     def parse_location(location: str):
@@ -170,6 +178,15 @@ class PyArrowFileIO(FileIO):
             return value
         return OptionsUtils.convert_to_boolean(value)
 
+    def _uses_s3_compatibility(self) -> bool:
+        return (not self._use_jindo
+                and (self._is_oss or bool(self._s3_endpoint)))
+
+    @staticmethod
+    def _configure_s3_compatibility():
+        os.environ.setdefault(
+            "AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
+
     def _extract_oss_bucket(self, location) -> str:
         uri = urlparse(location)
         if uri.scheme and uri.scheme != "oss":
@@ -200,7 +217,7 @@ class PyArrowFileIO(FileIO):
 
     def _initialize_oss_fs(self, path) -> FileSystem:
         # Disable optional checksum trailers unsupported by some S3-compatible services.
-        os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
+        self._configure_s3_compatibility()
 
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
             # When explicit credentials are provided, disable the EC2 Instance Metadata
@@ -240,8 +257,10 @@ class PyArrowFileIO(FileIO):
             *self._s3_key_variants(
                 "session-token", "session.token",
                 "security-token", "security.token"))
-        endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
         region = self._get_s3_property("region", S3Options.S3_REGION.key())
+
+        if self._s3_endpoint:
+            self._configure_s3_compatibility()
 
         if access_key:
             # When explicit credentials are provided, disable the EC2 Instance Metadata
@@ -251,7 +270,7 @@ class PyArrowFileIO(FileIO):
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
-            "endpoint_override": endpoint,
+            "endpoint_override": self._s3_endpoint,
             "access_key": access_key,
             "secret_key": secret_key,
             "session_token": session_token,
@@ -461,9 +480,9 @@ class PyArrowFileIO(FileIO):
             return False
 
         if file_info.type == pafs.FileType.Directory:
-            if (recursive and self._is_oss and not self._use_jindo
+            if (recursive and self._uses_s3_compatibility()
                     and self._pyarrow_gte_22):
-                return self._delete_oss_directory(path_str)
+                return self._delete_s3_compatible_directory(path_str)
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
@@ -478,7 +497,7 @@ class PyArrowFileIO(FileIO):
             self.filesystem.delete_file(path_str)
         return True
 
-    def _delete_oss_directory(self, path_str: str) -> bool:
+    def _delete_s3_compatible_directory(self, path_str: str) -> bool:
         selector = pafs.FileSelector(
             path_str, recursive=True, allow_not_found=True)
         file_infos = self.filesystem.get_file_info(selector)
@@ -496,11 +515,11 @@ class PyArrowFileIO(FileIO):
             reverse=True,
         )
         for directory in directories:
-            self._delete_oss_directory_marker(directory)
-        self._delete_oss_directory_marker(path_str)
+            self._delete_s3_directory_marker(directory)
+        self._delete_s3_directory_marker(path_str)
         return True
 
-    def _delete_oss_directory_marker(self, path_str: str):
+    def _delete_s3_directory_marker(self, path_str: str):
         try:
             self.filesystem.delete_dir(path_str.rstrip("/"))
         except FileNotFoundError:
