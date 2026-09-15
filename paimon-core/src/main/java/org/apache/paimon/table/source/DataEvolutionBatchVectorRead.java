@@ -71,6 +71,7 @@ public class DataEvolutionBatchVectorRead extends AbstractDataEvolutionVectorRea
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
         splitSearchSplits(splits, indexSplits, rawSplits);
+        demoteUncoverableIndexSplits(indexSplits, rawSplits);
         if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             List<GlobalIndexResult> empty = new ArrayList<>(n);
             for (int i = 0; i < n; i++) {

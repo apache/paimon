@@ -69,6 +69,7 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
         splitSearchSplits(splits, indexSplits, rawSplits);
+        demoteUncoverableIndexSplits(indexSplits, rawSplits);
         if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
