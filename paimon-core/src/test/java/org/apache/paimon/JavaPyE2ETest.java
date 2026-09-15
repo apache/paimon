@@ -1620,6 +1620,51 @@ public class JavaPyE2ETest {
         }
     }
 
+    /** Java reads shared-shredding MAP columns written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadSharedShreddingMapTable() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable)
+                        catalog.getTable(identifier("shared_shredding_map_python_test_parquet"));
+        Map<Integer, Map<String, Long>> rows = new HashMap<>();
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        if (row.isNullAt(1)) {
+                            rows.put(id, null);
+                            return;
+                        }
+                        InternalMap map = row.getMap(1);
+                        InternalArray keys = map.keyArray();
+                        InternalArray values = map.valueArray();
+                        Map<String, Long> converted = new LinkedHashMap<>();
+                        for (int i = 0; i < map.size(); i++) {
+                            converted.put(
+                                    keys.getString(i).toString(),
+                                    values.isNullAt(i) ? null : values.getLong(i));
+                        }
+                        rows.put(id, converted);
+                    });
+        }
+
+        assertThat(rows).containsOnlyKeys(1, 2, 3, 4);
+        assertThat(rows.get(1))
+                .containsOnlyKeys("hot", "warm", "overflow")
+                .containsEntry("hot", 10L)
+                .containsEntry("warm", 20L)
+                .containsEntry("overflow", 30L);
+        assertThat(rows.get(2))
+                .containsOnlyKeys("hot", "new")
+                .containsEntry("hot", null)
+                .containsEntry("new", 40L);
+        assertThat(rows.get(3)).isEmpty();
+        assertThat(rows.get(4)).isNull();
+    }
+
     private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
             throws Exception {
         Map<Integer, Map<Integer, byte[]>> rows = new HashMap<>();

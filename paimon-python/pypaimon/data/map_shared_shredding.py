@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Read support for Paimon's shared-shredding MAP storage layout."""
+"""Metadata and read support for the shared-shredding MAP layout."""
 
 import json
 import struct
@@ -33,6 +33,7 @@ _FIELD_DICT_ORIGINAL_SIZE = b"paimon.map.shared-shredding.field-dict-original-si
 _NUM_COLUMNS = b"paimon.map.shared-shredding.num-columns"
 _FIELD_COLUMNS = b"paimon.map.shared-shredding.field-columns"
 _OVERFLOW_SET = b"paimon.map.shared-shredding.overflow-set"
+_MAX_ROW_WIDTH = b"paimon.map.shared-shredding.max-row-width"
 _FIELD_MAPPING = "__field_mapping"
 _OVERFLOW = "__overflow"
 _PHYSICAL_COLUMN_PREFIX = "__col_"
@@ -102,6 +103,40 @@ def parse_shared_shredding_selection_metadata(field: pa.Field):
                        for field_id in overflow_json)):
         raise ValueError("Shared-shredding overflow set is malformed")
     return name_by_id, field_to_columns, set(overflow_json), num_columns
+
+
+def shared_shredding_metadata(
+        name_to_id, field_to_columns, overflow_set, num_columns,
+        max_row_width, compression):
+    """Build Java-compatible Arrow field metadata for one data file."""
+    compression = compression.lower()
+    if compression not in ("none", "lz4", "zstd"):
+        raise ValueError(
+            "MAP shared-shredding only supports none/lz4/zstd compression, "
+            "but is {}.".format(compression))
+    field_dict = json.dumps(
+        dict(sorted(name_to_id.items())),
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    encoded_dict = _compress(field_dict, compression)
+    columns = {
+        str(field_id): sorted(column_ids)
+        for field_id, column_ids in sorted(field_to_columns.items())
+    }
+    return {
+        _STORAGE_LAYOUT: b"shared-shredding",
+        _VERSION: b"1",
+        _FIELD_DICT: encoded_dict.decode("latin-1").encode("utf-8"),
+        _FIELD_DICT_COMPRESSION: compression.encode("utf-8"),
+        _FIELD_DICT_ORIGINAL_SIZE: str(len(field_dict)).encode("utf-8"),
+        _FIELD_COLUMNS: json.dumps(
+            columns, separators=(",", ":"), sort_keys=True).encode("utf-8"),
+        _OVERFLOW_SET: json.dumps(
+            sorted(overflow_set), separators=(",", ":")).encode("utf-8"),
+        _NUM_COLUMNS: str(num_columns).encode("utf-8"),
+        _MAX_ROW_WIDTH: str(max_row_width).encode("utf-8"),
+    }
 
 
 def map_selected_keys(description: str) -> List[str]:
@@ -587,6 +622,20 @@ def _decompress(data: bytes, original_size: int, compression: str) -> bytes:
     if len(result) != original_size:
         raise ValueError("Shared-shredding field dictionary size is invalid")
     return result
+
+
+def _compress(data: bytes, compression: str) -> bytes:
+    if compression == "none":
+        return data
+    if compression == "zstd":
+        import zstandard as zstd
+        return zstd.ZstdCompressor(level=1).compress(data)
+    if compression == "lz4":
+        payload = bytes(pa.Codec("lz4_raw").compress(data))
+        return struct.pack("<ii", len(payload), len(data)) + payload
+    raise ValueError(
+        "Unsupported shared-shredding dictionary compression: {}".format(
+            compression))
 
 
 def _required(metadata, key):

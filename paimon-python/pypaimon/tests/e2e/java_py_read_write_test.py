@@ -1636,6 +1636,41 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 self.assertEqual([None] * 5,
                                  result.column('metrics_missing').to_pylist())
 
+    def test_write_shared_shredding_map_for_java(self):
+        schema = pa.schema([
+            pa.field('id', pa.int32()),
+            pa.field('metrics', pa.map_(pa.string(), pa.int64())),
+        ])
+        rows = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'metrics': [
+                [('hot', 10), ('warm', 20), ('overflow', 30)],
+                [('hot', None), ('new', 40)],
+                [],
+                None,
+            ],
+        }, schema=schema)
+
+        table_name = 'default.shared_shredding_map_python_test_parquet'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(
+            table_name,
+            Schema.from_pyarrow_schema(schema, options={
+                'bucket': '-1',
+                'file.format': 'parquet',
+                'write-only': 'true',
+                'fields.metrics.map.storage-layout': 'shared-shredding',
+                'fields.metrics.map.shared-shredding.max-columns': '2',
+            }),
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(rows)
+        builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
     def test_write_map_blob_for_java(self):
         map_blob_type = pa.map_(pa.int32(), pa.large_binary())
         boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())

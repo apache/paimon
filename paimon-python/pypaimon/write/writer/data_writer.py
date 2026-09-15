@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
@@ -104,6 +105,14 @@ class DataWriter(ABC):
         # Paimon field id map, used by _apply_variant_shredding; built once since
         # the table schema is fixed for the lifetime of this writer.
         self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
+        self._map_shared_shredding = MapSharedShreddingWriter(
+            self.table.fields,
+            self.options,
+            self.file_format,
+            self.changelog_file_format
+            if self.changelog_producer == ChangelogProducer.INPUT else None,
+            self.bucket,
+        )
 
     # Set by the composite writers when a flush landed its normal data file but a
     # later phase of the same flush failed; see their ``_close_current_writers``.
@@ -259,8 +268,12 @@ class DataWriter(ABC):
         extra_files = []
         row_sidecar_path = None
         changelog_meta = None
+        shared_shredding_stats = {}
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
+        if self._map_shared_shredding.is_active():
+            data, shared_shredding_stats = \
+                self._map_shared_shredding.convert(data)
 
         # One data file means up to three files on disk -- the data file, its row
         # sidecar and its changelog -- and none of them is committed until all of
@@ -300,7 +313,7 @@ class DataWriter(ABC):
 
             # min key & max key
 
-            selected_table = data.select(self.trimmed_primary_keys)
+            selected_table = logical_data.select(self.trimmed_primary_keys)
             key_columns_batch = selected_table.to_batches()[0]
             min_key_row_batch = key_columns_batch.slice(0, 1)
             max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
@@ -311,21 +324,23 @@ class DataWriter(ABC):
             value_stats_enabled = self.options.metadata_stats_enabled()
             if value_stats_enabled:
                 stats_fields = self.table.fields if self.table.is_primary_key_table \
-                    else PyarrowFieldParser.to_paimon_schema(data.schema)
+                    else PyarrowFieldParser.to_paimon_schema(logical_data.schema)
             else:
                 stats_fields = self.table.trimmed_primary_keys_fields
             column_stats = {
-                field.name: self._get_column_stats(data, field.name)
+                field.name: self._get_column_stats(logical_data, field.name)
                 for field in stats_fields
             }
             key_fields = self.trimmed_primary_keys_fields
-            key_stats = self._collect_value_stats(data, key_fields, column_stats)
+            key_stats = self._collect_value_stats(
+                logical_data, key_fields, column_stats)
             if not self.options.primary_key_nullable() and not all(
                     count == 0 for count in key_stats.null_counts):
                 raise RuntimeError("Primary key should not be null")
 
             value_fields = stats_fields if value_stats_enabled else []
-            value_stats = self._collect_value_stats(data, value_fields, column_stats)
+            value_stats = self._collect_value_stats(
+                logical_data, value_fields, column_stats)
 
             # Read the range without advancing it: the advance belongs with the
             # append below, so a retried flush derives the same range.
@@ -368,6 +383,7 @@ class DataWriter(ABC):
             raise
 
         self.sequence_generator.start = self.sequence_generator.current
+        self._map_shared_shredding.file_completed(shared_shredding_stats)
         self.committed_files.append(data_meta)
         if changelog_meta is not None:
             self.committed_changelog_files.append(changelog_meta)
