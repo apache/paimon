@@ -195,3 +195,21 @@ def test_java_primary_key_raw_vectors_match_scalar(catalog):
     assert actual == expected
     assert actual
     assert fast.call_count > 0
+
+
+def test_java_primary_key_search_diagnostics(catalog):
+    _require_native("paimon_vindex")
+    table = catalog.get_table("default.test_pk_vector_golden")
+    builder = (table.new_vector_search_builder().with_vector_column("embedding")
+               .with_query_vector([1.0, 0.0, 0.0, 0.0]).with_limit(2))
+    baseline = builder.execute_local()
+    profile = builder.profile()
+    assert profile.result.positions == baseline.positions
+    route = profile.plan.routes[0]
+    assert route.snapshot_id == baseline.snapshot_id
+    assert route.index_file_count > 0
+    assert route.indexed_range_rows is None
+    assert route.raw_range_rows is None
+    assert route.overlapping_range_rows is None
+    assert profile.route_metrics[0]["counters"]["result_rows"] == len(baseline.positions)
+    assert profile.route_metrics[0]["counters"]["index_searches"] > 0

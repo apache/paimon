@@ -24,10 +24,13 @@ from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_scan import DataEvolutionVectorScan
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
+from pypaimon.table.source.search_diagnostics import SearchDiagnostics
 
 
-class VectorSearchBuilder(ABC):
+class VectorSearchBuilder(SearchDiagnostics, ABC):
     """Builder to build vector search."""
+
+    _diagnostic_kind = "vector"
 
     @abstractmethod
     def with_limit(self, limit):

@@ -26,6 +26,7 @@ from pypaimon.table.source.primary_key_vector_scan import PrimaryKeyVectorScanPl
 from pypaimon.table.source.vector_search_read import DataEvolutionVectorRead
 from pypaimon.table.source.vector_search_read import (
     _iter_arrow_scores)
+from pypaimon.table.source.search_diagnostics import search_stage
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
@@ -101,6 +102,7 @@ class PrimaryKeyVectorRead(DataEvolutionVectorRead):
         source_splits = [split.data_split for split in plan.splits()]
         return PrimaryKeyScoredResult(plan.snapshot_id, source_splits, candidates)
 
+    @search_stage("refine")
     def _rerank_indexed(self, plan, candidates, index_type):
         source_splits = [split.data_split for split in plan.splits()]
         selected = {}

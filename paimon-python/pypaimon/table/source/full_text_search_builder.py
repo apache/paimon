@@ -28,10 +28,13 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.index.pk.primary_key_index_definition import PrimaryKeyIndexFamily
 from pypaimon.index.pk.primary_key_index_definitions import PrimaryKeyIndexDefinitions
+from pypaimon.table.source.search_diagnostics import SearchDiagnostics
 
 
-class FullTextSearchBuilder(ABC):
+class FullTextSearchBuilder(SearchDiagnostics, ABC):
     """Builder to build full-text search."""
+
+    _diagnostic_kind = "full_text"
 
     @abstractmethod
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':

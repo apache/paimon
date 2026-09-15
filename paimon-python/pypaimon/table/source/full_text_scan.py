@@ -36,8 +36,12 @@ from pypaimon.utils.range import Range
 class FullTextScanPlan:
     """Plan of full-text scan."""
 
-    def __init__(self, splits: List[FullTextSearchSplit]):
+    def __init__(self, splits: List[FullTextSearchSplit], snapshot=None):
         self._splits = splits
+        self._snapshot = snapshot
+
+    def snapshot(self):
+        return self._snapshot
 
     def splits(self) -> List[FullTextSearchSplit]:
         return self._splits
@@ -73,14 +77,9 @@ class DataEvolutionFullTextScan(FullTextScan):
         id_to_column = {field.id: field.name for field in self._text_columns}
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
-        from pypaimon.common.options.options import Options
-        snapshot = TimeTravelUtil.try_travel_to_snapshot(
-            Options(self._table.table_schema.options),
-            self._table.tag_manager(),
-            self._table.snapshot_manager(),
-        )
+        snapshot = TimeTravelUtil.resolve_snapshot(self._table)
         if snapshot is None:
-            snapshot = self._table.snapshot_manager().get_latest_snapshot()
+            return FullTextScanPlan([])
 
         index_file_handler = IndexFileHandler(table=self._table)
         partition_filter = self._partition_filter
@@ -129,7 +128,7 @@ class DataEvolutionFullTextScan(FullTextScan):
             if raw_row_ranges:
                 splits.append(RawFullTextSearchSplit(raw_row_ranges))
 
-        return FullTextScanPlan(splits)
+        return FullTextScanPlan(splits, snapshot)
 
 
 def _supports_full_text_search(index_type):

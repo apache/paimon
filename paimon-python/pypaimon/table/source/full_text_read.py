@@ -18,6 +18,7 @@
 """Full-text read to read index files."""
 
 from abc import ABC, abstractmethod
+from copy import copy
 from concurrent.futures import wait
 from io import BytesIO
 from typing import Dict, List
@@ -37,6 +38,7 @@ from pypaimon.table.source.full_text_search_split import (
     RawFullTextSearchSplit,
 )
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
+from pypaimon.table.source.search_diagnostics import record_count, run_index_search, search_stage
 from pypaimon.utils.range import Range
 
 
@@ -71,6 +73,11 @@ class DataEvolutionFullTextRead(FullTextRead):
                 % self._text_columns)
         self._query = query
         self._partition_filter = partition_filter
+
+    def read_plan(self, plan: FullTextScanPlan) -> GlobalIndexResult:
+        reader = copy(self)
+        reader._table = global_index_live_row_filter.table_at_snapshot(self._table, plan.snapshot())
+        return reader.read(plan.splits())
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
         index_splits, raw_splits = _split_search_splits(splits)
@@ -156,10 +163,11 @@ class DataEvolutionFullTextRead(FullTextRead):
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        future = offset_reader.visit_full_text_search(full_text_search)
-        future.add_done_callback(lambda _: reader.close())
-        return future
+        return run_index_search(
+            self, offset_reader.visit_full_text_search, full_text_search,
+            row_range_end - row_range_start + 1, reader.close)
 
+    @search_stage("raw_read_score")
     def _read_raw_search(self, raw_row_ranges, index_type):
         raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
         if not raw_row_ranges:
@@ -176,6 +184,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         from pypaimon.table.special_fields import SpecialFields
 
         row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        record_count(self, "raw_rows_read", table.num_rows)
         texts = table.column(self._text_columns[0].name).to_pylist()
         index_bytes = self._build_raw_index(row_ids, texts, row_range_start)
         if index_bytes is None:

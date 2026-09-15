@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
@@ -109,10 +110,12 @@ class ScanQuery:
             projection.append(SpecialFields.ROW_ID.name)
         return projection
 
-    def _read_global_index_result(self, result):
+    def _read_global_index_result(self, result, snapshot_ids=None):
         read_builder = self._configured_read_builder()
         scan = read_builder.new_scan().with_global_index_result(result)
         plan = scan.plan()
+        if snapshot_ids is not None:
+            snapshot_ids.append(plan.snapshot_id)
         return read_builder.new_read().to_arrow(plan.splits())
 
     def to_pandas(self):
@@ -446,6 +449,47 @@ class ScanQuery:
 
 class _PreFilterQuery(ScanQuery):
 
+    def explain(self):
+        """Plan this search without executing it or fetching result rows."""
+        plan = self._for_execution()._search_builder().explain()
+        plan.projection = self._effective_projection()
+        plan.has_post_filter = self._predicate is not None
+        return plan
+
+    def profile(self):
+        """Run this search once, returning Arrow results and execution metrics."""
+        import time
+
+        start = time.perf_counter()
+        query = self._for_execution()
+        profile = query._search_builder().profile()
+        profile.plan.projection = self._effective_projection()
+        profile.plan.has_post_filter = self._predicate is not None
+        lookup_start = time.perf_counter()
+        profile.lookup_snapshot_ids = []
+        if isinstance(profile.result, list):
+            profile.result = [query._read_global_index_result(result, profile.lookup_snapshot_ids)
+                              for result in profile.result]
+            profile.output_rows = sum(table.num_rows for table in profile.result)
+        else:
+            profile.result = query._read_global_index_result(profile.result, profile.lookup_snapshot_ids)
+            profile.output_rows = profile.result.num_rows
+        profile.lookup_ms = (time.perf_counter() - lookup_start) * 1000
+        profile.elapsed_ms = (time.perf_counter() - start) * 1000
+        return profile
+
+    def _search_builder(self):
+        raise NotImplementedError
+
+    def _for_execution(self):
+        from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+        query = copy(self)
+        query._table = self._table._copy_with_snapshot(TimeTravelUtil.resolve_snapshot(self._table))
+        return query
+
+    def to_arrow(self):
+        return ScanQuery.to_arrow(self._for_execution())
+
     def __init__(
             self,
             table,
@@ -502,7 +546,10 @@ class VectorQuery(_PreFilterQuery):
             table, result_factory=self._execute_vector, pre_filter=pre_filter)
 
     def _execute_vector(self, query):
-        limit = query._limit if query._limit is not None else 10
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_vector_search_builder()
             .with_vector_column(self._vector_column)
@@ -510,9 +557,9 @@ class VectorQuery(_PreFilterQuery):
             .with_limit(limit)
             .with_options(self._vector_options)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
+        return builder
 
 
 class TextQuery(_PreFilterQuery):
@@ -524,15 +571,18 @@ class TextQuery(_PreFilterQuery):
             table, result_factory=self._execute_fts, pre_filter=pre_filter)
 
     def _execute_fts(self, query):
-        limit = query._limit if query._limit is not None else 10
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_full_text_search_builder()
             .with_query(self._text_query["column"], self._text_query["query"])
             .with_limit(limit)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_partition_filter(query._pre_filter)
-        return builder.execute_local()
+        if self._pre_filter is not None:
+            builder = builder.with_partition_filter(self._pre_filter)
+        return builder
 
 
 class HybridQuery(_PreFilterQuery):
@@ -558,7 +608,10 @@ class HybridQuery(_PreFilterQuery):
         return self
 
     def _execute_hybrid(self, query):
-        final_limit = query._limit if query._limit is not None else 10
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        final_limit = self._limit if self._limit is not None else 10
         route_limit = self._route_limit or final_limit
         builder = (
             self._table.new_hybrid_search_builder()
@@ -581,9 +634,9 @@ class HybridQuery(_PreFilterQuery):
                 weight=route["weight"],
                 options=route["options"],
             )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
+        return builder
 
 
 class BatchVectorQuery(_PreFilterQuery):
@@ -602,9 +655,10 @@ class BatchVectorQuery(_PreFilterQuery):
         super().__init__(table, pre_filter=pre_filter)
 
     def to_arrow(self):
+        query = self._for_execution()
         return [
-            self._read_global_index_result(result)
-            for result in self._execute_batch_vector(self)
+            query._read_global_index_result(result)
+            for result in query._execute_batch_vector(query)
         ]
 
     def to_pandas(self):
@@ -614,7 +668,10 @@ class BatchVectorQuery(_PreFilterQuery):
         return [table.to_pylist() for table in self.to_arrow()]
 
     def _execute_batch_vector(self, query):
-        limit = query._limit if query._limit is not None else 10
+        return query._search_builder().execute_batch_local()
+
+    def _search_builder(self):
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_batch_vector_search_builder()
             .with_vector_column(self._vector_column)
@@ -622,6 +679,6 @@ class BatchVectorQuery(_PreFilterQuery):
             .with_limit(limit)
             .with_options(self._vector_options)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
-        return builder.execute_batch_local()
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
+        return builder
