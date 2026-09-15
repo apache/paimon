@@ -433,6 +433,39 @@ public class InferVariantShreddingWriteTest {
     }
 
     @Test
+    public void testInferSchemaWithDecimalTrailingZeros() throws Exception {
+        ParquetFileFormat format = createFormat();
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        // 10.0 and 100.00 strip to a negative scale, which used to fail the whole file write
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(GenericVariant.fromJson("{\"price\":10.0,\"whole\":100.00}")),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":20.5,\"whole\":7}")));
+
+        RowType expectShreddedType =
+                RowType.of(
+                        new DataType[] {DataTypes.DECIMAL(18, 1), DataTypes.BIGINT()},
+                        new String[] {"price", "whole"});
+        verifyShreddingSchema(expectShreddedType);
+
+        List<InternalRow> result = readRows(format, writeType);
+        assertThat(result.get(0).getVariant(0).toJson()).isEqualTo("{\"price\":10,\"whole\":100}");
+        assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"price\":20.5,\"whole\":7}");
+
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.DOUBLE(), "$.price")
+                        .field(DataTypes.BIGINT(), "$.whole")
+                        .build();
+        RowType readType = DataTypes.ROW(DataTypes.FIELD(0, "v", variantRowType));
+        List<InternalRow> result2 = readRows(format, readType);
+        assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(10.0, 100L)));
+        assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(20.5, 7L)));
+    }
+
+    @Test
     public void testInferSchemaWithNullValues() throws Exception {
         ParquetFileFormat format = createFormat();
         RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));

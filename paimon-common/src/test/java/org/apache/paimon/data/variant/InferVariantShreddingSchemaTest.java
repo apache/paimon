@@ -180,6 +180,38 @@ public class InferVariantShreddingSchemaTest {
     }
 
     @Test
+    void testInferSchemaWithDecimalTrailingZeros() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+
+        // getDecimal() strips trailing zeros, so 10.0 and 100.00 arrive with a negative scale
+        // and 0.05 with a precision below its scale; none of them may break inference
+        GenericVariant variant1 =
+                GenericVariant.fromJson(
+                        "{\"price\": 10.0, \"whole\": 100.00, \"tiny\": 0.05,"
+                                + " \"big\": 100000000000000000000}");
+        GenericVariant variant2 =
+                GenericVariant.fromJson(
+                        "{\"price\": 20.5, \"whole\": 7, \"tiny\": 0.001, \"big\": 1}");
+
+        List<InternalRow> rows = Arrays.asList(GenericRow.of(variant1), GenericRow.of(variant2));
+
+        InferVariantShreddingSchema inferrer = defaultInferVariantShreddingSchema(schema);
+        RowType inferredSchema = inferrer.inferSchema(rows);
+
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(38, 0),
+                            DataTypes.DECIMAL(18, 1),
+                            DataTypes.DECIMAL(18, 3),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"big", "price", "tiny", "whole"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
+    }
+
+    @Test
     void testInferSchemaWithNullValues() {
         // Schema: row<v: variant>
         RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});

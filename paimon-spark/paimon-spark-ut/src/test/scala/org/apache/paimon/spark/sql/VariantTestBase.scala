@@ -431,6 +431,20 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Variant: decimals with trailing zeros under inferred shredding") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // 10.0 and 100.00 strip to a negative scale, which used to fail inferred-shredding writes
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":10.0,"whole":100.00}')),
+          | (2, parse_json('{"price":20.5,"whole":7}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'double'), variant_get(v, '$.whole', 'bigint') FROM T ORDER BY id"),
+      Seq(Row(1, 10.0, 100L), Row(2, 20.5, 7L)))
+  }
+
   test("Paimon Variant: read and write variant with null value") {
     withTable("source_tbl", "target_tbl") {
       sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
@@ -1053,6 +1067,22 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     val df = sql("SELECT id, IF(id = 1, variant_get(v, '$.a', 'int'), NULL) FROM T ORDER BY id")
     assert(isVariantType(fieldByPath(scanReadSchemaOf(df), Seq("v")).dataType))
     checkAnswer(df, Seq(Row(0, null), Row(1, 1)))
+  }
+
+  test("Paimon Variant pushdown: decimal extracted as string is the same for every layout") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // Mixed scales make an inferred shredding schema DECIMAL(18, 2) / DECIMAL(18, 1), so the
+    // typed_value keeps trailing zeros (1.50, 0.0) that the unshredded value strips.
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":1.50,"amount":0.00}')),
+          | (2, parse_json('{"price":0.05,"amount":2.5}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'string'), variant_get(v, '$.amount', 'string') FROM T ORDER BY id"),
+      Seq(Row(1, "1.5", "0"), Row(2, "0.05", "2.5"))
+    )
   }
 
   test("Paimon Variant pushdown: nested variant column inside a struct") {
