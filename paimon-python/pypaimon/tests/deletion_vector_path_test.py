@@ -32,9 +32,9 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
 
-_PLANNERS = ['python', pytest.param('native', marks=pytest.mark.skipif(
+_PLANNERS = ['python', pytest.param('native', marks=[pytest.mark.native_plan, pytest.mark.skipif(
     not native_version_at_least(0, 4, 0),
-    reason='pypaimon-rust>=0.4.0 required for native DV paths'))]
+    reason='pypaimon-rust>=0.4.0 required for native DV paths')])]
 
 
 def _table(tmp_path, layout, first_partition='a', partition_type=None):

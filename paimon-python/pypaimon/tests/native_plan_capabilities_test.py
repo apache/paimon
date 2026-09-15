@@ -24,6 +24,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.identifier import Identifier
@@ -42,6 +43,7 @@ from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_delete import TableDeleteByRowId
 
 
+@pytest.mark.native_plan
 @unittest.skipUnless(native_runtime_available(),
                      "pypaimon_rust split-planning API not installed")
 class NativePlanCapabilitiesTest(unittest.TestCase):

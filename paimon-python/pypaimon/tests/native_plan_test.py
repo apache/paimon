@@ -788,6 +788,22 @@ class NativePlanTest(unittest.TestCase):
                         self.assertIs(result, fallback)
                         native.assert_not_called()
 
+    def test_append_distribution_requires_stable_native_order(self):
+        for available in (False, True):
+            for selection in ('idx_of_this_subtask', 'start_pos_of_this_subtask'):
+                with self.subTest(available=available, selection=selection):
+                    fs = Mock(partition_key_predicate=None)
+                    scan = _scan(True, fs)
+                    setattr(fs, selection, 0)
+                    fs.scan.return_value = fallback = object()
+                    with patch('pypaimon.read.native_plan.native_version_at_least',
+                               return_value=available):
+                        self.assertEqual(scan._native_plan_supported(), available)
+                        if not available:
+                            with patch('pypaimon.read.native_plan.native_plan') as native:
+                                self.assertIs(scan.plan(), fallback)
+                                native.assert_not_called()
+
     def test_watermark_forwarding_requires_current_runtime(self):
         for available in (False, True):
             with self.subTest(available=available):

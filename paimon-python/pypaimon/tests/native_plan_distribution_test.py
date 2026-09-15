@@ -23,6 +23,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
@@ -146,6 +147,7 @@ class _DistributionFixture:
         return table, rows
 
 
+@pytest.mark.native_plan
 @unittest.skipUnless(native_runtime_available(),
                      'pypaimon_rust split-planning API required')
 class NativePlanDistributionTest(_DistributionFixture, unittest.TestCase):

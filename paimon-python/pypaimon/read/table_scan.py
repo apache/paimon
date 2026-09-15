@@ -133,6 +133,12 @@ class TableScan:
                 or not self._native_global_index_result_supported()
                 or getattr(fs, 'only_read_real_buckets', False)):
             return False
+        # Positional append distribution needs the stable partition/file order
+        # introduced in 0.4. Older bindings can assign different rows per call.
+        if (not self.table.is_primary_key_table and not fs.data_evolution
+                and (fs.idx_of_this_subtask is not None or fs.start_pos_of_this_subtask is not None)
+                and not native_version_at_least(0, 4)):
+            return False
         if getattr(fs, 'deletion_vectors_enabled', False):
             # 0.4.0 includes Python-written DV decoding and legacy bucket paths.
             if not native_version_at_least(0, 4, 0):

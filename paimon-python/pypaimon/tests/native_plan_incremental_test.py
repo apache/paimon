@@ -31,9 +31,9 @@ from pypaimon.utils.range import Range
 
 
 @pytest.fixture(params=[False, pytest.param(
-    True, marks=pytest.mark.skipif(
+    True, marks=[pytest.mark.native_plan, pytest.mark.skipif(
         not native_method_available('ReadBuilder', 'new_incremental_scan'),
-        reason='pypaimon_rust combined incremental planning API required'))],
+        reason='pypaimon_rust combined incremental planning API required')])],
     ids=['python', 'native'])
 def native(request):
     return request.param

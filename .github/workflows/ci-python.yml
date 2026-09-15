@@ -34,6 +34,9 @@ jobs:
   # Lint + test on selected versions only (3.6 / 3.7 low end, 3.10 / 3.11 / 3.12 / 3.13 current), not every Python version.
   test:
     name: Tests / Python ${{ matrix.python-version }}
+    env:
+      # Real native planning is covered by the Rust main job below.
+      PYTEST_ADDOPTS: "-m 'not native_plan'"
     timeout-minutes: 90
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
@@ -148,6 +151,7 @@ jobs:
               python -c "import datasets, lerobot; print('datasets', datasets.__version__, 'lerobot', lerobot.__version__)"
             fi
 
+            # Required by SQL tests; native planner tests run against main below.
             python -m pip install pypaimon-rust
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
               # Run the RoboMIND pipeline tests with synthetic local HDF5 data.

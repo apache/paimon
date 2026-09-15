@@ -20,6 +20,7 @@ import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -46,6 +47,7 @@ def _has_native_row_ranges():
     return hasattr(ReadBuilder, 'with_row_ranges')
 
 
+@pytest.mark.native_plan
 @unittest.skipUnless(_has_native_planner(),
                      "pypaimon_rust with split-planning API not installed")
 class NativePlanIntegrationTest(unittest.TestCase):

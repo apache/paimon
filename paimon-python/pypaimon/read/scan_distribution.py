@@ -26,8 +26,10 @@ from pypaimon.read.split import Split
 def validate_shard(index: int, count: int) -> None:
     if not isinstance(count, int) or count <= 0:
         raise ValueError("number_of_para_subtasks must be a positive integer")
-    if not isinstance(index, int) or index < 0 or index >= count:
-        raise ValueError("idx_of_this_subtask must be non-negative and less than number_of_para_subtasks")
+    if not isinstance(index, int) or index < 0:
+        raise ValueError("idx_of_this_subtask must be a non-negative integer")
+    if index >= count:
+        raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
 
 
 def validate_slice(start: int, end: int) -> None:

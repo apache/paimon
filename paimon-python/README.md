@@ -63,7 +63,8 @@ and prereleases before 0.4.0 use the Python planner for deletion vectors.
 When using an unreleased 0.4.0 development wheel, rebuild it with these fixes;
 package version checks cannot distinguish local builds with identical versions.
 
-Append scans support `with_shard()` and `with_slice()`; primary-key scans support
+Append scans support `with_shard()` and `with_slice()` with Rust 0.4 or newer,
+which preserves the file order needed for positional selection; primary-key scans support
 bucket-based `with_shard()`. Data-evolution position selection requires the
 binding's `TableScan.with_row_position_slice()` and `with_row_position_shard()`.
 Selection occurs before reader filtering and deletion vectors, so surviving row
