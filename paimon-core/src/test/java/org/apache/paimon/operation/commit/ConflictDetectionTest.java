@@ -756,6 +756,37 @@ class ConflictDetectionTest {
         }
     }
 
+    @Test
+    void testCompactDeletionConflictWithDvHasActionableMessage() {
+        ConflictDetection detection =
+                new AppendConflictDetection(
+                        "test-table",
+                        "test-user",
+                        RowType.of(),
+                        null,
+                        BucketMode.BUCKET_UNAWARE,
+                        true,
+                        null,
+                        null);
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(createFileEntry("existing", ADD)),
+                        Collections.singletonList(createFileEntry("missing", DELETE)),
+                        Collections.emptyList(),
+                        null,
+                        Snapshot.CommitKind.COMPACT);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get())
+                .hasMessageContaining("File deletion conflicts detected")
+                .hasMessageContaining("compact commit conflicts with changes to its input files")
+                .hasMessageContaining("deletion vectors")
+                .hasMessageContaining("restore deleted rows")
+                .hasMessageContaining("Please retry the compaction");
+    }
+
     private SimpleFileEntry createFileEntry(String fileName, FileKind kind) {
         return new SimpleFileEntry(
                 kind,
