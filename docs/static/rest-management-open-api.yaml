@@ -36,46 +36,6 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
-  /v1/{prefix}/labels:
-    parameters:
-      - $ref: '#/components/parameters/Prefix'
-    post:
-      tags: [label]
-      summary: Create or replace one label binding
-      operationId: upsertLabel
-      description: |
-        Atomically creates a binding or replaces the value identified by
-        (prefix, entityType, entityName, key). The entity must already exist. Other keys are
-        unchanged. Repeating the same request leaves the same label value. This operation
-        does not create the target entity or a separate label definition.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpsertLabelRequest'
-            example:
-              entityType: TABLE
-              entityName: sales.orders
-              key: domain
-              value: sales
-      responses:
-        '200':
-          description: Label binding created or replaced; no response body.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
   /v1/{prefix}/labels/{entityType}/{entityName}:
     parameters:
       - $ref: '#/components/parameters/Prefix'
@@ -121,6 +81,41 @@ paths:
       - $ref: '#/components/parameters/LabelEntityType'
       - $ref: '#/components/parameters/LabelEntityName'
       - $ref: '#/components/parameters/LabelKey'
+    post:
+      tags: [label]
+      summary: Create or replace one label binding
+      operationId: upsertLabel
+      description: |
+        Atomically creates a binding or replaces the value identified by
+        (prefix, entityType, entityName, key) in the path. The body contains only value.
+        The entity must already exist. Other keys are unchanged. Repeating the same request
+        leaves the same label value. This operation does not create the target entity or a
+        separate label definition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertLabelRequest'
+            example:
+              value: sales
+      responses:
+        '200':
+          description: Label binding created or replaced; no response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     get:
       tags: [label]
       summary: Get one label binding
@@ -598,8 +593,8 @@ components:
         define unambiguous names, including quoting or escaping where necessary.
         In a path, encode the complete name as one UTF-8 segment using REST Catalog URL
         encoding (spaces as +, literal + as %2B, slash as %2F); decode exactly once. Encode
-        dot-only segments . and .. as %2E and %2E%2E. JSON bodies carry the original unencoded
-        name. POST and path operations resolve names identically.
+        dot-only segments . and .. as %2E and %2E%2E. JSON responses carry the original unencoded
+        name. All operations resolve the entity through the path.
       examples: [sales.orders]
     LabelKey:
       type: string
@@ -607,9 +602,21 @@ components:
       pattern: '\S'
       description: |
         Non-blank, case-sensitive label key. Encode it as a single path segment using the same
-        encoding as entityName. Preserve the original string in JSON.
+        encoding as entityName. Preserve the original string in JSON responses.
       examples: [domain]
     UpsertLabelRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: Complete replacement value. An empty string is valid; null is not.
+      description: |
+        Value for the label binding identified by the request path. The body does not repeat
+        entityType, entityName, or key. Entity existence checks, authorization, and atomic
+        upsert are server responsibilities. Labels do not themselves grant access or enforce
+        a data policy.
+    GetLabelResponse:
       type: object
       required: [entityType, entityName, key, value]
       properties:
@@ -621,14 +628,6 @@ components:
           $ref: '#/components/schemas/LabelKey'
         value:
           type: string
-          description: Complete replacement value. An empty string is valid; null is not.
-      description: |
-        One direct label binding in the configured prefix. Entity existence checks,
-        authorization, and atomic upsert are server responsibilities. Labels do not themselves
-        grant access or enforce a data policy.
-    GetLabelResponse:
-      allOf:
-        - $ref: '#/components/schemas/UpsertLabelRequest'
       description: One direct binding, including its canonical entity identity, key, and value.
     ListLabelsResponse:
       type: object

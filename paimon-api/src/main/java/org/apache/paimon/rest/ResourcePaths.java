@@ -67,11 +67,6 @@ public class ResourcePaths {
         this.prefix = encodeString(prefix);
     }
 
-    @Experimental
-    public String labels() {
-        return SLASH.join(V1, prefix, LABELS);
-    }
-
     /** Labels attached to one entity, whose canonical name is encoded as a single segment. */
     @Experimental
     public String labels(String entityType, String entityName) {
@@ -79,7 +74,8 @@ public class ResourcePaths {
                 entityType != null && !entityType.trim().isEmpty(), "entityType must not be blank");
         checkArgument(
                 entityName != null && !entityName.trim().isEmpty(), "entityName must not be blank");
-        return SLASH.join(labels(), encodeLabelSegment(entityType), encodeLabelSegment(entityName));
+        return SLASH.join(
+                V1, prefix, LABELS, encodeLabelSegment(entityType), encodeLabelSegment(entityName));
     }
 
     @Experimental

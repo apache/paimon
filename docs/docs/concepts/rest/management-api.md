@@ -50,9 +50,9 @@ All management endpoints use the opaque `prefix` returned by the REST Catalog co
 is not a catalog name in a payload and is independent of local engine catalog aliases.
 
 ```
-POST   /v1/{prefix}/labels
 GET    /v1/{prefix}/labels/{entityType}/{entityName}
 GET    /v1/{prefix}/labels/{entityType}/{entityName}/{key}
+POST   /v1/{prefix}/labels/{entityType}/{entityName}/{key}
 DELETE /v1/{prefix}/labels/{entityType}/{entityName}/{key}
 
 GET  /v1/{prefix}/permissions
@@ -83,22 +83,25 @@ Paimon's table snapshot `tags`; a label does not itself grant access or enforce 
 server may identify a table as `sales.orders` and a column as `sales.orders.order_id`. The server
 must define unambiguous names, including how to quote or escape identifier components. The client
 passes names unchanged and never splits them on dots. Path parameters use REST Catalog URL
-encoding as individual UTF-8 segments; JSON bodies contain the original unencoded strings.
+encoding as individual UTF-8 segments; JSON responses contain the original unencoded strings.
 
 ### Set a label
 
-`POST /v1/{prefix}/labels` atomically creates or replaces the binding identified by
-`(prefix, entityType, entityName, key)`:
+`POST /v1/{prefix}/labels/{entityType}/{entityName}/{key}` atomically creates or replaces
+the binding identified by the path. For example, set the `domain` label on `sales.orders`:
+
+```http
+POST /v1/{prefix}/labels/TABLE/sales.orders/domain
+Content-Type: application/json
+```
 
 ```json
 {
-  "entityType": "TABLE",
-  "entityName": "sales.orders",
-  "key": "domain",
   "value": "sales"
 }
 ```
 
+The request body contains only the value; it does not repeat the identity from the path.
 The entity must already exist. Repeating the same request leaves the same label value, and
 updating one key leaves other keys unchanged. Identity fields must be non-blank; keys are case
 sensitive. The value must be a string; an empty string is allowed and null is rejected.
@@ -107,8 +110,9 @@ operation.
 
 ### Read and delete labels
 
-`GET .../labels/{entityType}/{entityName}/{key}` returns the same four fields as the write
-payload. A missing entity or key returns 404. For a missing key, the error identifies
+`GET .../labels/{entityType}/{entityName}/{key}` returns the complete binding with
+`entityType`, `entityName`, `key`, and `value`. A missing entity or key returns 404.
+For a missing key, the error identifies
 `resourceType=LABEL` and `resourceName={key}`.
 
 `GET .../labels/{entityType}/{entityName}` lists direct bindings:

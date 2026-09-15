@@ -120,7 +120,8 @@ api.listLabelsPaged("TABLE", "sales.orders", 100, null); // Reads one page.
 api.deleteLabel("TABLE", "sales.orders", "domain");
 ```
 
-Upsert creates or replaces one binding using POST. It requires the target entity to exist.
+Upsert creates or replaces one binding using POST on the same single-key path used by GET and
+DELETE. Its request body contains only `value`. It requires the target entity to exist.
 Deleting an absent binding succeeds; deleting from a missing entity fails. Servers must implement
 these endpoints; the client does not fall back to table options or snapshot tags. See
 [the label wire contract](../concepts/rest/management-api#entity-labels).

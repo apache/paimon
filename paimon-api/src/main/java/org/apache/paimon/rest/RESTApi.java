@@ -887,7 +887,8 @@ public class RESTApi {
      * <p>The server atomically upserts the binding identified by entity type, canonical entity
      * name, and key. Only its value is replaced; other labels are unchanged. Repeating the same
      * request leaves the same label value. Entity types and name resolution are server-defined;
-     * this client does not split, normalize, or resolve entity names.
+     * this client does not split, normalize, or resolve entity names. The path carries the binding
+     * identity; the request body contains only its value.
      *
      * @param value label value; an empty string is allowed, null is not
      * @throws NoSuchResourceException if the entity does not exist
@@ -896,8 +897,8 @@ public class RESTApi {
     @Experimental
     public void upsertLabel(String entityType, String entityName, String key, String value) {
         client.post(
-                resourcePaths.labels(),
-                new UpsertLabelRequest(entityType, entityName, key, value),
+                resourcePaths.label(entityType, entityName, key),
+                new UpsertLabelRequest(value),
                 restAuthFunction);
     }
 

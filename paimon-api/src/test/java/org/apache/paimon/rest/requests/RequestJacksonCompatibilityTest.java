@@ -160,17 +160,8 @@ public class RequestJacksonCompatibilityTest {
                             "schemaId"),
                     requestCase(
                             UpsertLabelRequest.class,
-                            "{\"entityType\":\"COLUMN\",\"entityName\":\"sales.orders.id\","
-                                    + "\"key\":\"classification\",\"value\":\"identifier\"}",
-                            request -> {
-                                assertThat(request.getEntityType()).isEqualTo("COLUMN");
-                                assertThat(request.getEntityName()).isEqualTo("sales.orders.id");
-                                assertThat(request.getKey()).isEqualTo("classification");
-                                assertThat(request.getValue()).isEqualTo("identifier");
-                            },
-                            "entityType",
-                            "entityName",
-                            "key",
+                            "{\"value\":\"identifier\"}",
+                            request -> assertThat(request.getValue()).isEqualTo("identifier"),
                             "value"));
 
     private static final Set<Class<? extends RESTRequest>> COMPLEX_REQUESTS =
