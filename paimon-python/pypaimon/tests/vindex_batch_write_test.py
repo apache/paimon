@@ -169,8 +169,10 @@ class VindexBatchWriteTest(unittest.TestCase):
 
     def test_null_row_ids_are_rejected_before_writing_source_batch(self):
         builder = object.__new__(GlobalIndexBuilder)
+        builder._table = Mock()
         builder._core_options = Mock()
         builder._core_options.global_index_row_count_per_shard.return_value = 10
+        builder._core_options.global_index_build_parallelism.return_value = 1
         builder._index_type = 'ivf-flat'
         builder._index_columns = ['embedding']
         writer = Mock()
