@@ -180,8 +180,9 @@ class TableScan:
             return False
         if self.table.options.query_auth_enabled:
             return False
-        # Java batch first-row reads skip L0. Scans including L0 still need
-        # first-row overlap packing that Rust does not currently provide.
+        # Ordinary Java first-row batch scans skip L0. The clustering override
+        # can combine first-row with DV merge-on-read, but its files need a
+        # separate audit because they may be sorted by non-primary-key columns.
         if (self.table.options.merge_engine() == 'first-row'
                 and not fs.skip_level0 and not fs.is_streaming):
             return False
