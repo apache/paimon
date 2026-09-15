@@ -16,6 +16,8 @@
 # under the License.
 
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -125,6 +127,53 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
                 # Arrow 6 cannot convert non-nullable MAP values to scalars.
                 actual = result.column('metrics').cast(pa.map_(pa.string(), value_type))
                 self.assertEqual(expected, actual.to_pylist())
+
+    def test_nested_non_nullable_map_values_in_subprocess(self):
+        # A native Arrow assertion aborts the process, not a Python exception.
+        result = subprocess.run([
+            sys.executable, '-c',
+            'from pypaimon.tests.map_shared_shredding_write_test import '
+            'MapSharedShreddingWriteTest\n'
+            'test = MapSharedShreddingWriteTest()\n'
+            'test.setUp()\n'
+            'try:\n'
+            '    test.check_nested_non_nullable_map_values()\n'
+            'finally:\n'
+            '    test.tearDown()\n',
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        self.assertEqual(0, result.returncode, result.stderr.decode('utf-8', 'replace'))
+
+    def check_nested_non_nullable_map_values(self):
+        from pypaimon.write.map_shared_shredding_writer import _to_python_values
+
+        inner = pa.map_(pa.string(), pa.field('value', pa.int64(), nullable=False))
+        for value_type, value in [
+                (inner, [('x', 1)]),
+                (pa.struct([pa.field('nested', inner)]), {'nested': [('x', 1)]}),
+                (pa.list_(inner), [[('x', 1)], [], None])]:
+            self.arrow_schema = pa.schema([
+                pa.field('id', pa.int32()),
+                pa.field('metrics', pa.map_(pa.string(), value_type)),
+            ])
+            expected = [[('a', value)], [], None, [('b', value)]]
+            array = pa.array([[('unused', value)]] + expected + [[]],
+                             type=self.arrow_schema.field('metrics').type)
+            # Keep nonzero offsets and multiple chunks in the conversion check.
+            chunks = [array.slice(1, 2), array.slice(3, 2)]
+            self.assertEqual(expected, [v for chunk in chunks
+                                        for v in _to_python_values(chunk)])
+            data = pa.Table.from_arrays([
+                pa.array([1, 2, 3, 4], type=pa.int32()),
+                pa.chunked_array(chunks),
+            ], schema=self.arrow_schema)
+            table = self._create_table('parquet', 2)
+            messages = self._write(table, data)
+            self.assertTrue(is_shared_shredding(pq.read_schema(
+                messages[0].new_files[0].file_path).field('metrics')))
+            reader = table.new_read_builder()
+            result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+            self.assertEqual(expected, [v for chunk in result.column('metrics').chunks
+                                        for v in _to_python_values(chunk)])
 
     def test_dedicated_columns_preserve_shredding(self):
         for blob, vector in [(True, False), (False, True), (True, True)]:

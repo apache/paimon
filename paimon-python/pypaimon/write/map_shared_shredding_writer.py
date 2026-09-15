@@ -235,16 +235,8 @@ class _MapFieldConverter:
             num_columns, item_type, logical_item_type)
 
     def convert(self, column):
-        # Avoid MapScalar conversion: older Arrow versions cannot represent
-        # MAP scalars with non-nullable values.
-        offsets, start, end = _normalized_offsets(column)
-        keys = column.keys.slice(start, end - start).to_pylist()
-        values = column.items.slice(start, end - start).to_pylist()
-        rows = []
-        for index, is_null in enumerate(column.is_null().to_pylist()):
-            start, end = offsets[index:index + 2]
-            rows.append(None if is_null else self._convert_map(
-                zip(keys[start:end], values[start:end])))
+        rows = [None if value is None else self._convert_map(value)
+                for value in _to_python_values(column)]
         return pa.array(rows, type=self.physical_type)
 
     def _convert_map(self, value):
@@ -337,6 +329,36 @@ class _MapFieldConverter:
                 selected = column_id
                 selected_last_used = last_used
         return selected
+
+
+def _to_python_values(column):
+    """Avoid Arrow 6 MAP scalars, including MAPs nested in ROW/ARRAY values."""
+    data_type = column.type
+    if pa.types.is_struct(data_type):
+        children = [_to_python_values(column.field(i))
+                    for i in range(len(data_type))]
+        names = [field.name for field in data_type]
+        values = [dict(zip(names, (child[i] for child in children)))
+                  for i in range(len(column))]
+    elif (pa.types.is_map(data_type) or pa.types.is_list(data_type)
+          or pa.types.is_large_list(data_type)):
+        offsets, start, end = _normalized_offsets(column)
+        if pa.types.is_map(data_type):
+            keys = _to_python_values(column.keys.slice(start, end - start))
+            items = _to_python_values(column.items.slice(start, end - start))
+            children = list(zip(keys, items))
+        else:
+            children = _to_python_values(column.values.slice(start, end - start))
+        values = [children[offsets[i]:offsets[i + 1]] for i in range(len(column))]
+    elif pa.types.is_fixed_size_list(data_type):
+        size = data_type.list_size
+        children = _to_python_values(column.values.slice(
+            column.offset * size, len(column) * size))
+        values = [children[i * size:(i + 1) * size] for i in range(len(column))]
+    else:
+        return column.to_pylist()
+    return [None if is_null else value
+            for is_null, value in zip(column.is_null().to_pylist(), values)]
 
 
 def _physical_struct_type(num_columns, item_type, logical_item_type):
