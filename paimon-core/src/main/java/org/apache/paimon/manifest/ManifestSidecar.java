@@ -43,7 +43,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -58,13 +57,15 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
 
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
+
 /** Independently usable partition, row-id and bucket coverage for each manifest block. */
 public final class ManifestSidecar {
     public static final String SUFFIX = ".avro.sidecar";
     private static final Logger LOG = LoggerFactory.getLogger(ManifestSidecar.class);
-    private static final long MAGIC = 0x5041494d53434152L;
+    private static final int MAGIC = 0x504d5343;
     private static final int FORMAT_VERSION = 1;
-    private static final int HEADER_BYTES = 60;
+    private static final int HEADER_BYTES = 24;
     private static final int BLOCK_BYTES = 27;
     private static final byte[] EMPTY = new byte[0];
     private static final int DIGEST_BYTES = 32;
@@ -90,25 +91,12 @@ public final class ManifestSidecar {
         return null;
     }
 
-    /** Construction bounds and independently enabled payloads, supplied by the caller. */
+    /** Optional payloads supplied by the caller. Partition coverage is always enabled. */
     public static final class Settings {
-        public final int maxBytes;
-        public final boolean partitionEnabled;
         public final boolean rowIdEnabled;
         public final boolean bucketEnabled;
 
-        public Settings(
-                long maxBytes,
-                boolean partitionEnabled,
-                boolean rowIdEnabled,
-                boolean bucketEnabled) {
-            if (maxBytes < 0) {
-                throw new IllegalArgumentException(
-                        "Manifest sidecar byte budget must be nonnegative");
-            }
-            // A sidecar fits in one byte array; reserve one byte for the overflow probe.
-            this.maxBytes = (int) Math.min(maxBytes, Integer.MAX_VALUE - 1L);
-            this.partitionEnabled = partitionEnabled;
+        public Settings(boolean rowIdEnabled, boolean bucketEnabled) {
             this.rowIdEnabled = rowIdEnabled;
             this.bucketEnabled = bucketEnabled;
         }
@@ -144,9 +132,7 @@ public final class ManifestSidecar {
         }
     }
 
-    /**
-     * Builds complete block descriptors even when either optional dimension becomes unavailable.
-     */
+    /** Builds a complete block directory with independently available coverage. */
     public static final class Builder {
         private final Settings settings;
         private final byte[] header;
@@ -155,7 +141,6 @@ public final class ManifestSidecar {
         private final TreeSet<Integer> partitionIds = new TreeSet<>();
         private final TreeSet<Long> bucketPairs = new TreeSet<>();
         private final List<IndexedBlock> blocks = new ArrayList<>();
-        private boolean complete;
         private long nextOffset;
         private long nextRecord;
         private Block current;
@@ -163,51 +148,20 @@ public final class ManifestSidecar {
         private boolean rowAvailable;
         private boolean partitionAvailable;
         private boolean bucketAvailable;
-        private boolean coarse;
-        private long min;
-        private long max;
-        private int dictionaryBytes;
-        private int optionalBytes;
 
-        public Builder(Settings settings, @Nullable byte[] header) {
+        public Builder(Settings settings, byte[] header) {
             this.settings = settings;
-            this.header = header;
-            complete =
-                    header != null
-                            && HEADER_BYTES + DIGEST_BYTES + 12L + header.length
-                                    <= settings.maxBytes;
-            nextOffset = header == null ? 0 : header.length;
-        }
-
-        public boolean complete() {
-            return complete;
+            this.header = Objects.requireNonNull(header);
+            nextOffset = header.length;
         }
 
         public void beginBlock(long offset, long length, long records) throws IOException {
-            if (!complete) {
-                return;
-            }
             require(current == null && offset == nextOffset && length > 0 && records > 0);
-            // Optional payloads can be discarded later, but descriptors must never be truncated.
-            if (HEADER_BYTES
-                            + DIGEST_BYTES
-                            + 12L
-                            + header.length
-                            + (blocks.size() + 1L) * BLOCK_BYTES
-                    > settings.maxBytes) {
-                complete = false;
-                blocks.clear();
-                dictionary.clear();
-                return;
-            }
             current = new Block(offset, length, nextRecord, records);
             entriesInBlock = 0;
             rowAvailable = settings.rowIdEnabled;
-            partitionAvailable = settings.partitionEnabled;
+            partitionAvailable = true;
             bucketAvailable = settings.bucketEnabled;
-            coarse = false;
-            min = Long.MAX_VALUE;
-            max = -1;
             ranges.clear();
             partitionIds.clear();
             bucketPairs.clear();
@@ -229,9 +183,6 @@ public final class ManifestSidecar {
                 @Nullable byte[] partition,
                 @Nullable Integer bucket,
                 @Nullable Integer totalBuckets) {
-            if (!complete) {
-                return;
-            }
             if (current == null) {
                 throw new IllegalStateException("No current Avro block");
             }
@@ -246,14 +197,8 @@ public final class ManifestSidecar {
                 ranges.clear();
                 return;
             }
-            long end = first + (count - 1);
-            min = Math.min(min, first);
-            max = Math.max(max, end);
-            // Keep checking subsequent entries, including missing row IDs, after coarsening.
-            if (coarse) {
-                return;
-            }
             long start = first;
+            long end = first + (count - 1);
             Map.Entry<Long, Long> before = ranges.floorEntry(start);
             if (before != null && before.getValue() >= start - 1) {
                 start = before.getKey();
@@ -266,35 +211,19 @@ public final class ManifestSidecar {
                 end = Math.max(end, next.getValue());
                 ranges.remove(next.getKey());
             }
-            if (8L + 16L * (ranges.size() + 1L) > settings.maxBytes - optionalBytes) {
-                coarse = true;
-                ranges.clear();
-            } else {
-                ranges.put(start, end);
-            }
+            ranges.put(start, end);
         }
 
         private void addBucket(@Nullable Integer bucket, @Nullable Integer totalBuckets) {
             if (!bucketAvailable) {
                 return;
             }
-            if (bucket == null
-                    || totalBuckets == null
-                    || bucket < 0
-                    || totalBuckets <= 0
-                    || bucket >= totalBuckets) {
+            if (bucket == null || totalBuckets == null || bucket < 0 || totalBuckets <= bucket) {
                 bucketAvailable = false;
                 bucketPairs.clear();
                 return;
             }
-            long pair = ((long) bucket << 32) | totalBuckets;
-            if (!bucketPairs.contains(pair)
-                    && 8L + 8L * (bucketPairs.size() + 1L) > settings.maxBytes - optionalBytes) {
-                bucketAvailable = false;
-                bucketPairs.clear();
-            } else {
-                bucketPairs.add(pair);
-            }
+            bucketPairs.add(((long) bucket << 32) | totalBuckets);
         }
 
         private void addPartition(@Nullable byte[] bytes) {
@@ -308,62 +237,24 @@ public final class ManifestSidecar {
             }
             Integer id = dictionary.get(ByteBuffer.wrap(bytes));
             if (id == null) {
-                if (bytes.length + 4L > settings.maxBytes - dictionaryBytes) {
-                    partitionAvailable = false;
-                    partitionIds.clear();
-                    return;
-                }
                 id = dictionary.size();
                 dictionary.put(ByteBuffer.wrap(bytes.clone()), id);
-                dictionaryBytes += 4 + bytes.length;
             }
             partitionIds.add(id);
         }
 
         public void endBlock() throws IOException {
-            if (!complete) {
-                return;
-            }
             require(current != null && entriesInBlock == current.recordCount);
-            byte[] rowPayload = EMPTY;
-            byte[] partitionPayload = EMPTY;
-            if (rowAvailable) {
-                if (coarse || 8L + 16L * ranges.size() > settings.maxBytes - optionalBytes) {
-                    ranges.clear();
-                    ranges.put(min, max);
-                }
-                if (8L + 16L * ranges.size() <= settings.maxBytes - optionalBytes) {
-                    ByteBuffer out = ByteBuffer.allocate(4 + 16 * ranges.size());
-                    out.putInt(ranges.size());
-                    for (Map.Entry<Long, Long> range : ranges.entrySet()) {
-                        out.putLong(range.getKey()).putLong(range.getValue());
-                    }
-                    rowPayload = out.array();
-                    optionalBytes += payloadSize(rowPayload);
-                }
-            }
-            if (partitionAvailable
-                    && 8L + 4L * partitionIds.size() <= settings.maxBytes - optionalBytes) {
-                ByteBuffer out = ByteBuffer.allocate(4 + 4 * partitionIds.size());
-                out.putInt(partitionIds.size());
-                for (int id : partitionIds) {
-                    out.putInt(id);
-                }
-                partitionPayload = out.array();
-                optionalBytes += payloadSize(partitionPayload);
-            }
-            byte[] bucketPayload = EMPTY;
-            if (bucketAvailable
-                    && 8L + 8L * bucketPairs.size() <= settings.maxBytes - optionalBytes) {
-                ByteBuffer out = ByteBuffer.allocate(4 + 8 * bucketPairs.size());
-                out.putInt(bucketPairs.size());
-                for (long pair : bucketPairs) {
-                    out.putInt((int) (pair >>> 32)).putInt((int) pair);
-                }
-                bucketPayload = out.array();
-                optionalBytes += payloadSize(bucketPayload);
-            }
-            blocks.add(new IndexedBlock(current, partitionPayload, rowPayload, bucketPayload));
+            blocks.add(
+                    new IndexedBlock(
+                            current,
+                            partitionAvailable
+                                    ? encodeValues(partitionIds, partitionIds.size())
+                                    : EMPTY,
+                            rowAvailable ? encodeRanges() : EMPTY,
+                            bucketAvailable
+                                    ? encodeValues(bucketPairs, bucketPairs.size())
+                                    : EMPTY));
             nextOffset = Math.addExact(current.offset, current.length);
             nextRecord = Math.addExact(current.firstRecord, current.recordCount);
             ranges.clear();
@@ -372,53 +263,35 @@ public final class ManifestSidecar {
             current = null;
         }
 
-        @Nullable
-        public byte[] serialize(String name, long fileSize, long entryCount) throws IOException {
-            if (!complete) {
-                return null;
-            }
-            require(current == null && nextOffset == fileSize && nextRecord == entryCount);
-            long size =
-                    HEADER_BYTES
-                            + DIGEST_BYTES
-                            + 12L
-                            + header.length
-                            + dictionaryBytes
-                            + blocks.size() * (long) BLOCK_BYTES
-                            + optionalBytes;
-            // Give directory growth priority over optional coverage. Never remove a descriptor.
-            for (IndexedBlock block : blocks) {
-                if (size <= settings.maxBytes) {
-                    break;
-                }
-                size -= payloadSize(block.rowIds);
-                optionalBytes -= payloadSize(block.rowIds);
-                block.rowIds = EMPTY;
-            }
-            for (IndexedBlock block : blocks) {
-                if (size <= settings.maxBytes) {
-                    break;
-                }
-                size -= payloadSize(block.buckets);
-                optionalBytes -= payloadSize(block.buckets);
-                block.buckets = EMPTY;
-            }
-            if (size > settings.maxBytes) {
-                size -= dictionaryBytes;
-                dictionaryBytes = 0;
-                dictionary.clear();
-                for (IndexedBlock block : blocks) {
-                    size -= payloadSize(block.partitions);
-                    optionalBytes -= payloadSize(block.partitions);
-                    block.partitions = EMPTY;
-                }
-            }
-            require(size <= settings.maxBytes);
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream((int) size);
+        private byte[] encodeRanges() throws IOException {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(buffer);
-            out.writeLong(MAGIC);
+            long min = ranges.firstKey();
+            long max = ranges.lastEntry().getValue();
+            encodeLong(out, ranges.size());
+            encodeLong(out, min);
+            encodeLong(out, max - min);
+            // The envelope supplies the first start and last end. Encode only interior endpoints.
+            DeltaRleWriter encoder = new DeltaRleWriter(out, min);
+            int index = 0;
+            for (Map.Entry<Long, Long> range : ranges.entrySet()) {
+                if (index > 0) {
+                    encoder.add(range.getKey());
+                }
+                if (++index < ranges.size()) {
+                    encoder.add(range.getValue());
+                }
+            }
+            encoder.finish();
+            return buffer.toByteArray();
+        }
+
+        public byte[] serialize(long fileSize, long entryCount) throws IOException {
+            require(current == null && nextOffset == fileSize && nextRecord == entryCount);
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(buffer);
+            out.writeInt(MAGIC);
             out.writeInt(FORMAT_VERSION);
-            out.write(digest(name.getBytes(StandardCharsets.UTF_8)));
             out.writeLong(fileSize);
             out.writeLong(entryCount);
             out.writeInt(header.length);
@@ -441,8 +314,17 @@ public final class ManifestSidecar {
             return buffer.toByteArray();
         }
 
-        private static int payloadSize(byte[] payload) {
-            return payload.length == 0 ? 0 : Integer.BYTES + payload.length;
+        private static byte[] encodeValues(Iterable<? extends Number> values, int count)
+                throws IOException {
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(buffer);
+            encodeLong(out, count);
+            DeltaRleWriter encoder = new DeltaRleWriter(out, 0);
+            for (Number value : values) {
+                encoder.add(value.longValue());
+            }
+            encoder.finish();
+            return buffer.toByteArray();
         }
 
         private static void writePayload(DataOutputStream out, byte[] payload) throws IOException {
@@ -456,9 +338,9 @@ public final class ManifestSidecar {
 
     private static final class IndexedBlock {
         private final Block block;
-        private byte[] partitions;
-        private byte[] rowIds;
-        private byte[] buckets;
+        private final byte[] partitions;
+        private final byte[] rowIds;
+        private final byte[] buckets;
 
         private IndexedBlock(Block block, byte[] partitions, byte[] rowIds, byte[] buckets) {
             this.block = block;
@@ -478,43 +360,36 @@ public final class ManifestSidecar {
     }
 
     /** Rebuild from the final physical blocks, including raw-copy and encoded rewrite paths. */
-    @Nullable
     public static byte[] build(FileIO io, Path path, long size, long records, Settings settings)
             throws IOException {
-        if (settings.maxBytes < 128) {
-            return null;
-        }
         try (ManifestAvroReader reader = new ManifestAvroReader(io.newInputStream(path))) {
             Builder builder = new Builder(settings, reader.headerBytes());
             ProjectedManifestEntry.Projection projection = BLOCK_INDEX_PROJECTION;
             ProjectedManifestEntry entry = projection.createEntry();
-            while (builder.complete() && reader.hasNext()) {
+            while (reader.hasNext()) {
                 ManifestAvroReader.RawBlock block = reader.next();
                 builder.beginBlock(reader.blockOffset(), reader.blockLength(), block.recordCount());
                 ManifestAvroReader.RowIterator rows = block.toRows(projection.projectedType());
-                while (builder.complete() && rows.hasNext()) {
+                while (rows.hasNext()) {
                     entry.replace(rows.next());
                     builder.add(
                             settings.rowIdEnabled ? entry.file().firstRowId() : null,
                             settings.rowIdEnabled ? entry.file().rowCount() : 0,
-                            settings.partitionEnabled ? entry.partitionBytes() : null,
+                            entry.partitionBytes(),
                             settings.bucketEnabled ? entry.bucket() : null,
                             settings.bucketEnabled ? entry.totalBuckets() : null);
                 }
                 builder.endBlock();
             }
-            return builder.serialize(path.getName(), size, records);
+            return builder.serialize(size, records);
         }
     }
 
     /** Selects blocks using row-ID coverage. A null query retains every block after validation. */
     public static Selection select(
-            byte[] data,
-            ManifestFileMeta manifest,
-            @Nullable RowRangeIndex query,
-            Settings settings)
+            byte[] data, ManifestFileMeta manifest, @Nullable RowRangeIndex query)
             throws IOException {
-        return select(data, manifest, query, null, null, settings);
+        return select(data, manifest, query, null, null);
     }
 
     /** Validates framing and tests row ID, partition, then bucket coverage. */
@@ -523,10 +398,9 @@ public final class ManifestSidecar {
             ManifestFileMeta manifest,
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
-            @Nullable RowType partitionType,
-            Settings settings)
+            @Nullable RowType partitionType)
             throws IOException {
-        return select(data, manifest, query, partitionFilter, partitionType, null, settings);
+        return select(data, manifest, query, partitionFilter, partitionType, null);
     }
 
     /**
@@ -539,22 +413,16 @@ public final class ManifestSidecar {
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable RowType partitionType,
-            @Nullable BiPredicate<Integer, Integer> bucketFilter,
-            Settings settings)
+            @Nullable BiPredicate<Integer, Integer> bucketFilter)
             throws IOException {
-        require(data.length >= 128 && data.length <= settings.maxBytes);
+        require(data.length >= HEADER_BYTES + DIGEST_BYTES + 12 + 21);
         int limit = data.length - DIGEST_BYTES;
         require(
                 MessageDigest.isEqual(
                         digest(data, limit), Arrays.copyOfRange(data, limit, data.length)));
         ByteBuffer in = ByteBuffer.wrap(data, 0, limit).slice();
-        require(in.getLong() == MAGIC);
+        require(in.getInt() == MAGIC);
         require(in.getInt() == FORMAT_VERSION);
-        byte[] hash = new byte[DIGEST_BYTES];
-        in.get(hash);
-        require(
-                MessageDigest.isEqual(
-                        hash, digest(manifest.fileName().getBytes(StandardCharsets.UTF_8))));
         require(in.getLong() == manifest.fileSize());
         long entries = Math.addExact(manifest.numAddedFiles(), manifest.numDeletedFiles());
         require(in.getLong() == entries);
@@ -598,33 +466,34 @@ public final class ManifestSidecar {
             long records = in.getLong();
             require(offset == nextOffset && length > 0 && length <= manifest.fileSize() - offset);
             require(records > 0 && records <= entries - firstRecord);
-            ByteBuffer partitionPayload = payload(in, Integer.BYTES);
-            ByteBuffer rowPayload = payload(in, 2 * Long.BYTES);
-            ByteBuffer bucketPayload = payload(in, 2 * Integer.BYTES);
+            Payload partitionPayload = payload(in, records);
+            Payload rowPayload = payload(in, records);
+            Payload bucketPayload = payload(in, records);
+            require(partitionPayload == null || partitionPayload.count <= partitions);
             long blockFirstRecord = firstRecord;
             nextOffset = offset + length;
             firstRecord += records;
 
             if (query != null && rowPayload != null) {
-                boolean singleRange = rowPayload.remaining() == 2 * Long.BYTES;
-                long min = rowPayload.getLong();
-                long firstEnd = rowPayload.getLong();
-                long max =
-                        singleRange
-                                ? firstEnd
-                                : rowPayload.getLong(rowPayload.limit() - Long.BYTES);
-                require(min >= 0 && firstEnd >= min && max >= firstEnd);
+                long min = readVarLong(rowPayload.data);
+                long span = readVarLong(rowPayload.data);
+                require(span <= Long.MAX_VALUE - min);
+                long max = min + span;
+                DeltaRleReader endpoints =
+                        new DeltaRleReader(rowPayload.data, 2L * (rowPayload.count - 1), min, max);
                 if (!query.intersects(min, max)) {
                     continue;
                 }
-                boolean rowHit = singleRange || query.intersects(min, firstEnd);
-                long previous = firstEnd;
-                while (!rowHit && rowPayload.hasRemaining()) {
-                    long rangeStart = rowPayload.getLong();
-                    long rangeEnd = rowPayload.getLong();
-                    require(rangeStart >= 0 && rangeEnd >= rangeStart && rangeStart > previous);
-                    previous = rangeEnd;
-                    rowHit = query.intersects(rangeStart, rangeEnd);
+                boolean rowHit = rowPayload.count == 1;
+                long start = min;
+                for (int range = 0; !rowHit && range < rowPayload.count; range++) {
+                    long end = range + 1 == rowPayload.count ? max : endpoints.next();
+                    require(end >= start);
+                    rowHit = query.intersects(start, end);
+                    if (!rowHit && range + 1 < rowPayload.count) {
+                        start = endpoints.next();
+                        require(start > end);
+                    }
                 }
                 if (!rowHit) {
                     continue;
@@ -632,13 +501,16 @@ public final class ManifestSidecar {
             }
 
             if (partitionFilter != null && partitionPayload != null) {
+                DeltaRleReader ids =
+                        new DeltaRleReader(
+                                partitionPayload.data, partitionPayload.count, 0, partitions - 1L);
                 boolean partitionHit = false;
-                int previous = -1;
-                while (!partitionHit && partitionPayload.hasRemaining()) {
-                    int id = partitionPayload.getInt();
-                    require(id > previous && id < partitions);
+                long previous = -1;
+                while (!partitionHit && ids.hasNext()) {
+                    long id = ids.next();
+                    require(id > previous);
                     previous = id;
-                    partitionHit = matches[id];
+                    partitionHit = matches[(int) id];
                 }
                 if (!partitionHit) {
                     continue;
@@ -646,14 +518,16 @@ public final class ManifestSidecar {
             }
 
             if (bucketFilter != null && bucketPayload != null) {
+                DeltaRleReader pairs =
+                        new DeltaRleReader(
+                                bucketPayload.data, bucketPayload.count, 0, Long.MAX_VALUE);
                 boolean bucketHit = false;
                 long previous = -1;
-                while (!bucketHit && bucketPayload.hasRemaining()) {
-                    int bucket = bucketPayload.getInt();
-                    int totalBuckets = bucketPayload.getInt();
-                    require(bucket >= 0 && totalBuckets > bucket);
-                    long pair = ((long) bucket << 32) | totalBuckets;
-                    require(pair > previous);
+                while (!bucketHit && pairs.hasNext()) {
+                    long pair = pairs.next();
+                    int bucket = (int) (pair >>> 32);
+                    int totalBuckets = (int) pair;
+                    require(totalBuckets > bucket && pair > previous);
                     previous = pair;
                     bucketHit = bucketFilter.test(bucket, totalBuckets);
                 }
@@ -667,9 +541,19 @@ public final class ManifestSidecar {
         return new Selection(header, selected);
     }
 
-    /** Reads framing and exposes known payload elements without decoding their contents. */
+    private static final class Payload {
+        private final int count;
+        private final ByteBuffer data;
+
+        private Payload(int count, ByteBuffer data) {
+            this.count = count;
+            this.data = data;
+        }
+    }
+
+    /** Reads framing and counts without expanding the compressed contents. */
     @Nullable
-    private static ByteBuffer payload(ByteBuffer in, int elementBytes) throws IOException {
+    private static Payload payload(ByteBuffer in, long records) throws IOException {
         require(in.hasRemaining());
         int encoding = Byte.toUnsignedInt(in.get());
         if (encoding == 0) {
@@ -684,21 +568,104 @@ public final class ManifestSidecar {
         if (encoding != 1) {
             return null;
         }
-        require(result.remaining() >= Integer.BYTES);
-        int count = result.getInt();
-        require(count > 0 && result.remaining() == (long) elementBytes * count);
-        return result;
+        long count = readVarLong(result);
+        require(count > 0 && count <= records && count <= Integer.MAX_VALUE);
+        // At least an envelope (row IDs) or one delta run (partitions/buckets) must follow.
+        require(result.remaining() >= 2);
+        return new Payload((int) count, result);
     }
 
-    /** Bounded, bulk sidecar reads. Null means read the original manifest. */
+    /** Writes equal consecutive deltas as (run length, delta), both unsigned varints. */
+    private static final class DeltaRleWriter {
+        private final DataOutputStream out;
+        private long previous;
+        private long delta;
+        private long repeat;
+
+        private DeltaRleWriter(DataOutputStream out, long base) {
+            this.out = out;
+            previous = base;
+        }
+
+        private void add(long value) throws IOException {
+            require(value >= previous);
+            long nextDelta = value - previous;
+            if (repeat != 0 && nextDelta != delta) {
+                finish();
+            }
+            delta = nextDelta;
+            repeat++;
+            previous = value;
+        }
+
+        private void finish() throws IOException {
+            if (repeat > 0) {
+                encodeLong(out, repeat);
+                encodeLong(out, delta);
+                repeat = 0;
+            }
+        }
+    }
+
+    /** Decodes only requested values; a complete read also checks the payload boundary. */
+    private static final class DeltaRleReader {
+        private final ByteBuffer data;
+        private final long max;
+        private long remaining;
+        private long value;
+        private long repeat;
+        private long delta;
+
+        private DeltaRleReader(ByteBuffer data, long count, long base, long max)
+                throws IOException {
+            require(base >= 0 && max >= base);
+            this.data = data;
+            remaining = count;
+            value = base;
+            this.max = max;
+            require(count != 0 || !data.hasRemaining());
+        }
+
+        private boolean hasNext() {
+            return remaining > 0;
+        }
+
+        private long next() throws IOException {
+            require(remaining > 0);
+            if (repeat == 0) {
+                repeat = readVarLong(data);
+                delta = readVarLong(data);
+                require(repeat > 0 && repeat <= remaining);
+                require(delta == 0 || repeat <= (max - value) / delta);
+            }
+            value += delta;
+            repeat--;
+            remaining--;
+            require(remaining != 0 || (repeat == 0 && !data.hasRemaining()));
+            return value;
+        }
+    }
+
+    /** Nonnegative long encoded in one to nine canonical unsigned LEB128 bytes. */
+    private static long readVarLong(ByteBuffer in) throws IOException {
+        long value = 0;
+        for (int shift = 0; shift < 63; shift += 7) {
+            require(in.hasRemaining());
+            int b = Byte.toUnsignedInt(in.get());
+            value |= (long) (b & 0x7f) << shift;
+            if ((b & 0x80) == 0) {
+                require(shift == 0 || (b & 0x7f) != 0);
+                return value;
+            }
+        }
+        throw new IOException("Invalid manifest sidecar varint");
+    }
+
+    /** Reads the complete sidecar. Null means read the original manifest. */
     @Nullable
     public static Selection read(
-            FileIO io,
-            Path path,
-            ManifestFileMeta manifest,
-            @Nullable RowRangeIndex query,
-            Settings settings) {
-        return read(io, path, manifest, query, null, null, settings);
+            FileIO io, Path path, ManifestFileMeta manifest, @Nullable RowRangeIndex query) {
+        return read(io, path, manifest, query, null, null);
     }
 
     @Nullable
@@ -708,10 +675,8 @@ public final class ManifestSidecar {
             ManifestFileMeta manifest,
             @Nullable RowRangeIndex query,
             @Nullable PartitionPredicate partitionFilter,
-            @Nullable RowType partitionType,
-            Settings settings) {
-        return read(
-                io, path, manifest, query, partitionFilter, partitionType, null, settings, null);
+            @Nullable RowType partitionType) {
+        return read(io, path, manifest, query, partitionFilter, partitionType, null, null);
     }
 
     @Nullable
@@ -723,10 +688,9 @@ public final class ManifestSidecar {
             @Nullable PartitionPredicate partitionFilter,
             @Nullable RowType partitionType,
             @Nullable BiPredicate<Integer, Integer> bucketFilter,
-            Settings settings,
             @Nullable SegmentsCache<Object> cache) {
         String sidecarFileName = fileName(manifest);
-        if (sidecarFileName == null || settings.maxBytes < 128) {
+        if (sidecarFileName == null) {
             return null;
         }
         try {
@@ -736,16 +700,9 @@ public final class ManifestSidecar {
             byte[] data =
                     cacheHit
                             ? ((ManifestSidecarSegment) cached).bytes()
-                            : readBytes(io, sidecarPath, settings.maxBytes);
+                            : readBytes(io, sidecarPath);
             Selection selection =
-                    select(
-                            data,
-                            manifest,
-                            query,
-                            partitionFilter,
-                            partitionType,
-                            bucketFilter,
-                            settings);
+                    select(data, manifest, query, partitionFilter, partitionType, bucketFilter);
             if (cache != null && !cacheHit && data.length <= cache.maxElementSize()) {
                 cache.put(sidecarPath, new ManifestSidecarSegment(data));
             }
@@ -777,14 +734,12 @@ public final class ManifestSidecar {
         }
     }
 
-    private static byte[] readBytes(FileIO io, Path path, int maxBytes) throws IOException {
+    private static byte[] readBytes(FileIO io, Path path) throws IOException {
         try (InputStream in = io.newInputStream(path)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[Math.min(READ_BUFFER_BYTES, maxBytes + 1)];
+            byte[] buffer = new byte[READ_BUFFER_BYTES];
             int n;
-            while ((n = in.read(buffer, 0, Math.min(buffer.length, maxBytes + 1 - out.size())))
-                    != -1) {
-                require(n <= maxBytes - out.size());
+            while ((n = in.read(buffer, 0, buffer.length)) != -1) {
                 out.write(buffer, 0, n);
             }
             return out.toByteArray();
@@ -1034,8 +989,7 @@ public final class ManifestSidecar {
 
     private static void require(boolean valid) throws IOException {
         if (!valid) {
-            throw new IOException(
-                    "Invalid, unsupported, mismatched or over-budget manifest sidecar");
+            throw new IOException("Invalid, unsupported or mismatched manifest sidecar");
         }
     }
 

@@ -18,7 +18,8 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.SingleSegments;
 import org.apache.paimon.format.FileFormat;
@@ -29,8 +30,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestSidecar.ManifestSidecarSegment;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -40,6 +39,7 @@ import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SegmentsCache;
+import org.apache.paimon.utils.SerializationUtils;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -72,29 +72,8 @@ import static org.mockito.Mockito.when;
 
 /** Cross-language format, physical block positions, completeness and allocation bounds. */
 class ManifestSidecarTest {
-    static final ConfigOption<MemorySize> MAX_BYTES =
-            ConfigOptions.key("test.sidecar.max-bytes")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(16));
-
-    static ManifestSidecar.Settings settings(Options options, int partitions) {
-        CoreOptions core = new CoreOptions(options);
-        return new ManifestSidecar.Settings(
-                options.get(MAX_BYTES).getBytes(),
-                partitions > 0,
-                core.dataEvolutionEnabled(),
-                core.bucket() != -1);
-    }
-
     @TempDir java.nio.file.Path temp;
-    private final ManifestSidecar.Settings settings = settings(sidecarOptions(), 2);
-
-    static Options sidecarOptions() {
-        Options options = new Options();
-        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
-        options.set(CoreOptions.BUCKET, 4);
-        return options;
-    }
+    private final ManifestSidecar.Settings settings = new ManifestSidecar.Settings(true, true);
 
     static ManifestFileMeta meta(String name, long size, long entries) {
         ManifestFileMeta meta = mock(ManifestFileMeta.class);
@@ -124,6 +103,15 @@ class ManifestSidecarTest {
 
     private ManifestFileMeta goldenMeta() throws IOException {
         return meta("manifest-golden", header().length + 400, 7);
+    }
+
+    @Test
+    void emptyManifestHasACompleteSidecar() throws Exception {
+        byte[] header = header();
+        byte[] data = new ManifestSidecar.Builder(settings, header).serialize(header.length, 0);
+        assertThat(ByteBuffer.wrap(data).getInt()).isEqualTo(0x504d5343);
+        assertThat(ManifestSidecar.select(data, meta("empty", header.length, 0), null).blocks())
+                .isEmpty();
     }
 
     @Test
@@ -170,8 +158,7 @@ class ManifestSidecarTest {
                                             new Range(3000000000L, 3000000000L))),
                             null,
                             DEFAULT_PART_TYPE,
-                            (bucket, totalBuckets) -> bucket == 1 && totalBuckets == 4,
-                            settings);
+                            (bucket, totalBuckets) -> bucket == 1 && totalBuckets == 4);
             assertThat(selected.blocks()).hasSize(2);
             List<ManifestEntry> expected = new ArrayList<>();
             for (ManifestSidecar.Block block : selected.blocks()) {
@@ -226,7 +213,7 @@ class ManifestSidecarTest {
         builder.add(20L, 5);
         builder.add(Long.MAX_VALUE, 1);
         builder.endBlock();
-        byte[] data = builder.serialize("manifest-golden", header.length + 400, 7);
+        byte[] data = builder.serialize(header.length + 400, 7);
         assertThat(data).isEqualTo(golden());
         ManifestFileMeta meta = goldenMeta();
         for (long point :
@@ -261,34 +248,8 @@ class ManifestSidecarTest {
         assertThat(gap.blocks()).isEmpty();
         RowRangeIndex query =
                 RowRangeIndex.create(Arrays.asList(new Range(10, 19), new Range(25, 40)));
-        assertThat(ManifestSidecar.select(data, meta, query, settings).blocks()).isEmpty();
+        assertThat(ManifestSidecar.select(data, meta, query).blocks()).isEmpty();
         assertThat(query.ranges()).containsExactly(new Range(10, 19), new Range(25, 40));
-    }
-
-    @Test
-    void settingsEnforceByteArraySizeLimit() {
-        for (long bytes :
-                new long[] {0, 127, Integer.MAX_VALUE - 1L, Integer.MAX_VALUE, Long.MAX_VALUE}) {
-            assertThat(new ManifestSidecar.Settings(bytes, true, true, true).maxBytes)
-                    .isEqualTo((int) Math.min(bytes, Integer.MAX_VALUE - 1L));
-        }
-        assertThatThrownBy(() -> new ManifestSidecar.Settings(-1, true, true, true))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void insufficientByteBudgetSkipsSidecarIo() throws Exception {
-        FileIO io = mock(FileIO.class);
-        Path path = new Path(temp.toString(), "manifest-golden");
-        ManifestFileMeta meta = goldenMeta();
-        for (int bytes : new int[] {0, 1, 127}) {
-            Options options = sidecarOptions();
-            options.set(MAX_BYTES, new MemorySize(bytes));
-            ManifestSidecar.Settings settings = settings(options, 2);
-            assertThat(ManifestSidecar.read(io, path, meta, null, settings)).isNull();
-            assertThat(ManifestSidecar.build(io, path, meta.fileSize(), 7, settings)).isNull();
-        }
-        verifyNoInteractions(io);
     }
 
     @Test
@@ -306,11 +267,11 @@ class ManifestSidecarTest {
         builder.beginBlock(header.length + 200, 100, 1);
         builder.add(1L << 32, 10);
         builder.endBlock();
-        byte[] data = builder.serialize("m", header.length + 300, 5);
+        byte[] data = builder.serialize(header.length + 300, 5);
         ManifestFileMeta meta = meta("m", header.length + 300, 5);
         RowRangeIndex outside =
                 spy(RowRangeIndex.create(Collections.singletonList(new Range(50, 59))));
-        ManifestSidecar.Selection none = ManifestSidecar.select(data, meta, outside, settings);
+        ManifestSidecar.Selection none = ManifestSidecar.select(data, meta, outside);
         assertThat(none.blocks()).isEmpty();
 
         // Only the three envelopes are tested; no individual interval intersection is evaluated.
@@ -324,7 +285,7 @@ class ManifestSidecarTest {
                         RowRangeIndex.create(
                                 Collections.singletonList(
                                         new Range((1L << 32) + 9, (1L << 32) + 9))));
-        ManifestSidecar.Selection hit = ManifestSidecar.select(data, meta, one, settings);
+        ManifestSidecar.Selection hit = ManifestSidecar.select(data, meta, one);
         assertThat(hit.blocks()).extracting(b -> b.firstRecord).containsExactly(4L);
 
         // A one-interval block needs no second intersection check after its envelope matches.
@@ -343,15 +304,14 @@ class ManifestSidecarTest {
             builder.beginBlock(header.length, 100, 1);
             builder.add(range.from, range.to - range.from + 1);
             builder.endBlock();
-            byte[] data = builder.serialize("m", header.length + 100, 1);
+            byte[] data = builder.serialize(header.length + 100, 1);
             ManifestFileMeta meta = meta("m", header.length + 100, 1);
-            assertThat(ManifestSidecar.select(data, meta, null, settings).blocks()).hasSize(1);
+            assertThat(ManifestSidecar.select(data, meta, null).blocks()).hasSize(1);
             assertThat(
                             ManifestSidecar.select(
                                             data,
                                             meta,
-                                            RowRangeIndex.create(Collections.emptyList()),
-                                            settings)
+                                            RowRangeIndex.create(Collections.emptyList()))
                                     .blocks())
                     .isEmpty();
             for (long point : new long[] {range.from, range.to}) {
@@ -359,70 +319,12 @@ class ManifestSidecarTest {
                         spy(
                                 RowRangeIndex.create(
                                         Collections.singletonList(new Range(point, point))));
-                assertThat(ManifestSidecar.select(data, meta, query, settings).blocks()).hasSize(1);
+                assertThat(ManifestSidecar.select(data, meta, query).blocks()).hasSize(1);
                 verify(query).intersects(range.from, range.to);
             }
             long missing = range.from > 0 ? range.from - 1 : range.to + 1;
             assertThat(select(data, meta, missing).blocks()).isEmpty();
         }
-    }
-
-    @Test
-    void malformedConsumedIntervalsStillFallBack() throws Exception {
-        int firstBlockIntervals = 60 + 4 + header().length + 4 + 4 + 24 + 1 + 5 + 4;
-        ManifestFileMeta meta = goldenMeta();
-        for (long[] mutation : new long[][] {{0, -1}, {8, -1}, {8, 30}, {16, 9}, {24, 19}}) {
-            byte[] data = golden();
-            ByteBuffer.wrap(data).putLong(firstBlockIntervals + (int) mutation[0], mutation[1]);
-            byte[] hash =
-                    MessageDigest.getInstance("SHA-256")
-                            .digest(Arrays.copyOf(data, data.length - 32));
-            System.arraycopy(hash, 0, data, data.length - 32, 32);
-            Files.write(temp.resolve("manifest-golden" + ManifestSidecar.SUFFIX), data);
-            for (RowRangeIndex query :
-                    Collections.singletonList(
-                            RowRangeIndex.create(Collections.singletonList(new Range(15, 15))))) {
-                assertThat(
-                                ManifestSidecar.read(
-                                        LocalFileIO.create(),
-                                        new Path(temp.toString(), "manifest-golden"),
-                                        meta,
-                                        query,
-                                        settings))
-                        .isNull();
-            }
-        }
-    }
-
-    @Test
-    void rowBoundsAndMatchesSkipUnusedIntervals() throws Exception {
-        byte[] header = header();
-        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
-        builder.beginBlock(header.length, 100, 3);
-        builder.add(0L, 10);
-        builder.add(20L, 10);
-        builder.add(40L, 10);
-        builder.endBlock();
-        byte[] data = builder.serialize("m", header.length + 100, 3);
-        int intervals = 60 + 4 + header.length + 4 + 4 + 24 + 1 + 5 + 4;
-        // A checksummed invalid tail must not be visited once the answer is known.
-        ByteBuffer.wrap(data).putLong(intervals + 32, 19);
-        byte[] hash =
-                MessageDigest.getInstance("SHA-256").digest(Arrays.copyOf(data, data.length - 32));
-        System.arraycopy(hash, 0, data, data.length - 32, 32);
-        ManifestFileMeta meta = meta("m", header.length + 100, 3);
-        assertThat(select(data, meta, 0).blocks()).hasSize(1);
-        assertThat(select(data, meta, 20).blocks()).hasSize(1);
-        assertThat(select(data, meta, 100).blocks()).isEmpty();
-        assertThat(
-                        ManifestSidecar.select(
-                                        data,
-                                        meta,
-                                        RowRangeIndex.create(Collections.emptyList()),
-                                        settings)
-                                .blocks())
-                .isEmpty();
-        assertThatThrownBy(() -> select(data, meta, 35)).isInstanceOf(IOException.class);
     }
 
     @Test
@@ -433,7 +335,7 @@ class ManifestSidecarTest {
         builder.add(0L, Long.MAX_VALUE);
         builder.add(Long.MAX_VALUE, 1);
         builder.endBlock();
-        byte[] data = builder.serialize("m", header.length + 100, 2);
+        byte[] data = builder.serialize(header.length + 100, 2);
         assertThat(data.length).isLessThan(512);
         assertThat(select(data, meta("m", header.length + 100, 2), Long.MAX_VALUE).blocks())
                 .hasSize(1);
@@ -444,7 +346,7 @@ class ManifestSidecarTest {
             builder.endBlock();
             assertThat(
                             select(
-                                            builder.serialize("m", header.length + 100, 1),
+                                            builder.serialize(header.length + 100, 1),
                                             meta("m", header.length + 100, 1),
                                             100)
                                     .blocks())
@@ -457,15 +359,13 @@ class ManifestSidecarTest {
             builder.endBlock();
             assertThat(
                             select(
-                                            builder.serialize("m", header.length + 100, 1),
+                                            builder.serialize(header.length + 100, 1),
                                             meta("m", header.length + 100, 1),
                                             100)
                                     .blocks())
                     .hasSize(1);
         }
-        Options options = sidecarOptions();
-        options.set(MAX_BYTES, new MemorySize(512));
-        builder = new ManifestSidecar.Builder(settings(options, 2), header);
+        builder = new ManifestSidecar.Builder(settings, header);
         builder.beginBlock(header.length, 100, 64);
         for (int i = 0; i < 64; i++) {
             builder.add(i * 10L, 1);
@@ -473,18 +373,15 @@ class ManifestSidecarTest {
         builder.endBlock();
         assertThat(
                         select(
-                                        builder.serialize("m", header.length + 100, 64),
+                                        builder.serialize(header.length + 100, 64),
                                         meta("m", header.length + 100, 64),
                                         5)
                                 .blocks())
-                .hasSize(1);
-        options.set(MAX_BYTES, new MemorySize(128));
-        builder = new ManifestSidecar.Builder(settings(options, 2), header);
-        assertThat(builder.serialize("m", 1, 2)).isNull();
+                .isEmpty();
     }
 
     @Test
-    void cacheRespectsElementThresholdAndPerReadByteBudget() throws Exception {
+    void cacheRespectsElementThreshold() throws Exception {
         byte[] data = golden();
         Path path = new Path(temp.toString(), "manifest-golden");
         Path sidecar = ManifestSidecar.path(path);
@@ -493,18 +390,15 @@ class ManifestSidecarTest {
         FileIO io = spy(LocalFileIO.create());
         SegmentsCache<Object> tooSmall =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), data.length - 1L, null, false);
-        assertThat(readCached(io, path, meta, settings, tooSmall).blocks()).hasSize(2);
-        assertThat(readCached(io, path, meta, settings, tooSmall).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, tooSmall).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, tooSmall).blocks()).hasSize(2);
         assertThat(tooSmall.getIfPresents(sidecar)).isNull();
         verify(io, times(2)).newInputStream(sidecar);
 
         SegmentsCache<Object> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), data.length, null, false);
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
-        Options options = sidecarOptions();
-        options.set(MAX_BYTES, new MemorySize(data.length - 1));
-        assertThat(readCached(io, path, meta, settings(options, 2), cache)).isNull();
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         verify(io, times(3)).newInputStream(sidecar);
     }
 
@@ -519,12 +413,12 @@ class ManifestSidecarTest {
         cache.put(sidecar, new SingleSegments(MemorySegment.wrap(data), data.length));
         FileIO io = spy(LocalFileIO.create());
 
-        assertThat(readCached(io, path, goldenMeta(), settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, goldenMeta(), cache).blocks()).hasSize(2);
         assertThat(cache.getIfPresents(sidecar)).isInstanceOf(ManifestSidecarSegment.class);
         ManifestSidecarSegment cached = (ManifestSidecarSegment) cache.getIfPresents(sidecar);
         assertThat(cached.bytes()).containsExactly(data);
         assertThat(cached.totalMemorySize()).isEqualTo(data.length);
-        assertThat(readCached(io, path, goldenMeta(), settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, goldenMeta(), cache).blocks()).hasSize(2);
         verify(io, times(1)).newInputStream(sidecar);
     }
 
@@ -537,16 +431,16 @@ class ManifestSidecarTest {
         FileIO io = spy(LocalFileIO.create());
         SegmentsCache<Object> cache =
                 new SegmentsCache<>(1024, MemorySize.ofMebiBytes(1), Long.MAX_VALUE, null, false);
-        assertThat(readCached(io, path, meta, settings, cache)).isNull();
+        assertThat(readCached(io, path, meta, cache)).isNull();
         assertThat(cache.getIfPresents(sidecar)).isNull();
         byte[] corrupt = data.clone();
         corrupt[0] ^= 1;
         Files.write(temp.resolve(sidecar.getName()), corrupt);
-        assertThat(readCached(io, path, meta, settings, cache)).isNull();
+        assertThat(readCached(io, path, meta, cache)).isNull();
         assertThat(cache.getIfPresents(sidecar)).isNull();
         Files.write(temp.resolve(sidecar.getName()), data);
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         verify(io, times(3)).newInputStream(sidecar);
     }
 
@@ -565,28 +459,22 @@ class ManifestSidecarTest {
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, cancelled, null, null, null, settings,
-                                        cache))
+                                        io, path, meta, cancelled, null, null, null, cache))
                 .isInstanceOf(CancellationException.class);
         assertThat(cache.getIfPresents(sidecar)).isNull();
 
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.read(
-                                        io, path, meta, cancelled, null, null, null, settings,
-                                        cache))
+                                        io, path, meta, cancelled, null, null, null, cache))
                 .isInstanceOf(CancellationException.class);
-        assertThat(readCached(io, path, meta, settings, cache).blocks()).hasSize(2);
+        assertThat(readCached(io, path, meta, cache).blocks()).hasSize(2);
         verify(io, times(2)).newInputStream(sidecar);
     }
 
     private ManifestSidecar.Selection readCached(
-            FileIO io,
-            Path path,
-            ManifestFileMeta meta,
-            ManifestSidecar.Settings settings,
-            SegmentsCache<Object> cache) {
+            FileIO io, Path path, ManifestFileMeta meta, SegmentsCache<Object> cache) {
         return ManifestSidecar.read(
                 io,
                 path,
@@ -595,7 +483,6 @@ class ManifestSidecarTest {
                 null,
                 null,
                 null,
-                settings,
                 cache);
     }
 
@@ -606,39 +493,49 @@ class ManifestSidecarTest {
         ManifestFileMeta meta = goldenMeta();
         RowRangeIndex query = RowRangeIndex.create(Collections.singletonList(new Range(11, 11)));
 
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query, settings))
-                .isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         byte[] good = golden();
         for (int position : new int[] {0, 9, 11, 15, 16, 55, 63, 67, 75, good.length - 1}) {
             byte[] bad = good.clone();
             bad[position] ^= 2;
             Files.write(index, bad);
-            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query, settings))
-                    .isNull();
+            assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         }
         // A valid checksum cannot make an unsupported container version readable.
         for (int version : new int[] {0, 2, 99}) {
             byte[] bad = good.clone();
-            ByteBuffer.wrap(bad).putInt(8, version);
+            ByteBuffer.wrap(bad).putInt(4, version);
             byte[] hash =
                     MessageDigest.getInstance("SHA-256")
                             .digest(Arrays.copyOf(bad, bad.length - 32));
             System.arraycopy(hash, 0, bad, bad.length - 32, 32);
-            assertThatThrownBy(() -> ManifestSidecar.select(bad, meta, query, settings))
+            assertThatThrownBy(() -> ManifestSidecar.select(bad, meta, query))
                     .isInstanceOf(IOException.class);
         }
         Files.write(index, Arrays.copyOf(good, good.length - 1));
-        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query, settings))
-                .isNull();
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query)).isNull();
         Files.write(index, good);
-        assertThat(
-                        ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query, settings)
-                                .blocks())
+        assertThat(ManifestSidecar.read(LocalFileIO.create(), manifest, meta, query).blocks())
                 .isEmpty();
+        // The sidecar is bound to physical coverage, not to a particular file name.
+        assertThat(
+                        ManifestSidecar.select(
+                                        good,
+                                        meta("renamed", meta.fileSize(), 7),
+                                        RowRangeIndex.create(
+                                                Collections.singletonList(new Range(20, 20))))
+                                .blocks())
+                .extracting(block -> block.firstRecord)
+                .containsExactly(0L, 5L);
         assertThatThrownBy(
                         () ->
                                 ManifestSidecar.select(
-                                        good, meta("other", meta.fileSize(), 7), query, settings))
+                                        good, meta("renamed", meta.fileSize() + 1, 7), query))
+                .isInstanceOf(IOException.class);
+        assertThatThrownBy(
+                        () ->
+                                ManifestSidecar.select(
+                                        good, meta("renamed", meta.fileSize(), 8), query))
                 .isInstanceOf(IOException.class);
     }
 
@@ -656,8 +553,7 @@ class ManifestSidecarTest {
                         suppressed)) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null, settings))
-                    .isNull();
+            assertThat(ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null)).isNull();
             assertThat(Thread.currentThread().isInterrupted()).isFalse();
         }
     }
@@ -670,10 +566,7 @@ class ManifestSidecarTest {
         when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
         try {
             Thread.currentThread().interrupt();
-            assertThatThrownBy(
-                            () ->
-                                    ManifestSidecar.read(
-                                            fileIO, path, meta("m", 1, 1), null, settings))
+            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
                     .isInstanceOf(java.io.UncheckedIOException.class)
                     .hasCauseReference(failure);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
@@ -693,10 +586,7 @@ class ManifestSidecarTest {
                         new AssertionError("error"))) {
             FileIO fileIO = mock(FileIO.class);
             when(fileIO.newInputStream(ManifestSidecar.path(path))).thenThrow(failure);
-            assertThatThrownBy(
-                            () ->
-                                    ManifestSidecar.read(
-                                            fileIO, path, meta("m", 1, 1), null, settings))
+            assertThatThrownBy(() -> ManifestSidecar.read(fileIO, path, meta("m", 1, 1), null))
                     .isSameAs(failure);
         }
     }
@@ -712,7 +602,7 @@ class ManifestSidecarTest {
                 builder.endBlock();
             }
             long size = header.length + blockCount * 100L;
-            byte[] data = builder.serialize("manifest-large", size, blockCount);
+            byte[] data = builder.serialize(size, blockCount);
             ManifestFileMeta meta = meta("manifest-large", size, blockCount);
             CountingInput stream = new CountingInput(data, Integer.MAX_VALUE);
             Path path = new Path(temp.toString(), meta.fileName());
@@ -723,8 +613,7 @@ class ManifestSidecarTest {
                             io,
                             path,
                             meta,
-                            RowRangeIndex.create(Collections.singletonList(new Range(0, 0))),
-                            settings);
+                            RowRangeIndex.create(Collections.singletonList(new Range(0, 0))));
             assertThat(actual.blocks()).hasSize(1);
             assertThat(actual.blocks().get(0).offset).isEqualTo(header.length);
             assertThat(stream.readLengths).hasSize((data.length + (1 << 20) - 1) / (1 << 20));
@@ -734,10 +623,40 @@ class ManifestSidecarTest {
     }
 
     @Test
-    void indexShortReadsAndExactBudget() throws Exception {
+    void sidecarsLargerThanTheFormerDefaultLimitAreReadCompletely() throws Exception {
+        byte[] header = header();
+        BinaryRow partition = new BinaryRow(1);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(partition);
+        byte[] value = new byte[17 * 1024 * 1024];
+        rowWriter.writeBinary(0, value, 0, value.length);
+        rowWriter.complete();
+        ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
+        builder.beginBlock(header.length, 100, 1);
+        builder.add(0L, 1, SerializationUtils.serializeBinaryRow(partition));
+        builder.endBlock();
+        byte[] data = builder.serialize(header.length + 100, 1);
+        assertThat(data.length).isGreaterThan(16 * 1024 * 1024);
+        Path path = new Path(temp.toString(), "manifest-large");
+        CountingInput stream = new CountingInput(data, Integer.MAX_VALUE);
+        FileIO io = mock(FileIO.class);
+        when(io.newInputStream(ManifestSidecar.path(path))).thenReturn(stream);
+        assertThat(
+                        ManifestSidecar.read(
+                                        io,
+                                        path,
+                                        meta("manifest-large", header.length + 100, 1),
+                                        null)
+                                .blocks())
+                .hasSize(1);
+        assertThat(stream.readLengths.stream().mapToInt(Integer::intValue).sum())
+                .isEqualTo(data.length);
+        assertThat(stream.requests).allMatch(request -> request <= 1 << 20);
+        assertThat(stream.closed).isTrue();
+    }
+
+    @Test
+    void indexShortReadsReadTheWholeFile() throws Exception {
         byte[] data = golden();
-        Options options = sidecarOptions();
-        options.set(MAX_BYTES, new MemorySize(data.length));
         Path path = new Path(temp.toString(), "manifest-golden");
         for (int maxRead : new int[] {Integer.MAX_VALUE, 7}) {
             CountingInput stream = new CountingInput(data, maxRead);
@@ -748,33 +667,12 @@ class ManifestSidecarTest {
                             io,
                             path,
                             goldenMeta(),
-                            RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
-                            settings(options, 2));
+                            RowRangeIndex.create(Collections.singletonList(new Range(20, 20))));
             assertThat(actual.blocks())
                     .extracting(block -> block.firstRecord)
                     .containsExactly(0L, 5L);
             assertThat(stream.closed).isTrue();
         }
-    }
-
-    @Test
-    void indexOverBudgetStopsAfterOneExtraByte() throws Exception {
-        Options options = sidecarOptions();
-        options.set(MAX_BYTES, new MemorySize(128));
-        Path path = new Path(temp.toString(), "manifest-golden");
-        CountingInput stream = new CountingInput(golden(), Integer.MAX_VALUE);
-        FileIO io = mock(FileIO.class);
-        when(io.newInputStream(ManifestSidecar.path(path))).thenReturn(stream);
-        assertThat(
-                        ManifestSidecar.read(
-                                io,
-                                path,
-                                goldenMeta(),
-                                RowRangeIndex.create(Collections.singletonList(new Range(20, 20))),
-                                settings(options, 2)))
-                .isNull();
-        assertThat(stream.readLengths).containsExactly(129);
-        assertThat(stream.closed).isTrue();
     }
 
     @Test
@@ -791,8 +689,7 @@ class ManifestSidecarTest {
                         RowRangeIndex.create(
                                 Arrays.asList(
                                         new Range(0, 0),
-                                        new Range(8254058425445L, 8254058425445L))),
-                        settings);
+                                        new Range(8254058425445L, 8254058425445L))));
         byte[] manifest = Arrays.copyOf(header, header.length + body.length);
         System.arraycopy(body, 0, manifest, header.length, body.length);
         CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
@@ -864,8 +761,7 @@ class ManifestSidecarTest {
                         golden(),
                         goldenMeta(),
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
             assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
         }
@@ -920,8 +816,7 @@ class ManifestSidecarTest {
                         golden(),
                         goldenMeta(),
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
             assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
         }
@@ -950,8 +845,7 @@ class ManifestSidecarTest {
                         golden(),
                         goldenMeta(),
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
             assertThatThrownBy(() -> IOUtils.readFully(in, false)).isInstanceOf(EOFException.class);
         }
@@ -979,8 +873,7 @@ class ManifestSidecarTest {
                         golden(),
                         goldenMeta(),
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         for (int round = 0; round < 2; round++) {
             try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
                 assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
@@ -1006,7 +899,7 @@ class ManifestSidecarTest {
         byte[] manifest = Arrays.copyOf(header, header.length + cachedLength + uncachedLength);
         Arrays.fill(manifest, header.length, header.length + cachedLength, (byte) 7);
         Arrays.fill(manifest, header.length + cachedLength, manifest.length, (byte) 9);
-        byte[] data = builder.serialize("large", manifest.length, 2);
+        byte[] data = builder.serialize(manifest.length, 2);
         ManifestFileMeta meta = meta("large", manifest.length, 2);
         Path path = new Path(temp.toString(), "large");
         FileIO io = mock(FileIO.class);
@@ -1026,8 +919,7 @@ class ManifestSidecarTest {
                         data,
                         meta,
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
             assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
         }
@@ -1055,7 +947,7 @@ class ManifestSidecarTest {
             builder.endBlock();
             offset += length;
         }
-        byte[] data = builder.serialize("manifest-large", offset, 3);
+        byte[] data = builder.serialize(offset, 3);
         byte[] manifest = Arrays.copyOf(header, (int) offset);
         CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
         FileIO io = mock(FileIO.class);
@@ -1080,8 +972,7 @@ class ManifestSidecarTest {
                         golden(),
                         goldenMeta(),
                         RowRangeIndex.create(
-                                Collections.singletonList(new Range(0, Long.MAX_VALUE))),
-                        settings);
+                                Collections.singletonList(new Range(0, Long.MAX_VALUE))));
         for (int bodyLength : new int[] {400, 399}) {
             byte[] manifest = Arrays.copyOf(header, header.length + bodyLength);
             CountingInput stream = new CountingInput(manifest, 7);
@@ -1139,7 +1030,6 @@ class ManifestSidecarTest {
         return ManifestSidecar.select(
                 data,
                 meta,
-                RowRangeIndex.create(Collections.singletonList(new Range(point, point))),
-                settings);
+                RowRangeIndex.create(Collections.singletonList(new Range(point, point))));
     }
 }

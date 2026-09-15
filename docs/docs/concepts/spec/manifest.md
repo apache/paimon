@@ -77,23 +77,23 @@ sidecar references, managing file ownership, applying entry filters and reconcil
 entries after block selection. `build` reads the completed physical manifest and returns sidecar
 bytes; it does not write or publish another file.
 
-`Settings` takes a byte budget and separate booleans for partition, row-ID and bucket payload
-generation. A disabled dimension uses encoding 0 and has no length or payload bytes. The
-partition dictionary is empty when partition generation is disabled. These generation settings
-do not prevent readers from using payloads already present in a sidecar.
+`Settings` enables row-ID and bucket payload generation independently. Partition generation is
+always enabled, including the empty partition tuple for unpartitioned tables. Missing or invalid
+metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
+construction keeps complete coverage and `read` consumes the entire file once it is opened.
 
 `read` returns null for an absent sidecar reference or an `IOException`, allowing the caller
 to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
 `UncheckedIOException`. Other exceptions and errors propagate unchanged. `select` validates
 supplied bytes directly and reports invalid containers with `IOException`.
 
-Version 1 uses the following layout. Container integers and payload integers
-are fixed-width big endian. Encoding IDs are unsigned bytes with separate namespaces.
+Version 1 uses the following layout. Container `int` and `long` fields are signed, fixed-width
+4-byte and 8-byte big-endian integers. Encoding IDs are unsigned bytes with separate namespaces.
+Payload integers use the variable-length encoding described below.
 
 ```text
-magic : 8 bytes                         // ASCII PAIMSCAR
+magic : 4 bytes                         // ASCII PMSC
 formatVersion : int                    // 1
-manifestNameHash : 32 bytes             // SHA-256 of the UTF-8 basename
 manifestLength : long
 manifestEntryCount : long               // ADD + DELETE
 avroHeaderLength : int
@@ -122,84 +122,100 @@ blocks[]                               // original physical order
 checksum : 32 bytes                     // SHA-256 of all preceding bytes
 ```
 
-The block ID is its position. Its first entry ordinal is the sum of preceding record
-counts and is not stored. Each complete partition tuple appears once in the dictionary,
-including all its fields and nulls. The scan's partition type interprets the existing
-serialized tuple. Partition predicates are evaluated once per dictionary entry.
+The sidecar contains no manifest-name hash. Renaming the manifest does not change sidecar
+bytes. Its stored length and entry count must match the supplied manifest metadata; the
+caller must associate the sidecar with the correct immutable manifest through its reference.
+
+The block ID is its position. Its first entry ordinal is the sum of preceding record counts
+and is not stored. Each complete partition tuple appears once in the dictionary, including
+all its fields and nulls. The scan's partition type interprets the existing serialized tuple.
+Partition predicates are evaluated once per dictionary entry.
 
 | Dimension | Encoding | Payload |
 | --- | --- | --- |
 | Any | `0` | Unavailable; only the encoding byte is present. |
-| Partition | `1` | Positive `partitionIdCount: int` followed by sorted unique dictionary IDs (`int`). |
-| Row ID | `1` | Positive `rangeCount: int` followed by sorted disjoint inclusive `(start: long, end: long)` pairs. Coverage may conservatively include gaps. |
-| Bucket | `1` | Positive `pairCount: int` followed by sorted unique `(bucket: int, totalBuckets: int)` pairs. |
-| Any | Other nonzero ID | Skip exactly the bounded payload length; treat only this dimension as unavailable. |
+| Partition | `1` | Count and delta/RLE-compressed sorted unique dictionary IDs. |
+| Row ID | `1` | Interval count, minimum, span, and delta/RLE-compressed interior endpoints. |
+| Bucket | `1` | Count and delta/RLE-compressed sorted unique packed bucket/count pairs. |
+| Any | Other nonzero ID | Skip the declared payload length; treat only this dimension as unavailable. |
 
-Only nonzero encodings are followed by a length and payload. Payload lengths exclude
-the encoding and length fields, but include the count at the start of the payload.
-For all three encoding-1 payloads below, `int` is a signed 4-byte integer and `long` is
-a signed 8-byte integer, both big endian. Elements have no padding, per-element length
-prefixes, or Avro variable-length integer encoding. Counts must be positive; encoding 0
-represents unavailable coverage, rather than encoding 1 with a zero count.
+Only nonzero encodings are followed by a length and payload. Payload lengths exclude the
+encoding and length fields, but include the count and other fields within the payload.
+All three encoding-1 payloads have positive counts no greater than the block's record count.
+Encoding 0 represents unavailable coverage, rather than encoding 1 with a zero count.
+
+#### Delta and RLE Encoding
+
+Every integer inside an encoding-1 payload is a nonnegative unsigned LEB128 varint, using
+one to nine bytes for values from 0 through `Long.MAX_VALUE`. Seven value bits are stored
+per byte, least significant group first; the high bit indicates another byte follows.
+Encodings use the shortest representation. There is no ZigZag transformation or padding.
+
+A sorted sequence is delta-encoded from a specified base. Consecutive equal deltas are
+stored as runs:
+
+```text
+runs[]
+  repeatCount : varint                 // positive number of values produced
+  delta : varint                       // add delta for each value in the run
+```
+
+Starting with `previous = base`, a run produces `repeatCount` successive values by adding
+`delta` each time. Run counts must sum to the dimension's expected value count. Decoders
+consume values lazily, check overflow and the applicable value bounds, and require the
+payload to end when all expected values have been consumed. They do not allocate expanded
+arrays for runs.
 
 #### Partition Payload
 
-When `partitionEncoding == 1`, the block stores the IDs of all distinct partition tuples
+When `partitionEncoding == 1`, the block stores IDs of all distinct partition tuples
 represented by its entries:
 
 ```text
 partitionPayload
-  partitionIdCount : int               // N > 0
-  partitionIds[N] : int                // N consecutive 4-byte dictionary IDs
-
-partitionPayloadLength = 4 + 4 * N
+  partitionIdCount : varint            // N > 0
+  runs[]                              // N dictionary IDs, base = 0
 ```
 
-An ID is the zero-based position of a complete tuple in the sidecar's shared
-`partitionDictionary`, not an individual partition field or an entry ordinal. Valid IDs
-satisfy `0 <= id < partitionCount` and are strictly increasing, with no duplicates.
-The tuple bytes appear only in the dictionary; they are not repeated in each block's payload.
-For example, IDs `[0, 3]` are stored as the three integers `[2, 0, 3]`, occupying 12 payload
-bytes, or 17 bytes including `partitionEncoding` and `partitionPayloadLength`.
+An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
+IDs satisfy `0 <= id < partitionCount` and are strictly increasing. Tuple bytes appear only
+in the dictionary and are not repeated in each block. For IDs `[0, 1, 2, 3, 4]`, the deltas
+are `[0, 1, 1, 1, 1]` and the runs are `(1, 0), (4, 1)`. The complete payload bytes are
+`[5, 1, 0, 4, 1]`: 5 bytes, or 10 bytes including the encoding and length fields.
 
-With a partition filter, the block matches if any referenced dictionary tuple matches.
-A tuple containing a null partition value can still have a valid dictionary ID. If any
-entry's partition tuple is unavailable, or partition coverage cannot fit its budget, the
-block uses encoding 0 so that missing dictionary coverage cannot exclude it.
+With a partition filter, a block matches if any referenced tuple matches. A tuple containing
+a null partition value still has a dictionary ID. Unpartitioned tables record the empty
+tuple. If any entry's entire partition tuple is unavailable, the block uses encoding 0,
+so a dictionary miss cannot exclude that block. Later blocks can still use existing IDs.
 
 #### Row-ID Payload
 
-When `rowIdEncoding == 1`, the block stores inclusive row-ID intervals:
+The writer merges overlapping and adjacent inclusive intervals contributed by entries.
+An entry contributes `[firstRowId, firstRowId + rowCount - 1]`. The resulting intervals are
+sorted and disjoint; they are never expanded into individual row IDs or coarsened to include gaps.
 
 ```text
 rowIdPayload
-  rangeCount : int                     // N > 0
-  ranges[N]
-    start : long                       // inclusive first row ID
-    end : long                         // inclusive last row ID
-
-rowIdPayloadLength = 4 + 16 * N
+  rangeCount : varint                  // N > 0
+  min : varint                         // first interval's start
+  span : varint                        // last interval's end minus min
+  runs[]                              // 2 * (N - 1) interior endpoints, base = min
 ```
 
-Each pair satisfies `0 <= start <= end <= Long.MAX_VALUE`. Pairs are ordered by `start`
-and do not overlap: each `start` is greater than the preceding `end`. The writer merges
-overlapping and adjacent intervals contributed by the entries. An entry contributes
-`[firstRowId, firstRowId + rowCount - 1]`; these are table row IDs, not manifest entry
-ordinals. `rangeCount` counts intervals, not entries or individual row IDs.
+The maximum is `min + span`, which must not exceed `Long.MAX_VALUE`. Flatten the intervals
+as `[start0, end0, start1, end1, ...]`. The first start is supplied by `min`, and the last
+end by `min + span`; only the remaining `2 * (N - 1)` interior endpoints are delta/RLE encoded.
+Pairing the reconstructed endpoints recovers the intervals. Each pair satisfies
+`0 <= start <= end <= Long.MAX_VALUE`; each following start must exceed the preceding end.
 
-There are no separate block min/max fields in this payload. The reader obtains the block
-minimum from the first pair's `start` and the maximum from the last pair's `end`. It tests
-this envelope first, then checks individual intervals if necessary. For example,
-`[(10, 19), (30, 39)]` is stored as `rangeCount = 2` followed by four longs. Its payload
-length is 36 bytes, or 41 bytes including the encoding and length fields. Its envelope
-is `[10, 39]`, but a query for row ID 25 does not match either interval.
+For `[(10, 19), (30, 39)]`, the count is 2, minimum is 10, and span is 29. The interior
+endpoints `[19, 30]` have deltas `[9, 11]` from base 10, encoded as `(1, 9), (1, 11)`.
+The complete payload bytes are `[2, 10, 29, 1, 9, 1, 11]`: 7 bytes, or 12 bytes with framing.
+For a single interval, the envelope completely defines the interval and no runs follow.
 
-If the exact union exceeds its available budget, the writer can store one conservative
-`[min,max]` pair using the same encoding. That payload has `rangeCount = 1` and length
-20 bytes; it can include gaps. There is no separate flag distinguishing a coarsened pair
-from an exact interval, so entry filtering remains necessary. Unknown or invalid row-ID
-metadata makes coverage unavailable for the block; further byte-budget degradation can
-also drop the payload entirely.
+The reader first tests the envelope without expanding any runs. A query for row ID 25
+passes the example's envelope check but matches neither interval. Unknown or invalid row-ID
+metadata makes that block's row-ID payload unavailable; partition and bucket coverage remain usable.
 
 #### Bucket Payload
 
@@ -207,91 +223,62 @@ When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
 
 ```text
 bucketPayload
-  pairCount : int                      // N > 0
-  pairs[N]
-    bucket : int                       // entry's bucket number
-    totalBuckets : int                 // entry's recorded total bucket count
+  pairCount : varint                   // N > 0
+  runs[]                              // N packed pairs, base = 0
 
-bucketPayloadLength = 4 + 8 * N
+packedPair = ((long) bucket << 32) | totalBuckets
 ```
 
-Each pair satisfies `0 <= bucket < totalBuckets`. Pairs are sorted by `bucket`, then
-`totalBuckets`, and deduplicated. `totalBuckets` comes from the entry's `_TOTAL_BUCKETS`;
-it is not the number of buckets represented by this block or the table's current bucket
-setting. The same bucket number can therefore occur with different totals after rescaling.
-For example, `[(1, 4), (1, 8), (3, 4)]` is stored as the seven integers
-`[3, 1, 4, 1, 8, 3, 4]`, occupying 28 payload bytes, or 33 bytes including the encoding
-and length fields. These pairs have no partition IDs or separate bucket min/max fields.
+Each pair satisfies `0 <= bucket < totalBuckets`. Packing places the bucket in the high
+32 bits and the recorded total bucket count in the low 32 bits. Packed values are nonnegative,
+sorted and unique, equivalent to sorting first by bucket and then by total bucket count.
+The decoder recovers `bucket = (int) (packedPair >>> 32)` and `totalBuckets = (int) packedPair`.
+The same bucket may occur with different totals after rescaling.
 
-Missing, invalid, negative/synthetic or over-budget bucket metadata makes that block's
-bucket coverage unavailable (encoding 0, no length or payload). Partition and row-ID
-coverage remain independently usable; no mutual-exclusion restriction is imposed.
+For `[(1, 4), (1, 8), (3, 4)]`, the packed values are `[4294967300, 4294967304, 12884901892]`
+and deltas are `[4294967300, 4, 8589934588]`. The payload contains count 3 and three runs
+of length 1, occupying 15 bytes, or 20 bytes with framing. Repeated bucket strides with the
+same total bucket count form a single run.
 
-A caller can supply a predicate on `(bucket, totalBuckets)` to test this payload. The
-predicate must conservatively retain every potentially matching pair. Filters requiring an
-entry's partition belong at the entry-filtering stage; omit the bucket predicate when no
-safe partition-independent check is available. An unavailable bucket payload cannot exclude
-a block. Malformed payload lengths or pair counts invalidate the container. Invalid ordering
-or values encountered while matching also invalidate it; elements after the first match are skipped.
+Missing, invalid or negative/synthetic bucket metadata makes the block's bucket coverage
+unavailable. A caller can supply a predicate on `(bucket, totalBuckets)` which conservatively
+retains every potentially matching pair. Filters requiring an entry's partition belong at
+the entry-filtering stage; omit the bucket predicate if no safe check is available.
 
-#### Validation and Coverage
+#### Validation and Reading
 
-Invalid lengths, known-payload framing, checksum mismatches or inconsistent physical
-coverage invalidate the container. Invalid dictionary references or interval ordering
-encountered in decoded payload contents also invalidate it. Byte spans must cover the
-entire original manifest after its header; record counts must sum to the manifest entry
-count. Readers validate the checksum, payload framing (including known count/length
-consistency), and the complete block directory even when a block is rejected. Block
-payload contents are decoded and validated only for dimensions still needed by the filters,
-and only until that dimension matches. A row-ID min/max rejection skips individual
-intervals; a match skips the remaining elements of that payload. Skipped payload contents
-are not individually validated.
+Readers validate the checksum, fixed container fields, payload lengths and count headers,
+and the complete physical block directory regardless of the query. Byte spans must cover
+the whole original manifest after its header; record counts must sum to the manifest entry
+count. Unknown nonzero encodings skip their declared bytes without interpreting a count.
 
-All entries contribute, including ADD, DELETE and every file format/column group.
-Row-ID ranges are never expanded into individual values. If an exact union exceeds its
-available byte budget, it becomes the inclusive `[min,max]` envelope with encoding 1. Processing
-continues through the end of the block to extend those bounds and detect unknown row IDs.
-An unknown or invalid row-ID range makes only that block's row-ID payload unavailable.
-Partition budget exhaustion independently makes that block's partition payload unavailable.
-The dictionary can consequently be incomplete for the manifest: a dictionary miss never
-excludes a block with unavailable partition coverage. Later blocks can still use existing IDs.
+Compressed contents are decoded only for dimensions needed by the filters and only until
+that dimension matches. A row-ID envelope rejection skips all its runs; a matching interval,
+partition ID or bucket pair skips remaining values. Invalid varints, run counts, overflows,
+out-of-range values or ordering encountered while decoding invalidate the container. Run
+contents skipped by short-circuiting are not individually validated.
 
-`Settings.maxBytes` bounds the whole serialized container, including the partition
-dictionary and all three payload types. The caller supplies the byte budget. It is capped
-at 2147483646 bytes to fit the in-memory byte-array representation. A budget too small for a
-complete sidecar causes `build` or `read` to return null; callers can keep using the manifest.
-The Avro header and block directory share this byte budget without separate size or count limits.
-Writers discard optional row-ID payloads, bucket payloads, then partition payloads/dictionary if necessary,
-to fit the complete directory. If the directory itself cannot fit, no sidecar is published.
-No emitted sidecar omits block descriptors. These are encoded-size bounds; Avro header parsing
-and sidecar construction also incur object/buffer overhead. Query concurrency multiplies per-reader costs.
+For conjunctive filters a block is retained only if every dimension is unavailable or matches.
+Matching tests row ID, partition, then bucket coverage. Absent filters are skipped, and a
+rejection skips the remaining dimensions. Matches in different dimensions can come from
+different entries, so entry filtering and ADD/DELETE reconciliation remain necessary.
 
-For conjunctive filters a block is retained only if each dimension is either unavailable
-or matches. Within each block, matching tests row ID, partition, then bucket coverage.
-It skips absent filters and short-circuits after a dimension rejects a block, skipping
-the contents of later payloads. Within each payload, matching stops at the first hit. Matches in different dimensions can come
-from different entries in the block, so entry filtering and deletion merging remain
-necessary. Block min/max is derived from the first/last interval before testing the
-individual intervals.
-
-Readers still consume and validate the whole bounded sidecar. A partition-only query
-therefore reads row-ID payload bytes too; payload lengths save decoding work for unused
-payload contents and unknown encodings, not storage I/O. Selected compressed blocks are read by byte range with adjacent
+The entire sidecar is read in chunks of at most 1 MiB, including payloads unused by a query.
+There is no size-based fallback or payload dropping. Payload lengths save decoding work,
+not sidecar storage I/O. Selected compressed Avro blocks are read by byte range with adjacent
 spans coalesced. Building a sidecar does not modify the original manifest.
 
 `read` and `openManifest` accept an optional caller-supplied `SegmentsCache<Object>`. Complete
-sidecar bytes are keyed by their explicit `Path`, subject to the cache memory budget and single-file threshold.
-Only successful reads and selections populate the cache. Each query creates independent
-views and reapplies its filters and byte budget; query-specific selections are not cached.
+sidecar bytes are keyed by their explicit `Path`. Only successful reads and selections
+populate the cache; query-specific selections are not cached. Cache entry-size limits affect
+admission only: larger sidecars are still fully read, validated and used.
 
-Selected Avro blocks also share this cache. Each entry contains one complete compressed
-block, keyed by the manifest's full path, original offset and encoded length, separately
-from whole-manifest and sidecar entries. Different selections can reuse the same blocks.
-Only successful complete reads populate the cache; oversized blocks stream through the
-bounded read buffer. Adjacent uncached blocks are read together when they fit the read
-buffer, then cached individually. Fully cached selections do not open the manifest file.
-Block entries follow the existing memory budget, entry-size limit, expiration and eviction
-settings. The Avro decoder and entry filters still run on cached bytes.
+Selected Avro blocks also share this cache. Each entry contains one complete compressed block,
+keyed by the manifest's full path, original offset and encoded length, separately from whole-file
+keys. Different selections reuse the same blocks. Only complete reads populate the cache;
+oversized blocks stream through the read buffer. Adjacent uncached blocks fitting the buffer
+are read together and cached individually. Fully cached selections do not open the manifest.
+The cache retains its configured memory budget, entry-size limit, expiration and eviction policy.
 
 ## Manifest
 
