@@ -224,6 +224,7 @@ class FileScanner:
         limit: Optional[int] = None,
         partition_predicate: Optional[Predicate] = None,
         skip_level0: bool = False,
+        is_streaming: bool = False,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -276,6 +277,7 @@ class FileScanner:
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
         self.skip_level0 = skip_level0
+        self.is_streaming = is_streaming
         self._global_index_result = None
         self._row_ranges = None
         self._scanned_snapshot = None
@@ -313,7 +315,7 @@ class FileScanner:
         return self.table.schema_manager.get_schema(schema_id)
 
     def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
-        if not self.deletion_vectors_enabled:
+        if self.is_streaming or not self.deletion_vectors_enabled:
             return {}
         # Extract unique partition-bucket pairs from file entries
         bucket_files = set()
@@ -393,6 +395,12 @@ class FileScanner:
 
         # Generate splits
         splits = split_generator.create_splits(entries)
+        if self.is_streaming:
+            for split in splits:
+                while callable(getattr(split, 'data_split', None)):
+                    split = split.data_split()
+                split.is_streaming = True
+                split.snapshot_id = self._scanned_snapshot_id
 
         if self.data_evolution and self.scan_stats is not None:
             # Data-evolution stats pruning happens on complete row-id groups
@@ -400,7 +408,7 @@ class FileScanner:
             self.scan_stats.entries_after_stats = sum(
                 len(split.files) for split in splits)
 
-        if self.table.is_primary_key_table:
+        if self.table.is_primary_key_table and not self.is_streaming:
             splits = self._apply_primary_key_sorted_indexes(splits)
 
         splits = self._apply_push_down_limit(splits)
@@ -411,10 +419,11 @@ class FileScanner:
         )
         return Plan(splits, snapshot_id=self._scanned_snapshot_id)
 
-    def _apply_primary_key_sorted_indexes(self, splits):
+    def _apply_primary_key_sorted_indexes(self, splits, snapshot=None):
+        snapshot = snapshot if snapshot is not None else self._scanned_snapshot
         if (not self.table.options.global_index_enabled()
                 or self.predicate is None
-                or self._scanned_snapshot is None
+                or snapshot is None
                 or not splits):
             return splits
 
@@ -430,7 +439,7 @@ class FileScanner:
             return splits
         field_ids = {definition.field_id for definition in definitions}
         entries = IndexFileHandler(self.table).scan(
-            self._scanned_snapshot,
+            snapshot,
             lambda entry: (
                 entry.kind == 0
                 and entry.index_file.global_index_meta is not None
@@ -439,7 +448,7 @@ class FileScanner:
             ),
         )
         index_plan = primary_key_sorted_index_scan.plan(
-            self._scanned_snapshot_id, splits, definitions, entries)
+            snapshot.id, splits, definitions, entries)
         evaluated = primary_key_sorted_index_scan.evaluate(
             index_plan,
             self.table.fields,
@@ -536,8 +545,8 @@ class FileScanner:
         return self.read_manifest_entries(manifest_files)
 
     def _eval_global_index(self, snapshot=None):
-        # No filter - nothing to evaluate
-        if self.predicate is None:
+        # Snapshot indexes describe current state, not historical change events.
+        if self.is_streaming or self.predicate is None:
             return None
 
         # Check if global index is enabled
@@ -830,6 +839,8 @@ class FileScanner:
         )
 
     def _filter_manifest_entry(self, entry: ManifestEntry) -> bool:
+        if self.is_streaming and entry.kind != 0:
+            raise ValueError("Incremental delta manifests must contain only ADD entries")
         stats = self.scan_stats
         if stats is not None:
             stats.entries_total += 1

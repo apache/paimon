@@ -147,6 +147,7 @@ def _read_options(table) -> dict:
     }
     table_options = table.options.options
     for option in (
+            CoreOptions.SCAN_VERSION,
             CoreOptions.SCAN_SNAPSHOT_ID,
             CoreOptions.SCAN_TAG_NAME,
             CoreOptions.SCAN_TIMESTAMP_MILLIS,
@@ -157,7 +158,7 @@ def _read_options(table) -> dict:
             CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE):
         if table_options.contains_key(option.key()):
             options[option.key()] = _option_value_to_string(
-                table_options.get(option))
+                table_options.to_map()[option.key()])
 
     # Rust takes epoch millis but PyPaimon also accepts a timestamp string.
     if table_options.contains_key(CoreOptions.SCAN_TIMESTAMP.key()):
@@ -257,7 +258,7 @@ def native_plan(
     pfields = _partition_fields(table)
     # Trimmed primary keys decode per-file min/max keys (PK merge-on-read).
     kfields = table.trimmed_primary_keys_fields
-    splits = [deserialize_split_v1(s.serialize(), pfields, kfields) for s in rust_splits]
+    splits = [deserialize_split_v1(split.serialize(), pfields, kfields) for split in rust_splits]
     _restore_python_partition_paths(table, splits)
     snapshot_id = getattr(rust_plan, 'snapshot_id', None)
     if callable(snapshot_id):
