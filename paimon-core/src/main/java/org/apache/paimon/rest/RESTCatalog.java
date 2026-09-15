@@ -40,6 +40,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.options.Options;
@@ -151,6 +152,11 @@ public class RESTCatalog implements Catalog {
     @Experimental
     public PolicyManagement policyManagement() {
         return new RESTPolicyManagement(api);
+    }
+
+    @Experimental
+    public LabelManagement labelManagement() {
+        return new RESTLabelManagement(api);
     }
 
     @Override
