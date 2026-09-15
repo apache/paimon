@@ -52,6 +52,7 @@ from pypaimon.multimodal.lerobot.dataset import (
     _index_names,
     _open_video_decoder,
     _selected_episodes,
+    _stack_visual_windows,
     _torch_row,
 )
 from pypaimon.multimodal.lerobot.api import _create_target_table
@@ -948,6 +949,47 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(torch.uint8, sample["observation.image"].dtype)
         self.assertEqual([3, 4, 5], list(
             sample["observation.image"].shape))
+
+    def test_visual_windows_preserve_order_padding_and_isolation(self):
+        try:
+            import torch
+            from torch.utils.data import default_collate
+        except ImportError as error:
+            self.skipTest(str(error))
+
+        keys = ["left", "right"]
+        plans = [{"windows": {key: indices for key in keys}}
+                 for indices in ([1, 0, 0], [0, 1, 1], [1, 0, 0])]
+        for dtype in (torch.uint8, torch.float32):
+            frames = torch.arange(120).reshape(2, 4, 5, 3).to(dtype)
+            frames = frames.permute(0, 3, 1, 2)
+            rows = {i: {key: frames[i] for key in keys} for i in range(2)}
+            with patch("torch.get_num_threads", return_value=1):
+                actual = _stack_visual_windows(plans, rows, keys)
+            for key in keys:
+                expected = [torch.stack([rows[i][key] for i in
+                            plan["windows"][key]]) for plan in plans]
+                self.assertTrue(torch.equal(
+                    default_collate(actual[key]), default_collate(expected)))
+                self.assertTrue(all(value.is_contiguous()
+                                    for value in actual[key]))
+                actual[key][0][1].zero_()
+                self.assertTrue(torch.equal(actual[key][0][2], expected[0][2]))
+                self.assertTrue(torch.equal(actual[key][2], expected[2]))
+                self.assertTrue(torch.equal(frames[0], expected[0][1]))
+            with patch("torch.get_num_threads", return_value=2):
+                self.assertEqual({}, _stack_visual_windows(plans, rows, keys))
+            self.assertEqual({}, _stack_visual_windows(plans, rows, ["left"]))
+
+        rows = {i: {key: torch.ones(2, requires_grad=True) for key in keys}
+                for i in range(2)}
+        with patch("torch.get_num_threads", return_value=1), torch.no_grad():
+            result = _stack_visual_windows(plans, rows, keys)
+        self.assertFalse(result["left"][0].requires_grad)
+        with patch("torch.get_num_threads", return_value=1), \
+                torch.inference_mode():
+            result = _stack_visual_windows(plans, rows, keys)
+        self.assertTrue(result["left"][0].is_inference())
 
     def test_dataset_return_uint8_requires_bool(self):
         loaded = (

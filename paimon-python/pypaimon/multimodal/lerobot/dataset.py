@@ -65,7 +65,7 @@ _TORCH_DTYPE_NAMES = {
 }
 
 _IMAGE_READ_ATTEMPTS = 3
-_MAX_VIDEO_DECODE_WORKERS = 8
+_MAX_VISUAL_WORKERS = 8
 
 _CONTROL_FEATURES = frozenset({
     "index",
@@ -438,9 +438,11 @@ class PaimonDatasetReader(ABC):
         })
 
         import torch
+        visual_windows = _stack_visual_windows(
+            plans, converted, self._visual_keys) if plans[0]["windows"] else {}
         duplicates = _duplicate_indices(plans)
         result = []
-        for plan in plans:
+        for offset, plan in enumerate(plans):
             item = dict(converted[plan["index"]])
             if plan["index"] in duplicates:
                 item = {
@@ -448,9 +450,12 @@ class PaimonDatasetReader(ABC):
                     for key, value in item.items()
                 }
             for key, positions in plan["windows"].items():
-                item[key] = torch.stack([
-                    converted[position][key] for position in positions
-                ])
+                if key in visual_windows:
+                    item[key] = visual_windows[key][offset]
+                else:
+                    item[key] = torch.stack([
+                        converted[position][key] for position in positions
+                    ])
             item.update(plan["padding"])
             if self.image_transforms is not None:
                 for key in self._visual_keys:
@@ -1309,6 +1314,28 @@ def _attach_task_labels(rows, task_names, subtask_names):
             row["subtask"] = subtask_names[subtask_index]
 
 
+def _stack_visual_windows(plans, rows, visual_keys):
+    import torch
+
+    keys = [key for key in plans[0]["windows"] if key in visual_keys]
+    # Let PyTorch handle parallelism when its own thread pool is enabled.
+    if len(keys) < 2 or torch.get_num_threads() > 1:
+        return {}
+    grad_enabled = torch.is_grad_enabled()
+    inference_enabled = torch.is_inference_mode_enabled()
+
+    def stack(key):
+        with torch.inference_mode(inference_enabled), \
+                torch.set_grad_enabled(grad_enabled):
+            return [torch.stack([
+                rows[position][key] for position in plan["windows"][key]
+            ]) for plan in plans]
+
+    with ThreadPoolExecutor(
+            max_workers=min(len(keys), _MAX_VISUAL_WORKERS)) as executor:
+        return dict(zip(keys, executor.map(stack, keys)))
+
+
 def _torch_row(row, features, return_uint8=False):
     import torch
 
@@ -1568,7 +1595,7 @@ def _decode_video_rows(row_groups, collators):
     else:
         with ThreadPoolExecutor(
                 max_workers=min(
-                    len(tasks), _MAX_VIDEO_DECODE_WORKERS)) as executor:
+                    len(tasks), _MAX_VISUAL_WORKERS)) as executor:
             decoded_groups = list(executor.map(
                 lambda task: task[0](task[2]), tasks))
 
