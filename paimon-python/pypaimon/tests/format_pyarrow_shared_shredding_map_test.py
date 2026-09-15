@@ -29,6 +29,7 @@ import pyarrow.fs as pafs
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
 
+from pypaimon.data.map_shared_shredding import map_selected_keys_field
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.schema.data_types import (
     ArrayType,
@@ -48,7 +49,7 @@ class _LocalFileIO:
 
 def _metadata(compression):
     field_dict = json.dumps(
-        {"camera": 0, "state": 1, "action": 2},
+        {"first": 0, "second": 1, "third": 2},
         separators=(",", ":"), sort_keys=True).encode("utf-8")
     if compression == "none":
         compressed = field_dict
@@ -64,6 +65,9 @@ def _metadata(compression):
         "paimon.map.shared-shredding.field-dict": compressed.decode("latin-1"),
         "paimon.map.shared-shredding.field-dict-compression": compression,
         "paimon.map.shared-shredding.field-dict-original-size": str(len(field_dict)),
+        "paimon.map.shared-shredding.field-columns": json.dumps({
+            "0": [0], "1": [0, 1], "2": []}),
+        "paimon.map.shared-shredding.overflow-set": "[2]",
         "paimon.map.shared-shredding.num-columns": "2",
     }
 
@@ -73,12 +77,12 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.value_arrow_type = pa.struct([
-            pa.field("record_index", pa.int64()),
-            pa.field("timestamp_ns", pa.int64()),
+            pa.field("value_x", pa.int64()),
+            pa.field("value_y", pa.int64()),
         ])
         self.value_type = RowType(True, [
-            DataField(1, "record_index", AtomicType("BIGINT")),
-            DataField(2, "timestamp_ns", AtomicType("BIGINT")),
+            DataField(1, "value_x", AtomicType("BIGINT")),
+            DataField(2, "value_y", AtomicType("BIGINT")),
         ])
 
     def tearDown(self):
@@ -86,20 +90,20 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
 
     def _write(self, compression, file_format):
         values0 = pa.array([
-            {"record_index": 10, "timestamp_ns": 100},
-            {"record_index": 40, "timestamp_ns": 400},
+            {"value_x": 10, "value_y": 100},
+            {"value_x": 40, "value_y": 400},
             None,
             None,
         ], type=self.value_arrow_type)
         values1 = pa.array([
-            {"record_index": 20, "timestamp_ns": 200},
+            {"value_x": 20, "value_y": 200},
             None,
             None,
             None,
         ], type=self.value_arrow_type)
         overflow = pa.array([
-            [(2, {"record_index": 30, "timestamp_ns": 300})],
-            [(99, {"record_index": 50, "timestamp_ns": 500})],
+            [(2, {"value_x": 30, "value_y": 300})],
+            [(99, {"value_x": 50, "value_y": 500})],
             None,
             [],
         ], type=pa.map_(pa.int32(), self.value_arrow_type))
@@ -115,7 +119,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
             mask=pa.array([False, False, True, False]),
         )
         field = pa.field(
-            "content_refs", physical.type, metadata=_metadata(compression))
+            "attributes", physical.type, metadata=_metadata(compression))
         table = pa.Table.from_arrays(
             [pa.array([0, 1, 2, 3]), physical],
             schema=pa.schema([pa.field("id", pa.int64()), field]))
@@ -130,17 +134,159 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
     def test_reads_complete_map_for_all_metadata_compressions(self):
         expected = [
             [
-                ("camera", {"record_index": 10, "timestamp_ns": 100}),
-                ("state", {"record_index": 20, "timestamp_ns": 200}),
-                ("action", {"record_index": 30, "timestamp_ns": 300}),
+                ("first", {"value_x": 10, "value_y": 100}),
+                ("second", {"value_x": 20, "value_y": 200}),
+                ("third", {"value_x": 30, "value_y": 300}),
             ],
-            [("state", {"record_index": 40, "timestamp_ns": 400})],
+            [("second", {"value_x": 40, "value_y": 400})],
             None,
             [],
         ]
         for compression in ("none", "lz4", "zstd"):
             with self.subTest(compression=compression):
                 self._assert_complete_map("parquet", compression, expected)
+
+    def test_reads_only_selected_shared_shredding_keys(self):
+        map_field = DataField(
+            0,
+            "attributes",
+            MapType(
+                True, AtomicType("STRING", False), self.value_type),
+        )
+        selected_field = map_selected_keys_field(
+            map_field, ["first", "third", "missing"])
+        reader = FormatPyArrowReader(
+            _LocalFileIO(), "parquet", self._write("none", "parquet"),
+            [selected_field], None, batch_size=2,
+        )
+
+        self.assertEqual(
+            [
+                "attributes.__field_mapping",
+                "attributes.__col_0",
+                "attributes.__overflow",
+            ],
+            reader._row_group_read_columns(),
+        )
+        actual = []
+        while True:
+            batch = reader.read_arrow_batch()
+            if batch is None:
+                break
+            actual.extend(batch.column(0).to_pylist())
+        self.assertEqual([
+            {
+                "first": {"value_x": 10, "value_y": 100},
+                "third": {"value_x": 30, "value_y": 300},
+                "missing": None,
+            },
+            {"first": None, "third": None, "missing": None},
+            None,
+            {"first": None, "third": None, "missing": None},
+        ], actual)
+
+    def test_reads_unknown_key_without_value_columns(self):
+        map_field = DataField(
+            0,
+            "attributes",
+            MapType(
+                True, AtomicType("STRING", False), self.value_type),
+        )
+        reader = FormatPyArrowReader(
+            _LocalFileIO(),
+            "parquet",
+            self._write("none", "parquet"),
+            [map_selected_keys_field(map_field, ["missing"])],
+            None,
+        )
+
+        self.assertEqual(
+            ["attributes.__field_mapping"],
+            reader._row_group_read_columns(),
+        )
+        actual = []
+        while True:
+            batch = reader.read_arrow_batch()
+            if batch is None:
+                break
+            actual.extend(batch.column(0).to_pylist())
+        self.assertEqual([
+            {"missing": None}, {"missing": None}, None, {"missing": None},
+        ], actual)
+
+    def test_reads_only_selected_shared_shredding_keys_from_orc(self):
+        path = self._write("none", "orc")
+        physical_schema = orc.ORCFile(path).schema
+        fields = list(physical_schema)
+        index = physical_schema.get_field_index("attributes")
+        fields[index] = pa.field(
+            "attributes", fields[index].type, metadata=_metadata("none"))
+        map_field = DataField(
+            0,
+            "attributes",
+            MapType(
+                True, AtomicType("STRING", False), self.value_type),
+        )
+        with mock.patch(
+                "pypaimon.read.reader.format_pyarrow_reader."
+                "_orc_schema_with_field_metadata",
+                return_value=pa.schema(fields)):
+            reader = FormatPyArrowReader(
+                _LocalFileIO(), "orc", path,
+                [map_selected_keys_field(
+                    map_field, ["first", "third", "missing"])],
+                None,
+                batch_size=2,
+            )
+            actual = []
+            while True:
+                batch = reader.read_arrow_batch()
+                if batch is None:
+                    break
+                actual.extend(batch.column(0).to_pylist())
+
+        self.assertEqual([
+            {
+                "first": {"value_x": 10, "value_y": 100},
+                "third": {"value_x": 30, "value_y": 300},
+                "missing": None,
+            },
+            {"first": None, "third": None, "missing": None},
+            None,
+            {"first": None, "third": None, "missing": None},
+        ], actual)
+
+    def test_reads_selected_keys_from_normal_map(self):
+        map_type = pa.map_(pa.string(), self.value_arrow_type)
+        path = os.path.join(self.tmp, "normal.parquet")
+        pq.write_table(pa.table({
+            "attributes": pa.array([
+                [("first", {"value_x": 1, "value_y": 10})],
+                [],
+                None,
+            ], type=map_type),
+        }), path)
+        map_field = DataField(
+            0,
+            "attributes",
+            MapType(
+                True, AtomicType("STRING", False), self.value_type),
+        )
+        reader = FormatPyArrowReader(
+            _LocalFileIO(), "parquet", path,
+            [map_selected_keys_field(map_field, ["first", "missing"])],
+            None,
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertEqual([
+            {
+                "first": {"value_x": 1, "value_y": 10},
+                "missing": None,
+            },
+            {"first": None, "missing": None},
+            None,
+        ], batch.column(0).to_pylist())
 
     def _assert_complete_map(
             self, file_format, compression, expected, path=None):
@@ -149,7 +295,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
             path or self._write(compression, file_format),
             [DataField(
                 0,
-                "content_refs",
+                "attributes",
                 MapType(
                     True, AtomicType("STRING", False), self.value_type),
             )],
@@ -169,19 +315,19 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
         path = self._write("none", "orc")
         physical_schema = orc.ORCFile(path).schema
         fields = list(physical_schema)
-        index = physical_schema.get_field_index("content_refs")
+        index = physical_schema.get_field_index("attributes")
         fields[index] = pa.field(
-            "content_refs", fields[index].type, metadata=_metadata("none"))
+            "attributes", fields[index].type, metadata=_metadata("none"))
         arrow_schema = base64.b64encode(
             pa.schema(fields).serialize().to_pybytes())
 
         expected = [
             [
-                ("camera", {"record_index": 10, "timestamp_ns": 100}),
-                ("state", {"record_index": 20, "timestamp_ns": 200}),
-                ("action", {"record_index": 30, "timestamp_ns": 300}),
+                ("first", {"value_x": 10, "value_y": 100}),
+                ("second", {"value_x": 20, "value_y": 200}),
+                ("third", {"value_x": 30, "value_y": 300}),
             ],
-            [("state", {"record_index": 40, "timestamp_ns": 400})],
+            [("second", {"value_x": 40, "value_y": 400})],
             None,
             [],
         ]
@@ -206,34 +352,89 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
             names=["__field_mapping", "__col_0", "__col_1", "__overflow"],
         )
         path = os.path.join(self.tmp, "time.orc")
-        orc.write_table(pa.table({"content_refs": physical}), path)
+        orc.write_table(pa.table({"attributes": physical}), path)
 
         result = self._read_orc_shared_map(path, AtomicType("TIME(3)"))
 
         self.assertEqual(pa.map_(pa.string(), pa.time32("ms")), result.type)
         self.assertEqual(
-            [[("camera", time(0, 0, 1, 234000)),
-              ("action", time(0, 0, 5, 678000))]],
+            [[("first", time(0, 0, 1, 234000)),
+              ("third", time(0, 0, 5, 678000))]],
             result.to_pylist(),
         )
 
-    def test_restores_timestamp_precision_from_orc(self):
-        camera_timestamp = datetime(2024, 1, 2, 3, 4, 5, 123000)
-        action_timestamp = datetime(2024, 1, 2, 3, 4, 5, 678000)
+    def test_restores_selected_time_values_from_orc(self):
         physical = pa.StructArray.from_arrays(
             [
                 pa.array([[0, -1]], type=pa.list_(pa.int32())),
-                pa.array([camera_timestamp], type=pa.timestamp("ns")),
+                pa.array([1234], type=pa.int32()),
+                pa.array([None], type=pa.int32()),
+                pa.array(
+                    [[(2, 5678)]], type=pa.map_(pa.int32(), pa.int32())),
+            ],
+            names=["__field_mapping", "__col_0", "__col_1", "__overflow"],
+        )
+        path = os.path.join(self.tmp, "selected-time.orc")
+        orc.write_table(pa.table({"attributes": physical}), path)
+        physical_field = orc.ORCFile(path).schema.field("attributes")
+        metadata_schema = pa.schema([pa.field(
+            "attributes",
+            physical_field.type,
+            metadata=_metadata("none"),
+        )])
+        map_field = DataField(
+            0,
+            "attributes",
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                AtomicType("TIME(3)"),
+            ),
+        )
+
+        with mock.patch(
+                "pypaimon.read.reader.format_pyarrow_reader."
+                "_orc_schema_with_field_metadata",
+                return_value=metadata_schema):
+            reader = FormatPyArrowReader(
+                _LocalFileIO(),
+                "orc",
+                path,
+                [map_selected_keys_field(
+                    map_field, ["first", "third"])],
+                None,
+            )
+            result = reader.read_arrow_batch().column(0)
+
+        self.assertEqual(
+            pa.struct([
+                pa.field("first", pa.time32("ms")),
+                pa.field("third", pa.time32("ms")),
+            ]),
+            result.type,
+        )
+        self.assertEqual([{
+            "first": time(0, 0, 1, 234000),
+            "third": time(0, 0, 5, 678000),
+        }], result.to_pylist())
+
+    def test_restores_timestamp_precision_from_orc(self):
+        first_timestamp = datetime(2024, 1, 2, 3, 4, 5, 123000)
+        third_timestamp = datetime(2024, 1, 2, 3, 4, 5, 678000)
+        physical = pa.StructArray.from_arrays(
+            [
+                pa.array([[0, -1]], type=pa.list_(pa.int32())),
+                pa.array([first_timestamp], type=pa.timestamp("ns")),
                 pa.array([None], type=pa.timestamp("ns")),
                 pa.array(
-                    [[(2, action_timestamp)]],
+                    [[(2, third_timestamp)]],
                     type=pa.map_(pa.int32(), pa.timestamp("ns")),
                 ),
             ],
             names=["__field_mapping", "__col_0", "__col_1", "__overflow"],
         )
         path = os.path.join(self.tmp, "timestamp.orc")
-        orc.write_table(pa.table({"content_refs": physical}), path)
+        orc.write_table(pa.table({"attributes": physical}), path)
 
         result = self._read_orc_shared_map(
             path, AtomicType("TIMESTAMP(3)"))
@@ -241,16 +442,16 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
         self.assertEqual(
             pa.map_(pa.string(), pa.timestamp("ms")), result.type)
         self.assertEqual(
-            [[("camera", camera_timestamp), ("action", action_timestamp)]],
+            [[("first", first_timestamp), ("third", third_timestamp)]],
             result.to_pylist(),
         )
 
     def test_restores_nested_timestamp_values_from_orc(self):
-        camera_timestamp = datetime(2024, 1, 2, 3, 4, 5, 123000)
+        first_timestamp = datetime(2024, 1, 2, 3, 4, 5, 123000)
         history_timestamp = datetime(
             2024, 1, 2, 3, 4, 5, 123456, tzinfo=timezone.utc)
         physical_value_type = pa.struct([
-            pa.field("captured_at", pa.timestamp("ns")),
+            pa.field("event_time", pa.timestamp("ns")),
             pa.field("history", pa.list_(pa.timestamp("ns", tz="UTC"))),
         ])
         physical = pa.StructArray.from_arrays(
@@ -258,7 +459,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
                 pa.array([[0, -1]], type=pa.list_(pa.int32())),
                 pa.array(
                     [{
-                        "captured_at": camera_timestamp,
+                        "event_time": first_timestamp,
                         "history": [history_timestamp],
                     }],
                     type=physical_value_type,
@@ -270,9 +471,9 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
             names=["__field_mapping", "__col_0", "__col_1", "__overflow"],
         )
         path = os.path.join(self.tmp, "nested-timestamp.orc")
-        orc.write_table(pa.table({"content_refs": physical}), path)
+        orc.write_table(pa.table({"attributes": physical}), path)
         logical_value_type = RowType(True, [
-            DataField(1, "captured_at", AtomicType("TIMESTAMP(3)")),
+            DataField(1, "event_time", AtomicType("TIMESTAMP(3)")),
             DataField(
                 2,
                 "history",
@@ -284,24 +485,24 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
 
         self.assertEqual(
             pa.struct([
-                pa.field("captured_at", pa.timestamp("ms")),
+                pa.field("event_time", pa.timestamp("ms")),
                 pa.field(
                     "history", pa.list_(pa.timestamp("us", tz="UTC"))),
             ]),
             result.type.item_type,
         )
         self.assertEqual(
-            [[("camera", {
-                "captured_at": camera_timestamp,
+            [[("first", {
+                "event_time": first_timestamp,
                 "history": [history_timestamp],
             })]],
             result.to_pylist(),
         )
 
     def _read_orc_shared_map(self, path, value_type):
-        physical_field = orc.ORCFile(path).schema.field("content_refs")
+        physical_field = orc.ORCFile(path).schema.field("attributes")
         metadata_field = pa.field(
-            "content_refs", physical_field.type, metadata=_metadata("none"))
+            "attributes", physical_field.type, metadata=_metadata("none"))
         arrow_schema = base64.b64encode(
             pa.schema([metadata_field]).serialize().to_pybytes())
         metadata = mock.Mock()
@@ -315,7 +516,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
                 _LocalFileIO(), "orc", path,
                 [DataField(
                     0,
-                    "content_refs",
+                    "attributes",
                     MapType(
                         True,
                         AtomicType("STRING", False),
@@ -375,19 +576,19 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
         self.assertEqual(["a_b", "a_b__0"], batch.schema.names)
         self.assertEqual([7], batch.column(0).to_pylist())
         self.assertEqual(
-            [[("camera", 10)]], batch.column(1).to_pylist())
+            [[("first", 10)]], batch.column(1).to_pylist())
 
     def test_leaves_normal_map_unchanged(self):
         path = os.path.join(self.tmp, "normal.parquet")
         pq.write_table(
-            pa.table({"content_refs": pa.array(
-                [[("camera", 1)]], type=pa.map_(pa.string(), pa.int64()))}),
+            pa.table({"attributes": pa.array(
+                [[("first", 1)]], type=pa.map_(pa.string(), pa.int64()))}),
             path,
         )
         reader = FormatPyArrowReader(
             _LocalFileIO(), "parquet", path,
             [DataField(
-                0, "content_refs",
+                0, "attributes",
                 MapType(
                     True,
                     AtomicType("STRING", False),
@@ -395,7 +596,7 @@ class SharedShreddingMapReaderTest(unittest.TestCase):
             None,
         )
         self.assertEqual(
-            [[("camera", 1)]], reader.read_arrow_batch().column(0).to_pylist())
+            [[("first", 1)]], reader.read_arrow_batch().column(0).to_pylist())
 
 
 if __name__ == "__main__":
