@@ -414,7 +414,13 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 +----------------------------+
 | ...                        |
 +----------------------------+
+| Frame Mapping 1            |  Optional compressed PTS/duration/key-frame data
++----------------------------+
+| Frame Mapping 2            |
++----------------------------+
 | Physical Length Index      |  Delta-Varint video lengths
++----------------------------+
+| Frame-Mapping Length Index |  Delta-Varint mapping lengths
 +----------------------------+
 | Run Length Index           |  Delta-Varint logical row counts
 +----------------------------+
@@ -423,6 +429,7 @@ the ordinary BLOB entry header, length trailer, or per-entry CRC:
 | Run First-Frame Index      |  Delta-Varint frame ordinals
 +----------------------------+
 | Physical Index Length      |  4 bytes (Little Endian)
+| Frame-Mapping Index Length |  4 bytes (Little Endian)
 | Run-Length Index Length    |  4 bytes (Little Endian)
 | Run-Reference Index Length |  4 bytes (Little Endian)
 | First-Frame Index Length   |  4 bytes (Little Endian)
@@ -435,20 +442,29 @@ The run arrays have equal element counts. A non-negative run reference is an ord
 physical length index. For logical row `r` in a run beginning at logical row `s`, the returned
 `VideoFrameDescriptor` identifies the referenced raw video range and frame ordinal
 `run_first_frame + (r - s)`. `-1` is a NULL run and `-2` is a data-evolution placeholder run.
-Non-negative runs have fixed frame stride one in version 1; a discontinuity starts another run.
+Non-negative runs have fixed frame stride one; a discontinuity starts another run. Version 2 may
+store one exact frame mapping per physical video. Version 1 remains readable and omits both mapping
+regions and the frame-mapping index.
+
+A frame-mapping block contains a one-byte version (`1`), the eight-byte little-endian magic
+`0x564944454F494458` (`VIDEOIDX`), a four-byte little-endian signed stream index, and zlib-compressed
+UTF-8 JSON. The JSON `frames` array contains integer `pts`, positive integer `duration`, and
+`key_frame` values for every presentation-order frame.
 
 The serialized `VideoFrameDescriptor` stored in an Arrow/data-file cell has its own versioned
 wire layout. All numeric values are little endian:
 
 | Field | Size | Description |
 | --- | ---: | --- |
-| Version | 1 byte | Descriptor version, currently `1` |
+| Version | 1 byte | Descriptor version, currently `2` |
 | Magic | 8 bytes | `0x564944454F46524D` (`VIDEOFRM`) |
 | URI length | 4 bytes | UTF-8 URI byte length |
 | URI | variable | URI of the containing `.video` file |
 | Offset | 8 bytes | Start of the complete encoded-video payload |
 | Length | 8 bytes | Encoded-video payload length |
 | Frame index | 8 bytes | Zero-based presentation-order frame ordinal |
+| Frame-mapping offset | 8 bytes | Version 2 only: mapping offset in the `.video` file |
+| Frame-mapping length | 8 bytes | Version 2 only: mapping length |
 
 Descriptor bytes are independently versioned from the `.video` container. Java and Python share
 canonical descriptor and container fixtures to keep both implementations byte-compatible.

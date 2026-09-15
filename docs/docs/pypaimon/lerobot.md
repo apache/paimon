@@ -224,8 +224,9 @@ loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 
 Without `tag_name`, the latest snapshots are used. Frame lookups use the BTree
 on `index`; payloads remain lazy. Video decoding prefers TorchCodec, falls back
-to PyAV, and reuses a bounded decoder cache. Set `video_backend` to force
-either decoder.
+to PyAV, and reuses a bounded decoder cache. Persisted frame mappings avoid a
+full packet scan when a decoder first opens. Set `video_backend` to force either
+decoder.
 
 Subclass `PaimonDatasetReader` for a custom logical frame layout:
 

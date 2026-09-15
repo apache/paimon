@@ -89,7 +89,11 @@ public class VideoFormatReader implements FileRecordReader<InternalRow> {
                                     filePath.toString(),
                                     fileMeta.videoOffset(currentPosition),
                                     fileMeta.videoLength(currentPosition),
-                                    fileMeta.frameIndex(currentPosition));
+                                    fileMeta.frameIndex(currentPosition),
+                                    fileMeta.frameMappingLength(currentPosition) == 0
+                                            ? -1
+                                            : fileMeta.frameMappingOffset(currentPosition),
+                                    fileMeta.frameMappingLength(currentPosition));
                     field = Blob.fromDescriptor(uriReader, descriptor);
                 }
                 currentPosition++;

@@ -25,6 +25,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.multimodal import VideoFrameCollator
 from pypaimon.multimodal.lerobot.dataset import _decode_video_rows
 from pypaimon.table.row.blob import VideoFrameDescriptor
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 
 
 class _Decoder:
@@ -288,6 +289,40 @@ class VideoFrameCollatorTest(unittest.TestCase):
 
         self.assertEqual("oss://bucket/internal.video", file_io.path)
         self.assertEqual((b"resolved-video", 2), result[0]["frame"])
+
+    def test_loads_persisted_frame_mapping_for_decoder(self):
+        mapping = VideoFrameMapping(0, [
+            {'pts': 0, 'duration': 1, 'key_frame': 1},
+            {'pts': 1, 'duration': 1, 'key_frame': 0},
+        ])
+        encoded = mapping.serialize()
+        video = b"video"
+        path = os.path.join(self.temp_dir.name, "indexed.video")
+        with open(path, "wb") as output:
+            output.write(video + encoded)
+        descriptor = VideoFrameDescriptor(
+            path, 0, len(video), 1, len(video), len(encoded)
+        ).serialize()
+        mappings = []
+
+        def factory(stream):
+            mappings.append(stream.video_frame_mapping)
+            return _Decoder(stream, [])
+
+        collator = VideoFrameCollator(
+            self.table,
+            video_column="video",
+            decoder_factory=factory,
+            decode_fn=lambda decoder, frame, row: decoder.decode(frame),
+            collate_fn=lambda rows: rows,
+        )
+        try:
+            result = collator([{"video": descriptor}])
+        finally:
+            collator.close()
+
+        self.assertEqual((video, 1), result[0]["frame"])
+        self.assertEqual([0, 1], mappings[0].pts)
 
     def _descriptor(self, name, data, frame_index):
         path = os.path.join(self.temp_dir.name, name)
