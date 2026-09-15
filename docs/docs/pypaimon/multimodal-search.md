@@ -63,6 +63,14 @@ filter the rows read from the search result. Both `pre_filter` and `where()`
 accept SQL-like predicate strings. For full-text search, `pre_filter` must only
 reference partition columns.
 
+Each execution of `search`, `search_vectors`, or `search_hybrid` reads one
+snapshot across candidate search, filtering, reranking, and result lookup.
+Concurrent commits become visible on the next execution, including when reusing
+the same query object. Explicit snapshot, tag, and timestamp selectors are
+honored. All routes in a hybrid search and all vectors in a batch share that
+execution's snapshot. Keep the snapshot's data files available for the duration
+of the query; capturing a read view does not prevent snapshot expiration.
+
 ```python
 neighbors = (
     docs.search(
