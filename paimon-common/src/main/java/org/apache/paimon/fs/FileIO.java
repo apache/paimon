@@ -85,6 +85,15 @@ public interface FileIO extends Serializable, Closeable {
     SeekableInputStream newInputStream(Path path) throws IOException;
 
     /**
+     * Opens a stream for a file whose length is already known, for example from a manifest.
+     * Implementations may avoid a separate file-status request and optimize positioned reads. The
+     * caller must supply the length of the file being opened.
+     */
+    default SeekableInputStream newInputStream(Path path, long fileSize) throws IOException {
+        return newInputStream(path);
+    }
+
+    /**
      * Opens an PositionOutputStream at the indicated Path.
      *
      * @param path the file name to open

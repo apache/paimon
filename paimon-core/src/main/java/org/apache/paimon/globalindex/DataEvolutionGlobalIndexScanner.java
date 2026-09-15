@@ -125,7 +125,8 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                         partitionFilter,
                         coverageIndexFiles,
                         table.coreOptions().scalarIndexSearchMode());
-        GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
+        GlobalIndexFileReader indexFileReader =
+                meta -> fileIO.newInputStream(meta.filePath(), meta.fileSize());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {

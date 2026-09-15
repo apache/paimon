@@ -138,6 +138,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
         final Map<Long, TableSchema> cache = new HashMap<>();
+        cache.put(schema.id(), schema);
         this.schemaFetcher =
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;

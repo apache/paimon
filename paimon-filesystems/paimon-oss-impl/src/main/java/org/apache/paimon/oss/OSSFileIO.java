@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
@@ -233,6 +234,24 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     new CacheKey(hadoopOptions, scheme, authority), key -> supplier.get());
         } else {
             return supplier.get();
+        }
+    }
+
+    @Override
+    public SeekableInputStream newInputStream(Path path, long fileSize) throws IOException {
+        URI uri = path.toUri();
+        if (fileSize < 0 || !"oss".equals(uri.getScheme()) || uri.getHost() == null) {
+            return super.newInputStream(path);
+        }
+        try {
+            return new OSSRangeInputStream(
+                    ossClient(path),
+                    uri.getHost(),
+                    uri.getPath().substring(1),
+                    fileSize,
+                    FileSystem.getStatistics("oss", AliyunOSSFileSystem.class));
+        } catch (Exception e) {
+            throw new IOException("Failed to open OSS file " + path, e);
         }
     }
 

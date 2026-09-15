@@ -222,7 +222,8 @@ public class VectoredReadUtils {
         }
     }
 
-    private static byte[] getOrCreateBuffer(FileRange range) {
+    /** Return a range's caller-provided buffer, allocating it lazily when necessary. */
+    public static byte[] getOrCreateBuffer(FileRange range) {
         if (range instanceof FileRange.FileRangeImpl) {
             return ((FileRange.FileRangeImpl) range).getOrCreateBuffer();
         }
@@ -258,7 +259,8 @@ public class VectoredReadUtils {
         }
     }
 
-    private static List<? extends FileRange> validateAndSortRanges(
+    /** Validate ranges before dispatching them to multiple readers or caches. */
+    public static List<? extends FileRange> validateAndSortRanges(
             final List<? extends FileRange> input) throws EOFException {
         requireNonNull(input, "Null input list");
         checkArgument(!input.isEmpty(), "Empty input list");
