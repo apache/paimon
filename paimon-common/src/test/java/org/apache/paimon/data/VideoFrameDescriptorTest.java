@@ -49,6 +49,12 @@ public class VideoFrameDescriptorTest {
                 new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 43);
         assertThat(next).isNotEqualTo(frame);
         assertThat(next.payloadDescriptor()).isEqualTo(frame.payloadDescriptor());
+
+        VideoFrameDescriptor indexed =
+                new VideoFrameDescriptor("oss://bucket/source.mp4", 17, 103, 42, 120, 8);
+        assertThat(VideoFrameDescriptor.deserialize(indexed.serialize())).isEqualTo(indexed);
+        assertThat(indexed.frameMappingDescriptor())
+                .isEqualTo(new BlobDescriptor("oss://bucket/source.mp4", 120, 8));
     }
 
     @Test

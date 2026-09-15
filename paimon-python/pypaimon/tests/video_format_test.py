@@ -19,6 +19,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
@@ -34,6 +35,7 @@ from pypaimon.table.row.blob import (
 )
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 from pypaimon.write.video_format_writer import VideoFormatWriter
 
 
@@ -81,6 +83,14 @@ class VideoFormatTest(unittest.TestCase):
             VideoFrameDescriptor.deserialize(serialized + b"x")
         with self.assertRaisesRegex(ValueError, "non-negative"):
             VideoFrameDescriptor("x", 0, 1, -1)
+
+        indexed = VideoFrameDescriptor("s3://bucket/a.video", 7, 99, 42, 106, 8)
+        restored = VideoFrameDescriptor.deserialize(indexed.serialize())
+        self.assertEqual(indexed, restored)
+        self.assertEqual(
+            BlobDescriptor("s3://bucket/a.video", 106, 8),
+            restored.frame_mapping_descriptor,
+        )
 
     def test_cross_language_descriptor_fixture(self):
         fixture = self._fixture_bytes(self.DESCRIPTOR_FIXTURE)
@@ -167,6 +177,72 @@ class VideoFormatTest(unittest.TestCase):
         writer.close()
         self.assertEqual(fixture, (self.root / "written.video").read_bytes())
 
+    def test_v2_preserves_exact_frame_mapping(self):
+        mapping = VideoFrameMapping(0, [
+            {'pts': 0, 'duration': 1, 'key_frame': 1},
+            {'pts': 1, 'duration': 1, 'key_frame': 0},
+        ])
+        encoded = mapping.serialize()
+        video = b"video"
+        source_path = self.root / "indexed.mp4"
+        source_path.write_bytes(video + encoded)
+        source_descriptor = VideoFrameDescriptor(
+            source_path.as_uri(), 0, len(video), 1, len(video), len(encoded)
+        )
+        source = Blob.from_descriptor(
+            self.file_io.uri_reader_factory.create(source_descriptor.uri),
+            source_descriptor,
+        )
+        target = (self.root / "indexed.video").as_uri()
+
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        writer.add_element(GenericRow([source], [self.field], RowKind.INSERT))
+        writer.close()
+
+        stored = (self.root / "indexed.video").read_bytes()
+        with self.file_io.new_input_stream(target) as stream:
+            meta = VideoFileMeta(stream, len(stored))
+        self.assertEqual(
+            (0, len(video), 1, len(video), len(encoded)), meta.frame(0)
+        )
+        value = VideoFrameDescriptor.deserialize(self._read(target)[0])
+        self.assertEqual(1, value.frame_index)
+        mapping_descriptor = value.frame_mapping_descriptor
+        self.assertEqual(
+            encoded,
+            Blob.from_file(
+                self.file_io,
+                mapping_descriptor.uri,
+                mapping_descriptor.offset,
+                mapping_descriptor.length,
+            ).to_data(),
+        )
+
+    def test_writer_builds_frame_mapping_once_per_video(self):
+        mapping = VideoFrameMapping(0, [
+            {'pts': 0, 'duration': 1, 'key_frame': 1},
+        ])
+        target = (self.root / "generated.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        frames = [
+            self._source_frame("generated.mp4", b"video", index)
+            for index in (0, 1)
+        ]
+
+        with patch.object(
+                VideoFrameMapping, "inspect", return_value=mapping) as inspect:
+            for frame in frames:
+                writer.add_element(
+                    GenericRow([frame], [self.field], RowKind.INSERT)
+                )
+            writer.close()
+
+        inspect.assert_called_once()
+        with self.file_io.new_input_stream(target) as stream:
+            meta = VideoFileMeta(
+                stream, (self.root / "generated.video").stat().st_size)
+        self.assertEqual(len(mapping.serialize()), meta.frame(0)[4])
+
     def test_selection_keeps_logical_frame_positions(self):
         target = (self.root / "selection.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))
@@ -243,7 +319,7 @@ class VideoFormatTest(unittest.TestCase):
                 '<IIIIIB',
                 *(len(index) for index in indexes),
                 VideoFormatWriter.FOOTER_MAGIC_NUMBER,
-                VideoFormatWriter.VERSION,
+                VideoFormatWriter.V1_VERSION,
             )
         )
 

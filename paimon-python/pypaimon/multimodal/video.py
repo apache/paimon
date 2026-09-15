@@ -22,6 +22,7 @@ from collections import OrderedDict
 from collections.abc import Mapping
 
 from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 
 
 class VideoFrameCollator:
@@ -120,12 +121,25 @@ class VideoFrameCollator:
             if descriptor is None:
                 decoded[position] = output
                 continue
-            grouped.setdefault(descriptor.payload_descriptor, []).append(
+            group = grouped.setdefault(
+                descriptor.payload_descriptor,
+                [descriptor.frame_mapping_descriptor, []],
+            )
+            if group[0] is None:
+                group[0] = descriptor.frame_mapping_descriptor
+            elif (
+                descriptor.frame_mapping_descriptor is not None
+                and group[0] != descriptor.frame_mapping_descriptor
+            ):
+                raise ValueError(
+                    "One video payload references different frame mappings."
+                )
+            group[1].append(
                 (descriptor.frame_index, position, output)
             )
 
-        for payload, frames in grouped.items():
-            decoder = self._decoder(payload)
+        for payload, (frame_mapping, frames) in grouped.items():
+            decoder = self._decoder(payload, frame_mapping)
             for frame_index, position, output in sorted(
                     frames, key=lambda frame: frame[0]):
                 output[self.output_column] = self.decode_fn(
@@ -166,7 +180,7 @@ class VideoFrameCollator:
             )
         return output, descriptor
 
-    def _decoder(self, descriptor):
+    def _decoder(self, descriptor, frame_mapping_descriptor):
         resource = self._decoders.pop(descriptor, None)
         if resource is not None:
             self._decoders[descriptor] = resource
@@ -181,6 +195,15 @@ class VideoFrameCollator:
             descriptor.length,
         ).new_input_stream()
         try:
+            if frame_mapping_descriptor is not None:
+                mapping = Blob.from_file(
+                    self.file_io,
+                    frame_mapping_descriptor.uri,
+                    frame_mapping_descriptor.offset,
+                    frame_mapping_descriptor.length,
+                ).to_data()
+                stream.video_frame_mapping = VideoFrameMapping.deserialize(
+                    mapping)
             decoder = self.decoder_factory(stream)
         except Exception:
             stream.close()

@@ -84,6 +84,7 @@ from pypaimon.multimodal.lerobot.source import (
     _remote_source_path,
     _validate_info_paths,
 )
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 from pypaimon.multimodal.table import _target_schema
 
 try:
@@ -311,6 +312,48 @@ class LeRobotValidationTest(unittest.TestCase):
         finally:
             decoder.close()
 
+    @unittest.skipUnless(
+        av is not None and importlib.util.find_spec("torch") is not None,
+        "PyAV and Torch are required for video decoding",
+    )
+    def test_pyav_decoder_uses_persisted_frame_mapping(self):
+        output = io.BytesIO()
+        with av.open(output, mode="w", format="mp4") as container:
+            stream = container.add_stream("mpeg4", rate=30)
+            stream.width = 16
+            stream.height = 16
+            stream.pix_fmt = "yuv420p"
+            stream.gop_size = 12
+            stream.codec_context.max_b_frames = 2
+            for index in range(40):
+                image = np.full((16, 16, 3), index + 24, dtype=np.uint8)
+                frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+                frame.pts = index
+                frame.time_base = Fraction(1, 30)
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+
+        payload = output.getvalue()
+        mapping = VideoFrameMapping.inspect(io.BytesIO(payload))
+        with av.open(io.BytesIO(payload)) as container:
+            expected = [
+                np.array(frame.to_ndarray(format="rgb24"), copy=True)
+                for frame in container.decode(video=0)
+            ]
+
+        decoder = _PyAVVideoDecoder(io.BytesIO(payload), mapping)
+        try:
+            with patch.object(
+                    decoder, "_index_packets",
+                    side_effect=AssertionError("must not scan packets")):
+                for index in (25, 1, 39):
+                    actual = decoder[index].permute(1, 2, 0).numpy()
+                    np.testing.assert_array_equal(expected[index], actual)
+        finally:
+            decoder.close()
+
     def test_default_video_backend_falls_back_on_os_error(self):
         stream = Mock()
         decoder = object()
@@ -322,7 +365,7 @@ class LeRobotValidationTest(unittest.TestCase):
                 return_value=decoder) as pyav:
             self.assertIs(decoder, _open_video_decoder(stream))
             stream.seek.assert_called_once_with(0)
-            pyav.assert_called_once_with(stream)
+            pyav.assert_called_once_with(stream, None)
 
         with patch(
                 "pypaimon.multimodal.lerobot.dataset."
@@ -2007,7 +2050,9 @@ class LeRobotValidationTest(unittest.TestCase):
                 path for path in source_file_io.opened_paths
                 if path.endswith(".mp4")
             ]
-            self.assertEqual(3, len(opened_videos))
+            # Each source is scanned once for its exact frame mapping, then
+            # streamed once into the .video pack.
+            self.assertEqual(6, len(opened_videos))
             self.assertEqual(1, source_file_io.close_count)
             _, remote_bodies = connection.get_table(
                 "remote_frames").scan().select([

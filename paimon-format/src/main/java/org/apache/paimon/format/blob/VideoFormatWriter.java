@@ -33,7 +33,9 @@ import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -48,15 +50,18 @@ import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
  */
 public class VideoFormatWriter implements FileAwareFormatWriter {
 
-    public static final byte VERSION = 1;
+    public static final byte VERSION = 2;
+    public static final byte V1_VERSION = 1;
     public static final int MAGIC_NUMBER = 0x4F454449; // "IDEO" in little endian
     public static final long NULL_REFERENCE = -1L;
     public static final long PLACEHOLDER_REFERENCE = -2L;
-    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 5 + Byte.BYTES;
+    public static final int FILE_FOOTER_LENGTH = Integer.BYTES * 6 + Byte.BYTES;
+    public static final int V1_FILE_FOOTER_LENGTH = Integer.BYTES * 5 + Byte.BYTES;
 
     private final PositionOutputStream out;
     private final RawVideoPayloadWriter payloadWriter;
     private final LongArrayList physicalVideoLengths;
+    private final List<byte[]> frameMappings;
     private final LongArrayList runLengths;
     private final LongArrayList runReferences;
     private final LongArrayList runFirstFrames;
@@ -86,6 +91,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                         blobFetchMetricReporter,
                         copyBufferSize);
         this.physicalVideoLengths = new LongArrayList(16);
+        this.frameMappings = new ArrayList<>();
         this.runLengths = new LongArrayList(16);
         this.runReferences = new LongArrayList(16);
         this.runFirstFrames = new LongArrayList(16);
@@ -130,6 +136,8 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
             }
             ordinal = physicalVideoLengths.size();
             physicalVideoLengths.add(length);
+            Blob frameMapping = VideoFrameDescriptor.frameMappingBlob(blob);
+            frameMappings.add(frameMapping == null ? new byte[0] : frameMapping.toData());
             physicalVideos.put(payload, ordinal);
         }
         append(ordinal, frame.frameIndex());
@@ -148,20 +156,36 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
         flushRun();
         payloadWriter.close();
 
+        boolean hasFrameMappings = frameMappings.stream().anyMatch(mapping -> mapping.length > 0);
+        byte version = hasFrameMappings ? VERSION : V1_VERSION;
+        if (hasFrameMappings) {
+            for (byte[] mapping : frameMappings) {
+                out.write(mapping);
+            }
+        }
         byte[] physicalIndex = DeltaVarintCompressor.compressLongArrayList(physicalVideoLengths);
+        LongArrayList frameMappingLengths = new LongArrayList(frameMappings.size());
+        frameMappings.forEach(mapping -> frameMappingLengths.add(mapping.length));
+        byte[] frameMappingIndex = DeltaVarintCompressor.compressLongArrayList(frameMappingLengths);
         byte[] runLengthIndex = DeltaVarintCompressor.compressLongArrayList(runLengths);
         byte[] runReferenceIndex = DeltaVarintCompressor.compressLongArrayList(runReferences);
         byte[] firstFrameIndex = DeltaVarintCompressor.compressLongArrayList(runFirstFrames);
         out.write(physicalIndex);
+        if (hasFrameMappings) {
+            out.write(frameMappingIndex);
+        }
         out.write(runLengthIndex);
         out.write(runReferenceIndex);
         out.write(firstFrameIndex);
         out.write(intToLittleEndian(physicalIndex.length));
+        if (hasFrameMappings) {
+            out.write(intToLittleEndian(frameMappingIndex.length));
+        }
         out.write(intToLittleEndian(runLengthIndex.length));
         out.write(intToLittleEndian(runReferenceIndex.length));
         out.write(intToLittleEndian(firstFrameIndex.length));
         out.write(intToLittleEndian(MAGIC_NUMBER));
-        out.write(VERSION);
+        out.write(version);
         closed = true;
     }
 

@@ -155,6 +155,44 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testV2PreservesFrameMapping() throws IOException {
+        byte[] video = "video".getBytes(StandardCharsets.UTF_8);
+        byte[] mapping = "mapping".getBytes(StandardCharsets.UTF_8);
+        java.nio.file.Path source = tempPath.resolve("indexed.mp4");
+        byte[] sourceBytes = new byte[video.length + mapping.length];
+        System.arraycopy(video, 0, sourceBytes, 0, video.length);
+        System.arraycopy(mapping, 0, sourceBytes, video.length, mapping.length);
+        Files.write(source, sourceBytes);
+        VideoFrameDescriptor descriptor =
+                new VideoFrameDescriptor(
+                        new Path(source.toUri()).toString(),
+                        0,
+                        video.length,
+                        1,
+                        video.length,
+                        mapping.length);
+        Blob frame =
+                Blob.fromDescriptor(org.apache.paimon.utils.UriReader.fromFile(fileIO), descriptor);
+
+        write(frame);
+
+        try (SeekableInputStream in = fileIO.newInputStream(file)) {
+            VideoFileMeta meta = new VideoFileMeta(in, fileIO.getFileSize(file), null);
+            assertThat(meta.videoLength(0)).isEqualTo(video.length);
+            assertThat(meta.frameMappingOffset(0)).isEqualTo(video.length);
+            assertThat(meta.frameMappingLength(0)).isEqualTo(mapping.length);
+        }
+        VideoFrameDescriptor restored = descriptor(read(null).get(0));
+        assertThat(
+                        VideoFrameDescriptor.frameMappingBlob(
+                                        Blob.fromDescriptor(
+                                                org.apache.paimon.utils.UriReader.fromFile(fileIO),
+                                                restored))
+                                .toData())
+                .isEqualTo(mapping);
+    }
+
+    @Test
     public void testSelectionKeepsLogicalRowPositions() throws IOException {
         byte[] bytes = "first-mp4".getBytes();
         write(
@@ -233,7 +271,7 @@ public class VideoFileFormatTest {
                                 + runLengthIndex.length
                                 + runReferenceIndex.length
                                 + firstFrameIndex.length
-                                + VideoFormatWriter.FILE_FOOTER_LENGTH];
+                                + VideoFormatWriter.V1_FILE_FOOTER_LENGTH];
         int position = 0;
         position = put(bytes, position, physicalIndex);
         position = put(bytes, position, runLengthIndex);
@@ -244,7 +282,7 @@ public class VideoFileFormatTest {
         position = putInt(bytes, position, runReferenceIndex.length);
         position = putInt(bytes, position, firstFrameIndex.length);
         position = putInt(bytes, position, VideoFormatWriter.MAGIC_NUMBER);
-        bytes[position] = VideoFormatWriter.VERSION;
+        bytes[position] = VideoFormatWriter.V1_VERSION;
         Files.write(java.nio.file.Paths.get(file.toUri()), bytes);
 
         assertThatThrownBy(

@@ -46,6 +46,7 @@ from pypaimon.multimodal.lerobot.schema import (
 )
 from pypaimon.multimodal.table import _target_schema, _time_travel_table
 from pypaimon.multimodal.video import VideoFrameCollator
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 
 
 _TORCH_DTYPE_NAMES = {
@@ -1387,17 +1388,20 @@ def _video_tensor(frame, feature, return_uint8=False):
 
 
 def _open_video_decoder(stream, backend=None):
+    frame_mapping = getattr(stream, "video_frame_mapping", None)
+    if not isinstance(frame_mapping, VideoFrameMapping):
+        frame_mapping = None
     if backend in (None, "torchcodec"):
         try:
-            return _open_torchcodec_decoder(stream)
-        except (ImportError, OSError, RuntimeError):
+            return _open_torchcodec_decoder(stream, frame_mapping)
+        except (ImportError, OSError, RuntimeError, TypeError):
             if backend == "torchcodec":
                 raise
             stream.seek(0)
-    return _PyAVVideoDecoder(stream)
+    return _PyAVVideoDecoder(stream, frame_mapping)
 
 
-def _open_torchcodec_decoder(stream):
+def _open_torchcodec_decoder(stream, frame_mapping=None):
     try:
         from torchcodec.decoders import VideoDecoder
     except (ImportError, RuntimeError) as error:
@@ -1405,12 +1409,20 @@ def _open_torchcodec_decoder(stream):
             "Video-backed PaimonLeRobotDataset requires TorchCodec from "
             "'pypaimon[lerobot]'."
         ) from error
+    options = (
+        {
+            "stream_index": frame_mapping.stream_index,
+            "custom_frame_mappings": frame_mapping.torchcodec_json(),
+        }
+        if frame_mapping is not None
+        else {"seek_mode": "exact"}
+    )
     try:
-        return VideoDecoder(stream, seek_mode="exact")
+        return VideoDecoder(stream, **options)
     except TypeError:
         # TorchCodec 0.2 accepts bytes but not seekable file-like objects.
         stream.seek(0)
-        return VideoDecoder(stream.read(), seek_mode="exact")
+        return VideoDecoder(stream.read(), **options)
 
 
 class _PyAVVideoDecoder:
@@ -1418,7 +1430,7 @@ class _PyAVVideoDecoder:
     # Reuse common overlapping delta windows without retaining a whole video.
     _FRAME_CACHE_SIZE = 8
 
-    def __init__(self, stream):
+    def __init__(self, stream, frame_mapping=None):
         try:
             import av
         except ImportError as error:
@@ -1428,9 +1440,25 @@ class _PyAVVideoDecoder:
             ) from error
         self._container = av.open(stream)
         self._stream = self._container.streams.video[0]
+        if frame_mapping is not None:
+            streams = [
+                stream for stream in self._container.streams.video
+                if stream.index == frame_mapping.stream_index
+            ]
+            if not streams:
+                raise ValueError(
+                    "Video frame mapping references missing stream %s."
+                    % frame_mapping.stream_index
+                )
+            self._stream = streams[0]
         self._next_index = 0
-        self._timestamps = []
-        self._keyframes = []
+        self._timestamps = (
+            [pts * self._stream.time_base for pts in frame_mapping.pts]
+            if frame_mapping is not None
+            else []
+        )
+        self._keyframes = (
+            frame_mapping.key_frames if frame_mapping is not None else [])
         self._cache = OrderedDict()
         self._frames = iter(self._container.decode(self._stream))
 

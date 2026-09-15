@@ -35,6 +35,8 @@ public class VideoFileMeta {
 
     private final long[] physicalVideoLengths;
     private final long[] physicalVideoOffsets;
+    private final long[] frameMappingLengths;
+    private final long[] frameMappingOffsets;
     private final long[] runEnds;
     private final long[] runReferences;
     private final long[] runFirstFrames;
@@ -43,35 +45,57 @@ public class VideoFileMeta {
 
     public VideoFileMeta(SeekableInputStream in, long fileSize, @Nullable RoaringBitmap32 selection)
             throws IOException {
-        if (fileSize < VideoFormatWriter.FILE_FOOTER_LENGTH) {
+        if (fileSize < VideoFormatWriter.V1_FILE_FOOTER_LENGTH) {
             throw corrupt(
                     "file size %s is smaller than footer size %s.",
-                    fileSize, VideoFormatWriter.FILE_FOOTER_LENGTH);
+                    fileSize, VideoFormatWriter.V1_FILE_FOOTER_LENGTH);
         }
 
-        long footerStart = fileSize - VideoFormatWriter.FILE_FOOTER_LENGTH;
-        in.seek(footerStart);
-        byte[] footer = new byte[VideoFormatWriter.FILE_FOOTER_LENGTH];
-        IOUtils.readFully(in, footer);
-        int physicalIndexLength = BytesUtils.getInt(footer, 0);
-        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES);
-        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2);
-        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3);
-        int magic = BytesUtils.getInt(footer, Integer.BYTES * 4);
-        byte version = footer[Integer.BYTES * 5];
+        in.seek(fileSize - Integer.BYTES - Byte.BYTES);
+        byte[] trailer = new byte[Integer.BYTES + Byte.BYTES];
+        IOUtils.readFully(in, trailer);
+        int magic = BytesUtils.getInt(trailer, 0);
+        byte version = trailer[Integer.BYTES];
         if (magic != VideoFormatWriter.MAGIC_NUMBER) {
             throw corrupt("invalid footer magic %s.", magic);
         }
-        if (version != VideoFormatWriter.VERSION) {
+        if (version != VideoFormatWriter.V1_VERSION && version != VideoFormatWriter.VERSION) {
             throw new IOException("Unsupported video format version: " + version);
         }
 
-        int[] indexLengths = {
-            physicalIndexLength,
-            runLengthIndexLength,
-            runReferenceIndexLength,
-            firstFrameIndexLength
-        };
+        int footerLength =
+                version == VideoFormatWriter.V1_VERSION
+                        ? VideoFormatWriter.V1_FILE_FOOTER_LENGTH
+                        : VideoFormatWriter.FILE_FOOTER_LENGTH;
+        long footerStart = fileSize - footerLength;
+        in.seek(footerStart);
+        byte[] footer = new byte[footerLength];
+        IOUtils.readFully(in, footer);
+        int physicalIndexLength = BytesUtils.getInt(footer, 0);
+        int frameMappingIndexLength =
+                version == VideoFormatWriter.V1_VERSION
+                        ? 0
+                        : BytesUtils.getInt(footer, Integer.BYTES);
+        int shift = version == VideoFormatWriter.V1_VERSION ? 0 : Integer.BYTES;
+        int runLengthIndexLength = BytesUtils.getInt(footer, Integer.BYTES + shift);
+        int runReferenceIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 2 + shift);
+        int firstFrameIndexLength = BytesUtils.getInt(footer, Integer.BYTES * 3 + shift);
+
+        int[] indexLengths =
+                version == VideoFormatWriter.V1_VERSION
+                        ? new int[] {
+                            physicalIndexLength,
+                            runLengthIndexLength,
+                            runReferenceIndexLength,
+                            firstFrameIndexLength
+                        }
+                        : new int[] {
+                            physicalIndexLength,
+                            frameMappingIndexLength,
+                            runLengthIndexLength,
+                            runReferenceIndexLength,
+                            firstFrameIndexLength
+                        };
         long totalIndexLength = 0;
         for (int length : indexLengths) {
             if (length < 0) {
@@ -87,26 +111,54 @@ public class VideoFileMeta {
         long offset = indexStart;
         long[] physicalVideoLengths = readIndex(in, offset, physicalIndexLength, "physical video");
         offset += physicalIndexLength;
+        long[] frameMappingLengths;
+        if (version == VideoFormatWriter.V1_VERSION) {
+            frameMappingLengths = new long[physicalVideoLengths.length];
+        } else {
+            frameMappingLengths = readIndex(in, offset, frameMappingIndexLength, "frame mapping");
+            offset += frameMappingIndexLength;
+            if (frameMappingLengths.length != physicalVideoLengths.length) {
+                throw corrupt("physical video and frame mapping indexes have different counts.");
+            }
+        }
         long[] runLengths = readIndex(in, offset, runLengthIndexLength, "run length");
         offset += runLengthIndexLength;
         long[] runReferences = readIndex(in, offset, runReferenceIndexLength, "run reference");
         offset += runReferenceIndexLength;
         long[] runFirstFrames = readIndex(in, offset, firstFrameIndexLength, "run first-frame");
 
+        long frameMappingSize = 0;
+        for (long length : frameMappingLengths) {
+            if (length < 0 || frameMappingSize > Long.MAX_VALUE - length) {
+                throw corrupt("invalid frame mapping length %s.", length);
+            }
+            frameMappingSize += length;
+        }
+        long frameMappingStart = indexStart - frameMappingSize;
+        if (frameMappingStart < 0) {
+            throw corrupt("frame mappings exceed the file size.");
+        }
+
         long[] physicalVideoOffsets = new long[physicalVideoLengths.length];
         long payloadOffset = 0;
         for (int i = 0; i < physicalVideoLengths.length; i++) {
             long length = physicalVideoLengths[i];
-            if (length <= 0 || length > indexStart - payloadOffset) {
+            if (length <= 0 || length > frameMappingStart - payloadOffset) {
                 throw corrupt("invalid physical video length %s at ordinal %s.", length, i);
             }
             physicalVideoOffsets[i] = payloadOffset;
             payloadOffset += length;
         }
-        if (payloadOffset != indexStart) {
+        if (payloadOffset != frameMappingStart) {
             throw corrupt(
                     "indexed videos use %s bytes, but payload region contains %s bytes.",
-                    payloadOffset, indexStart);
+                    payloadOffset, frameMappingStart);
+        }
+        long[] frameMappingOffsets = new long[frameMappingLengths.length];
+        long frameMappingOffset = frameMappingStart;
+        for (int i = 0; i < frameMappingLengths.length; i++) {
+            frameMappingOffsets[i] = frameMappingOffset;
+            frameMappingOffset += frameMappingLengths[i];
         }
 
         if (runLengths.length != runReferences.length
@@ -162,6 +214,8 @@ public class VideoFileMeta {
 
         this.physicalVideoLengths = physicalVideoLengths;
         this.physicalVideoOffsets = physicalVideoOffsets;
+        this.frameMappingLengths = frameMappingLengths;
+        this.frameMappingOffsets = frameMappingOffsets;
         this.runEnds = runEnds;
         this.runReferences = runReferences;
         this.runFirstFrames = runFirstFrames;
@@ -190,6 +244,14 @@ public class VideoFileMeta {
         int run = run(row);
         long runStart = run == 0 ? 0 : runEnds[run - 1];
         return runFirstFrames[run] + row - runStart;
+    }
+
+    public long frameMappingOffset(int returnedRow) {
+        return frameMappingOffsets[physicalOrdinal(returnedRow)];
+    }
+
+    public long frameMappingLength(int returnedRow) {
+        return frameMappingLengths[physicalOrdinal(returnedRow)];
     }
 
     public int returnedPosition(int currentPosition) {

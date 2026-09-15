@@ -83,10 +83,10 @@ to write complete videos and their logical frame rows.
 
 Each logical value is a `VideoFrameDescriptor`: its URI range identifies one complete encoded
 video and its frame ordinal selects a frame inside that video. On write, a `.video` data region
-concatenates raw video payloads without ordinary BLOB entry wrappers. Four embedded delta-varint
-indexes record physical video lengths, logical run lengths, run-to-video references, and the first
-frame ordinal of each run. Consecutive frames therefore need one run entry rather than one index
-entry per row. NULL and data-evolution placeholders use negative run references.
+concatenates raw video payloads without ordinary BLOB entry wrappers. Compact indexes map rows to
+videos and frame ordinals. Version 2 additionally stores compressed PTS, duration, and key-frame
+mappings once per physical video. Consecutive frames share one run entry; NULL and data-evolution
+placeholders use negative run references.
 
 ## Reuse, Rolling, and Compaction
 
@@ -102,7 +102,8 @@ together. The resulting file group remains row-aligned and a single large episod
 configured target.
 
 When BLOB compaction is enabled, it byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
-and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
+and rebuilds the embedded indexes; it does not decode or re-encode frames. Persisted frame mappings
+are copied into the new pack. The aligned normal data
 file contains only application columns such as `episode_id`, state, and action. Paimon stores the
 frame mapping in the `.video` descriptor/index path.
 `blob-compaction.enabled` defaults to `false`; ordinary normal-file compaction can
@@ -115,8 +116,7 @@ leave the video packs unchanged. See [Data Evolution Maintenance](./data-evoluti
   `.blob`.
 - Non-null writes must be exact descriptor-backed `BlobRef` values containing a
   `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
-- Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not
-  store PTS values or parse codec/container metadata.
+- Version 1 remains readable but has no persisted frame mapping.
 - A `BlobConsumer` callback is not supported for the video field.
 
 ## Read Frames
@@ -129,6 +129,10 @@ not contain decoded image pixels. Read behavior differs by API:
 | Flink and Spark SQL | Set `blob-as-descriptor=true`. With `false`, the SQL adapter materializes the complete encoded video payload for each selected frame row. |
 | PyPaimon reads of `.video` fields | Return serialized `VideoFrameDescriptor` values even when `blob-as-descriptor=false`. |
 | Java internal-row API | `row.getBlob(position)` returns a descriptor-backed `BlobRef`; call `toDescriptor()` to access the frame descriptor. `toData()` reads the complete video payload. |
+
+PyPaimon records an exact frame mapping while writing supported videos. TorchCodec and PyAV reuse
+it to avoid scanning the complete packet stream when a decoder first opens. Missing mappings fall
+back to the version 1 behavior.
 
 After ingesting data, query descriptors without loading a complete video for every row:
 

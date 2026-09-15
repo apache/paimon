@@ -24,15 +24,18 @@ from pypaimon.table.row.blob import (
     BlobRef,
     VideoFrameDescriptor,
 )
+from pypaimon.table.row.video_frame_mapping import VideoFrameMapping
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class VideoFormatWriter(BlobFormatWriter):
     """Pack complete encoded videos and an embedded logical frame-run index."""
 
-    VERSION = 1
+    VERSION = 2
+    V1_VERSION = 1
     FOOTER_MAGIC_NUMBER = 0x4F454449
-    FOOTER_SIZE = 21
+    FOOTER_SIZE = 25
+    V1_FOOTER_SIZE = 21
     NULL_REFERENCE = -1
     PLACE_HOLDER_REFERENCE = -2
 
@@ -48,6 +51,7 @@ class VideoFormatWriter(BlobFormatWriter):
             copy_buffer_size=copy_buffer_size,
         )
         self._physical_lengths = []
+        self._frame_mappings = []
         self._physical_videos = {}
         self._run_lengths = []
         self._run_references = []
@@ -88,9 +92,11 @@ class VideoFormatWriter(BlobFormatWriter):
         payload = frame.payload_descriptor
         ordinal = self._physical_videos.get(payload)
         if ordinal is None:
+            frame_mapping = self._frame_mapping(value, frame)
             length = self._write_video_payload(value)
             ordinal = len(self._physical_lengths)
             self._physical_lengths.append(length)
+            self._frame_mappings.append(frame_mapping)
             self._physical_videos[payload] = ordinal
         self._append(ordinal, frame.frame_index)
 
@@ -106,7 +112,15 @@ class VideoFormatWriter(BlobFormatWriter):
         if self._closed:
             return
         self._flush_run()
+        version = (
+            self.VERSION if any(self._frame_mappings) else self.V1_VERSION)
+        if version >= 2:
+            for frame_mapping in self._frame_mappings:
+                self.output_stream.write(frame_mapping)
         physical_index = DeltaVarintCompressor.compress(self._physical_lengths)
+        frame_mapping_index = DeltaVarintCompressor.compress(
+            [len(mapping) for mapping in self._frame_mappings]
+        )
         run_length_index = DeltaVarintCompressor.compress(self._run_lengths)
         run_reference_index = DeltaVarintCompressor.compress(
             self._run_references
@@ -114,27 +128,55 @@ class VideoFormatWriter(BlobFormatWriter):
         first_frame_index = DeltaVarintCompressor.compress(
             self._run_first_frames
         )
-        for index in (
-            physical_index,
-            run_length_index,
-            run_reference_index,
-            first_frame_index,
-        ):
+        indexes = [physical_index]
+        if version >= 2:
+            indexes.append(frame_mapping_index)
+        indexes.extend((run_length_index, run_reference_index, first_frame_index))
+        for index in indexes:
             self.output_stream.write(index)
-        self.output_stream.write(struct.pack(
-            '<IIIIIB',
-            len(physical_index),
-            len(run_length_index),
-            len(run_reference_index),
-            len(first_frame_index),
-            self.FOOTER_MAGIC_NUMBER,
-            self.VERSION,
-        ))
+        if version == self.V1_VERSION:
+            footer = struct.pack(
+                '<IIIIIB',
+                len(physical_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                version,
+            )
+        else:
+            footer = struct.pack(
+                '<IIIIIIB',
+                len(physical_index),
+                len(frame_mapping_index),
+                len(run_length_index),
+                len(run_reference_index),
+                len(first_frame_index),
+                self.FOOTER_MAGIC_NUMBER,
+                version,
+            )
+        self.output_stream.write(footer)
         if hasattr(self.output_stream, 'flush'):
             self.output_stream.flush()
         if hasattr(self.output_stream, 'close'):
             self.output_stream.close()
         self._closed = True
+
+    @staticmethod
+    def _frame_mapping(blob, frame):
+        descriptor = frame.frame_mapping_descriptor
+        if descriptor is not None:
+            mapping = Blob.from_descriptor(
+                blob.uri_reader, descriptor).to_data()
+            VideoFrameMapping.deserialize(mapping)
+            return mapping
+        try:
+            with blob.new_input_stream() as stream:
+                return VideoFrameMapping.inspect(stream).serialize()
+        except Exception:
+            # Frame mappings are an optional read optimization. Unsupported
+            # containers continue to use the version-1 scan fallback.
+            return b''
 
     def _write_video_payload(self, blob: BlobRef) -> int:
         start = self.position

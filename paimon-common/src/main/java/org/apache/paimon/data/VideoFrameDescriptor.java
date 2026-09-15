@@ -35,17 +35,57 @@ public class VideoFrameDescriptor extends BlobDescriptor {
 
     private static final long serialVersionUID = 1L;
     private static final long MAGIC = 0x564944454F46524DL; // "VIDEOFRM"
-    private static final byte CURRENT_VERSION = 1;
-    private static final int FIXED_LENGTH =
+    private static final byte CURRENT_VERSION = 2;
+    private static final int V1_FIXED_LENGTH =
             Byte.BYTES + Long.BYTES + Integer.BYTES + 3 * Long.BYTES;
+    private static final int V2_FIXED_LENGTH = V1_FIXED_LENGTH + 2 * Long.BYTES;
 
     private final long frameIndex;
+    private final long frameMappingOffset;
+    private final long frameMappingLength;
+    private final byte version;
 
     public VideoFrameDescriptor(String uri, long offset, long length, long frameIndex) {
+        this(uri, offset, length, frameIndex, -1, 0, (byte) 1);
+    }
+
+    public VideoFrameDescriptor(
+            String uri,
+            long offset,
+            long length,
+            long frameIndex,
+            long frameMappingOffset,
+            long frameMappingLength) {
+        this(
+                uri,
+                offset,
+                length,
+                frameIndex,
+                frameMappingOffset,
+                frameMappingLength,
+                frameMappingLength == 0 ? (byte) 1 : CURRENT_VERSION);
+    }
+
+    private VideoFrameDescriptor(
+            String uri,
+            long offset,
+            long length,
+            long frameIndex,
+            long frameMappingOffset,
+            long frameMappingLength,
+            byte version) {
         super(uri, offset, length);
         checkArgument(
                 frameIndex >= 0, "Video frame index must be non-negative, but was %s.", frameIndex);
+        checkArgument(frameMappingLength >= 0, "Video frame mapping length must be non-negative.");
+        checkArgument(
+                (frameMappingLength == 0 && frameMappingOffset == -1)
+                        || (frameMappingLength > 0 && frameMappingOffset >= 0),
+                "Invalid video frame mapping range.");
         this.frameIndex = frameIndex;
+        this.frameMappingOffset = frameMappingOffset;
+        this.frameMappingLength = frameMappingLength;
+        this.version = version;
     }
 
     public long frameIndex() {
@@ -55,6 +95,22 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     /** Returns the physical video identity without the logical frame locator. */
     public BlobDescriptor payloadDescriptor() {
         return new BlobDescriptor(uri(), offset(), length());
+    }
+
+    public @Nullable BlobDescriptor frameMappingDescriptor() {
+        return frameMappingLength == 0
+                ? null
+                : new BlobDescriptor(uri(), frameMappingOffset, frameMappingLength);
+    }
+
+    /** Returns the persisted frame mapping carried by an exact frame reference. */
+    public static @Nullable Blob frameMappingBlob(Blob blob) {
+        VideoFrameDescriptor frame = fromBlob(blob);
+        BlobDescriptor mapping = frame == null ? null : frame.frameMappingDescriptor();
+        if (mapping == null) {
+            return null;
+        }
+        return Blob.fromDescriptor(((BlobRef) blob).uriReader(), mapping);
     }
 
     /** Returns the video frame carried by an exact lazy blob reference, or {@code null}. */
@@ -77,30 +133,35 @@ public class VideoFrameDescriptor extends BlobDescriptor {
     @Override
     public byte[] serialize() {
         byte[] uriBytes = uri().getBytes(StandardCharsets.UTF_8);
+        int fixedLength = version == 1 ? V1_FIXED_LENGTH : V2_FIXED_LENGTH;
         ByteBuffer buffer =
-                ByteBuffer.allocate(FIXED_LENGTH + uriBytes.length).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.put(CURRENT_VERSION);
+                ByteBuffer.allocate(fixedLength + uriBytes.length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.put(version);
         buffer.putLong(MAGIC);
         buffer.putInt(uriBytes.length);
         buffer.put(uriBytes);
         buffer.putLong(offset());
         buffer.putLong(length());
         buffer.putLong(frameIndex);
+        if (version >= 2) {
+            buffer.putLong(frameMappingOffset);
+            buffer.putLong(frameMappingLength);
+        }
         return buffer.array();
     }
 
     public static VideoFrameDescriptor deserialize(byte[] bytes) {
-        if (bytes == null || bytes.length < FIXED_LENGTH) {
+        if (bytes == null || bytes.length < V1_FIXED_LENGTH) {
             throw invalidPayload("too short");
         }
 
         ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         byte version = buffer.get();
-        if (version != CURRENT_VERSION) {
+        if (version < 1 || version > CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting VideoFrameDescriptor version to be "
+                    "Expecting VideoFrameDescriptor version in [1, "
                             + CURRENT_VERSION
-                            + ", but found "
+                            + "], but found "
                             + version
                             + ".");
         }
@@ -117,7 +178,8 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         if (uriLength > buffer.remaining()) {
             throw invalidPayload("URI length exceeds data size");
         }
-        if (buffer.remaining() - uriLength < 3 * Long.BYTES) {
+        int trailingLength = version == 1 ? 3 * Long.BYTES : 5 * Long.BYTES;
+        if (buffer.remaining() - uriLength < trailingLength) {
             throw invalidPayload("missing offset/length/frame index");
         }
 
@@ -127,13 +189,20 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         long offset = buffer.getLong();
         long length = buffer.getLong();
         long frameIndex = buffer.getLong();
+        long frameMappingOffset = -1;
+        long frameMappingLength = 0;
+        if (version >= 2) {
+            frameMappingOffset = buffer.getLong();
+            frameMappingLength = buffer.getLong();
+        }
         if (buffer.hasRemaining()) {
             throw invalidPayload("trailing bytes");
         }
         if (frameIndex < 0) {
             throw invalidPayload("negative frame index: " + frameIndex);
         }
-        return new VideoFrameDescriptor(uri, offset, length, frameIndex);
+        return new VideoFrameDescriptor(
+                uri, offset, length, frameIndex, frameMappingOffset, frameMappingLength, version);
     }
 
     public static boolean isVideoFrameDescriptor(byte[] bytes) {
@@ -141,7 +210,8 @@ public class VideoFrameDescriptor extends BlobDescriptor {
             return false;
         }
         ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
-        return buffer.get() == CURRENT_VERSION && buffer.getLong() == MAGIC;
+        byte version = buffer.get();
+        return version >= 1 && version <= CURRENT_VERSION && buffer.getLong() == MAGIC;
     }
 
     @Override
@@ -154,12 +224,13 @@ public class VideoFrameDescriptor extends BlobDescriptor {
         }
         VideoFrameDescriptor that = (VideoFrameDescriptor) o;
         return frameIndex == that.frameIndex
-                && payloadDescriptor().equals(that.payloadDescriptor());
+                && payloadDescriptor().equals(that.payloadDescriptor())
+                && Objects.equals(frameMappingDescriptor(), that.frameMappingDescriptor());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(payloadDescriptor(), frameIndex);
+        return Objects.hash(payloadDescriptor(), frameIndex, frameMappingDescriptor());
     }
 
     @Override
