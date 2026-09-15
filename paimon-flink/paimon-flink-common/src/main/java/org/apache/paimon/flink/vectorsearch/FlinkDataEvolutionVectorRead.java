@@ -92,6 +92,7 @@ public class FlinkDataEvolutionVectorRead extends DataEvolutionVectorRead {
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
         splitSearchSplits(plan.splits(), indexSplits, rawSplits);
+        demoteUncoverableIndexSplits(indexSplits, rawSplits);
         if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }

@@ -88,6 +88,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     /** Snapshot the plan was built against; pins filters and raw reads to it. */
     @Nullable protected Snapshot planSnapshot;
 
+    /**
+     * Scalar pre-filter computed while splitting index/raw splits for the current read; lets {@link
+     * #preFilters} reuse it instead of scanning the scalar index twice. Only written and read on
+     * the single thread performing the read.
+     */
+    @Nullable private transient RoaringNavigableMap64 scalarPreFilter;
+
     private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
@@ -132,6 +139,55 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         table.coreOptions().toConfiguration());
     }
 
+    /**
+     * Moves index splits aside when the scalar index cannot evaluate {@link #filter}: the index
+     * path answers with all-or-nothing bitmaps, so with an unevaluable filter it can neither honor
+     * the filter (an empty bitmap silently drops every covered row) nor ignore it (the top-K would
+     * be polluted by non-matching rows). Instead, suppress the index splits and route the ranges
+     * the raw splits do not already cover through the raw search, where the exact final-read filter
+     * decides; already-covered ranges would duplicate that work. Splits routed this way reuse the
+     * vector index type so raw scoring keeps its metric. Must run after {@link #splitSearchSplits}
+     * and before the index splits are read, on the single thread performing the read; the computed
+     * pre-filter is cached for {@link #preFilters} to reuse.
+     */
+    protected void demoteUncoverableIndexSplits(
+            List<IndexVectorSearchSplit> indexSplits, List<RawVectorSearchSplit> rawSplits) {
+        scalarPreFilter = null;
+        if (filter == null || indexSplits.isEmpty()) {
+            return;
+        }
+        RoaringNavigableMap64 matchedRows = scalarMatchedRows(indexSplits);
+        if (matchedRows != null) {
+            scalarPreFilter = matchedRows;
+            return;
+        }
+        String indexType = vectorIndexType(indexSplits);
+        List<Range> uncovered = new ArrayList<>();
+        List<IndexFileMeta> scalarIndexFiles = new ArrayList<>();
+        for (IndexVectorSearchSplit split : indexSplits) {
+            if (!coveredByRawSplits(split.rowRangeStart(), split.rowRangeEnd(), rawSplits)) {
+                uncovered.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+                scalarIndexFiles.addAll(split.scalarIndexFiles());
+            }
+        }
+        if (!uncovered.isEmpty()) {
+            rawSplits.add(new RawVectorSearchSplit(uncovered, scalarIndexFiles, indexType));
+        }
+        indexSplits.clear();
+    }
+
+    private static boolean coveredByRawSplits(
+            long start, long end, List<RawVectorSearchSplit> rawSplits) {
+        for (RawVectorSearchSplit raw : rawSplits) {
+            for (Range range : raw.rowRanges()) {
+                if (range.from <= start && end <= range.to) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
         List<Range> indexedRowRanges = new ArrayList<>(splits.size());
         for (IndexVectorSearchSplit split : splits) {
@@ -141,7 +197,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         RoaringNavigableMap64 liveRows =
                 GlobalIndexLiveRowFilter.liveRows(
                         table, planSnapshot, partitionFilter, indexedRowRanges);
-        RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
+        RoaringNavigableMap64 matchedRows =
+                scalarPreFilter != null ? scalarPreFilter : scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
         boolean hasFilter = false;
@@ -167,6 +224,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return hasFilter ? includeRowIds : Collections.emptyList();
     }
 
+    /**
+     * Row ids the scalar index reports as matching {@link #filter}, or {@code null} when the index
+     * cannot evaluate the predicate (no scalar index files, or a function the reader does not
+     * support). {@code null} means "cannot decide", never "no rows match".
+     */
     @Nullable
     private RoaringNavigableMap64 scalarMatchedRows(List<IndexVectorSearchSplit> splits) {
         if (filter == null) {
@@ -183,13 +245,13 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 DataEvolutionGlobalIndexScanner.create(
                         table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
-            return new RoaringNavigableMap64();
+            return null;
         }
 
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (!result.isPresent()) {
-                return new RoaringNavigableMap64();
+                return null;
             }
             return result.get().results();
         } catch (IOException e) {
