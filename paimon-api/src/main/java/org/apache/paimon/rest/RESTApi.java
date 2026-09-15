@@ -69,6 +69,7 @@ import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.requests.UpsertLabelRequest;
+import org.apache.paimon.rest.requests.UpsertSemanticViewRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
@@ -80,6 +81,7 @@ import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
+import org.apache.paimon.rest.responses.GetSemanticViewResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -97,6 +99,7 @@ import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSchemasResponse;
+import org.apache.paimon.rest.responses.ListSemanticViewsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -114,6 +117,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.view.SemanticViewDefinition;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
 
@@ -960,6 +964,92 @@ public class RESTApi {
     @Experimental
     public void deleteLabel(String entityType, String entityName, String key) {
         client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
+    }
+
+    /** Creates or atomically replaces the complete semantic model definition. */
+    @Experimental
+    public GetSemanticViewResponse upsertSemanticView(
+            Identifier identifier, SemanticViewDefinition definition) {
+        return upsertSemanticView(identifier, definition, null);
+    }
+
+    /**
+     * Replaces a matching existing revision, or upserts unconditionally when expectedRevision is
+     * null. HTTP 409 (including revision and SQL view name conflicts) is reported as
+     * AlreadyExistsException by the standard REST error handler. Conditional writes never fall back
+     * to unconditional upserts; after an ambiguous result, GET and reconcile the definition.
+     */
+    @Experimental
+    public GetSemanticViewResponse upsertSemanticView(
+            Identifier identifier,
+            SemanticViewDefinition definition,
+            @Nullable String expectedRevision) {
+        checkArgument(identifier != null, "identifier must not be null");
+        return client.post(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                new UpsertSemanticViewRequest(definition, expectedRevision),
+                GetSemanticViewResponse.class,
+                restAuthFunction);
+    }
+
+    /** Gets the complete model definition and revision. Missing objects return HTTP 404. */
+    @Experimental
+    public GetSemanticViewResponse getSemanticView(Identifier identifier) {
+        checkArgument(identifier != null, "identifier must not be null");
+        return client.get(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                GetSemanticViewResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists semantic view names only, following catalog pagination. */
+    @Experimental
+    public List<String> listSemanticViews(String database) {
+        return PagedList.listAllFromPagedApi(
+                token -> listSemanticViewsPaged(database, null, token));
+    }
+
+    /** Lists names with a page size of 1 to 1000, or the server default when null. */
+    @Experimental
+    public PagedList<String> listSemanticViewsPaged(
+            String database, @Nullable Integer maxResults, @Nullable String pageToken) {
+        checkArgument(
+                maxResults == null || (maxResults >= 1 && maxResults <= 1000),
+                "maxResults must be between 1 and 1000");
+        ListSemanticViewsResponse response =
+                client.get(
+                        resourcePaths.semanticViews(database),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListSemanticViewsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(response.getSemanticViews(), response.getNextPageToken());
+    }
+
+    /** Deletes a semantic view; an absent object returns HTTP 404. */
+    @Experimental
+    public void deleteSemanticView(Identifier identifier) {
+        deleteSemanticView(identifier, null);
+    }
+
+    /** Deletes atomically if expectedRevision matches, or unconditionally when null. */
+    @Experimental
+    public void deleteSemanticView(Identifier identifier, @Nullable String expectedRevision) {
+        checkArgument(identifier != null, "identifier must not be null");
+        checkArgument(
+                expectedRevision == null || !expectedRevision.trim().isEmpty(),
+                "expectedRevision must not be blank");
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (expectedRevision != null) {
+            queryParams.put("expectedRevision", expectedRevision);
+        }
+        client.delete(
+                resourcePaths.semanticView(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                queryParams,
+                null,
+                restAuthFunction);
     }
 
     /** Lists permissions on an exact resource in the configured REST catalog. */

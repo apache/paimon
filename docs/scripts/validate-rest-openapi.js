@@ -346,6 +346,73 @@ function validateCatalogOpenApi() {
   ['GetDatabaseResponse', 'GetTableResponse', 'GetViewResponse', 'GetFunctionResponse'].forEach(
     (schemaName) => contract.requireTypedIntegerProperties(schemaName, ['createdAt', 'updatedAt']),
   );
+  const semanticCollection = '/v1/{prefix}/databases/{database}/semantic-views';
+  const semanticItem = `${semanticCollection}/{semanticView}`;
+  [
+    [semanticCollection, 'get', 'listSemanticViews'],
+    [semanticItem, 'get', 'getSemanticView'],
+    [semanticItem, 'post', 'upsertSemanticView'],
+    [semanticItem, 'delete', 'deleteSemanticView'],
+  ].forEach(([resourcePath, method, operationId]) => {
+    contract.checkSpec(
+      contract.spec.paths[resourcePath]?.[method]?.operationId === operationId,
+      `${operationId} must use ${method.toUpperCase()} ${resourcePath}`,
+    );
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500', '501']);
+  });
+  contract.checkSpec(!contract.spec.paths[semanticItem].patch, 'Semantic views use POST replacement');
+  contract.requireResponses('upsertSemanticView', ['409', '413']);
+  contract.requireResponses('deleteSemanticView', ['409']);
+  const semanticUpsert = contract.requireOperation('upsertSemanticView');
+  contract.checkSpec(
+    semanticUpsert.requestBody.required &&
+      semanticUpsert.requestBody.content['application/json'].schema.$ref ===
+        '#/components/schemas/UpsertSemanticViewRequest' &&
+      semanticUpsert.responses['200'].content['application/json'].schema.$ref ===
+        '#/components/schemas/GetSemanticViewResponse',
+    'Semantic view upsert must take a complete definition and return the committed object',
+  );
+  const semanticDelete = contract.requireOperation('deleteSemanticView');
+  contract.checkSpec(
+    !semanticDelete.requestBody &&
+      semanticDelete.parameters.some(
+        (parameter) =>
+          parameter.name === 'expectedRevision' && parameter.in === 'query' && !parameter.required,
+      ),
+    'Semantic view DELETE must carry its optional revision in query parameters without a body',
+  );
+  const pageSize = contract.requireOperation('listSemanticViews').parameters.find(
+    (parameter) => parameter.name === 'maxResults',
+  );
+  contract.checkSpec(
+    pageSize.schema.minimum === 1 && pageSize.schema.maximum === 1000,
+    'Semantic view page size must be between 1 and 1000',
+  );
+  contract.requireRequiredProperties('SemanticViewDefinition', ['format', 'dialect', 'content']);
+  const definition = contract.requireProperties('SemanticViewDefinition', ['format', 'dialect', 'content']);
+  contract.checkSpec(
+    !definition.dialect.enum && definition.content['x-max-utf8-bytes'] === 1048576,
+    'Semantic definitions require an extensible dialect and a 1 MiB UTF-8 content limit',
+  );
+  contract.requireRequiredProperties('UpsertSemanticViewRequest', ['definition']);
+  requireNullableStringProperty(contract, 'UpsertSemanticViewRequest', 'expectedRevision');
+  contract.requireRequiredProperties('GetSemanticViewResponse', [
+    'name', 'entityName', 'definition', 'revision',
+  ]);
+  const semanticNames = contract.requireProperties('ListSemanticViewsResponse', ['semanticViews', 'nextPageToken']);
+  contract.checkSpec(
+    semanticNames.semanticViews.type === 'array' && semanticNames.semanticViews.items.type === 'string',
+    'Semantic view lists must contain names only',
+  );
+  contract.checkSpec(
+    errorResourceTypes.includes('SEMANTIC_VIEW'),
+    'Semantic view errors must identify SEMANTIC_VIEW',
+  );
+  contract.checkSpec(
+    contract.requireOperation('alterView').requestBody.content['application/json'].schema.$ref ===
+      '#/components/schemas/AlterViewRequest',
+    'Ordinary view POST must retain its existing alteration request',
+  );
   return contract.operations.size;
 }
 

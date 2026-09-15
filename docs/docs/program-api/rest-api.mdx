@@ -141,3 +141,11 @@ To use the full table API, add the [Java bundle](java-api#dependency) and create
 `metastore=rest`, the server `uri`, `warehouse`, and the same authentication options. See
 [REST catalog configuration](../concepts/rest/) for an example. Loading table metadata and reading
 its data files are separate operations, so configure storage access as required by the catalog.
+
+## Semantic view definitions
+
+`RESTApi` exposes `upsertSemanticView`, `getSemanticView`, `listSemanticViews`,
+`listSemanticViewsPaged`, and `deleteSemanticView`. Upsert and get return `GetSemanticViewResponse`.
+Use `RESTCatalog.semanticViewManagement()` for the domain API backed by an existing catalog.
+See [Semantic Views](../concepts/rest/semantic-views.md) for Java examples, revision conditions,
+server integration requirements, and the definition format.

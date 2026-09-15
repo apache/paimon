@@ -1,0 +1,57 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.view;
+
+import org.apache.paimon.annotation.Experimental;
+
+/** A registered semantic model, independent of a SQL view's query and result schema. */
+@Experimental
+public class SemanticView {
+
+    private final String name;
+    private final String entityName;
+    private final SemanticViewDefinition definition;
+    private final String revision;
+
+    public SemanticView(
+            String name, String entityName, SemanticViewDefinition definition, String revision) {
+        this.name = name;
+        this.entityName = entityName;
+        this.definition = definition;
+        this.revision = revision;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    /** Canonical server-generated identity for labels; do not reconstruct it from name segments. */
+    public String getEntityName() {
+        return entityName;
+    }
+
+    public SemanticViewDefinition getDefinition() {
+        return definition;
+    }
+
+    /** Opaque concurrency token, independent of the model syntax version. */
+    public String getRevision() {
+        return revision;
+    }
+}
