@@ -354,32 +354,37 @@ class AsyncStreamingTableScan:
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
         manifest_files = self._manifest_list_manager.read_delta(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
     def _create_changelog_plan(self, snapshot: Snapshot) -> Plan:
         """Read from changelog_manifest_list (changelog-producer=input/full-compaction/lookup)."""
         manifest_files = self._manifest_list_manager.read_changelog(snapshot)
-        return self._create_plan_from_manifests(manifest_files)
+        return self._create_plan_from_manifests(manifest_files, snapshot.id)
 
-    def _create_plan_from_manifests(self, manifest_files: List) -> Plan:
+    def _create_plan_from_manifests(self, manifest_files: List, snapshot_id=None) -> Plan:
         """Create splits from manifest files, applying shard filtering."""
         if not manifest_files:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Use configurable parallelism from table options
         max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
 
-        # Read manifest entries from manifest files
+        def require_add(entry):
+            if entry.kind != 0:
+                raise ValueError("Incremental manifests must contain only ADD entries")
+            return True
+
+        # Validate before the manifest reader reconciles ADD/DELETE entries.
         entries = self._manifest_file_manager.read_entries_parallel(
             manifest_files,
-            manifest_entry_filter=None,
+            manifest_entry_filter=require_add,
             max_workers=max_workers
         )
 
         # Apply shard/bucket filtering for parallel consumption
         entries = self._filter_entries_for_shard(entries) if entries else []
         if not entries:
-            return Plan([])
+            return Plan([], snapshot_id=snapshot_id)
 
         # Get split options from table
         options = self.table.options
@@ -403,7 +408,10 @@ class AsyncStreamingTableScan:
             )
 
         splits = split_generator.create_splits(entries)
-        return Plan(splits)
+        for split in splits:
+            split.is_streaming = True
+            split.snapshot_id = snapshot_id
+        return Plan(splits, snapshot_id=snapshot_id)
 
     def _should_use_diff_catch_up(self) -> bool:
         """Check if diff-based catch-up should be used (large gap to latest)."""

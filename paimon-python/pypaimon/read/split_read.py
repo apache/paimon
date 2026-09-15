@@ -1049,15 +1049,19 @@ class MergeFileSplitRead(SplitRead):
         )
 
     def create_reader(self) -> RecordReader:
-        # Create a dict mapping data file name to deletion file reader method
         self._genarate_deletion_file_readers()
-        section_readers = []
-        sections = IntervalPartition(self.split.files).partition()
-        for section in sections:
-            supplier = partial(self.section_reader_supplier, section)
-            section_readers.append(supplier)
-        concat_reader = ConcatRecordReader(section_readers)
-        kv_unwrap_reader = KeyValueUnwrapRecordReader(DropDeleteRecordReader(concat_reader))
+        if getattr(self.split, 'is_streaming', False):
+            # Java streaming PK reads concatenate physical changes, including
+            # retracts, without merging versions. Respect explicitly supplied DVs.
+            kv_reader = ConcatRecordReader([
+                partial(self.kv_reader_supplier, file,
+                        self.deletion_file_readers.get(file.file_name)) for file in self.split.files])
+        else:
+            sections = IntervalPartition(self.split.files).partition()
+            concat_reader = ConcatRecordReader([
+                partial(self.section_reader_supplier, section) for section in sections])
+            kv_reader = DropDeleteRecordReader(concat_reader)
+        kv_unwrap_reader = KeyValueUnwrapRecordReader(kv_reader)
         if self.predicate_for_reader:
             reader = FilterRecordReader(kv_unwrap_reader, self.predicate_for_reader)
         else:

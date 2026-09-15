@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -31,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Collections;
 
 /**
@@ -45,7 +45,7 @@ public final class AvroBlockReader implements Closeable {
 
     private @Nullable AvroRawBlock borrowedRawBlock;
 
-    public AvroBlockReader(SeekableInputStream input) throws IOException {
+    public AvroBlockReader(InputStream input) throws IOException {
         try {
             this.reader = new RawBlockReader(input);
         } catch (IOException | RuntimeException | Error e) {
@@ -60,7 +60,8 @@ public final class AvroBlockReader implements Closeable {
     }
 
     /**
-     * Returns the physical block offset; read immediately after {@link #nextBorrowedRawBlock()}.
+     * Returns the block offset relative to the initial input position; read immediately after
+     * {@link #nextBorrowedRawBlock()}.
      */
     public long blockOffset() {
         return reader.blockOffset();

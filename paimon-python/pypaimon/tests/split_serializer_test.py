@@ -127,6 +127,19 @@ class SplitSerializerTest(unittest.TestCase):
             (dv.dv_index_path, dv.offset, dv.length, dv.cardinality),
             ('dv/file-b', 2, 10, 3))
 
+    def test_streaming_java_flag_survives_decoding_and_selection(self):
+        data = bytearray(_GOLDEN_DATA_SPLIT_V1)
+        data[-2] = 1
+        split = deserialize_split_v1(bytes(data), self._partition_fields())
+        self.assertTrue(split.is_streaming)
+        selected = split.filter_file(lambda file: file.file_name == 'file-b')
+        self.assertTrue(selected.is_streaming)
+        self.assertEqual(selected.snapshot_id, split.snapshot_id)
+        indexed = IndexedSplit(selected, [])
+        self.assertTrue(indexed.is_streaming)
+        self.assertFalse(deserialize_split_v1(
+            _GOLDEN_DATA_SPLIT_V1, self._partition_fields()).is_streaming)
+
     def test_decodes_min_max_keys_with_key_fields(self):
         # Trimmed primary keys -> per-file min/max keys are decoded for PK
         # merge-on-read. The golden files carry keys [1..10] and [11..20].

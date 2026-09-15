@@ -166,6 +166,7 @@ public class RequestJacksonCompatibilityTest {
 
     private static final Set<Class<? extends RESTRequest>> COMPLEX_REQUESTS =
             Stream.<Class<? extends RESTRequest>>of(
+                            UpsertSemanticViewRequest.class,
                             AlterFunctionRequest.class,
                             AlterTableRequest.class,
                             AlterViewRequest.class,

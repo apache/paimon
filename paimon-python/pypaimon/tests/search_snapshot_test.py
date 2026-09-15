@@ -129,19 +129,24 @@ def test_empty_search_does_not_follow_first_commit(table):
     assert query.to_list() == [{"id": 1, "category": "allowed"}]
 
 
-@pytest.mark.parametrize("selector", ["snapshot", "tag", "timestamp"])
+@pytest.mark.parametrize("selector", ["snapshot", "tag", "version", "timestamp"])
 def test_time_travel_survives_concurrent_writes_and_retained_tag_snapshot(table, selector):
+    from pypaimon.multimodal.query import VectorQuery
+
     table.add(DATA)
     source = table.raw_table.snapshot_manager().get_latest_snapshot()
-    if selector == "tag":
+    if selector in ("tag", "version"):
         table.raw_table.create_tag("training", snapshot_id=source.id)
-        query = search(table, tag_name="training")
+        if selector == "tag":
+            query = search(table, tag_name="training")
+        else:
+            read_table = table.raw_table.copy({"scan.version": "training"})
+            query = VectorQuery(read_table, [0, 0], "embedding").select(["id", "category"]).limit(1)
         # Tags retain manifests even after their original snapshot JSON expires.
         table.add(pa.table({"id": [3], "category": ["allowed"],
                             "embedding": [[20, 0]]}, schema=SCHEMA))
         table.raw_table.file_io.delete(table.raw_table.snapshot_manager().get_snapshot_path(source.id))
     elif selector == "timestamp":
-        from pypaimon.multimodal.query import VectorQuery
         read_table = table.raw_table.copy({"scan.timestamp-millis": str(source.time_millis)})
         query = VectorQuery(read_table, [0, 0], "embedding").select(["id", "category"]).limit(1)
     else:
@@ -150,8 +155,9 @@ def test_time_travel_survives_concurrent_writes_and_retained_tag_snapshot(table,
 
     def update_before_lookup(execution, result):
         table.update("id = 1", {"category": "blocked"})
-        if selector == "tag":
+        if selector in ("tag", "version"):
             table.raw_table.replace_tag("training")
+            assert not execution._table.options.native_plan_enabled(default=True)
         # Read-option copies must retain the captured snapshot too.
         execution._table = execution._table.copy({"read.batch-size": "2"})
         return lookup(execution, result)

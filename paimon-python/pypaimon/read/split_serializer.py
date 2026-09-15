@@ -231,13 +231,14 @@ def _read_datasplit_body(r: _Reader, partition_fields: List[DataField],
     files = [_datafilemeta_from_row(r.take(r.i32()), bucket_path, arity, key_fields)
              for _ in range(file_count)]
     data_deletion_files = _read_deletion_list(r)
-    r.u8()    # isStreaming
+    is_streaming = r.u8() != 0
     raw_convertible = r.u8() != 0
     return DataSplit(
         files=files,
         partition=partition,
         bucket=bucket,
         raw_convertible=raw_convertible,
+        is_streaming=is_streaming,
         data_deletion_files=data_deletion_files,
         snapshot_id=snapshot_id,
     )

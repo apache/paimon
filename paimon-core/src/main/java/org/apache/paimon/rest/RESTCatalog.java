@@ -43,6 +43,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.management.LabelManagement;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PolicyManagement;
+import org.apache.paimon.management.SemanticViewManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -157,6 +158,12 @@ public class RESTCatalog implements Catalog {
     @Experimental
     public LabelManagement labelManagement() {
         return new RESTLabelManagement(api);
+    }
+
+    /** Definition management for semantic views, using this catalog's configuration. */
+    @Experimental
+    public SemanticViewManagement semanticViewManagement() {
+        return new RESTSemanticViewManagement(api);
     }
 
     @Override
