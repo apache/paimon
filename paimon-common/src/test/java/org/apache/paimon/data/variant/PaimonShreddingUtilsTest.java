@@ -292,6 +292,55 @@ public class PaimonShreddingUtilsTest {
     }
 
     @Test
+    public void testShreddedDecimalCastsLikeUnshredded() {
+        // A shredded typed_value carries the scale of the file schema, e.g. 10.0 as
+        // DECIMAL(18, 1), while the unshredded leg strips trailing zeros; both legs must
+        // produce the same string, and numeric targets must stay unaffected.
+        GenericVariant v =
+                GenericVariant.fromJson(
+                        "{\"price\": 10.0, \"amount\": 1.50, \"tiny\": 0.05, \"zero\": 0.00}");
+        VariantCastArgs castArgs = new VariantCastArgs(true, ZoneOffset.UTC);
+
+        RowType shredded =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 1),
+                            DataTypes.DECIMAL(18, 2),
+                            DataTypes.DECIMAL(18, 2)
+                        },
+                        new String[] {"amount", "price", "tiny", "zero"});
+        RowType unshredded = RowType.of();
+
+        for (RowType shape : new RowType[] {shredded, unshredded}) {
+            VariantSchema variantSchema = buildVariantSchema(variantShreddingSchema(shape));
+            FieldToExtract[] fieldsToExtract = {
+                buildFieldsToExtract(DataTypes.STRING(), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.tiny", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.STRING(), "$.zero", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DECIMAL(10, 2), "$.price", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.DOUBLE(), "$.amount", castArgs, variantSchema),
+                buildFieldsToExtract(DataTypes.BIGINT(), "$.price", castArgs, variantSchema)
+            };
+
+            assertThat(
+                            assembleVariantStruct(
+                                    castShredded(v, variantSchema), variantSchema, fieldsToExtract))
+                    .as("shape %s", shape)
+                    .isEqualTo(
+                            GenericRow.of(
+                                    BinaryString.fromString("10"),
+                                    BinaryString.fromString("1.5"),
+                                    BinaryString.fromString("0.05"),
+                                    BinaryString.fromString("0"),
+                                    Decimal.fromBigDecimal(new BigDecimal("10.00"), 10, 2),
+                                    1.5,
+                                    10L));
+        }
+    }
+
+    @Test
     public void testAssembleDecimalWithScaleAbovePrecision() {
         // the unshredded leg extracts through VariantGet, which used to build an invalid
         // DecimalType for a value below 0.1 or one whose trailing zeros were stripped off

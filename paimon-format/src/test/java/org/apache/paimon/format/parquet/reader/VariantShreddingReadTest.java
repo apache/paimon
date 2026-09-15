@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -47,6 +48,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -490,6 +492,56 @@ public class VariantShreddingReadTest {
         List<InternalRow> result = readRows(format, readType);
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"price\",\"type\":\"DECIMAL(18, 1)\"},{\"name\":\"amount\",\"type\":\"DECIMAL(18, 2)\"}]}}]}"
+            })
+    public void testReadDecimalAsStringConsistently(String shreddingSchema) throws Exception {
+        // A shredded typed_value keeps the scale of the file schema while the unshredded value
+        // is read with trailing zeros stripped; both layouts must extract the same string.
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        writeRows(
+                format.createWriterFactory(writeType),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":10.0,\"amount\":1.50}")),
+                GenericRow.of(GenericVariant.fromJson("{\"price\":2.5,\"amount\":0.00}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.STRING(), "$.price")
+                                        .field(DataTypes.STRING(), "$.amount")
+                                        .field(DataTypes.DECIMAL(10, 2), "$.price")
+                                        .field(DataTypes.DOUBLE(), "$.amount")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 4))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("10"),
+                                BinaryString.fromString("1.5"),
+                                Decimal.fromBigDecimal(new BigDecimal("10.00"), 10, 2),
+                                1.5));
+        assertThat(result.get(1).getRow(0, 4))
+                .isEqualTo(
+                        GenericRow.of(
+                                BinaryString.fromString("2.5"),
+                                BinaryString.fromString("0"),
+                                Decimal.fromBigDecimal(new BigDecimal("2.50"), 10, 2),
+                                0.0));
     }
 
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
