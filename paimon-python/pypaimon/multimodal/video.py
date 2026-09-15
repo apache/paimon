@@ -40,6 +40,7 @@ class VideoFrameCollator:
     Optional ``decode_batch_fn`` replaces ``decode_fn`` for each payload group.
     It receives the cached decoder, sorted frame indices, and corresponding row
     dictionaries, and returns a sequence with one frame per row in that order.
+    At least one of ``decode_fn`` or ``decode_batch_fn`` must be provided.
 
     The cache is process-local and keyed by physical video payload identity.
     ``collate_fn`` defaults to PyTorch's ``default_collate`` and may be replaced
@@ -52,7 +53,7 @@ class VideoFrameCollator:
             *,
             video_column,
             decoder_factory,
-            decode_fn,
+            decode_fn=None,
             output_column="frame",
             max_open_videos=8,
             collate_fn=None,
@@ -61,10 +62,13 @@ class VideoFrameCollator:
             raise ValueError("video_column is required.")
         if not callable(decoder_factory):
             raise ValueError("decoder_factory must be callable.")
-        if not callable(decode_fn):
-            raise ValueError("decode_fn must be callable.")
+        if decode_fn is not None and not callable(decode_fn):
+            raise ValueError("decode_fn must be callable or None.")
         if decode_batch_fn is not None and not callable(decode_batch_fn):
             raise ValueError("decode_batch_fn must be callable or None.")
+        if decode_fn is None and decode_batch_fn is None:
+            raise ValueError(
+                "At least one of decode_fn or decode_batch_fn is required.")
         if (
             isinstance(max_open_videos, bool)
             or not isinstance(max_open_videos, int)

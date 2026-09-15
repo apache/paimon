@@ -62,6 +62,52 @@ class VideoFrameCollatorTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_accepts_batch_callback_without_single_frame_callback(self):
+        descriptors = [
+            self._descriptor("episode.mp4", b"video", index)
+            for index in (2, 0)
+        ]
+        for kwargs in ({}, {"decode_fn": None}):
+            with self.subTest(kwargs=kwargs):
+                collator = VideoFrameCollator(
+                    self.table,
+                    video_column="video",
+                    decoder_factory=lambda stream: _Decoder(stream, []),
+                    decode_batch_fn=lambda decoder, indices, rows: [
+                        decoder.decode(index) for index in indices
+                    ],
+                    collate_fn=lambda rows: rows,
+                    **kwargs,
+                )
+                try:
+                    result = collator([{"video": value} for value in descriptors])
+                    self.assertEqual([(b"video", 2), (b"video", 0)],
+                                     [row["frame"] for row in result])
+                finally:
+                    collator.close()
+
+    def test_rejects_missing_or_invalid_decode_callbacks(self):
+        callback = lambda *args: None
+        cases = [
+            ({}, "At least one"),
+            ({"decode_fn": None, "decode_batch_fn": None}, "At least one"),
+            ({"decode_fn": False}, "decode_fn must be callable"),
+            ({"decode_fn": False, "decode_batch_fn": callback},
+             "decode_fn must be callable"),
+            ({"decode_batch_fn": False}, "decode_batch_fn must be callable"),
+            ({"decode_fn": callback, "decode_batch_fn": False},
+             "decode_batch_fn must be callable"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    VideoFrameCollator(
+                        self.table,
+                        video_column="video",
+                        decoder_factory=lambda stream: _Decoder(stream, []),
+                        **kwargs,
+                    )
+
     def test_reuses_decoder_for_rows_with_same_descriptor(self):
         descriptors = [
             self._descriptor("episode-1.mp4", b"video-one", frame)

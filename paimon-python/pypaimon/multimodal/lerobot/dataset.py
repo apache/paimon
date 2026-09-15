@@ -267,7 +267,6 @@ class PaimonDatasetReader(ABC):
                 video_column=key,
                 decoder_factory=partial(
                     _open_video_decoder, backend=self.video_backend),
-                decode_fn=_decode_video_frame,
                 decode_batch_fn=_decode_video_frames,
                 output_column=key,
                 collate_fn=_identity,
@@ -1536,10 +1535,6 @@ class _PyAVVideoDecoder:
 
     def close(self):
         self._container.close()
-
-
-def _decode_video_frame(decoder, frame_index, unused_row):
-    return decoder[frame_index]
 
 
 def _decode_video_frames(decoder, frame_indices, unused_rows):

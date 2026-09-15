@@ -475,7 +475,6 @@ class LeRobotValidationTest(unittest.TestCase):
         collator = pmm.VideoFrameCollator(
             SimpleNamespace(file_io=file_io), video_column="video",
             decoder_factory=lambda source: decoder,
-            decode_fn=lambda *args: self.fail("unexpected single-frame call"),
             decode_batch_fn=_decode_video_frames,
             collate_fn=lambda rows: rows,
         )
