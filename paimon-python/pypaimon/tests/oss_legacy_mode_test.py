@@ -53,45 +53,92 @@ class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 class _DeleteRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def _target(self):
+        path = unquote(urlsplit(self.path).path).lstrip("/")
+        bucket, _, key = path.partition("/")
+        return bucket, key
+
+    def _respond(self, status, body=b""):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_HEAD(self):
+        self.server.requests.append((self.command, self.path))
+        if not hasattr(self.server, "bucket_objects"):
+            return self._respond(501)
+        bucket, key = self._target()
+        exists = not key or key in self.server.bucket_objects.get(bucket, ())
+        self._respond(200 if exists else 404)
+
     def do_GET(self):
         self.server.requests.append((self.command, self.path))
         query = parse_qs(urlsplit(self.path).query)
         prefix = query.get("prefix", [""])[0]
+        delimiter = query.get("delimiter", [""])[0]
         max_keys = int(query.get("max-keys", ["1000"])[0])
+        bucket, _ = self._target()
+        objects = (
+            self.server.bucket_objects.get(bucket, ())
+            if hasattr(self.server, "bucket_objects")
+            else self.server.objects
+        )
         keys = sorted(
-            key for key in self.server.objects if key.startswith(prefix)
-        )[:max_keys]
+            key for key in objects if key.startswith(prefix)
+        )
+        contents = []
+        common_prefixes = set()
+        for key in keys:
+            suffix = key[len(prefix):]
+            if delimiter and delimiter in suffix:
+                common_prefixes.add(
+                    prefix + suffix.split(delimiter, 1)[0] + delimiter)
+            else:
+                contents.append(key)
+        contents = contents[:max_keys]
         body = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
-            '<IsTruncated>false</IsTruncated>{}</ListBucketResult>'.format(
+            '<Name>{}</Name><Prefix>{}</Prefix><Delimiter>{}</Delimiter>'
+            '<KeyCount>{}</KeyCount><MaxKeys>{}</MaxKeys>'
+            '<IsTruncated>false</IsTruncated>{}{}</ListBucketResult>'.format(
+                escape(bucket), escape(prefix), escape(delimiter),
+                len(contents) + len(common_prefixes), max_keys,
                 "".join(
-                    "<Contents><Key>{}</Key><Size>1</Size></Contents>".format(
-                        escape(key))
-                    for key in keys)))
-        if (keys == [self.server.prefix]
+                    "<Contents><Key>{}</Key>"
+                    "<LastModified>2026-01-01T00:00:00Z</LastModified>"
+                    "<Size>{}</Size><StorageClass>STANDARD</StorageClass>"
+                    "</Contents>".format(
+                        escape(key), 0 if key.endswith("/") else 1)
+                    for key in contents),
+                "".join(
+                    "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>".format(
+                        escape(child))
+                    for child in sorted(common_prefixes))))
+        if (not hasattr(self.server, "bucket_objects")
+                and keys == [self.server.prefix]
                 and not self.server.late_object_added):
             self.server.objects.add(self.server.prefix + "late.parquet")
             self.server.late_object_added = True
-        first = self.server.prefix + "first.parquet"
-        if first in keys and not self.server.missing_object_removed:
+        first = getattr(self.server, "prefix", "") + "first.parquet"
+        if (not hasattr(self.server, "bucket_objects")
+                and first in keys and not self.server.missing_object_removed):
             self.server.objects.discard(first)
             self.server.missing_object_removed = True
         encoded = body.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/xml")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+        self._respond(200, encoded)
 
     def do_DELETE(self):
         self.server.requests.append((self.command, self.path))
-        path = unquote(urlsplit(self.path).path).lstrip("/")
-        _, key = path.split("/", 1)
-        self.server.objects.discard(key)
-        self.send_response(204)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+        bucket, key = self._target()
+        if hasattr(self.server, "bucket_objects"):
+            self.server.bucket_objects.setdefault(bucket, set()).discard(key)
+        else:
+            self.server.objects.discard(key)
+        self._respond(204)
 
     def _unexpected(self):
         self.server.requests.append((self.command, self.path))
@@ -99,7 +146,6 @@ class _DeleteRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    do_HEAD = _unexpected
     do_POST = _unexpected
     do_PUT = _unexpected
 
@@ -632,6 +678,62 @@ class CustomS3EndpointTest(unittest.TestCase):
 
         file_io._s3_delete_client.delete_object.assert_called_once_with(
             Bucket="target-bucket", Key="table/")
+
+    @unittest.skipUnless(
+        parse(pyarrow.__version__) >= parse("22.0.0"),
+        "requires PyArrow 22+ and boto3",
+    )
+    def test_delete_uses_cross_bucket_list_status_path(self):
+        server = _ThreadingHTTPServer(
+            ("127.0.0.1", 0), _DeleteRequestHandler)
+        server.requests = []
+        source_objects = {
+            "parent/child/", "parent/child/keep.parquet"}
+        server.bucket_objects = {
+            "source-bucket": set(source_objects),
+            "target-bucket": {
+                "parent/child/", "parent/child/delete.parquet"},
+        }
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            options = Options({
+                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+                S3Options.S3_ENDPOINT.key():
+                    "http://127.0.0.1:{}".format(server.server_port),
+                S3Options.S3_REGION.key(): "us-east-1",
+                "fs.s3.path.style.access": "true",
+            })
+            with mock.patch.dict(os.environ, {
+                    "NO_PROXY": "127.0.0.1,localhost",
+                    "no_proxy": "127.0.0.1,localhost",
+            }):
+                file_io = PyArrowFileIO(
+                    "s3://source-bucket/warehouse", options)
+                statuses = file_io.list_status(
+                    "s3://target-bucket/parent")
+                target = next(
+                    status for status in statuses
+                    if status.type == pafs.FileType.Directory)
+
+                self.assertEqual(
+                    "target-bucket/parent/child", target.path)
+                self.assertTrue(file_io.delete(
+                    target.path, recursive=True))
+                file_io._s3_delete_client.close()
+
+            self.assertEqual(
+                source_objects, server.bucket_objects["source-bucket"])
+            self.assertEqual(set(), server.bucket_objects["target-bucket"])
+            self.assertTrue(all(
+                urlsplit(path).path.startswith("/target-bucket/")
+                for method, path in server.requests
+                if method == "DELETE"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
 
     @unittest.skipUnless(
         parse(pyarrow.__version__) >= parse("22.0.0"),
