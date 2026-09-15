@@ -112,15 +112,10 @@ def _file_info(path, file_type):
 
 
 def _set_listed_keys(file_io, *passes):
-    paginator = mock.Mock()
-    file_io._s3_delete_client.get_paginator.return_value = paginator
-    paginator.paginate.side_effect = [
-        [{"Contents": [{"Key": key} for key in keys]}]
+    file_io._s3_delete_client.list_objects_v2.side_effect = [
+        {"Contents": [{"Key": key} for key in keys]}
         for keys in passes
-    ]
-    file_io._s3_delete_client.list_objects_v2.return_value = {
-        "Contents": []
-    }
+    ] + [{"Contents": []}]
 
 
 def _probe_response(status_code, body):
@@ -591,6 +586,23 @@ class CustomS3EndpointTest(unittest.TestCase):
             mock.call(Bucket="target-bucket", Key="table/"),
         ], file_io._s3_delete_client.delete_object.call_args_list)
 
+    def test_pre_pyarrow_22_cross_bucket_delete_keeps_native_path(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = False
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+
+        self.assertTrue(file_io.delete(
+            "s3://target-bucket/table", recursive=True))
+
+        file_io.filesystem.delete_dir_contents.assert_called_once_with(
+            "target-bucket/table")
+        file_io.filesystem.delete_dir.assert_called_once_with(
+            "target-bucket/table")
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
     def test_non_recursive_delete_uses_bucket_from_target_uri(self):
         file_io = self._new_file_io()
         file_io._pyarrow_gte_22 = True
@@ -614,8 +626,10 @@ class CustomS3EndpointTest(unittest.TestCase):
         server = _ThreadingHTTPServer(
             ("127.0.0.1", 0), _DeleteRequestHandler)
         server.requests = []
-        server.prefix = "table/"
-        server.objects = {server.prefix, server.prefix + "first.parquet"}
+        server.prefix = "ta/ble/"
+        decoy = "ta/ble-other/keep.parquet"
+        server.objects = {
+            server.prefix, server.prefix + "first.parquet", decoy}
         server.late_object_added = False
         server.missing_object_removed = False
         server_thread = threading.Thread(target=server.serve_forever)
@@ -639,23 +653,23 @@ class CustomS3EndpointTest(unittest.TestCase):
                     "s3://source-bucket/warehouse", options)
                 file_io.filesystem = mock.Mock()
                 file_io.filesystem.get_file_info.return_value = [
-                    _file_info("/table", pafs.FileType.Directory)]
+                    _file_info("/ta/ble", pafs.FileType.Directory)]
 
                 self.assertTrue(file_io.delete(
-                    "s3://target-bucket/table", recursive=True))
+                    "s3://target-bucket/ta//ble", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertTrue(server.late_object_added)
             self.assertTrue(server.missing_object_removed)
-            self.assertEqual(set(), server.objects)
+            self.assertEqual({decoy}, server.objects)
             self.assertEqual(
                 {"GET", "DELETE"},
                 {method for method, _ in server.requests})
             self.assertEqual([
-                "/target-bucket/table/first.parquet",
-                "/target-bucket/table/",
-                "/target-bucket/table/late.parquet",
-                "/target-bucket/table/",
+                "/target-bucket/ta/ble/first.parquet",
+                "/target-bucket/ta/ble/",
+                "/target-bucket/ta/ble/late.parquet",
+                "/target-bucket/ta/ble/",
             ], [path for method, path in server.requests
                 if method == "DELETE"])
         finally:

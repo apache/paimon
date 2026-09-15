@@ -524,7 +524,12 @@ class PyArrowFileIO(FileIO):
         if prefix:
             prefix += "/"
         while True:
-            keys = self._iter_s3_keys(client, bucket, prefix)
+            response = client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+            keys = (
+                item["Key"] for item in response.get("Contents", ())
+                if item["Key"] != prefix
+            )
             if self._delete_s3_objects(client, bucket, keys):
                 continue
             if prefix:
@@ -534,14 +539,6 @@ class PyArrowFileIO(FileIO):
             if not any(item["Key"] != prefix
                        for item in response.get("Contents", ())):
                 return True
-
-    @staticmethod
-    def _iter_s3_keys(client, bucket: str, prefix: str):
-        paginator = client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-            for item in page.get("Contents", ()):
-                if item["Key"] != prefix:
-                    yield item["Key"]
 
     @staticmethod
     def _delete_s3_objects(
@@ -567,7 +564,7 @@ class PyArrowFileIO(FileIO):
     def _split_s3_path(self, path_str: str):
         parsed = urlparse(path_str)
         if parsed.scheme:
-            return parsed.netloc, parsed.path.lstrip("/")
+            return parsed.netloc, re.sub(r"/+", "/", parsed.path).lstrip("/")
 
         path_str = path_str.lstrip("/")
         expected_bucket = self._oss_bucket if self._is_oss else self._s3_bucket
