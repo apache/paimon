@@ -140,6 +140,61 @@ public class SnapshotManagerTest {
         }
     }
 
+    @Test
+    public void testTryFromPathReportsSnapshotDeletedDuringReadAsNotFound() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        Path path = snapshotManager.snapshotPath(1);
+        fileIO.tryToWriteAtomic(path, createSnapshotWithMillis(1, 1000).toJson());
+        IOException readFailure = new IOException("404 Not Found");
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(path);
+                            throw readFailure;
+                        })
+                .when(fileIO)
+                .readFileUtf8(path);
+
+        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path))
+                .isInstanceOf(FileNotFoundException.class)
+                .hasCause(readFailure);
+    }
+
+    @Test
+    public void testTryFromPathKeepsReadFailureOfExistingSnapshot() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        Path path = snapshotManager.snapshotPath(1);
+        fileIO.tryToWriteAtomic(path, createSnapshotWithMillis(1, 1000).toJson());
+        Mockito.doThrow(new IOException("Read failure")).when(fileIO).readFileUtf8(path);
+
+        assertThatThrownBy(() -> SnapshotManager.tryFromPath(fileIO, path))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Fails to read snapshot from path")
+                .hasRootCauseMessage("Read failure");
+    }
+
+    @Test
+    public void testLatestSnapshotOfUserStopsAtSnapshotDeletedDuringRead() throws IOException {
+        FileIO fileIO = Mockito.spy(LocalFileIO.create());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+        for (long id = 1; id <= 3; id++) {
+            fileIO.tryToWriteAtomic(
+                    snapshotManager.snapshotPath(id),
+                    createSnapshotWithMillis(id, id * 1000).toJson());
+        }
+        Path expiring = snapshotManager.snapshotPath(1);
+        Mockito.doAnswer(
+                        invocation -> {
+                            fileIO.deleteQuietly(expiring);
+                            throw new IOException("404 Not Found");
+                        })
+                .when(fileIO)
+                .readFileUtf8(expiring);
+
+        assertThat(snapshotManager.latestSnapshotOfUser("currentCommitUser")).isEmpty();
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarliestSnapshot(boolean isRaceCondition) throws IOException {

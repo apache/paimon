@@ -870,6 +870,13 @@ public class SnapshotManager implements Serializable {
             } catch (FileNotFoundException e) {
                 throw e;
             } catch (IOException e) {
+                // Some FileIOs throw a plain IOException for a snapshot deleted during reading.
+                if (!fileExists(fileIO, path)) {
+                    FileNotFoundException notFound =
+                            new FileNotFoundException("Snapshot file " + path + " does not exist.");
+                    notFound.initCause(e);
+                    throw notFound;
+                }
                 throw new RuntimeException("Fails to read snapshot from path " + path, e);
             }
 
@@ -887,5 +894,14 @@ public class SnapshotManager implements Serializable {
             }
         }
         throw new RuntimeException("Retry fail after 10 times", exception);
+    }
+
+    private static boolean fileExists(FileIO fileIO, Path path) {
+        try {
+            return fileIO.exists(path);
+        } catch (IOException ignored) {
+            // Treat as present so that the original read failure is kept.
+            return true;
+        }
     }
 }
