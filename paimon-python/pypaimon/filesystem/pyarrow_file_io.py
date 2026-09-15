@@ -22,8 +22,9 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
@@ -65,6 +66,7 @@ class PyArrowFileIO(FileIO):
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._is_s3 = scheme in {"s3", "s3a", "s3n"}
+        self._s3_bucket = netloc if self._is_s3 else None
         self._s3_endpoint = (
             self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
             if self._is_s3 else None
@@ -75,6 +77,7 @@ class PyArrowFileIO(FileIO):
         self._legacy_bucket_checked = False
         self._legacy_bucket_error = None
         self._legacy_bucket_lock = threading.Lock()
+        self._s3_delete_client = None
 
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
@@ -105,6 +108,7 @@ class PyArrowFileIO(FileIO):
         state = self.__dict__.copy()
         # threading.Lock cannot be pickled; recreated in __setstate__.
         state.pop("_legacy_bucket_lock", None)
+        state.pop("_s3_delete_client", None)
         # Recreate S3-compatible clients with the worker's AWS SDK settings.
         if self._uses_s3_compatibility():
             state.pop("filesystem", None)
@@ -113,6 +117,7 @@ class PyArrowFileIO(FileIO):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._legacy_bucket_lock = threading.Lock()
+        self._s3_delete_client = None
         if self._uses_s3_compatibility():
             self.filesystem = (
                 self._initialize_oss_fs(None)
@@ -181,6 +186,12 @@ class PyArrowFileIO(FileIO):
     def _uses_s3_compatibility(self) -> bool:
         return (not self._use_jindo
                 and (self._is_oss or bool(self._s3_endpoint)))
+
+    def _uses_s3_delete_fallback(self) -> bool:
+        return (self._uses_s3_compatibility()
+                and self._pyarrow_gte_22
+                and not (self._is_s3 and self._get_s3_boolean_property(
+                    "delete.batch-enabled")))
 
     @staticmethod
     def _configure_s3_compatibility():
@@ -480,9 +491,17 @@ class PyArrowFileIO(FileIO):
             return False
 
         if file_info.type == pafs.FileType.Directory:
-            if (recursive and self._uses_s3_compatibility()
-                    and self._pyarrow_gte_22):
-                return self._delete_s3_compatible_directory(path_str)
+            if self._uses_s3_delete_fallback():
+                if recursive:
+                    return self._delete_s3_compatible_directory(path_str)
+                selector = pafs.FileSelector(
+                    path_str, recursive=False, allow_not_found=True)
+                if self.filesystem.get_file_info(selector):
+                    raise OSError(f"Directory {path} is not empty")
+                bucket, key = self._split_s3_path(path_str)
+                self._get_s3_delete_client().delete_object(
+                    Bucket=bucket, Key=key.rstrip("/") + "/")
+                return True
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
@@ -498,32 +517,113 @@ class PyArrowFileIO(FileIO):
         return True
 
     def _delete_s3_compatible_directory(self, path_str: str) -> bool:
-        selector = pafs.FileSelector(
-            path_str, recursive=True, allow_not_found=True)
-        file_infos = self.filesystem.get_file_info(selector)
-        files = [
-            info.path for info in file_infos
-            if info.type == pafs.FileType.File
-        ]
-        if files:
-            with ThreadPoolExecutor(max_workers=min(16, len(files))) as executor:
-                list(executor.map(self.filesystem.delete_file, files))
-        directories = sorted(
-            (info.path for info in file_infos
-             if info.type == pafs.FileType.Directory),
-            key=lambda item: item.count("/"),
-            reverse=True,
-        )
-        for directory in directories:
-            self._delete_s3_directory_marker(directory)
-        self._delete_s3_directory_marker(path_str)
-        return True
+        client = self._get_s3_delete_client()
+        bucket, key = self._split_s3_path(path_str)
+        prefix = key.rstrip("/") + "/"
+        while True:
+            keys = self._iter_s3_keys(client, bucket, prefix)
+            if self._delete_s3_objects(client, bucket, keys):
+                continue
+            client.delete_object(Bucket=bucket, Key=prefix)
+            response = client.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, MaxKeys=2)
+            if not any(item["Key"] != prefix
+                       for item in response.get("Contents", ())):
+                return True
 
-    def _delete_s3_directory_marker(self, path_str: str):
-        try:
-            self.filesystem.delete_dir(path_str.rstrip("/"))
-        except FileNotFoundError:
-            pass
+    @staticmethod
+    def _iter_s3_keys(client, bucket: str, prefix: str):
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for item in page.get("Contents", ()):
+                if item["Key"] != prefix:
+                    yield item["Key"]
+
+    @staticmethod
+    def _delete_s3_objects(
+            client, bucket: str, keys: Iterable[str]) -> int:
+        keys = iter(keys)
+        batch = list(islice(keys, 16))
+        if not batch:
+            return 0
+        deleted = 0
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            while batch:
+                futures = [
+                    executor.submit(
+                        client.delete_object, Bucket=bucket, Key=key)
+                    for key in batch
+                ]
+                for future in futures:
+                    future.result()
+                deleted += len(batch)
+                batch = list(islice(keys, 16))
+        return deleted
+
+    def _split_s3_path(self, path_str: str):
+        parsed = urlparse(path_str)
+        if parsed.scheme:
+            return parsed.netloc, parsed.path.lstrip("/")
+
+        path_str = path_str.lstrip("/")
+        expected_bucket = self._oss_bucket if self._is_oss else self._s3_bucket
+        if expected_bucket and path_str.startswith(expected_bucket + "/"):
+            return path_str.split("/", 1)
+        if expected_bucket:
+            return expected_bucket, path_str
+        return path_str.split("/", 1)
+
+    def _get_s3_delete_client(self):
+        if self._s3_delete_client is not None:
+            return self._s3_delete_client
+
+        import boto3
+        from botocore.config import Config
+
+        if self._is_oss:
+            endpoint = self.properties.get(OssOptions.OSS_ENDPOINT)
+            access_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_ID)
+            secret_key = self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET)
+            session_token = self.properties.get(OssOptions.OSS_SECURITY_TOKEN)
+            region = self.properties.get(OssOptions.OSS_REGION)
+            addressing_style = "virtual"
+        else:
+            endpoint = self._s3_endpoint
+            access_key = self._get_property(
+                S3Options.S3_ACCESS_KEY_ID.key(),
+                *self._s3_key_variants("access-key", "access.key"))
+            secret_key = self._get_property(
+                S3Options.S3_ACCESS_KEY_SECRET.key(),
+                *self._s3_key_variants("secret-key", "secret.key"))
+            session_token = self._get_property(
+                S3Options.S3_SECURITY_TOKEN.key(),
+                *self._s3_key_variants(
+                    "session-token", "session.token",
+                    "security-token", "security.token"))
+            region = self._get_s3_property("region", S3Options.S3_REGION.key())
+            path_style = (
+                self._get_s3_boolean_property("path-style-access") or
+                self._get_s3_boolean_property("path.style.access"))
+            addressing_style = "path" if path_style else "virtual"
+
+        if endpoint and "://" not in endpoint:
+            endpoint = "https://" + endpoint
+        self._s3_delete_client = boto3.session.Session().client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            aws_session_token=session_token,
+            region_name=region,
+            config=Config(
+                retries={"max_attempts": 10, "mode": "standard"},
+                s3={"addressing_style": addressing_style},
+                max_pool_connections=16,
+                connect_timeout=60,
+                read_timeout=60,
+            ),
+        )
+        return self._s3_delete_client
 
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
