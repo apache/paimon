@@ -269,7 +269,8 @@ different entries, so entry filtering and ADD/DELETE reconciliation remain neces
 The entire sidecar is read in chunks of at most 1 MiB, including payloads unused by a query.
 There is no size-based fallback or payload dropping. Payload lengths save decoding work,
 not sidecar storage I/O. Selected compressed Avro blocks are read by byte range with adjacent
-spans coalesced. Building a sidecar does not modify the original manifest.
+spans coalesced and individual read requests bounded to 4 MiB. Building a sidecar does not
+modify the original manifest.
 
 `read` and `openManifest` accept an optional caller-supplied `SegmentsCache<Object>`. Complete
 sidecar bytes are keyed by their explicit `Path`. Only successful reads and selections

@@ -68,7 +68,8 @@ public final class ManifestSidecar {
     private static final int BLOCK_BYTES = 27;
     private static final byte[] EMPTY = new byte[0];
     private static final int DIGEST_BYTES = 32;
-    private static final int READ_BUFFER_BYTES = 1024 * 1024;
+    private static final int SIDECAR_READ_BUFFER_BYTES = 1024 * 1024;
+    private static final int BLOCK_READ_BUFFER_BYTES = 4 * 1024 * 1024;
     private static final ProjectedManifestEntry.Projection BLOCK_INDEX_PROJECTION =
             createBlockIndexProjection();
 
@@ -673,7 +674,7 @@ public final class ManifestSidecar {
     private static byte[] readBytes(FileIO io, Path path) throws IOException {
         try (InputStream in = io.newInputStream(path)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[READ_BUFFER_BYTES];
+            byte[] buffer = new byte[SIDECAR_READ_BUFFER_BYTES];
             int n;
             while ((n = in.read(buffer, 0, buffer.length)) != -1) {
                 out.write(buffer, 0, n);
@@ -817,7 +818,7 @@ public final class ManifestSidecar {
                 seekInput(block.offset);
                 remaining = end - block.offset;
             }
-            int requested = (int) Math.min(READ_BUFFER_BYTES, remaining);
+            int requested = (int) Math.min(BLOCK_READ_BUFFER_BYTES, remaining);
             // A previous buffer may be shared with other readers through the block cache.
             if (cache != null || buffer == null || buffer.length < requested) {
                 buffer = new byte[requested];
@@ -842,7 +843,7 @@ public final class ManifestSidecar {
                     Block next = selected.blocks.get(blockPosition);
                     if (next.offset != end
                             || next.length > cache.maxElementSize()
-                            || end - first.offset + next.length > READ_BUFFER_BYTES
+                            || end - first.offset + next.length > BLOCK_READ_BUFFER_BYTES
                             || cachedBlock(next) != null) {
                         break;
                     }
@@ -898,7 +899,10 @@ public final class ManifestSidecar {
             int position = 0;
             while (position < length) {
                 int count =
-                        input.read(bytes, position, Math.min(READ_BUFFER_BYTES, length - position));
+                        input.read(
+                                bytes,
+                                position,
+                                Math.min(BLOCK_READ_BUFFER_BYTES, length - position));
                 if (count < 0) {
                     throw new EOFException("Truncated manifest block");
                 }

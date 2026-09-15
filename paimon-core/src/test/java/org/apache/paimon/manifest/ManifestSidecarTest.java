@@ -936,8 +936,8 @@ class ManifestSidecarTest {
     @Test
     void oversizedBlocksUseBoundedReadsWithoutModifyingPreviouslyCachedBytes() throws Exception {
         byte[] header = header();
-        int cachedLength = (1 << 20) + 17;
-        int uncachedLength = 2 * (1 << 20) + 31;
+        int cachedLength = (4 << 20) + 17;
+        int uncachedLength = 2 * (4 << 20) + 31;
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
         builder.beginBlock(header.length, cachedLength, 1);
         builder.add(0L, 1);
@@ -962,7 +962,7 @@ class ManifestSidecarTest {
         try (InputStream in = ManifestSidecar.openManifest(io, path, first, cache)) {
             assertThat(IOUtils.readFully(in, false)).isEqualTo(expected);
         }
-        assertThat(cold.readLengths).containsExactly(1 << 20, 17);
+        assertThat(cold.readLengths).containsExactly(4 << 20, 17);
         ManifestSidecar.Selection all =
                 ManifestSidecar.select(
                         data,
@@ -972,7 +972,7 @@ class ManifestSidecarTest {
         try (InputStream in = ManifestSidecar.openManifest(io, path, all, cache)) {
             assertThat(IOUtils.readFully(in, false)).isEqualTo(manifest);
         }
-        assertThat(mixed.readLengths).containsExactly(1 << 20, 1 << 20, 31);
+        assertThat(mixed.readLengths).containsExactly(4 << 20, 4 << 20, 31);
         assertThat(cache.estimatedSize()).isEqualTo(1);
         assertThat(
                         cache.getIfPresents(
@@ -990,7 +990,7 @@ class ManifestSidecarTest {
         byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
         long offset = header.length;
-        for (int length : new int[] {512 * 1024, 512 * 1024, 257}) {
+        for (int length : new int[] {2 << 20, 2 << 20, 257}) {
             builder.beginBlock(offset, length, 1);
             builder.add(20L, 1);
             builder.endBlock();
@@ -998,18 +998,31 @@ class ManifestSidecarTest {
         }
         byte[] data = builder.serialize(offset, 3);
         byte[] manifest = Arrays.copyOf(header, (int) offset);
-        CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
-        FileIO io = mock(FileIO.class);
         Path path = new Path(temp.toString(), "manifest-large");
-        when(io.newInputStream(path)).thenReturn(stream);
-        try (InputStream input =
-                ManifestSidecar.openManifest(
-                        io, path, select(data, meta("manifest-large", offset, 3), 20))) {
-            assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
+        for (boolean withCache : new boolean[] {false, true}) {
+            CountingInput stream = new CountingInput(manifest, Integer.MAX_VALUE);
+            FileIO io = mock(FileIO.class);
+            when(io.newInputStream(path)).thenReturn(stream);
+            SegmentsCache<Object> cache =
+                    withCache
+                            ? new SegmentsCache<>(
+                                    1024, MemorySize.ofMebiBytes(8), 4 << 20, null, false)
+                            : null;
+            try (InputStream input =
+                    ManifestSidecar.openManifest(
+                            io, path, select(data, meta("manifest-large", offset, 3), 20), cache)) {
+                assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
+            }
+            assertThat(stream.readLengths).containsExactly(4 << 20, 257);
+            if (withCache) {
+                assertThat(stream.seeks)
+                        .containsExactly((long) header.length, header.length + (4L << 20));
+                assertThat(cache.estimatedSize()).isEqualTo(3);
+            } else {
+                assertThat(stream.seeks).containsExactly((long) header.length);
+            }
+            assertThat(stream.closed).isTrue();
         }
-        assertThat(stream.readLengths).containsExactly(1 << 20, 257);
-        assertThat(stream.seeks).containsExactly((long) header.length);
-        assertThat(stream.closed).isTrue();
     }
 
     @Test
