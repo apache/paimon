@@ -25,8 +25,6 @@ import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.NoSuchElementException;
 
@@ -34,9 +32,7 @@ import java.util.NoSuchElementException;
 public final class RawBlockReader extends DataFileStream<Void> {
 
     private final SeekableInputStream input;
-    private final long headerOffset;
-    private final long headerLength;
-    @Nullable private byte[] headerBytes;
+    private final byte[] headerBytes;
     private long blockOffset;
     private long blockLength;
     private boolean pending;
@@ -48,24 +44,16 @@ public final class RawBlockReader extends DataFileStream<Void> {
     private RawBlockReader(SeekableInputStream input, long headerOffset) throws IOException {
         super(input, new NoOpDatumReader<Void>());
         this.input = input;
-        this.headerOffset = headerOffset;
-        this.headerLength = position() - headerOffset;
+        this.headerBytes = new byte[Math.toIntExact(position() - headerOffset)];
+        long resumePosition = input.getPos();
+        input.seek(headerOffset);
+        IOUtils.readFully(input, headerBytes);
+        // Preserve the position past any bytes already buffered by the Avro decoder.
+        input.seek(resumePosition);
     }
 
-    /** Returns a copy of the complete OCF header, reading and caching it on first access. */
-    public byte[] headerBytes() throws IOException {
-        if (headerBytes == null) {
-            byte[] bytes = new byte[Math.toIntExact(headerLength)];
-            long resumePosition = input.getPos();
-            try {
-                input.seek(headerOffset);
-                IOUtils.readFully(input, bytes);
-            } finally {
-                // Preserve the position past any bytes already buffered by the Avro decoder.
-                input.seek(resumePosition);
-            }
-            headerBytes = bytes;
-        }
+    /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
+    public byte[] headerBytes() {
         return headerBytes.clone();
     }
 

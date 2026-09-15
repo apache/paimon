@@ -55,7 +55,7 @@ public final class AvroBlockReader implements Closeable {
     }
 
     /** Returns a copy of the complete OCF header, including schema, codec and sync marker. */
-    public byte[] headerBytes() throws IOException {
+    public byte[] headerBytes() {
         return reader.headerBytes();
     }
 

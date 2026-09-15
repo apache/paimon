@@ -93,8 +93,8 @@ class AvroBlockReaderTest {
                         }
                     };
             try (AvroBlockReader reader = new AvroBlockReader(input)) {
-                assertThat(seeks).isEmpty();
                 long resumePosition = input.getPos();
+                assertThat(seeks).containsExactly(0L, resumePosition);
                 byte[] header = reader.headerBytes();
                 assertThat(header).isEqualTo(Arrays.copyOf(bytes, (int) boundaries[0]));
                 assertThat(input.getPos()).isEqualTo(resumePosition);
@@ -145,48 +145,42 @@ class AvroBlockReaderTest {
     }
 
     @Test
-    void failedHeaderReadRestoresThePositionAndCanBeRetried() throws IOException {
+    void failedHeaderReadClosesTheInput() throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        long headerLength;
-        long secondBlockOffset;
         try (DataFileWriter<Long> writer = new DataFileWriter<>(new GenericDatumWriter<>(SCHEMA))) {
             writer.create(SCHEMA, output);
-            headerLength = writer.sync();
             writer.append(11L);
-            secondBlockOffset = writer.sync();
-            writer.append(22L);
         }
         byte[] bytes = output.toByteArray();
-        AtomicBoolean failRead = new AtomicBoolean();
+        AtomicBoolean closed = new AtomicBoolean();
         SeekableInputStream input =
                 new SeekableInputStreamWrapper(open(bytes)) {
+                    private boolean readingHeader;
+
+                    @Override
+                    public void seek(long position) throws IOException {
+                        super.seek(position);
+                        readingHeader = position == 0;
+                    }
+
                     @Override
                     public int read(byte[] data, int offset, int length) throws IOException {
-                        if (failRead.getAndSet(false)) {
+                        if (readingHeader) {
                             throw new IOException("header read failed");
                         }
                         return super.read(data, offset, length);
                     }
-                };
-        try (AvroBlockReader reader = new AvroBlockReader(input)) {
-            reader.nextBorrowedRawBlock();
-            assertThat(reader.hasNextBlock()).isTrue();
-            long resumePosition = input.getPos();
-            failRead.set(true);
-            assertThatThrownBy(reader::headerBytes)
-                    .isInstanceOf(IOException.class)
-                    .hasMessage("header read failed");
-            assertThat(input.getPos()).isEqualTo(resumePosition);
 
-            byte[] header = reader.headerBytes();
-            assertThat(header).isEqualTo(Arrays.copyOf(bytes, (int) headerLength));
-            assertThat(input.getPos()).isEqualTo(resumePosition);
-            assertThat(reader.nextBorrowedRawBlock().recordCount()).isEqualTo(1);
-            assertThat(reader.blockOffset()).isEqualTo(secondBlockOffset);
-            assertBlockReadable(
-                    header, bytes, reader.blockOffset(), reader.blockLength(), new long[] {22L});
-            assertThat(reader.hasNextBlock()).isFalse();
-        }
+                    @Override
+                    public void close() throws IOException {
+                        super.close();
+                        closed.set(true);
+                    }
+                };
+        assertThatThrownBy(() -> new AvroBlockReader(input))
+                .isInstanceOf(IOException.class)
+                .hasMessage("header read failed");
+        assertThat(closed.get()).isTrue();
     }
 
     @Test
