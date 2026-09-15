@@ -193,3 +193,91 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Explain and Profile Search
+
+Call `explain()` on a vector, batch vector, full-text, or hybrid query to inspect
+its planned index and raw-data work. It returns a `SearchExplainResult` with
+structured fields and a printable summary. It does not run vector/text searches
+or fetch result rows. Planning can read data to evaluate primary-key scalar
+predicates, so it is not always metadata-only.
+
+```python
+query = docs.search(query_vector, column="embedding").select(["content"]).limit(10)
+plan = query.explain()
+print(plan)
+
+route = plan.routes[0]
+print(route.index_file_count, route.index_bytes, route.index_types)
+print(route.indexed_range_rows, route.raw_range_rows, route.overlapping_range_rows)
+```
+
+Each route reports its search mode, column, candidate limit, query count,
+planning snapshot, index splits/files/bytes, raw splits, scalar-index file count,
+and whether scalar or partition filters are configured. Vector routes also
+report the configured refinement factor (`0` disables refinement) and the
+per-index search limit. Hybrid plans retain route order, weights, the fusion
+ranker, and the route worker limit. A query's projection and post-filter flag
+are included; `where()` applies during lookup after search top-k and can reduce
+the number of returned rows.
+
+Coverage counts are unions of inclusive row-ID ranges in the plan, not live-row
+counts or measured ANN recall. Indexed and raw ranges can overlap, for example
+when scalar-index coverage requires fallback. Do not add these counts as if they
+were disjoint. Primary-key source-file plans report `None` for global row-ID
+coverage because their positions are local to source files.
+
+Call `profile()` to execute the search once and obtain its result together with
+runtime measurements. Use `profile.result` directly; subsequently calling
+`to_arrow()` would execute a second search.
+
+```python
+profile = query.profile()
+print(profile)
+neighbors = profile.result  # Arrow table, with the normal projection and filters
+print(profile.elapsed_ms, profile.lookup_ms, profile.output_rows)
+print(profile.route_metrics[0]["timings_ms"])
+print(profile.route_metrics[0]["counters"])
+
+batch_profile = docs.search_vectors(query_vectors, column="embedding").limit(10).profile()
+batch_neighbors = batch_profile.result  # One Arrow table per query vector
+```
+
+`SearchProfileResult.plan` describes that execution's plan. A separate earlier
+`explain()` may describe a different snapshot if the table changes. Profiling
+preserves the normal search and lookup behavior; it does not create a
+transaction across hybrid routes or pin subsequent lookups. Each route's
+`snapshot_id` describes its planning snapshot. `lookup_snapshot_ids` records the
+actual result-lookup snapshots, one per batch query, so concurrent writes can be
+identified. Full-text raw fallback and live-row filtering retain the normal
+reader's snapshot behavior and are not guaranteed to use the planning snapshot.
+Use a table opened at a specific snapshot when a fixed view is required.
+
+The built-in local vector, batch vector, full-text, and hybrid search builders
+also expose `explain()` and `profile()`. Builder profiles return their normal
+scored index result (a list for batch search), without fetching Arrow rows, so
+`lookup_ms`, `lookup_snapshot_ids`, and `output_rows` are `None`.
+
+Runtime metrics are opt-in. Normal execution does not collect profiling clocks
+or counters. The available measurements are:
+
+| Measurement | Meaning |
+| --- | --- |
+| `elapsed_ms` | Wall time for this call, including lookup for multimodal queries. |
+| `planning`, `search` | Per-route planning and search wall time in `timings_ms`. |
+| `index_open`, `index_search` | Reader opening and accumulated index-search time. Full-text lazy loading is included in `index_search`. |
+| `pre_filter`, `raw_read_score`, `refine` | Instrumented filtering, raw-data reading/scoring, and vector refinement time. Single-vector refinement also includes its nested `raw_read_score` stage. |
+| `fusion_ms`, `lookup_ms` | Hybrid result fusion and multimodal result lookup time. |
+| `index_searches`, `peak_index_searches` | Number of index calls and peak outstanding calls per route, not native worker-thread counts. A batch call counts once. |
+| `index_rows_before_filter`, `index_rows_after_filter` | Sum of submitted index row-range sizes before and after include-row-ID filtering; fully pruned splits make no index call. These are not counts of vectors visited by ANN. |
+| `index_candidates`, `refine_candidates` | Candidates returned by indexes or submitted for refinement, summed across shards/queries before final merging. |
+| `raw_rows_read`, `refine_rows_read` | Rows yielded to raw scoring or refinement. Batch refinement reads shared candidate rows once; these are not storage-level I/O row counts. |
+| `result_rows`, `output_rows` | Per-route result count before fusion/lookup, and final Arrow row count. Batch counts sum all queries. |
+
+Times are milliseconds. Stage times are inclusive and may overlap or sum across
+concurrent work; adding them does not yield wall time. Missing measurements mean
+the phase was not instrumented or invoked, not necessarily that it was free.
+Primary-key readers expose total planning/search time and inherited index/refine
+stages, but do not currently report every raw-read or refinement row counter.
+Profiling incurs the real search cost plus measurement overhead; it is not an
+estimate or a benchmark isolated from caches and other queries.

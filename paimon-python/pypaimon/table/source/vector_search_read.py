@@ -32,6 +32,7 @@ from pypaimon.table.source.vector_search_split import (
     RawVectorSearchSplit,
 )
 from pypaimon.table.source import global_index_live_row_filter
+from pypaimon.table.source.search_diagnostics import record_count, run_index_search, search_stage
 from pypaimon.utils.range import Range
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -112,6 +113,7 @@ class AbstractVectorSearchReadImpl:
                 % (self._index_metric, metric, self._vector_column.name))
         self._index_metric = metric
 
+    @search_stage("pre_filter")
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
         """Evaluate live-row/scalar filters and return one bitmap per index split."""
@@ -189,6 +191,7 @@ class AbstractVectorSearchReadImpl:
                 merged = RoaringBitmap64.or_(merged, bitmap)
         return merged
 
+    @search_stage("pre_filter")
     def _raw_pre_filter(self, splits, snapshot=None):
         if self._filter is None:
             return None
@@ -235,6 +238,7 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
+    @search_stage("index_open")
     def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
         """Open a vector index reader for the split, wrapped with the row-id offset.
 
@@ -286,13 +290,16 @@ class AbstractVectorSearchReadImpl:
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
         try:
-            future = offset_reader.visit_vector_search(vector_search)
+            future = run_index_search(
+                self, offset_reader.visit_vector_search, vector_search,
+                row_range_end - row_range_start + 1)
         except BaseException:
             reader.close()
             raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
+    @search_stage("raw_read_score")
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
                          index_type=None, include_filter=True,
                          score_candidates=None, snapshot=None):
@@ -304,6 +311,7 @@ class AbstractVectorSearchReadImpl:
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
 
+        record_count(self, "refine_rows_read" if score_candidates is not None else "raw_rows_read", table.num_rows)
         top_k_heap = []
         metric = self._search_metric(index_type)
         block_size = _score_block_size(query_vector)
@@ -390,8 +398,11 @@ class AbstractVectorSearchReadImpl:
             offer_block()
         return _scored_result(top_k_heap)
 
+    @search_stage("refine")
     def _read_raw_refine_search(self, candidates, query_vector, index_type=None,
                                 snapshot=None):
+        if getattr(self, "_search_metrics", None) is not None:
+            record_count(self, "refine_candidates", candidates.cardinality())
         return self._read_raw_candidate_search(
             candidates.to_range_list(),
             candidates,
@@ -444,7 +455,9 @@ class AbstractVectorSearchReadImpl:
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
         try:
-            future = offset_reader.visit_batch_vector_search(batch_vector_search)
+            future = run_index_search(
+                self, offset_reader.visit_batch_vector_search, batch_vector_search,
+                row_range_end - row_range_start + 1)
         except BaseException:
             reader.close()
             raise
@@ -487,9 +500,12 @@ class AbstractVectorSearchReadImpl:
         return self._stream_rerank_candidates(
             candidates, union_candidates, query_vectors, index_type, snapshot)
 
+    @search_stage("refine")
     def _stream_rerank_candidates(self, candidates, union_candidates, query_vectors,
                                   index_type, snapshot):
         # Retain only candidate membership, not all candidate vectors as Python lists.
+        if getattr(self, "_search_metrics", None) is not None:
+            record_count(self, "refine_candidates", sum(result.results().cardinality() for result in candidates))
         queries_by_row = {}
         for query_index, result in enumerate(candidates):
             for row_id in result.results():
@@ -523,6 +539,7 @@ class AbstractVectorSearchReadImpl:
         reader, batches = table_read._new_arrow_batch_reader(splits)
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             for batch in batch_reader:
+                record_count(self, "refine_rows_read", batch.num_rows)
                 row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
                 vectors = batch.column(self._vector_column.name)
                 positions = {}
@@ -691,6 +708,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
             for indexed, raw in zip(indexed_results, raw_results)
         ]
 
+    @search_stage("raw_read_score")
     def _read_raw_batch_search(self, raw_row_ranges, pre_filter,
                                index_type=None, snapshot=None):
         """Scan raw rows once, keeping a separate top-k heap for each query."""
@@ -726,6 +744,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         # Close the underlying iterator as well if scoring fails mid-batch.
         with _ClosableArrowBatchReader(reader, batches) as batch_reader:
             for batch in batch_reader:
+                record_count(self, "raw_rows_read", batch.num_rows)
                 row_ids = batch.column(SpecialFields.ROW_ID.name).to_pylist()
                 vectors = batch.column(self._vector_column.name)
                 for start, query_index, scores in _iter_arrow_batch_scores(

@@ -18,6 +18,7 @@
 """Builder to build batch vector search over multiple query vectors."""
 
 from abc import ABC, abstractmethod
+from pypaimon.table.source.search_diagnostics import SearchDiagnostics
 
 from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
@@ -28,8 +29,10 @@ from pypaimon.table.source.vector_search_read import (
 from pypaimon.table.source.vector_search_read import BatchVectorSearchRead  # noqa: F401
 
 
-class BatchVectorSearchBuilder(ABC):
+class BatchVectorSearchBuilder(SearchDiagnostics, ABC):
     """Builder to build batch vector search; result ``i`` matches vector ``i``."""
+
+    _diagnostic_kind = "batch_vector"
 
     @abstractmethod
     def with_limit(self, limit):

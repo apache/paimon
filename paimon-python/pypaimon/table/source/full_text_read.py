@@ -37,6 +37,7 @@ from pypaimon.table.source.full_text_search_split import (
     RawFullTextSearchSplit,
 )
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
+from pypaimon.table.source.search_diagnostics import record_count, run_index_search, search_stage
 from pypaimon.utils.range import Range
 
 
@@ -156,10 +157,17 @@ class DataEvolutionFullTextRead(FullTextRead):
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        future = offset_reader.visit_full_text_search(full_text_search)
+        try:
+            future = run_index_search(
+                self, offset_reader.visit_full_text_search, full_text_search,
+                row_range_end - row_range_start + 1)
+        except BaseException:
+            reader.close()
+            raise
         future.add_done_callback(lambda _: reader.close())
         return future
 
+    @search_stage("raw_read_score")
     def _read_raw_search(self, raw_row_ranges, index_type):
         raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
         if not raw_row_ranges:
@@ -176,6 +184,7 @@ class DataEvolutionFullTextRead(FullTextRead):
         from pypaimon.table.special_fields import SpecialFields
 
         row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        record_count(self, "raw_rows_read", table.num_rows)
         texts = table.column(self._text_columns[0].name).to_pylist()
         index_bytes = self._build_raw_index(row_ids, texts, row_range_start)
         if index_bytes is None:

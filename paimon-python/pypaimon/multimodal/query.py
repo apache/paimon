@@ -109,10 +109,12 @@ class ScanQuery:
             projection.append(SpecialFields.ROW_ID.name)
         return projection
 
-    def _read_global_index_result(self, result):
+    def _read_global_index_result(self, result, snapshot_ids=None):
         read_builder = self._configured_read_builder()
         scan = read_builder.new_scan().with_global_index_result(result)
         plan = scan.plan()
+        if snapshot_ids is not None:
+            snapshot_ids.append(plan.snapshot_id)
         return read_builder.new_read().to_arrow(plan.splits())
 
     def to_pandas(self):
@@ -446,6 +448,37 @@ class ScanQuery:
 
 class _PreFilterQuery(ScanQuery):
 
+    def explain(self):
+        """Plan this search without executing it or fetching result rows."""
+        plan = self._search_builder().explain()
+        plan.projection = self._effective_projection()
+        plan.has_post_filter = self._predicate is not None
+        return plan
+
+    def profile(self):
+        """Run this search once, returning Arrow results and execution metrics."""
+        import time
+
+        start = time.perf_counter()
+        profile = self._search_builder().profile()
+        profile.plan.projection = self._effective_projection()
+        profile.plan.has_post_filter = self._predicate is not None
+        lookup_start = time.perf_counter()
+        profile.lookup_snapshot_ids = []
+        if isinstance(profile.result, list):
+            profile.result = [self._read_global_index_result(result, profile.lookup_snapshot_ids)
+                              for result in profile.result]
+            profile.output_rows = sum(table.num_rows for table in profile.result)
+        else:
+            profile.result = self._read_global_index_result(profile.result, profile.lookup_snapshot_ids)
+            profile.output_rows = profile.result.num_rows
+        profile.lookup_ms = (time.perf_counter() - lookup_start) * 1000
+        profile.elapsed_ms = (time.perf_counter() - start) * 1000
+        return profile
+
+    def _search_builder(self):
+        raise NotImplementedError
+
     def __init__(
             self,
             table,
@@ -502,6 +535,10 @@ class VectorQuery(_PreFilterQuery):
             table, result_factory=self._execute_vector, pre_filter=pre_filter)
 
     def _execute_vector(self, query):
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        query = self
         limit = query._limit if query._limit is not None else 10
         builder = (
             self._table.new_vector_search_builder()
@@ -512,7 +549,7 @@ class VectorQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
 class TextQuery(_PreFilterQuery):
@@ -524,6 +561,10 @@ class TextQuery(_PreFilterQuery):
             table, result_factory=self._execute_fts, pre_filter=pre_filter)
 
     def _execute_fts(self, query):
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        query = self
         limit = query._limit if query._limit is not None else 10
         builder = (
             self._table.new_full_text_search_builder()
@@ -532,7 +573,7 @@ class TextQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_partition_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
 class HybridQuery(_PreFilterQuery):
@@ -558,6 +599,10 @@ class HybridQuery(_PreFilterQuery):
         return self
 
     def _execute_hybrid(self, query):
+        return query._search_builder().execute_local()
+
+    def _search_builder(self):
+        query = self
         final_limit = query._limit if query._limit is not None else 10
         route_limit = self._route_limit or final_limit
         builder = (
@@ -583,7 +628,7 @@ class HybridQuery(_PreFilterQuery):
             )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_local()
+        return builder
 
 
 class BatchVectorQuery(_PreFilterQuery):
@@ -614,6 +659,10 @@ class BatchVectorQuery(_PreFilterQuery):
         return [table.to_pylist() for table in self.to_arrow()]
 
     def _execute_batch_vector(self, query):
+        return query._search_builder().execute_batch_local()
+
+    def _search_builder(self):
+        query = self
         limit = query._limit if query._limit is not None else 10
         builder = (
             self._table.new_batch_vector_search_builder()
@@ -624,4 +673,4 @@ class BatchVectorQuery(_PreFilterQuery):
         )
         if query._pre_filter is not None:
             builder = builder.with_filter(query._pre_filter)
-        return builder.execute_batch_local()
+        return builder

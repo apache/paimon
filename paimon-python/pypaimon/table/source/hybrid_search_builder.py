@@ -31,6 +31,8 @@ from pypaimon.globalindex.vector_search_result import (
     ScoredGlobalIndexResult,
 )
 
+from pypaimon.table.source.search_diagnostics import SearchDiagnostics
+
 RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
 MRR_RANKER = "mrr"
@@ -149,8 +151,10 @@ class HybridSearchRouteBuilder:
         return self.search_builder.execute_local()
 
 
-class HybridSearchBuilder(ABC):
+class HybridSearchBuilder(SearchDiagnostics, ABC):
     """Builder to build hybrid search."""
+
+    _diagnostic_kind = "hybrid"
 
     @abstractmethod
     def with_limit(self, limit: int) -> 'HybridSearchBuilder':
@@ -232,37 +236,29 @@ class HybridSearchBuilder(ABC):
     def execute_local(self) -> ScoredGlobalIndexResult:
         """Execute hybrid index search locally."""
         route_builders = self.route_builders()
-        if len(route_builders) <= 1:
-            return self.rank([
-                self.to_route_result(
-                    route_builder, route_builder.execute_local())
-                for route_builder in route_builders
-            ])
+        results = _execute_routes(route_builders, lambda route: route.execute_local())
+        return self.rank([
+            self.to_route_result(route, result)
+            for route, result in zip(route_builders, results)])
 
-        workers = min(len(route_builders), _MAX_ROUTE_WORKERS)
-        with ThreadPoolExecutor(
-                max_workers=workers,
-                thread_name_prefix="paimon-hybrid-search") as executor:
-            futures = [
-                executor.submit(route_builder.execute_local)
-                for route_builder in route_builders
-            ]
-            done, pending = wait(futures, return_when=FIRST_EXCEPTION)
-            failed = next(
-                (future for future in futures
-                 if future in done and future.exception() is not None),
-                None,
-            )
-            if failed is not None:
-                for future in pending:
-                    future.cancel()
-                failed.result()
 
-            route_results = [
-                self.to_route_result(route_builder, future.result())
-                for route_builder, future in zip(route_builders, futures)
-            ]
-        return self.rank(route_results)
+def _execute_routes(route_builders, execute):
+    """Run regular and profiled routes with the same ordering and cleanup."""
+    if len(route_builders) <= 1:
+        return [execute(route) for route in route_builders]
+    workers = min(len(route_builders), _MAX_ROUTE_WORKERS)
+    with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="paimon-hybrid-search") as executor:
+        futures = [executor.submit(execute, route) for route in route_builders]
+        done, pending = wait(futures, return_when=FIRST_EXCEPTION)
+        failed = next(
+            (future for future in futures
+             if future in done and future.exception() is not None), None)
+        if failed is not None:
+            for future in pending:
+                future.cancel()
+            failed.result()
+        return [future.result() for future in futures]
 
 
 class HybridSearchBuilderImpl(HybridSearchBuilder):
