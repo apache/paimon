@@ -18,6 +18,7 @@
 """Opt-in diagnostics for the existing local search execution paths."""
 
 import time
+from collections import defaultdict
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from functools import wraps
@@ -54,8 +55,6 @@ class SearchRoutePlan:
     has_pre_filter: bool = False
     has_partition_filter: bool = False
     weight: float = 1.0
-    refine_factor: Optional[int] = None
-    index_search_limit: Optional[int] = None
     notes: List[str] = field(default_factory=list)
 
 
@@ -89,9 +88,6 @@ class SearchExplainResult:
                 route.index_split_count, route.index_file_count, route.index_bytes,
                 ",".join(route.index_types) or "<none>"))
             lines.append("  Raw splits: {}".format(route.raw_split_count))
-            if route.refine_factor is not None:
-                lines.append("  Refine factor: {}  index search limit={}".format(
-                    route.refine_factor, route.index_search_limit))
             lines.append("  Range rows (not live counts): indexed={} raw={} overlap={}".format(
                 route.indexed_range_rows, route.raw_range_rows, route.overlapping_range_rows))
             lines.append("  Filters: scalar={} partition={} scalar-index-files={}".format(
@@ -138,32 +134,33 @@ class SearchMetrics:
     """One reader's counters, shared only by its search workers."""
 
     def __init__(self):
-        self.timings_ms = {}
-        self.counters = {}
+        self.timings_ms = defaultdict(float)
+        self.counters = defaultdict(int)
         self._active = 0
         self._lock = Lock()
 
     def add_time(self, stage, start):
         elapsed = (time.perf_counter() - start) * 1000
         with self._lock:
-            self.timings_ms[stage] = self.timings_ms.get(stage, 0.0) + elapsed
+            self.timings_ms[stage] += elapsed
 
     def add(self, name, count):
         with self._lock:
-            self.counters[name] = self.counters.get(name, 0) + count
+            self.counters[name] += count
 
     def begin_index(self, rows, include):
+        included = rows if include is None else include.cardinality()
         with self._lock:
             self._active += 1
-            self.counters["peak_index_searches"] = max(
-                self._active, self.counters.get("peak_index_searches", 0))
-        self.add("index_searches", 1)
-        self.add("index_rows_before_filter", rows)
-        self.add("index_rows_after_filter", rows if include is None else include.cardinality())
+            self.counters["peak_index_searches"] = max(self._active, self.counters["peak_index_searches"])
+            self.counters["index_searches"] += 1
+            self.counters["index_rows_before_filter"] += rows
+            self.counters["index_rows_after_filter"] += included
 
     def end_index(self, start):
-        self.add_time("index_search", start)
+        elapsed = (time.perf_counter() - start) * 1000
         with self._lock:
+            self.timings_ms["index_search"] += elapsed
             self._active -= 1
 
     def snapshot(self):
@@ -194,34 +191,38 @@ def record_count(owner, name, count):
         metrics.add(name, count)
 
 
-def run_index_search(owner, search, request, row_count):
+def run_index_search(owner, search, request, row_count, close):
+    """Close the reader on completion; profiling finishes before publishing results."""
     metrics = getattr(owner, "_search_metrics", None)
-    if metrics is None:
-        return search(request)
-    metrics.begin_index(row_count, request.include_row_ids)
-    start = time.perf_counter()
+    if metrics is not None:
+        metrics.begin_index(row_count, request.include_row_ids)
+        start = time.perf_counter()
     try:
         future = search(request)
     except BaseException:
-        metrics.end_index(start)
+        if metrics is not None:
+            metrics.end_index(start)
+        close()
         raise
+    if metrics is None:
+        future.add_done_callback(lambda _: close())
+        return future
 
     observed = Future()
+    # Cancelling this wrapper cannot stop native work and must not close its reader.
+    observed.set_running_or_notify_cancel()
 
     def completed(done):
+        metrics.end_index(start)
         try:
-            if done.cancelled():
-                metrics.end_index(start)
-                observed.cancel()
-                observed.set_running_or_notify_cancel()
-                return
-            result = done.result()
-            metrics.add("index_candidates", result_count(result))
+            try:
+                result = done.result()
+                metrics.add("index_candidates", result_count(result))
+            finally:
+                close()
         except BaseException as error:
-            metrics.end_index(start)
             observed.set_exception(error)
         else:
-            metrics.end_index(start)
             observed.set_result(result)
 
     future.add_done_callback(completed)
@@ -310,16 +311,7 @@ def _plan_leaf(builder):
                   else builder.new_vector_search_read())
         plan = builder.new_vector_search_scan().scan()
         column = builder._vector_column.name
-    summary = _summarize(builder, plan, column)
-    if kind != "full_text":
-        index_type = summary.index_types[0] if len(summary.index_types) == 1 else None
-        summary.refine_factor = reader._configured_refine_factor(index_type)
-        summary.index_search_limit = reader._indexed_search_limit(index_type)
-    return reader, plan, summary
-
-
-def _range_rows(ranges):
-    return sum(row_range.count() for row_range in Range.sort_and_merge_overlap(ranges, True))
+    return reader, plan, _summarize(builder, plan, column)
 
 
 def _summarize(builder, plan, column):
@@ -374,11 +366,11 @@ def _summarize(builder, plan, column):
     route.index_types = sorted({item.index_type for item in files.values()})
     route.scalar_index_file_count = len(scalar_files)
     if route.indexed_range_rows is not None:
-        route.indexed_range_rows = _range_rows(indexed_ranges)
-        route.raw_range_rows = _range_rows(raw_ranges)
-        route.overlapping_range_rows = _range_rows(Range.and_(
-            Range.sort_and_merge_overlap(indexed_ranges, True),
-            Range.sort_and_merge_overlap(raw_ranges, True)))
+        indexed_ranges = Range.sort_and_merge_overlap(indexed_ranges, True)
+        raw_ranges = Range.sort_and_merge_overlap(raw_ranges, True)
+        route.indexed_range_rows = sum(r.count() for r in indexed_ranges)
+        route.raw_range_rows = sum(r.count() for r in raw_ranges)
+        route.overlapping_range_rows = sum(r.count() for r in Range.and_(indexed_ranges, raw_ranges))
     if snapshot_id is None:
         route.notes.append("No snapshot ID was supplied by the search planner.")
     return route

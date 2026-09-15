@@ -538,8 +538,7 @@ class VectorQuery(_PreFilterQuery):
         return query._search_builder().execute_local()
 
     def _search_builder(self):
-        query = self
-        limit = query._limit if query._limit is not None else 10
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_vector_search_builder()
             .with_vector_column(self._vector_column)
@@ -547,8 +546,8 @@ class VectorQuery(_PreFilterQuery):
             .with_limit(limit)
             .with_options(self._vector_options)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
         return builder
 
 
@@ -564,15 +563,14 @@ class TextQuery(_PreFilterQuery):
         return query._search_builder().execute_local()
 
     def _search_builder(self):
-        query = self
-        limit = query._limit if query._limit is not None else 10
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_full_text_search_builder()
             .with_query(self._text_query["column"], self._text_query["query"])
             .with_limit(limit)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_partition_filter(query._pre_filter)
+        if self._pre_filter is not None:
+            builder = builder.with_partition_filter(self._pre_filter)
         return builder
 
 
@@ -602,8 +600,7 @@ class HybridQuery(_PreFilterQuery):
         return query._search_builder().execute_local()
 
     def _search_builder(self):
-        query = self
-        final_limit = query._limit if query._limit is not None else 10
+        final_limit = self._limit if self._limit is not None else 10
         route_limit = self._route_limit or final_limit
         builder = (
             self._table.new_hybrid_search_builder()
@@ -626,8 +623,8 @@ class HybridQuery(_PreFilterQuery):
                 weight=route["weight"],
                 options=route["options"],
             )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
         return builder
 
 
@@ -662,8 +659,7 @@ class BatchVectorQuery(_PreFilterQuery):
         return query._search_builder().execute_batch_local()
 
     def _search_builder(self):
-        query = self
-        limit = query._limit if query._limit is not None else 10
+        limit = self._limit if self._limit is not None else 10
         builder = (
             self._table.new_batch_vector_search_builder()
             .with_vector_column(self._vector_column)
@@ -671,6 +667,6 @@ class BatchVectorQuery(_PreFilterQuery):
             .with_limit(limit)
             .with_options(self._vector_options)
         )
-        if query._pre_filter is not None:
-            builder = builder.with_filter(query._pre_filter)
+        if self._pre_filter is not None:
+            builder = builder.with_filter(self._pre_filter)
         return builder

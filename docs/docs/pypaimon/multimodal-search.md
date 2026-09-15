@@ -214,9 +214,8 @@ print(route.indexed_range_rows, route.raw_range_rows, route.overlapping_range_ro
 
 Each route reports its search mode, column, candidate limit, query count,
 planning snapshot, index splits/files/bytes, raw splits, scalar-index file count,
-and whether scalar or partition filters are configured. Vector routes also
-report the configured refinement factor (`0` disables refinement) and the
-per-index search limit. Hybrid plans retain route order, weights, the fusion
+and whether scalar or partition filters are configured.
+Hybrid plans retain route order, weights, the fusion
 ranker, and the route worker limit. A query's projection and post-filter flag
 are included; `where()` applies during lookup after search top-k and can reduce
 the number of returned rows.

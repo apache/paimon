@@ -157,15 +157,9 @@ class DataEvolutionFullTextRead(FullTextRead):
             full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-        try:
-            future = run_index_search(
-                self, offset_reader.visit_full_text_search, full_text_search,
-                row_range_end - row_range_start + 1)
-        except BaseException:
-            reader.close()
-            raise
-        future.add_done_callback(lambda _: reader.close())
-        return future
+        return run_index_search(
+            self, offset_reader.visit_full_text_search, full_text_search,
+            row_range_end - row_range_start + 1, reader.close)
 
     @search_stage("raw_read_score")
     def _read_raw_search(self, raw_row_ranges, index_type):

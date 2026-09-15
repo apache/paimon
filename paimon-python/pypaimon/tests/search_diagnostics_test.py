@@ -17,7 +17,7 @@
 """Search diagnostics must describe and execute the real search path once."""
 
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor, wait
 from types import SimpleNamespace
 from unittest import mock
 
@@ -195,6 +195,7 @@ def test_index_profile_handles_failure_without_leaking_active_searches(failure):
     owner = SimpleNamespace(_search_metrics=metrics)
     query = VectorSearch([1.0], 2, "embedding", options={})
     original = RuntimeError("native search failed")
+    close = mock.Mock()
 
     def search(unused_query):
         if failure == "synchronous":
@@ -207,13 +208,15 @@ def test_index_profile_handles_failure_without_leaking_active_searches(failure):
         return future
 
     if failure == "cancelled":
-        observed = run_index_search(owner, search, query, 10)
-        assert observed.cancelled()
+        observed = run_index_search(owner, search, query, 10, close)
+        with pytest.raises(CancelledError):
+            observed.result()
         assert wait([observed], timeout=0).done == {observed}
     else:
         with pytest.raises(RuntimeError) as exc:
-            run_index_search(owner, search, query, 10).result()
+            run_index_search(owner, search, query, 10, close).result()
         assert exc.value is original
+    close.assert_called_once_with()
     assert metrics._active == 0
     assert "index_search" in metrics.timings_ms
 
@@ -223,7 +226,8 @@ def test_async_search_metrics_are_ready_before_result_and_report_concurrency():
     owner = SimpleNamespace(_search_metrics=metrics)
     query = VectorSearch([1.0], 2, "embedding", options={})
     pending = [Future(), Future()]
-    observed = [run_index_search(owner, lambda q, f=f: f, query, 10) for f in pending]
+    close = mock.Mock()
+    observed = [run_index_search(owner, lambda q, f=f: f, query, 10, close) for f in pending]
     with ThreadPoolExecutor(max_workers=2) as executor:
         for future in pending:
             executor.submit(future.set_result, DictBasedScoredIndexResult({1: 1.0}))
@@ -232,14 +236,21 @@ def test_async_search_metrics_are_ready_before_result_and_report_concurrency():
     assert metrics.counters["peak_index_searches"] == 2
     assert metrics.counters["index_candidates"] == 2
     assert metrics._active == 0
+    assert close.call_count == 2
 
 
 def test_normal_search_does_not_collect_timing():
     builder = vector_builder()
-    with mock.patch(SCAN, return_value=VectorSearchScanPlan([])), \
+    native = mock.Mock()
+    native.vector_metric.return_value = "l2"
+    native.visit_vector_search.return_value = _completed_future(DictBasedScoredIndexResult({1: 2.0}))
+    with mock.patch(SCAN, return_value=VectorSearchScanPlan([index_split()])), \
+            mock.patch(VECTOR + "._create_vector_reader", return_value=native), \
+            mock.patch(VECTOR + ".AbstractVectorSearchReadImpl._pre_filters", return_value=[]), \
             mock.patch("pypaimon.table.source.search_diagnostics.time.perf_counter",
                        side_effect=AssertionError("profiling disabled")):
-        assert builder.execute_local().results().is_empty()
+        assert list(builder.execute_local().results()) == [1]
+    native.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -294,7 +305,6 @@ def test_native_profile_reports_indexed_raw_and_refine_work(tmp_path, batch):
     route = profile.plan.routes[0]
     assert (route.indexed_range_rows, route.raw_range_rows) == (2, 1)
     assert route.index_file_count == 1
-    assert (route.refine_factor, route.index_search_limit) == (2, 2)
     counters = profile.route_metrics[0]["counters"]
     assert counters["index_searches"] == 1
     assert counters["index_candidates"] == (4 if batch else 2)
@@ -326,3 +336,67 @@ def test_profile_reports_actual_lookup_snapshot_after_concurrent_append(tmp_path
         profile = table.search([1, 0]).select(["id"]).limit(1).profile()
     assert profile.result.column("id").to_pylist() == [1]
     assert profile.lookup_snapshot_ids[0] > profile.plan.routes[0].snapshot_id
+
+
+def test_profiled_index_cannot_close_reader_before_native_search_completes():
+    builder = vector_builder()
+    reader = builder.new_vector_search_read()
+    reader._search_metrics = SearchMetrics()
+    native = mock.Mock()
+    native.vector_metric.return_value = "l2"
+    pending = Future()
+    native.visit_vector_search.return_value = pending
+    split = index_split()
+    with mock.patch(VECTOR + "._create_vector_reader", return_value=native):
+        observed = reader._eval(0, 9, split.vector_index_files, [1.0], 2, None)
+    try:
+        assert not observed.cancel()
+        native.close.assert_not_called()
+    finally:
+        pending.set_result(DictBasedScoredIndexResult({1: 2.0}))
+    assert observed.result().score_getter()(1) == 2.0
+    native.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_empty_profile_does_not_validate_unused_refinement_options(batch):
+    builder = vector_builder(batch).with_option("refine_factor", "unused-invalid")
+    with mock.patch(SCAN, return_value=VectorSearchScanPlan([])):
+        baseline = builder.execute_batch_local() if batch else [builder.execute_local()]
+        assert all(result.results().is_empty() for result in baseline)
+        assert builder.explain().routes[0].index_file_count == 0
+        profile = builder.profile()
+    results = profile.result if batch else [profile.result]
+    assert len(results) == len(baseline)
+    assert all(result.results().is_empty() for result in results)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_profile_result_waits_for_reader_cleanup(fail):
+    metrics = SearchMetrics()
+    owner = SimpleNamespace(_search_metrics=metrics)
+    query = VectorSearch([1.0], 2, "embedding", options={})
+    pending = Future()
+    closing, release = threading.Event(), threading.Event()
+
+    def close():
+        closing.set()
+        assert release.wait(timeout=5)
+
+    observed = run_index_search(owner, lambda _: pending, query, 10, close)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        if fail:
+            completion = executor.submit(pending.set_exception, RuntimeError("native error"))
+        else:
+            completion = executor.submit(pending.set_result, DictBasedScoredIndexResult({1: 2.0}))
+        try:
+            assert closing.wait(timeout=5)
+            assert not observed.done()
+        finally:
+            release.set()
+        completion.result(timeout=5)
+    if fail:
+        with pytest.raises(RuntimeError, match="native error"):
+            observed.result(timeout=5)
+    else:
+        assert list(observed.result(timeout=5).results()) == [1]

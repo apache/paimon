@@ -289,15 +289,9 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        try:
-            future = run_index_search(
-                self, offset_reader.visit_vector_search, vector_search,
-                row_range_end - row_range_start + 1)
-        except BaseException:
-            reader.close()
-            raise
-        future.add_done_callback(lambda _: reader.close())
-        return future
+        return run_index_search(
+            self, offset_reader.visit_vector_search, vector_search,
+            row_range_end - row_range_start + 1, reader.close)
 
     @search_stage("raw_read_score")
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
@@ -454,15 +448,9 @@ class AbstractVectorSearchReadImpl:
 
         reader, offset_reader = self._open_offset_reader(
             vector_index_files, row_range_start, row_range_end)
-        try:
-            future = run_index_search(
-                self, offset_reader.visit_batch_vector_search, batch_vector_search,
-                row_range_end - row_range_start + 1)
-        except BaseException:
-            reader.close()
-            raise
-        future.add_done_callback(lambda _: reader.close())
-        return future
+        return run_index_search(
+            self, offset_reader.visit_batch_vector_search, batch_vector_search,
+            row_range_end - row_range_start + 1, reader.close)
 
     def _indexed_search_limit(self, index_type):
         refine_factor = self._configured_refine_factor(index_type)
