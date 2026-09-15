@@ -868,7 +868,8 @@ class TableRead:
         ) if push_down_limit else None
         effective_read_type = read_type if read_type is not None else self.read_type
         scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
-        if self.table.is_primary_key_table and not split.raw_convertible:
+        if self.table.is_primary_key_table and (
+                getattr(split, 'is_streaming', False) or not split.raw_convertible):
             inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(

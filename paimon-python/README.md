@@ -72,11 +72,18 @@ binding's `TableScan.with_row_position_slice()` and `with_row_position_shard()`.
 Selection occurs before reader filtering and deletion vectors, so surviving row
 counts can differ between shards. Limits are applied after shard/slice selection.
 
-Timestamp incremental scans require `ReadBuilder.new_incremental_scan()`.
-Python resolves `(start_timestamp, end_timestamp]` to snapshot IDs; Rust combines
-the selected APPEND deltas into one plan, including merging primary-key versions
-across commits. Other commit kinds are excluded, and the ending snapshot supplies
-snapshot metadata and deletion vectors even if it contributes no APPEND files.
+Timestamp incremental scans require `ReadBuilder.new_incremental_scan()` and
+stream-aware splits exposing `Split.is_streaming()`. Python resolves
+`(start_timestamp, end_timestamp]` to snapshot IDs; Rust packs the selected APPEND
+deltas into one plan. Like Java, readers retain physical change events, including
+repeated primary keys and retracts across commits. They do not merge the window
+into a final table state or apply endpoint deletion vectors or global indexes.
+Other commit kinds are excluded; the ending snapshot still supplies plan metadata.
+Rebuild development wheels from Rust main to obtain this contract.
+
+`scan.version` supports tags, snapshot IDs and `watermark-<value>`, resolving tags
+first and using the historical schema. Ordinary postpone-bucket batch scans can
+use native planning and exclude pending files in negative buckets.
 
 Dynamic and cross-partition primary-key buckets support native planning, including
 bucket sharding. Cross-partition key migration is maintained by the writer's index.
@@ -85,11 +92,15 @@ use native planning. With deletion vectors, batch scans exclude level 0 unless
 `deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
 together for reader-side merging. Write scans and incremental scans retain level 0.
 
-Chunk shuffle, query authorization, first-row scans that include level 0, and scored
-or primary-key global-index results still use the Python planner. Native planning
-remains optional and is disabled by default. The combined incremental planner's
-window-end deletion-vector behavior described above differs from Java delta scans,
-which do not attach deletion vectors; full Java incremental parity remains pending.
+Scored global-index results on data-evolution append tables use native row-range
+planning; Python attaches scores to the selected ranges and reads the data.
+Primary-key sorted indexes refine native batch splits through Python's existing
+index reader, preserving merge-required splits and the selected snapshot.
+
+Chunk shuffle, query authorization, batch first-row scans explicitly including L0,
+and precomputed primary-key global-index results still use the Python planner.
+Continuous streaming and write planning also retain their Python entrypoints.
+Native planning remains optional and is disabled by default.
 
 # Load LeRobot Dataset v3
 
