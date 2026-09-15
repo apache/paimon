@@ -40,7 +40,8 @@ case class WriteIntoPaimonTable(
     saveMode: SaveMode,
     _data: DataFrame,
     options: Options,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    commitUser: Option[String] = None)
   extends RunnableCommand
   with ExpressionHelper
   with SchemaEvolutionHelper
@@ -58,7 +59,7 @@ case class WriteIntoPaimonTable(
     updateTableWithOptions(
       Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
-    val writer = PaimonSparkWriter(table, batchId = batchId)
+    val writer = PaimonSparkWriter(table, batchId = batchId, commitUser = commitUser)
     if (overwritePartition != null) {
       writer.withOverwrite(overwritePartition.asJava)
     }

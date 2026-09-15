@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -43,6 +44,15 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
 
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
+
+    /**
+     * Whether {@link #filterCommitted} looks the previous commit of this user up without the lower
+     * bound of {@link CoreOptions#COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT}. The bound only saves the
+     * lookup work for a commit user that is created for one run and so cannot have committed before
+     * its base snapshot; a caller-provided user that survives a restart can have, and needs the
+     * unbounded lookup to recognise a replay. Conflict detection keeps the bound either way.
+     */
+    FileStoreCommit filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound);
 
     FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
 

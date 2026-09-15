@@ -38,7 +38,7 @@ case class PaimonV2DataWriter(
     dataSchema: StructType,
     coreOptions: CoreOptions,
     uriReaderFactory: UriReaderFactory,
-    batchId: Option[Long] = None,
+    commitIdentifier: Option[Long] = None,
     paimonWriteType: Option[RowType] = None,
     metadataSchema: Option[StructType] = None,
     plainWriteSchema: Option[StructType] = None)

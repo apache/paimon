@@ -54,6 +54,50 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit expireForEmptyCommit(boolean expireForEmptyCommit);
 
+    /**
+     * If this is set to true, {@link StreamTableCommit#filterAndCommit} verifies that every file it
+     * is about to commit still exists. By default it does.
+     *
+     * <p>The check guards a committable that was restored from an engine's state and may reference
+     * files deleted long ago. A caller which filters a committable it has just produced itself
+     * knows those files exist, and can skip a file listing proportional to the size of the
+     * committable.
+     */
+    InnerTableCommit checkFilesExistence(boolean checkFilesExistence);
+
+    /**
+     * Whether {@link StreamTableCommit#filterAndCommit} checks the append files of a committable
+     * against the files of the latest snapshot before committing them. By default it does.
+     *
+     * <p>The check guards a committable restored from an engine's state, whose files may have been
+     * committed, or removed, by an attempt the engine did not see complete. A caller filtering a
+     * committable it has just produced knows its files are new, and can skip a scan of the base
+     * files of every partition the committable touches. {@link #appendCommitCheckConflict} still
+     * forces the check regardless of this setting.
+     */
+    InnerTableCommit checkAppendFiles(boolean checkAppendFiles);
+
+    /**
+     * If this is set to true, maintenance runs on the committing thread and its failure is thrown
+     * to the caller, instead of running through an executor which stores the failure for the next
+     * commit to report.
+     *
+     * <p>A committer which commits once and is then closed has to do this: it is about to shut the
+     * executor down, so maintenance dispatched to it may never run, and there is no next commit to
+     * report a failure to. {@link BatchTableCommit#commit(List)} already behaves this way; a caller
+     * which commits through {@link StreamTableCommit#filterAndCommit} with the same one-shot
+     * lifecycle has to ask for it.
+     */
+    InnerTableCommit inlineMaintenance(boolean inlineMaintenance);
+
+    /**
+     * See {@link
+     * org.apache.paimon.operation.FileStoreCommit#filterCommittedIgnoresStrictModeBound}. A write
+     * builder enables this when it was given its commit user, since such a user can have committed
+     * before the base snapshot of the current write.
+     */
+    InnerTableCommit filterCommittedIgnoresStrictModeBound(boolean ignoresStrictModeBound);
+
     InnerTableCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
     InnerTableCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);

@@ -114,14 +114,18 @@ abstract class abstractInnerTableDataWrite[T] extends InnerTableDataWrite[T] wit
 
   val fullCompactionDeltaCommits: Option[Int]
 
-  /** For batch write, batchId is None, for streaming write, batchId is the current batch id (>= 0). */
-  val batchId: Option[Long]
+  /**
+   * None for a batch write. For a streaming write, the identifier the micro-batch is committed
+   * under, which counts from 1.
+   */
+  val commitIdentifier: Option[Long]
 
   private lazy val needFullCompaction: Boolean = {
     fullCompactionDeltaCommits match {
       case Some(deltaCommits) if deltaCommits > 0 =>
-        batchId match {
-          case Some(id) => (id + 1) % deltaCommits == 0
+        commitIdentifier match {
+          // The same rule by which a compacted-full scan recognises the full compaction.
+          case Some(identifier) => identifier % deltaCommits == 0
           // When fullCompactionDeltaCommits is set, always trigger full compaction for batch write.
           case None => true
         }
