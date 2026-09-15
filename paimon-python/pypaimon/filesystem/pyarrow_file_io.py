@@ -566,15 +566,9 @@ class PyArrowFileIO(FileIO):
         if parsed.scheme:
             return parsed.netloc, re.sub(r"/+", "/", parsed.path).lstrip("/")
 
-        path_str = path_str.lstrip("/")
-        expected_bucket = self._oss_bucket if self._is_oss else self._s3_bucket
-        if expected_bucket and path_str == expected_bucket:
-            return expected_bucket, ""
-        if expected_bucket and path_str.startswith(expected_bucket + "/"):
-            return path_str.split("/", 1)
-        if expected_bucket:
-            return expected_bucket, path_str
-        return path_str.split("/", 1)
+        normalized = re.sub(r"/+", "/", path_str).lstrip("/")
+        bucket, _, key = normalized.partition("/")
+        return bucket, key
 
     def _get_s3_delete_client(self):
         if self._s3_delete_client is not None:

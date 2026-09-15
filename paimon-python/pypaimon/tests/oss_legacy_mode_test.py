@@ -586,6 +586,21 @@ class CustomS3EndpointTest(unittest.TestCase):
             mock.call(Bucket="target-bucket", Key="table/"),
         ], file_io._s3_delete_client.delete_object.call_args_list)
 
+    def test_recursive_delete_uses_bucket_from_target_filesystem_path(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+        _set_listed_keys(file_io, ["table/data.parquet"], [])
+
+        self.assertTrue(file_io.delete(
+            "target-bucket/table", recursive=True))
+
+        self.assertEqual([
+            mock.call(Bucket="target-bucket", Key="table/data.parquet"),
+            mock.call(Bucket="target-bucket", Key="table/"),
+        ], file_io._s3_delete_client.delete_object.call_args_list)
+
     def test_pre_pyarrow_22_cross_bucket_delete_keeps_native_path(self):
         file_io = self._new_file_io()
         file_io._pyarrow_gte_22 = False
@@ -656,7 +671,7 @@ class CustomS3EndpointTest(unittest.TestCase):
                     _file_info("/ta/ble", pafs.FileType.Directory)]
 
                 self.assertTrue(file_io.delete(
-                    "s3://target-bucket/ta//ble", recursive=True))
+                    "target-bucket/ta//ble", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertTrue(server.late_object_added)
