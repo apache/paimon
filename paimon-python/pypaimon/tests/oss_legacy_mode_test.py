@@ -636,13 +636,13 @@ class CustomS3EndpointTest(unittest.TestCase):
                         "no_proxy": "127.0.0.1,localhost",
                     }):
                 file_io = PyArrowFileIO(
-                    "s3://test-bucket/table", options)
+                    "s3://source-bucket/warehouse", options)
                 file_io.filesystem = mock.Mock()
                 file_io.filesystem.get_file_info.return_value = [
                     _file_info("/table", pafs.FileType.Directory)]
 
                 self.assertTrue(file_io.delete(
-                    "s3://test-bucket/table", recursive=True))
+                    "s3://target-bucket/table", recursive=True))
                 file_io._s3_delete_client.close()
 
             self.assertTrue(server.late_object_added)
@@ -652,10 +652,10 @@ class CustomS3EndpointTest(unittest.TestCase):
                 {"GET", "DELETE"},
                 {method for method, _ in server.requests})
             self.assertEqual([
-                "/test-bucket/table/first.parquet",
-                "/test-bucket/table/",
-                "/test-bucket/table/late.parquet",
-                "/test-bucket/table/",
+                "/target-bucket/table/first.parquet",
+                "/target-bucket/table/",
+                "/target-bucket/table/late.parquet",
+                "/target-bucket/table/",
             ], [path for method, path in server.requests
                 if method == "DELETE"])
         finally:
