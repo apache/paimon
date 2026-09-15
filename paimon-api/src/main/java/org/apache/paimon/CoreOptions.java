@@ -510,6 +510,27 @@ public class CoreOptions implements Serializable {
                                     + "in the previous file. This must not exceed "
                                     + "'variant.shredding.minFieldCardinalityRatio'.");
 
+    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_WRITE =
+            key("manifest.sidecar.write")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Write sidecars with independent partition, row-id and bucket coverage for newly created manifests. Defaults to manifest-sort.enabled when unset.");
+
+    public static final ConfigOption<Boolean> MANIFEST_SIDECAR_READ =
+            key("manifest.sidecar.read")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Read optional manifest sidecars for partition, row-id or bucket filters after coarse pruning. Missing or invalid sidecars fall back to manifest reads. Defaults to manifest-sort.enabled when unset.");
+
+    public static final ConfigOption<MemorySize> MANIFEST_SIDECAR_MAX_BYTES =
+            key("manifest.sidecar.max-bytes")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum serialized manifest sidecar size, including header and checksum. Defaults to twice manifest.target-file-size. Optional payloads are dropped before omitting a sidecar whose complete block directory cannot fit.");
+
     public static final ConfigOption<String> MANIFEST_COMPRESSION =
             key("manifest.compression")
                     .stringType()
@@ -3215,6 +3236,24 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestTargetSize() {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
+    }
+
+    public boolean manifestSidecarWriteEnabled() {
+        return options.getOptional(MANIFEST_SIDECAR_WRITE).orElseGet(this::manifestSortEnabled);
+    }
+
+    public boolean manifestSidecarReadEnabled() {
+        return options.getOptional(MANIFEST_SIDECAR_READ).orElseGet(this::manifestSortEnabled);
+    }
+
+    public MemorySize manifestSidecarMaxSize() {
+        return options.getOptional(MANIFEST_SIDECAR_MAX_BYTES)
+                .orElseGet(
+                        () -> {
+                            long target = manifestTargetSize().getBytes();
+                            return new MemorySize(
+                                    target > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : target * 2);
+                        });
     }
 
     public MemorySize manifestFullCompactionThresholdSize() {

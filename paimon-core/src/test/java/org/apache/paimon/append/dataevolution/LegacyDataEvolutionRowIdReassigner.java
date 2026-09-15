@@ -886,7 +886,8 @@ final class LegacyDataEvolutionRowIdReassigner {
                 null,
                 Filter.alwaysTrue(),
                 entry -> partitionPredicate == null || partitionPredicate.test(entry.partition()),
-                ManifestEntry::copyWithoutStats);
+                ManifestEntry::copyWithoutStats,
+                null);
     }
 
     private Comparator<ManifestEntry> entryComparator() {

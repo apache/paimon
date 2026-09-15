@@ -590,7 +590,7 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
-        # Disable both early filters in explain mode (scan_stats) so all entries
+        # Disable early entry filters and sidecar pruning in explain mode so all entries
         # flow through _filter_manifest_entry for accurate funnel counting.
         early_row_filter = None if self.scan_stats is not None \
             else _build_early_row_range_filter(row_ranges)
@@ -604,6 +604,7 @@ class FileScanner:
             early_entry_filter=self._build_early_bucket_filter(),
             early_record_filter=early_row_filter,
             partition_filter=partition_filter,
+            row_ranges=row_ranges if self.scan_stats is None else None,
         )
 
     def _build_early_bucket_filter(self):

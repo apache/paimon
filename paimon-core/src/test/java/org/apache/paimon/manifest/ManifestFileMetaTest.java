@@ -2744,7 +2744,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                         false,
                                         null),
                                 Long.MAX_VALUE,
-                                null)
+                                null,
+                                new ManifestSidecar.Settings(
+                                        new CoreOptions(new Options()),
+                                        multiPartitionType.getFieldCount()))
                         .create();
 
         List<ManifestFileMeta> input = new ArrayList<>();
@@ -3204,7 +3207,9 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                                 false,
                                 null),
                         Long.MAX_VALUE,
-                        null)
+                        null,
+                        new ManifestSidecar.Settings(
+                                new CoreOptions(new Options()), partitionType.getFieldCount()))
                 .create();
     }
 

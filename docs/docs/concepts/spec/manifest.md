@@ -63,6 +63,262 @@ skip manifests before opening them.
 Each extra file belongs exclusively to one manifest. It is retained and cleaned up together with
 that manifest during snapshot, tag, or changelog deletion.
 
+### Manifest Sidecar
+
+With `manifest.sidecar.write` enabled, a manifest writer can create a binary
+`<manifest-file-name>.avro.sidecar` sidecar. Its name is stored in the manifest-list
+record's `_EXTRA_FILES`; the existing Avro schemas and `_VERSION` identifiers are unchanged.
+Readers identify the sidecar by the `.avro.sidecar` suffix among these explicit
+references, not by probing for a derived file name. Other extra-file references are preserved.
+
+With `manifest.sidecar.read` enabled and a partition, row-ID or bucket filter available, readers can use
+the sidecar to select complete Avro blocks before reading manifest entries. Each option
+inherits `manifest-sort.enabled` when unset; an explicit value overrides it independently.
+Since manifest sorting defaults to `false`, sidecar reads and writes are also disabled when
+none of these options is set. Old manifests, null or empty extra-file lists, and lists containing only
+other extra-file types use the normal manifest read path. Missing sidecars and explicit container
+validation failures, such as unsupported versions, checksum mismatches and byte-budget violations,
+also fall back to that path. Each block's partition, row-ID and bucket
+coverage is independently usable; an unavailable dimension cannot exclude a block.
+Java falls back only on `IOException`. If the current thread is interrupted, it instead throws
+`UncheckedIOException` with the original I/O failure. Other exceptions and errors propagate unchanged;
+Java does not inspect causes or suppressed exceptions. PyPaimon explicitly propagates cancellation
+and interruption exception types, including wrapped causes.
+
+Writers choose partition, row-ID and bucket payloads through internal sidecar settings derived from
+the table. Partition coverage is enabled when the supplied partition count is greater than zero;
+otherwise the partition dictionary and partition payloads are omitted. Row-ID coverage follows
+`data-evolution.enabled`. Bucket coverage is enabled when `bucket` is not `-1`, independently
+of data evolution. A disabled payload uses encoding 0, with no length or payload bytes.
+Each payload remains independently usable by readers. These settings do not add
+table options or prevent readers from using payloads already present in existing sidecars.
+
+Version 1 uses the following layout. Container integers and payload integers
+are fixed-width big endian. Encoding IDs are unsigned bytes with separate namespaces.
+
+```text
+magic : 8 bytes                         // ASCII PAIMSCAR
+formatVersion : int                    // 1
+manifestNameHash : 32 bytes             // SHA-256 of the UTF-8 basename
+manifestLength : long
+manifestEntryCount : long               // ADD + DELETE
+avroHeaderLength : int
+avroHeader : bytes                      // original schema, codec and sync marker
+partitionCount : int
+partitionDictionary[]
+  partitionByteLength : int
+  partitionBytes : bytes                // existing manifest BinaryRow serialization
+blockCount : int
+blocks[]                               // original physical order
+  offset : long
+  length : long                         // complete encoded block, including sync marker
+  recordCount : long
+  partitionEncoding : byte
+  if partitionEncoding != 0:
+    partitionPayloadLength : int
+    partitionPayload : bytes
+  rowIdEncoding : byte
+  if rowIdEncoding != 0:
+    rowIdPayloadLength : int
+    rowIdPayload : bytes
+  bucketEncoding : byte
+  if bucketEncoding != 0:
+    bucketPayloadLength : int
+    bucketPayload : bytes
+checksum : 32 bytes                     // SHA-256 of all preceding bytes
+```
+
+The block ID is its position. Its first entry ordinal is the sum of preceding record
+counts and is not stored. Each complete partition tuple appears once in the dictionary,
+including all its fields and nulls. The scan's partition type interprets the existing
+serialized tuple. Partition predicates are evaluated once per dictionary entry.
+
+| Dimension | Encoding | Payload |
+| --- | --- | --- |
+| Any | `0` | Unavailable; only the encoding byte is present. |
+| Partition | `1` | Positive `partitionIdCount: int` followed by sorted unique dictionary IDs (`int`). |
+| Row ID | `1` | Positive `rangeCount: int` followed by sorted disjoint inclusive `(start: long, end: long)` pairs. Coverage may conservatively include gaps. |
+| Bucket | `1` | Positive `pairCount: int` followed by sorted unique `(bucket: int, totalBuckets: int)` pairs. |
+| Any | Other nonzero ID | Skip exactly the bounded payload length; treat only this dimension as unavailable. |
+
+Only nonzero encodings are followed by a length and payload. Payload lengths exclude
+the encoding and length fields, but include the count at the start of the payload.
+For all three encoding-1 payloads below, `int` is a signed 4-byte integer and `long` is
+a signed 8-byte integer, both big endian. Elements have no padding, per-element length
+prefixes, or Avro variable-length integer encoding. Counts must be positive; encoding 0
+represents unavailable coverage, rather than encoding 1 with a zero count.
+
+#### Partition Payload
+
+When `partitionEncoding == 1`, the block stores the IDs of all distinct partition tuples
+represented by its entries:
+
+```text
+partitionPayload
+  partitionIdCount : int               // N > 0
+  partitionIds[N] : int                // N consecutive 4-byte dictionary IDs
+
+partitionPayloadLength = 4 + 4 * N
+```
+
+An ID is the zero-based position of a complete tuple in the sidecar's shared
+`partitionDictionary`, not an individual partition field or an entry ordinal. Valid IDs
+satisfy `0 <= id < partitionCount` and are strictly increasing, with no duplicates.
+The tuple bytes appear only in the dictionary; they are not repeated in each block's payload.
+For example, IDs `[0, 3]` are stored as the three integers `[2, 0, 3]`, occupying 12 payload
+bytes, or 17 bytes including `partitionEncoding` and `partitionPayloadLength`.
+
+With a partition filter, the block matches if any referenced dictionary tuple matches.
+A tuple containing a null partition value can still have a valid dictionary ID. If any
+entry's partition tuple is unavailable, or partition coverage cannot fit its budget, the
+block uses encoding 0 so that missing dictionary coverage cannot exclude it.
+
+#### Row-ID Payload
+
+When `rowIdEncoding == 1`, the block stores inclusive row-ID intervals:
+
+```text
+rowIdPayload
+  rangeCount : int                     // N > 0
+  ranges[N]
+    start : long                       // inclusive first row ID
+    end : long                         // inclusive last row ID
+
+rowIdPayloadLength = 4 + 16 * N
+```
+
+Each pair satisfies `0 <= start <= end <= Long.MAX_VALUE`. Pairs are ordered by `start`
+and do not overlap: each `start` is greater than the preceding `end`. The writer merges
+overlapping and adjacent intervals contributed by the entries. An entry contributes
+`[firstRowId, firstRowId + rowCount - 1]`; these are table row IDs, not manifest entry
+ordinals. `rangeCount` counts intervals, not entries or individual row IDs.
+
+There are no separate block min/max fields in this payload. The reader obtains the block
+minimum from the first pair's `start` and the maximum from the last pair's `end`. It tests
+this envelope first, then checks individual intervals if necessary. For example,
+`[(10, 19), (30, 39)]` is stored as `rangeCount = 2` followed by four longs. Its payload
+length is 36 bytes, or 41 bytes including the encoding and length fields. Its envelope
+is `[10, 39]`, but a query for row ID 25 does not match either interval.
+
+If the exact union exceeds its available budget, the writer can store one conservative
+`[min,max]` pair using the same encoding. That payload has `rangeCount = 1` and length
+20 bytes; it can include gaps. There is no separate flag distinguishing a coarsened pair
+from an exact interval, so entry filtering remains necessary. Unknown or invalid row-ID
+metadata makes coverage unavailable for the block; further byte-budget degradation can
+also drop the payload entirely.
+
+#### Bucket Payload
+
+When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
+
+```text
+bucketPayload
+  pairCount : int                      // N > 0
+  pairs[N]
+    bucket : int                       // entry's bucket number
+    totalBuckets : int                 // entry's recorded total bucket count
+
+bucketPayloadLength = 4 + 8 * N
+```
+
+Each pair satisfies `0 <= bucket < totalBuckets`. Pairs are sorted by `bucket`, then
+`totalBuckets`, and deduplicated. `totalBuckets` comes from the entry's `_TOTAL_BUCKETS`;
+it is not the number of buckets represented by this block or the table's current bucket
+setting. The same bucket number can therefore occur with different totals after rescaling.
+For example, `[(1, 4), (1, 8), (3, 4)]` is stored as the seven integers
+`[3, 1, 4, 1, 8, 3, 4]`, occupying 28 payload bytes, or 33 bytes including the encoding
+and length fields. These pairs have no partition IDs or separate bucket min/max fields.
+
+Missing, invalid, negative/synthetic or over-budget bucket metadata makes that block's
+bucket coverage unavailable (encoding 0, no length or payload). Partition and row-ID
+coverage remain independently usable; no mutual-exclusion restriction is imposed.
+
+Readers test bucket-only queries using the existing bucket-selection logic, including
+the total-bucket count. Java uses conservative partition-independent bounds for
+`ManifestBucketFilter`; arbitrary partition-dependent callbacks remain at the entry
+filter stage. An unavailable bucket payload cannot exclude a block. Malformed payload lengths
+or pair counts invalidate the container. Invalid ordering or values encountered while matching
+also invalidate it; elements after the first match are skipped.
+
+#### Validation and Coverage
+
+Invalid lengths, known-payload framing, checksum mismatches or inconsistent physical
+coverage invalidate the container. Invalid dictionary references or interval ordering
+encountered in decoded payload contents also invalidate it. Byte spans must cover the
+entire original manifest after its header; record counts must sum to the manifest entry
+count. Readers validate the checksum, payload framing (including known count/length
+consistency), and the complete block directory even when a block is rejected. Block
+payload contents are decoded and validated only for dimensions still needed by the filters,
+and only until that dimension matches. A row-ID min/max rejection skips individual
+intervals; a match skips the remaining elements of that payload. Skipped payload contents
+are not individually validated.
+
+All entries contribute, including ADD, DELETE and every file format/column group.
+Row-ID ranges are never expanded into individual values. If an exact union exceeds its
+available byte budget, it becomes the inclusive `[min,max]` envelope with encoding 1. Processing
+continues through the end of the block to extend those bounds and detect unknown row IDs.
+An unknown or invalid row-ID range makes only that block's row-ID payload unavailable.
+Partition budget exhaustion independently makes that block's partition payload unavailable.
+The dictionary can consequently be incomplete for the manifest: a dictionary miss never
+excludes a block with unavailable partition coverage. Later blocks can still use existing IDs.
+
+`manifest.sidecar.max-bytes` bounds the whole serialized container, including the
+partition dictionary and all three payload types. It accepts memory sizes such as
+`16 mb` and, when unset, defaults to twice the configured `manifest.target-file-size`
+(16 MiB with the default 8 MiB manifest target). An explicit sidecar size overrides this default.
+The effective budget is capped at 2147483646 bytes to fit the in-memory byte-array representation.
+Smaller budgets that cannot fit a sidecar skip this optimization; they do not prevent manifest writes
+or reads. Doubling a very large manifest target saturates at the maximum representable memory size.
+The Avro header and block directory share this byte budget without separate size or count limits.
+Writers discard optional row-ID payloads, bucket payloads, then partition payloads/dictionary if necessary,
+to fit the complete directory. If the directory itself cannot fit, no sidecar is published.
+No emitted sidecar omits block descriptors. These are encoded-size bounds; Avro header parsing
+and sidecar construction also incur object/buffer overhead. Query concurrency multiplies per-reader costs.
+
+For conjunctive filters a block is retained only if each dimension is either unavailable
+or matches. Within each block, matching tests row ID, partition, then bucket coverage.
+It skips absent filters and short-circuits after a dimension rejects a block, skipping
+the contents of later payloads. Within each payload, matching stops at the first hit. Matches in different dimensions can come
+from different entries in the block, so entry filtering and deletion merging remain
+necessary. Block min/max is derived from the first/last interval before testing the
+individual intervals.
+
+Readers still consume and validate the whole bounded sidecar. A partition-only query
+therefore reads row-ID payload bytes too; payload lengths save decoding work for unused
+payload contents and unknown encodings, not storage I/O. Selected compressed blocks are read by byte range with adjacent
+spans coalesced. Existing immutable manifests are not backfilled by enabling the write option.
+
+Java readers share the existing manifest cache for complete sidecar bytes, keyed by the
+explicit sidecar path and subject to the same memory budget and single-file threshold.
+Only successful reads and selections populate the cache. Each query creates independent
+views and reapplies its filters and byte budget; query-specific selections are not cached.
+
+Selected Avro blocks also share this cache. Each entry contains one complete compressed
+block, keyed by the manifest's full path, original offset and encoded length, separately
+from whole-manifest and sidecar entries. Different selections can reuse the same blocks.
+Only successful complete reads populate the cache; oversized blocks stream through the
+bounded read buffer. Adjacent uncached blocks are read together when they fit the read
+buffer, then cached individually. Fully cached selections do not open the manifest file.
+Block entries follow the existing memory budget, entry-size limit, expiration and eviction
+settings. The Avro decoder and entry filters still run on cached bytes.
+
+PyPaimon reuses `CachingFileIO` for sidecar bytes. Enable `local-cache.enabled` on the catalog
+and include `meta` in `local-cache.whitelist` (included by default). Files ending in
+`.avro.sidecar`, including custom names, use the same cache as other metadata. The cache
+stores raw byte blocks by full path and block index, sharing `local-cache.max-size` and
+`local-cache.block-size`. Without `local-cache.dir` it uses memory; setting that option
+enables disk caching. Sidecar validation, filters and the read byte budget are reapplied
+on every query. Local caching is disabled by default.
+
+All Java sidecar selections use the block cache, including selections covering every block.
+Selected reads never populate the full-manifest cache; that cache is used only without a
+sidecar selection. PyPaimon explain scans disable sidecar pruning to preserve complete entry
+counters.
+
+Selected blocks still pass through entry filtering and ADD/DELETE reconciliation. Snapshot,
+tag, changelog, orphan-file and failed-commit cleanup retain or remove the sidecar through
+its extra-file reference together with the owning manifest.
+
 ## Manifest
 
 Data manifests record **ADD** (`0`) and **DELETE** (`1`) entries. Readers reconcile these entries

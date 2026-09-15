@@ -166,7 +166,9 @@ public abstract class ManifestFileMetaTestBase {
                                 false,
                                 null),
                         Long.MAX_VALUE,
-                        null)
+                        null,
+                        new ManifestSidecar.Settings(
+                                new CoreOptions(new Options()), getPartitionType().getFieldCount()))
                 .create();
     }
 
