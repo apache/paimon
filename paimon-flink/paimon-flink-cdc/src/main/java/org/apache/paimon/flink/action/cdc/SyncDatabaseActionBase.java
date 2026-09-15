@@ -196,6 +196,7 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
         NewTableSchemaBuilder schemaBuilder =
                 new NewTableSchemaBuilder(
                         tableConfig,
+                        tableConfigByTable,
                         caseSensitive,
                         partitionKeys,
                         primaryKeys,
