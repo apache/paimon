@@ -77,8 +77,9 @@ sidecar references, managing file ownership, applying entry filters and reconcil
 entries after block selection. `build` reads the completed physical manifest and returns sidecar
 bytes; it does not write or publish another file.
 
-`Settings` enables row-ID and bucket payload generation independently. Partition generation is
-always enabled, including the empty partition tuple for unpartitioned tables. Missing or invalid
+`Settings` contains `write` and `read` switches for the calling writer and scan, and enables
+row-ID and bucket payload generation independently. Partition generation is always enabled,
+including the empty partition tuple for unpartitioned tables. Missing or invalid
 metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
 construction keeps complete coverage and `read` consumes the entire file once it is opened.
 

@@ -58,7 +58,8 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 /** Complete sidecar payload format, compression and independent filtering. */
 class ManifestBlockIndexTest {
     private final RowType type = RowType.of(DataTypes.INT(), DataTypes.STRING());
-    private final ManifestSidecar.Settings defaults = new ManifestSidecar.Settings(true, true);
+    private final ManifestSidecar.Settings defaults =
+            new ManifestSidecar.Settings(true, true, true, true);
 
     private byte[] fixture(String field) throws IOException {
         Properties p = new Properties();
@@ -105,7 +106,7 @@ class ManifestBlockIndexTest {
             boolean rowIdEnabled = (mask & 1) != 0;
             boolean bucketEnabled = (mask & 2) != 0;
             ManifestSidecar.Settings settings =
-                    new ManifestSidecar.Settings(rowIdEnabled, bucketEnabled);
+                    new ManifestSidecar.Settings(true, true, rowIdEnabled, bucketEnabled);
             ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
             for (int block = 0; block < 2; block++) {
                 builder.beginBlock(header.length + block * 100L, 100, 1);
@@ -459,7 +460,8 @@ class ManifestBlockIndexTest {
     void unpartitionedTablesStillRecordTheEmptyPartition() throws Exception {
         byte[] header = fixture("avroHeader");
         ManifestSidecar.Builder builder =
-                new ManifestSidecar.Builder(new ManifestSidecar.Settings(false, false), header);
+                new ManifestSidecar.Builder(
+                        new ManifestSidecar.Settings(true, true, false, false), header);
         builder.beginBlock(header.length, 100, 1);
         builder.add(null, 0, SerializationUtils.serializeBinaryRow(BinaryRow.EMPTY_ROW));
         builder.endBlock();

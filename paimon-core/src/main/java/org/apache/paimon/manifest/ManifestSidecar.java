@@ -91,12 +91,16 @@ public final class ManifestSidecar {
         return null;
     }
 
-    /** Optional payloads supplied by the caller. Partition coverage is always enabled. */
+    /** Read/write switches and optional payloads. Partition coverage is always enabled. */
     public static final class Settings {
+        public final boolean write;
+        public final boolean read;
         public final boolean rowIdEnabled;
         public final boolean bucketEnabled;
 
-        public Settings(boolean rowIdEnabled, boolean bucketEnabled) {
+        public Settings(boolean write, boolean read, boolean rowIdEnabled, boolean bucketEnabled) {
+            this.write = write;
+            this.read = read;
             this.rowIdEnabled = rowIdEnabled;
             this.bucketEnabled = bucketEnabled;
         }
