@@ -356,6 +356,8 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         )
 
         scanner = FileScanner.__new__(FileScanner)
+        scanner.idx_of_this_subtask = None
+        scanner.start_pos_of_this_subtask = None
         scanner.manifest_scanner = unittest.mock.MagicMock(
             return_value=([], unittest.mock.Mock(id=3)))
         scanner._global_index_result = None

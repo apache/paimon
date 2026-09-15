@@ -107,7 +107,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             slice_row_ranges = Range.and_(slice_row_ranges, self.row_ranges)
 
         # Wrap splits with IndexedSplit for slice-based filtering or row_ranges
-        if slice_row_ranges:
+        if slice_row_ranges is not None:
+            if not slice_row_ranges:
+                return []
             splits = self._wrap_to_indexed_splits(splits, slice_row_ranges)
 
         return splits
