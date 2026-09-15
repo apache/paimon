@@ -57,6 +57,8 @@ checked before planning. Deletion-vector scans require `pypaimon-rust>=0.4.0`,
 which includes schema-aware decoding of Python-written index manifests and
 legacy bucket-index path compatibility. The reader honors explicit paths, then
 bucket paths, and can read older Python files placed in `table/index`.
+Bucket paths use the partition field types and `partition.legacy-name` to match
+Java formatting, including timestamp precision and different JVM float spellings.
 New Python writes honor `index-file-in-data-file-dir` and retain explicit paths
 when Python and Java partition-directory formatting differs. Older releases
 and prereleases before 0.4.0 use the Python planner for deletion vectors.

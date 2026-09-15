@@ -19,6 +19,8 @@
 
 from pathlib import Path
 from dataclasses import replace
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -37,13 +39,14 @@ _PLANNERS = ['python', pytest.param('native', marks=[pytest.mark.native_plan, py
     reason='pypaimon-rust>=0.4.0 required for native DV paths')])]
 
 
-def _table(tmp_path, layout, first_partition='a', partition_type=None):
+def _table(tmp_path, layout, first_partition='a', partition_type=None, legacy_partition_name=True):
     catalog = CatalogFactory.create({'warehouse': str(tmp_path / 'warehouse')})
     catalog.create_database('db', True)
     options = {
         'bucket': '-1', 'data-evolution.enabled': 'true', 'row-tracking.enabled': 'true',
         'deletion-vectors.enabled': 'true', 'scan.native-plan.enabled': 'false',
         'index-file-in-data-file-dir': str(layout.startswith('bucket')).lower(),
+        'partition.legacy-name': str(legacy_partition_name).lower(),
     }
     if layout == 'bucket-external':
         options.update({
@@ -54,6 +57,8 @@ def _table(tmp_path, layout, first_partition='a', partition_type=None):
     elif layout == 'global-external':
         options['global-index.external-path'] = (tmp_path / 'external-index').as_uri()
     second_partition = 'b' if partition_type is None else False if pa.types.is_boolean(partition_type) else 2.0
+    if partition_type is not None and pa.types.is_timestamp(partition_type):
+        second_partition = first_partition + timedelta(days=1)
     schema = pa.schema([('p', pa.string() if partition_type is None else partition_type), ('k', pa.int64())])
     catalog.create_table('db.t', Schema.from_pyarrow_schema(
         schema, partition_keys=['p'], options=options), False)
@@ -235,16 +240,56 @@ def test_bucket_dv_preserves_python_typed_partition_directory(tmp_path, planner,
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)
-@pytest.mark.parametrize('value,partition_type,canonical_name', [('a/b', None, 'a%2Fb'), (True, pa.bool_(), 'true')])
+@pytest.mark.parametrize('value,partition_type,canonical_name', [
+    ('a/b', None, 'a%2Fb'), (True, pa.bool_(), 'true'),
+    (0.1, pa.float32(), '0.1'),
+    (0.0001, pa.float32(), '1.0E-4'),
+    (1e7, pa.float32(), '1.0E7'),
+    (-0.0, pa.float32(), '-0.0'),
+    (1.4e-45, pa.float32(), '1.4E-45'),
+    (3.4028234663852886e38, pa.float32(), '3.4028235E38'),
+    (1.17549435e-38, pa.float32(), '1.17549435E-38'),
+    (1.17549435e-38, pa.float32(), '1.1754944E-38'),
+    (2.68873286e11, pa.float32(), '2.68873286E11'),
+    (2.68873286e11, pa.float32(), '2.6887329E11'),
+    (9.64991956e24, pa.float32(), '9.6499195E24'),
+    (1e23, pa.float64(), '9.999999999999999E22'),
+    (1e23, pa.float64(), '1.0E23'),
+    (-2.3345394554987242e17, pa.float64(), '-2.33453945549872416E17'),
+    (5e-324, pa.float64(), '4.9E-324'),
+    (datetime(2026, 9, 15, 12), pa.timestamp('s'), '2026-09-15 12%3A00%3A00'),
+    (datetime(2026, 9, 15, 12), pa.timestamp('ms'), '2026-09-15 12%3A00%3A00.000'),
+    (datetime(2026, 9, 15, 12, 0, 0, 120000), pa.timestamp('ms'), '2026-09-15 12%3A00%3A00.120'),
+    (datetime(2026, 9, 15, 12), pa.timestamp('us'), '2026-09-15 12%3A00%3A00.000000'),
+    (datetime(2026, 9, 15, 12, 0, 0, 123456), pa.timestamp('us'), '2026-09-15 12%3A00%3A00.123456'),
+    (datetime(2026, 9, 15, 12), pa.timestamp('ns'), '2026-09-15 12%3A00%3A00.000000000'),
+])
 def test_java_canonical_bucket_dv_without_external_path(tmp_path, planner, value, partition_type, canonical_name):
-    table = _table(tmp_path, 'bucket', value, partition_type)
+    _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_name, False)
+
+
+@pytest.mark.parametrize('planner', _PLANNERS)
+@pytest.mark.parametrize('value,partition_type,canonical_name', [
+    (datetime(2026, 9, 15, 12), pa.timestamp('ms'), '2026-09-15T12%3A00'),
+    (datetime(2026, 9, 15, 12, 0, 1), pa.timestamp('ms'), '2026-09-15T12%3A00%3A01'),
+    (datetime(2026, 9, 15, 12, 0, 0, 120000), pa.timestamp('ms'), '2026-09-15T12%3A00%3A00.120'),
+    (datetime(2026, 9, 15, 12, 0, 0, 120100), pa.timestamp('us'), '2026-09-15T12%3A00%3A00.120100'),
+])
+def test_java_legacy_bucket_dv_without_external_path(tmp_path, planner, value, partition_type, canonical_name):
+    _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_name, True)
+
+
+def _check_java_bucket_dv(tmp_path, planner, value, partition_type, canonical_name, legacy_partition_name):
+    table = _table(tmp_path, 'bucket', value, partition_type, legacy_partition_name)
     _delete(table, [0])
     old = _entries(table, 2)[0]
     canonical_path = str(Path(table.table_path) / ('p=' + canonical_name) / ('bucket-' + str(old.bucket)) /
                          old.index_file.file_name)
     # Model the persisted layout produced by Java: the bucket path is canonical
     # and no explicit index location is needed in its manifest metadata.
-    with table.file_io.new_input_stream(old.index_file.external_path) as stream:
+    old_path = table.path_factory().bucket_index_path(
+        tuple(old.partition.values), old.bucket, old.index_file, table.file_io)
+    with table.file_io.new_input_stream(old_path) as stream:
         data = stream.read()
     with table.file_io.new_output_stream(canonical_path) as stream:
         stream.write(data)
@@ -257,15 +302,54 @@ def test_java_canonical_bucket_dv_without_external_path(tmp_path, planner, value
     finally:
         commit.close()
     # Case-insensitive local filesystems consider p=True and p=true identical.
-    if not Path(old.index_file.external_path).samefile(canonical_path):
-        table.file_io.delete_quietly(old.index_file.external_path)
-    plan = _read(table, planner, 3, [1, 2, 3])
+    if not Path(old_path).samefile(canonical_path):
+        table.file_io.delete_quietly(old_path)
+        # Both previous Python locations must lose to every Java spelling.
+        with table.file_io.new_output_stream(old_path) as stream:
+            stream.write(b'not the canonical deletion vector')
+    with table.file_io.new_output_stream(table.path_factory().index_path() + '/' + old.index_file.file_name) as stream:
+        stream.write(b'not a bucket deletion vector')
+    if partition_type is not None and pa.types.is_floating(partition_type):
+        other_partition = str(Path(table.table_path) / 'p=2.0' / ('bucket-' + str(old.bucket)) /
+                              old.index_file.file_name)
+        with table.file_io.new_output_stream(other_partition) as stream:
+            stream.write(b'not the requested floating partition')
+    if planner == 'native' and partition_type is not None and pa.types.is_floating(partition_type):
+        # Rust does not support floating partitions; exercise the real adapter
+        # fallback against the same Java-produced DV layout.
+        table = table.copy({'scan.native-plan.enabled': 'true'})
+        planner = 'python'
+        with patch('pypaimon.read.native_plan.native_plan', wraps=native_plan) as native_call:
+            plan = _read(table, planner, 3, [1, 2, 3])
+        assert native_call.call_count == 1
+    else:
+        plan = _read(table, planner, 3, [1, 2, 3])
     paths = [dv.dv_index_path for split in plan.splits()
              for dv in split.data_deletion_files or [] if dv is not None]
     assert paths == [canonical_path]
     _delete(table, [1])
     _read(table, planner, 4, [2, 3])
     _read(table, planner, 3, [1, 2, 3])
+
+
+@pytest.mark.parametrize('legacy_partition_name,expected', [
+    (False, 'ts=2026-09-15 12%3A00%3A00.000/day=1970-01-02/tm=12%3A34%3A56'),
+    (True, 'ts=2026-09-15T12%3A00/day=1/tm=45296120'),
+])
+def test_typed_partition_paths_follow_partition_key_order(tmp_path, legacy_partition_name, expected):
+    catalog = CatalogFactory.create({'warehouse': str(tmp_path)})
+    catalog.create_database('db', True)
+    schema = pa.schema([
+        ('id', pa.int64()), ('ts', pa.timestamp('ms')), ('p/q', pa.float32()),
+        ('day', pa.date32()), ('tm', pa.time32('ms')), ('d', pa.decimal128(10, 9)),
+    ])
+    catalog.create_table('db.t', Schema.from_pyarrow_schema(
+        schema, partition_keys=['p/q', 'ts', 'day', 'tm', 'd'],
+        options={'partition.legacy-name': str(legacy_partition_name).lower()}), False)
+    factory = catalog.get_table('db.t').path_factory()
+    partition = (0.1, datetime(2026, 9, 15, 12), date(1970, 1, 2), time(12, 34, 56, 120000), Decimal('0E-9'))
+    assert factory.relative_bucket_path(partition, 2, True) == (
+        'p%2Fq=0.1/' + expected + '/d=0.000000000/bucket-2')
 
 
 @pytest.mark.parametrize('planner', _PLANNERS)

@@ -1133,6 +1133,15 @@ class CoreOptions:
         )
     )
 
+    PARTITION_GENERATE_LEGACY_NAME: ConfigOption[bool] = (
+        ConfigOptions.key("partition.legacy-name")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Use legacy Java toString partition names; otherwise use casts to string."
+        )
+    )
+
     DYNAMIC_PARTITION_OVERWRITE: ConfigOption[bool] = (
         ConfigOptions.key("dynamic-partition-overwrite")
         .boolean_type()

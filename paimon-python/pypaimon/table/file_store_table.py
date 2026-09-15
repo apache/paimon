@@ -382,12 +382,13 @@ class FileStoreTable(Table):
         return FileStorePathFactory(
             root=str(self.table_path),
             partition_keys=self.partition_keys,
+            partition_types=[field.type for field in self.partition_keys_fields],
             default_part_value=self.options.options.get(
                 CoreOptions.PARTITION_DEFAULT_NAME, "__DEFAULT_PARTITION__"),
             format_identifier=format_identifier,
             data_file_prefix="data-",
             changelog_file_prefix="changelog-",
-            legacy_partition_name=True,
+            legacy_partition_name=self.options.options.get(CoreOptions.PARTITION_GENERATE_LEGACY_NAME),
             file_suffix_include_compression=False,
             file_compression=file_compression,
             data_file_path_directory=None,
