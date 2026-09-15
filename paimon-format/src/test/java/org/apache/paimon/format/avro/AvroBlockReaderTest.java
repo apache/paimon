@@ -18,12 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.fs.ByteArraySeekableStream;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.SeekableInputStreamWrapper;
-import org.apache.paimon.fs.local.LocalFileIO;
-
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileStream;
@@ -31,17 +25,15 @@ import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.util.ArrayList;
+import java.io.InputStream;
 import java.util.Arrays;
-import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -52,8 +44,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AvroBlockReaderTest {
 
     private static final Schema SCHEMA = Schema.create(Schema.Type.LONG);
-
-    @TempDir private java.nio.file.Path tempDir;
 
     @ParameterizedTest
     @ValueSource(strings = {"null", "deflate", "snappy", "zstandard"})
@@ -78,31 +68,19 @@ class AvroBlockReaderTest {
         assertThat(boundaries[values.length]).isEqualTo(bytes.length);
 
         for (int maxRead : new int[] {1, 7, Integer.MAX_VALUE}) {
-            List<Long> seeks = new ArrayList<>();
-            SeekableInputStream input =
-                    new SeekableInputStreamWrapper(open(bytes)) {
+            InputStream input =
+                    new FilterInputStream(new ByteArrayInputStream(bytes)) {
                         @Override
                         public int read(byte[] data, int offset, int length) throws IOException {
                             return super.read(data, offset, Math.min(length, maxRead));
                         }
-
-                        @Override
-                        public void seek(long position) throws IOException {
-                            seeks.add(position);
-                            super.seek(position);
-                        }
                     };
             try (AvroBlockReader reader = new AvroBlockReader(input)) {
-                long resumePosition = input.getPos();
-                assertThat(seeks).containsExactly(0L, resumePosition);
                 byte[] header = reader.headerBytes();
                 assertThat(header).isEqualTo(Arrays.copyOf(bytes, (int) boundaries[0]));
-                assertThat(input.getPos()).isEqualTo(resumePosition);
-                assertThat(seeks).containsExactly(0L, resumePosition);
                 byte[] anotherHeader = reader.headerBytes();
                 anotherHeader[0] = 0;
                 assertThat(reader.headerBytes()).isEqualTo(header);
-                assertThat(seeks).hasSize(2);
                 AvroRawBlock previous = null;
                 for (int i = 0; i < values.length; i++) {
                     // Exercise next() both directly and after repeated look-ahead calls.
@@ -136,7 +114,7 @@ class AvroBlockReaderTest {
             writer.create(SCHEMA, output);
         }
         byte[] bytes = output.toByteArray();
-        try (AvroBlockReader reader = new AvroBlockReader(open(bytes))) {
+        try (AvroBlockReader reader = new AvroBlockReader(new ByteArrayInputStream(bytes))) {
             assertThat(reader.headerBytes()).isEqualTo(bytes);
             assertThat(reader.hasNextBlock()).isFalse();
             assertThatThrownBy(reader::nextBorrowedRawBlock)
@@ -145,46 +123,28 @@ class AvroBlockReaderTest {
     }
 
     @Test
-    void failedHeaderReadClosesTheInput() throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try (DataFileWriter<Long> writer = new DataFileWriter<>(new GenericDatumWriter<>(SCHEMA))) {
-            writer.create(SCHEMA, output);
-            writer.append(11L);
-        }
-        byte[] bytes = output.toByteArray();
+    void failedHeaderReadClosesTheInput() {
         AtomicBoolean closed = new AtomicBoolean();
-        SeekableInputStream input =
-                new SeekableInputStreamWrapper(open(bytes)) {
-                    private boolean readingHeader;
-
+        InputStream input =
+                new InputStream() {
                     @Override
-                    public void seek(long position) throws IOException {
-                        super.seek(position);
-                        readingHeader = position == 0;
+                    public int read() throws IOException {
+                        throw new IOException("header read failed");
                     }
 
                     @Override
-                    public int read(byte[] data, int offset, int length) throws IOException {
-                        if (readingHeader) {
-                            throw new IOException("header read failed");
-                        }
-                        return super.read(data, offset, length);
-                    }
-
-                    @Override
-                    public void close() throws IOException {
-                        super.close();
+                    public void close() {
                         closed.set(true);
                     }
                 };
         assertThatThrownBy(() -> new AvroBlockReader(input))
                 .isInstanceOf(IOException.class)
-                .hasMessage("header read failed");
+                .hasRootCauseMessage("header read failed");
         assertThat(closed.get()).isTrue();
     }
 
     @Test
-    void headerFromMemoryCanRestoreEof() throws IOException {
+    void headerExcludesBufferedBlockData() throws IOException {
         for (int records : new int[] {0, 1}) {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             long headerLength;
@@ -197,12 +157,12 @@ class AvroBlockReaderTest {
                 }
             }
             byte[] bytes = output.toByteArray();
-            ByteArraySeekableStream input = new ByteArraySeekableStream(bytes);
+            ByteArrayInputStream input = new ByteArrayInputStream(bytes);
             try (AvroBlockReader reader = new AvroBlockReader(input)) {
-                assertThat(input.getPos()).isEqualTo(bytes.length);
+                assertThat(input.available()).isZero();
                 byte[] header = reader.headerBytes();
                 assertThat(header).isEqualTo(Arrays.copyOf(bytes, (int) headerLength));
-                assertThat(input.getPos()).isEqualTo(bytes.length);
+                assertThat(input.available()).isZero();
                 if (records > 0) {
                     assertThat(reader.nextBorrowedRawBlock().recordCount()).isEqualTo(records);
                     assertBlockReadable(
@@ -230,25 +190,16 @@ class AvroBlockReaderTest {
         int prefixLength = 13;
         byte[] bytes = new byte[prefixLength + avro.length];
         System.arraycopy(avro, 0, bytes, prefixLength, avro.length);
-        SeekableInputStream input = open(bytes);
-        input.seek(prefixLength);
+        InputStream input = new ByteArrayInputStream(bytes, prefixLength, avro.length);
         try (AvroBlockReader reader = new AvroBlockReader(input)) {
-            long resumePosition = input.getPos();
             byte[] header = reader.headerBytes();
             assertThat(header).isEqualTo(Arrays.copyOf(avro, (int) headerLength));
-            assertThat(input.getPos()).isEqualTo(resumePosition);
             assertThat(reader.nextBorrowedRawBlock().recordCount()).isEqualTo(1);
-            assertThat(reader.blockOffset()).isEqualTo(prefixLength + headerLength);
+            assertThat(reader.blockOffset()).isEqualTo(headerLength);
             assertBlockReadable(
-                    header, bytes, reader.blockOffset(), reader.blockLength(), new long[] {17L});
+                    header, avro, reader.blockOffset(), reader.blockLength(), new long[] {17L});
             assertThat(reader.hasNextBlock()).isFalse();
         }
-    }
-
-    private SeekableInputStream open(byte[] bytes) throws IOException {
-        java.nio.file.Path file = Files.createTempFile(tempDir, "blocks-", ".avro");
-        Files.write(file, bytes);
-        return LocalFileIO.create().newInputStream(new Path(file.toUri()));
     }
 
     private static void assertBlockReadable(
