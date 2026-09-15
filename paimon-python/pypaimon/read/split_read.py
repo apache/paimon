@@ -28,6 +28,11 @@ from pypaimon.deletionvectors import (
     PositionMappedDeletionVector,
 )
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.data.map_shared_shredding import (
+    is_map_selected_keys_field,
+    map_selected_keys,
+    map_selected_keys_field,
+)
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
@@ -77,7 +82,7 @@ from pypaimon.read.reader.sort_merge_reader import (SortMergeReaderWithMinHeap,
                                                     builtin_seq_comparator)
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import DataField, MapType, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
@@ -429,6 +434,16 @@ class SplitRead(ABC):
             SpecialFields.row_type_with_row_tracking(self.table.table_schema.fields)
             if row_tracking_enabled else self.table.table_schema.fields
         )
+        if target_fields is not None:
+            selected_by_id = {
+                field.id: field for field in target_fields
+                if is_map_selected_keys_field(field)
+            }
+            if selected_by_id:
+                table_schema_fields = [
+                    selected_by_id.get(field.id, field)
+                    for field in table_schema_fields
+                ]
 
         # When native shard pushdown is used, the format reader only returns rows
         # starting from shard_range[0], so _ROW_ID must be offset accordingly.
@@ -594,8 +609,21 @@ class SplitRead(ABC):
         return self._read_data_fields_from(self._get_all_data_fields())
 
     def _read_data_fields_from(self, all_data_fields):
-        read_field_ids = {field.id for field in self.read_fields}
-        return [f for f in all_data_fields if f.id in read_field_ids]
+        read_fields_by_id = {field.id: field for field in self.read_fields}
+        result = []
+        for data_field in all_data_fields:
+            read_field = read_fields_by_id.get(data_field.id)
+            if read_field is None:
+                continue
+            if (is_map_selected_keys_field(read_field)
+                    and isinstance(data_field.type, MapType)):
+                data_field = map_selected_keys_field(
+                    data_field,
+                    map_selected_keys(read_field.description),
+                    value_type=data_field.type.value,
+                )
+            result.append(data_field)
+        return result
 
     def _final_data_fields_from(self, all_data_fields: List[DataField]) -> List[DataField]:
         """The per-position target fields a batch must end up as: trimmed for
@@ -1196,7 +1224,6 @@ class DataEvolutionSplitRead(SplitRead):
                 NestedLeafBatchReader
             reader = NestedLeafBatchReader(
                 reader, self.outer_extract_name_paths, self.outer_flat_read_type)
-
         if self.limit is not None and not self._post_filter_after_inline:
             reader = LimitedRecordBatchReader(reader, self.limit)
 

@@ -45,6 +45,7 @@ class _ReadBuilderTestBase(unittest.TestCase):
             pa.field('pk', pa.int64(), nullable=False),
             ('mv', struct_type),
             ('val', pa.string()),
+            ('attrs', pa.map_(pa.string(), pa.int64())),
         ])
         schema = Schema.from_pyarrow_schema(
             cls.pa_schema, primary_keys=['pk'],
@@ -63,7 +64,7 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         rb = self.table.new_read_builder()
         fields = rb.read_type()
         names = [f.name for f in fields]
-        self.assertEqual(names, ['pk', 'mv', 'val'])
+        self.assertEqual(names, ['pk', 'mv', 'val', 'attrs'])
         # Without an explicit projection the read_type must NOT inject
         # row-tracking system columns; the raw table fields are returned
         # verbatim.
@@ -102,6 +103,27 @@ class ReadBuilderProjectionStateTest(_ReadBuilderTestBase):
         self.assertEqual(rb._nested_paths, [[0]])
         names = [f.name for f in rb.read_type()]
         self.assertEqual(names, ['pk'])
+
+    def test_bracketed_map_selector_is_one_literal_key(self):
+        rb = self.table.new_read_builder().with_projection(
+            ["attrs['key.with.dots']", 'attrs["other"]'])
+
+        self.assertEqual(
+            [['attrs', 'key.with.dots'], ['attrs', 'other']],
+            rb._nested_name_paths(),
+        )
+        self.assertEqual(
+            ['attrs_key_with_dots', 'attrs_other'],
+            [field.name for field in rb.read_type()],
+        )
+        self.assertEqual(
+            ['attrs'], [field.name for field in rb.new_scan()._read_type])
+
+    def test_dot_does_not_select_map_key(self):
+        rb = self.table.new_read_builder().with_projection(
+            ['attrs.other', 'pk'])
+
+        self.assertEqual(['pk'], [field.name for field in rb.read_type()])
 
 
 class ReadBuilderProjectionFieldIdTest(_ReadBuilderTestBase):

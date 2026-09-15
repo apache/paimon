@@ -21,9 +21,20 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from pyarrow import RecordBatch
 
+from pypaimon.data.map_shared_shredding import \
+    assemble_normal_map_selected_keys
 from pypaimon.read.reader.field_indices import blob_field_indices, vector_field_indices
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+
+
+def _struct_field(column, name):
+    struct_field = getattr(pc, "struct_field", None)
+    if struct_field is not None:
+        return struct_field(column, name)
+
+    field_index = [field.name for field in column.type].index(name)
+    return column.flatten()[field_index]
 
 
 class NestedLeafBatchReader(RecordBatchReader):
@@ -57,7 +68,11 @@ class NestedLeafBatchReader(RecordBatchReader):
         for i, path in enumerate(self._paths):
             column = batch.column(path[0])
             for name in path[1:]:
-                column = pc.struct_field(column, name)
+                if pa.types.is_map(column.type):
+                    column = assemble_normal_map_selected_keys(
+                        column, [name], column.type.item_type).field(0)
+                else:
+                    column = _struct_field(column, name)
             target_type = self._schema.field(i).type
             if column.type != target_type:
                 column = column.cast(target_type, safe=False)

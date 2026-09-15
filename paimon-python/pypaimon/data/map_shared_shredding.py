@@ -18,7 +18,8 @@
 
 import json
 import struct
-from typing import Dict
+from copy import copy
+from typing import Dict, List
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -30,9 +31,13 @@ _FIELD_DICT = b"paimon.map.shared-shredding.field-dict"
 _FIELD_DICT_COMPRESSION = b"paimon.map.shared-shredding.field-dict-compression"
 _FIELD_DICT_ORIGINAL_SIZE = b"paimon.map.shared-shredding.field-dict-original-size"
 _NUM_COLUMNS = b"paimon.map.shared-shredding.num-columns"
+_FIELD_COLUMNS = b"paimon.map.shared-shredding.field-columns"
+_OVERFLOW_SET = b"paimon.map.shared-shredding.overflow-set"
 _FIELD_MAPPING = "__field_mapping"
 _OVERFLOW = "__overflow"
 _PHYSICAL_COLUMN_PREFIX = "__col_"
+_SELECTED_KEYS_PREFIX = "__PAIMON_MAP_SELECTED_KEYS:"
+_SELECTED_KEYS_DELIMITER = ";"
 
 
 def is_shared_shredding(field: pa.Field) -> bool:
@@ -63,6 +68,95 @@ def parse_shared_shredding_metadata(field: pa.Field):
     if num_columns < 0:
         raise ValueError("Shared-shredding column count must not be negative")
     return name_by_id, num_columns
+
+
+def parse_shared_shredding_selection_metadata(field: pa.Field):
+    """Return file-local placement metadata required for key pruning."""
+    name_by_id, num_columns = parse_shared_shredding_metadata(field)
+    metadata = field.metadata or {}
+    field_columns_json = json.loads(
+        _required(metadata, _FIELD_COLUMNS).decode("utf-8"))
+    if not isinstance(field_columns_json, dict):
+        raise ValueError("Shared-shredding field columns must be an object")
+    try:
+        field_to_columns = {
+            int(field_id): list(columns)
+            for field_id, columns in field_columns_json.items()
+        }
+    except (TypeError, ValueError):
+        raise ValueError("Shared-shredding field columns are malformed")
+    if not all(
+            isinstance(column, int) and 0 <= column < num_columns
+            for columns in field_to_columns.values()
+            if isinstance(columns, list)
+            for column in columns):
+        raise ValueError("Shared-shredding field columns are malformed")
+    if not all(isinstance(columns, list)
+               for columns in field_to_columns.values()):
+        raise ValueError("Shared-shredding field columns are malformed")
+
+    overflow_json = json.loads(
+        _required(metadata, _OVERFLOW_SET).decode("utf-8"))
+    if (not isinstance(overflow_json, list)
+            or not all(isinstance(field_id, int)
+                       for field_id in overflow_json)):
+        raise ValueError("Shared-shredding overflow set is malformed")
+    return name_by_id, field_to_columns, set(overflow_json), num_columns
+
+
+def map_selected_keys(description: str) -> List[str]:
+    if not description or not description.startswith(_SELECTED_KEYS_PREFIX):
+        raise ValueError("Invalid selected-key MAP metadata: {}".format(
+            description))
+    return description[len(_SELECTED_KEYS_PREFIX):].split(
+        _SELECTED_KEYS_DELIMITER)
+
+
+def is_map_selected_keys_field(field) -> bool:
+    from pypaimon.schema.data_types import RowType
+
+    return (
+        isinstance(field.type, RowType)
+        and field.description is not None
+        and field.description.startswith(_SELECTED_KEYS_PREFIX)
+    )
+
+
+def map_selected_keys_field(field, keys, value_type=None):
+    """Build the temporary ROW used by selected-key MAP reads."""
+    from pypaimon.schema.data_types import DataField, MapType, RowType
+
+    if not keys:
+        raise ValueError("Selected MAP keys must not be empty")
+    if len(set(keys)) != len(keys):
+        raise ValueError("Selected MAP keys must not contain duplicates")
+    for key in keys:
+        if not isinstance(key, str):
+            raise TypeError("Selected MAP keys must be strings")
+        if _SELECTED_KEYS_DELIMITER in key:
+            raise ValueError(
+                "Selected MAP key must not contain '{}': {}".format(
+                    _SELECTED_KEYS_DELIMITER, key))
+        if key.startswith(_SELECTED_KEYS_PREFIX):
+            raise ValueError(
+                "Selected MAP key must not start with metadata prefix: {}".format(
+                    key))
+
+    if value_type is None:
+        if not isinstance(field.type, MapType):
+            raise TypeError("Selected-key projection requires a MAP field")
+        value_type = field.type.value
+    children = []
+    for index, key in enumerate(keys):
+        child_type = copy(value_type)
+        child_type.nullable = True
+        children.append(DataField(index, key, child_type))
+    return DataField(
+        field.id,
+        field.name,
+        RowType(field.type.nullable, children),
+        _SELECTED_KEYS_PREFIX + _SELECTED_KEYS_DELIMITER.join(keys),
+    )
 
 
 def assemble_shared_shredding_map(
@@ -209,6 +303,172 @@ def assemble_shared_shredding_map(
         null_count=result.null_count,
         children=[entries],
     )
+
+
+def shared_shredding_selected_paths(
+        field_name: str, selected_keys: List[str], metadata) -> List[str]:
+    """Return the physical leaf paths needed for selected literal keys."""
+    name_by_id, field_to_columns, overflow_set, _ = metadata
+    id_by_name = {name: field_id for field_id, name in name_by_id.items()}
+    columns = set()
+    include_overflow = False
+    for key in selected_keys:
+        field_id = id_by_name.get(key)
+        if field_id is None:
+            continue
+        columns.update(field_to_columns.get(field_id, ()))
+        include_overflow = include_overflow or field_id in overflow_set
+    paths = ["{}.{}".format(field_name, _FIELD_MAPPING)]
+    paths.extend(
+        "{}.{}{}".format(field_name, _PHYSICAL_COLUMN_PREFIX, index)
+        for index in sorted(columns)
+    )
+    if include_overflow:
+        paths.append("{}.{}".format(field_name, _OVERFLOW))
+    return paths
+
+
+def assemble_shared_shredding_selected_keys(
+        column: pa.StructArray,
+        selected_keys: List[str],
+        value_type: pa.DataType,
+        metadata) -> pa.StructArray:
+    """Materialize selected MAP values from a pruned physical struct."""
+    if not pa.types.is_struct(column.type):
+        raise TypeError("Shared-shredding MAP must be stored as a struct")
+    name_by_id, field_to_columns, overflow_set, num_columns = metadata
+    id_by_name = {name: field_id for field_id, name in name_by_id.items()}
+
+    field_names = [field.name for field in column.type]
+    if not field_names or field_names[0] != _FIELD_MAPPING:
+        raise ValueError(
+            "Shared-shredding physical struct must start with {}".format(
+                _FIELD_MAPPING))
+    physical_columns = {}
+    overflow = None
+    for position, field_name in enumerate(field_names[1:], 1):
+        if field_name == _OVERFLOW:
+            overflow = column.field(position)
+        elif field_name.startswith(_PHYSICAL_COLUMN_PREFIX):
+            try:
+                physical_columns[int(
+                    field_name[len(_PHYSICAL_COLUMN_PREFIX):])] = column.field(
+                        position)
+            except ValueError:
+                raise ValueError(
+                    "Unexpected shared-shredding physical field: {}".format(
+                        field_name))
+        else:
+            raise ValueError(
+                "Unexpected shared-shredding physical field: {}".format(
+                    field_name))
+
+    mapping = column.field(0).to_pylist()
+    null_rows = column.is_null().to_pylist()
+    overflow_offsets = overflow_keys = overflow_values = overflow_nulls = None
+    if overflow is not None:
+        overflow_offsets, overflow_start, overflow_end = _normalized_offsets(
+            overflow)
+        overflow_keys = overflow.keys.slice(
+            overflow_start, overflow_end - overflow_start).to_pylist()
+        overflow_values = _restore_orc_temporal_values(
+            overflow.items.slice(
+                overflow_start, overflow_end - overflow_start), value_type)
+        overflow_nulls = overflow.is_null().to_pylist()
+
+    sources = []
+    source_by_column = {}
+    for physical_index in sorted(physical_columns):
+        source_by_column[physical_index] = len(sources)
+        sources.append(_restore_orc_temporal_values(
+            physical_columns[physical_index], value_type))
+    overflow_source = None
+    if overflow_values is not None:
+        overflow_source = len(sources)
+        sources.append(overflow_values)
+
+    source_bases = []
+    value_arrays = []
+    next_base = 0
+    for source in sources:
+        source_bases.append(next_base)
+        value_arrays.append(source)
+        next_base += len(source)
+    value_pool = (
+        pa.concat_arrays(value_arrays)
+        if value_arrays else pa.array([], type=value_type)
+    )
+
+    children = []
+    for key in selected_keys:
+        field_id = id_by_name.get(key)
+        indices = []
+        candidate_columns = (
+            field_to_columns.get(field_id, ()) if field_id is not None else ())
+        for row in range(len(column)):
+            selected = None
+            if not null_rows[row] and field_id is not None:
+                row_mapping = mapping[row]
+                if row_mapping is None or len(row_mapping) != num_columns:
+                    raise ValueError(
+                        "Shared-shredding field mapping length must equal {}".format(
+                            num_columns))
+                for physical_index in candidate_columns:
+                    if row_mapping[physical_index] == field_id:
+                        source = source_by_column.get(physical_index)
+                        if source is None:
+                            raise ValueError(
+                                "Missing shared-shredding physical column {}".format(
+                                    physical_index))
+                        selected = source_bases[source] + row
+                        break
+                if (selected is None
+                        and field_id in overflow_set
+                        and overflow_source is not None
+                        and not overflow_nulls[row]):
+                    for item_index in range(
+                            overflow_offsets[row], overflow_offsets[row + 1]):
+                        if overflow_keys[item_index] == field_id:
+                            selected = (
+                                source_bases[overflow_source] + item_index)
+                            break
+            indices.append(selected)
+        children.append(pc.take(
+            value_pool, pa.array(indices, type=pa.int64())))
+
+    fields = [pa.field(key, value_type) for key in selected_keys]
+    mask = column.is_null() if column.null_count else None
+    return pa.StructArray.from_arrays(children, fields=fields, mask=mask)
+
+
+def assemble_normal_map_selected_keys(
+        column: pa.MapArray,
+        selected_keys: List[str],
+        value_type: pa.DataType) -> pa.StructArray:
+    """Materialize selected values when an older file stores a normal MAP."""
+    if not pa.types.is_map(column.type):
+        raise TypeError("Selected-key MAP must be stored as a map or shared struct")
+    offsets, start, end = _normalized_offsets(column)
+    keys = column.keys.slice(start, end - start).to_pylist()
+    values = _restore_orc_temporal_values(
+        column.items.slice(start, end - start), value_type)
+    null_rows = column.is_null().to_pylist()
+    children = []
+    for selected_key in selected_keys:
+        indices = []
+        for row in range(len(column)):
+            selected = None
+            if not null_rows[row]:
+                for item_index in range(offsets[row], offsets[row + 1]):
+                    if keys[item_index] == selected_key:
+                        selected = item_index
+                        break
+            indices.append(selected)
+        children.append(pc.take(
+            values, pa.array(indices, type=pa.int64())))
+    fields = [pa.field(key, value_type) for key in selected_keys]
+    mask = column.is_null() if column.null_count else None
+    return pa.StructArray.from_arrays(children, fields=fields, mask=mask)
 
 
 def _restore_orc_temporal_values(column, logical_type):
