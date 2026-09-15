@@ -44,6 +44,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -149,7 +151,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
                         fileReader, written, dataNum, newDirectExecutorService())) {
-            assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
+            assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
 
             GlobalIndexResult result = reader.visitEqual(ref, literal).join().get();
             assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
@@ -180,10 +182,131 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
                         fileReader, written, dataNum, newDirectExecutorService())) {
-            assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
+            assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
 
             GlobalIndexResult result = reader.visitGreaterOrEqual(ref, secondFileMin).join().get();
             assertResult(result, filter(obj -> comparator.compare(obj, secondFileMin) >= 0));
+        }
+    }
+
+    @TestTemplate
+    public void testAllMatchAvoidsOpeningBTreeFiles() throws Exception {
+        Object literal = data.get(dataNum / 2).getKey();
+        List<GlobalIndexIOMeta> written =
+                Arrays.asList(
+                        writeData(Arrays.asList(Pair.of(literal, 0L), Pair.of(literal, 2L))),
+                        writeData(Arrays.asList(Pair.of(literal, 1L), Pair.of(literal, 3L))));
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader =
+                new OffsetGlobalIndexReader(
+                        globalIndexer.createReader(
+                                countingReader, written, 4, newDirectExecutorService()),
+                        1000L,
+                        1003L)) {
+            assertRows(reader.visitEqual(ref, literal).join().get(), 1000L, 1001L, 1002L, 1003L);
+            assertRows(
+                    reader.visitGreaterOrEqual(ref, literal).join().get(),
+                    1000L,
+                    1001L,
+                    1002L,
+                    1003L);
+            assertRows(
+                    reader.visitLessOrEqual(ref, literal).join().get(), 1000L, 1001L, 1002L, 1003L);
+            assertRows(
+                    reader.visitBetween(ref, literal, literal).join().get(),
+                    1000L,
+                    1001L,
+                    1002L,
+                    1003L);
+            Object lower = data.get(0).getKey();
+            Object upper = data.get(dataNum - 1).getKey();
+            if (comparator.compare(lower, literal) < 0) {
+                assertRows(
+                        reader.visitGreaterThan(ref, lower).join().get(),
+                        1000L,
+                        1001L,
+                        1002L,
+                        1003L);
+            }
+            if (comparator.compare(upper, literal) > 0) {
+                assertRows(
+                        reader.visitLessThan(ref, upper).join().get(), 1000L, 1001L, 1002L, 1003L);
+            }
+            assertRows(reader.visitNotEqual(ref, literal).join().get());
+            assertRows(reader.visitLessThan(ref, literal).join().get());
+            assertRows(reader.visitGreaterThan(ref, literal).join().get());
+            assertRows(reader.visitEqual(ref, null).join().get());
+            assertThat(countingReader.openedFiles).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testAllMatchRangeDoesNotConsumeScanBudget() throws Exception {
+        options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
+        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+        List<GlobalIndexIOMeta> written = writeData();
+        Object min = data.get(0).getKey();
+        Object max = data.get(dataNum - 1).getKey();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader, written, dataNum, newDirectExecutorService())) {
+            assertResult(reader.visitBetween(ref, min, max).join().get(), filter(obj -> true));
+            assertResult(reader.visitGreaterOrEqual(ref, min).join().get(), filter(obj -> true));
+            assertResult(reader.visitLessOrEqual(ref, max).join().get(), filter(obj -> true));
+            assertThat(countingReader.openedFiles).isEmpty();
+            assertThat(reader.visitLessThan(ref, max).join()).isEmpty();
+        }
+    }
+
+    @TestTemplate
+    public void testAllMatchFallsBackForNullsAndIncompleteCoverage() throws Exception {
+        Object literal = data.get(dataNum / 2).getKey();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        GlobalIndexIOMeta sparse =
+                writeData(Arrays.asList(Pair.of(literal, 1L), Pair.of(literal, 3L)));
+        GlobalIndexIOMeta withNulls =
+                writeData(
+                        Arrays.asList(
+                                Pair.of(null, 0L),
+                                Pair.of(literal, 1L),
+                                Pair.of(null, 2L),
+                                Pair.of(literal, 3L)));
+        GlobalIndexIOMeta unknownCount =
+                new GlobalIndexIOMeta(sparse.filePath(), sparse.fileSize(), sparse.metadata());
+        for (GlobalIndexIOMeta meta : Arrays.asList(sparse, withNulls, unknownCount)) {
+            CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+            try (GlobalIndexReader reader =
+                    globalIndexer.createReader(
+                            countingReader,
+                            Collections.singletonList(meta),
+                            4,
+                            newDirectExecutorService())) {
+                assertRows(reader.visitEqual(ref, literal).join().get(), 1L, 3L);
+                assertThat(countingReader.openedFiles).containsExactly(meta.filePath());
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testAllMatchRequiresEveryFileToMatch() throws Exception {
+        Object min = data.get(0).getKey();
+        Object max = data.get(dataNum - 1).getKey();
+        if (comparator.compare(min, max) == 0) {
+            return;
+        }
+        List<GlobalIndexIOMeta> written =
+                Arrays.asList(writeData(singletonData(min, 0L)), writeData(singletonData(max, 1L)));
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader, written, 2, newDirectExecutorService())) {
+            assertRows(reader.visitEqual(ref, min).join().get(), 0L);
+            assertRows(reader.visitLessThan(ref, max).join().get(), 0L);
+            assertThat(countingReader.openedFiles).containsExactly(written.get(0).filePath());
         }
     }
 
@@ -375,6 +498,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         return new GlobalIndexIOMeta(
                 new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
+                resultEntry.rowCount(),
                 resultEntry.meta());
     }
 
