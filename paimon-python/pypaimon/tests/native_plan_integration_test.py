@@ -122,13 +122,14 @@ class NativePlanIntegrationTest(unittest.TestCase):
             {'scan.snapshot-id': None, 'scan.native-plan.enabled': 'true'})
         self.assertFalse(native.new_read_builder().explain().native_planned)
 
-    def test_first_row_merge_engine_falls_back(self):
+    def test_first_row_batch_scan_uses_native_plan(self):
         self.cat.create_table('default.fr_t', Schema.from_pyarrow_schema(
             self.schema, primary_keys=['k'],
             options={'bucket': '1', 'merge-engine': 'first-row'}), False)
         self._write('fr_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
         self._write('fr_t', [{'k': 1, 'v': 'X'}, {'k': 3, 'v': 'c'}])  # k=1 stays 'a'
-        self._assert_matches('fr_t', expect_native=False)
+        self._assert_matches('fr_t')
+        self.assertEqual(self._plan_and_read('fr_t', native=False)[1], [])
 
     def test_append_matches_normal_plan(self):
         self.cat.create_table(

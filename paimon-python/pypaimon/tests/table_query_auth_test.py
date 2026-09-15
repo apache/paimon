@@ -91,6 +91,7 @@ class _FakeScan:
 class _FakeFileScanner:
     def __init__(self, plan):
         self._plan = plan
+        self.skip_level0 = False
 
     def scan(self):
         return self._plan

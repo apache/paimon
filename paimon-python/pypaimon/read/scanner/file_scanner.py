@@ -222,7 +222,8 @@ class FileScanner:
         manifest_scanner: Callable[[], Tuple[List[ManifestFileMeta], Optional[Snapshot]]],
         predicate: Optional[Predicate] = None,
         limit: Optional[int] = None,
-        partition_predicate: Optional[Predicate] = None
+        partition_predicate: Optional[Predicate] = None,
+        skip_level0: bool = False,
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -274,6 +275,7 @@ class FileScanner:
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self.skip_level0 = skip_level0
         self._global_index_result = None
         self._row_ranges = None
         self._scanned_snapshot = None
@@ -869,7 +871,7 @@ class FileScanner:
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
-            if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+            if self.skip_level0 and entry.file.level == 0:
                 return False
             if self.primary_key_predicate:
                 if not self.primary_key_predicate.test_by_simple_stats(
@@ -877,9 +879,9 @@ class FileScanner:
                     entry.file.row_count
                 ):
                     return False
-            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
-            # so we can safely filter by value stats per file.
-            if self.deletion_vectors_enabled and self.predicate_for_stats:
+            # Java enables value filtering only when batch scans exclude L0.
+            # With L0 present, pruning an update can expose an older value.
+            if self.skip_level0 and self.predicate_for_stats:
                 if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                     stats_fields = entry.file.write_cols
                 else:

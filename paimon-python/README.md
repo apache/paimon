@@ -78,11 +78,18 @@ the selected APPEND deltas into one plan, including merging primary-key versions
 across commits. Other commit kinds are excluded, and the ending snapshot supplies
 snapshot metadata and deletion vectors even if it contributes no APPEND files.
 
-Chunk shuffle, query authorization, first-row merge, deletion-vector merge-on-read,
-dynamic or cross-partition primary-key buckets, and scored or primary-key
-global-index results still use the Python planner. Rust also rejects floating-point
-partition-directory formatting; these scans fall back to Python. Native planning
-remains optional and is disabled by default.
+Dynamic and cross-partition primary-key buckets support native planning, including
+bucket sharding. Cross-partition key migration is maintained by the writer's index.
+Batch first-row scans follow Java and exclude un-compacted level-0 files; they can
+use native planning. With deletion vectors, batch scans exclude level 0 unless
+`deletion-vectors.merge-on-read=true`, in which case overlapping key ranges stay
+together for reader-side merging. Write scans and incremental scans retain level 0.
+
+Chunk shuffle, query authorization, first-row scans that include level 0, and scored
+or primary-key global-index results still use the Python planner. Native planning
+remains optional and is disabled by default. The combined incremental planner's
+window-end deletion-vector behavior described above differs from Java delta scans,
+which do not attach deletion vectors; full Java incremental parity remains pending.
 
 # Load LeRobot Dataset v3
 
