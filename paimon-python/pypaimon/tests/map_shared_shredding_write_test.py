@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -214,6 +215,72 @@ class MapSharedShreddingWriteTest(unittest.TestCase):
             self._write(table, pa.Table.from_pydict({
                 'id': [1], 'metrics': [[('a', 1)]],
             }, schema=self.arrow_schema))
+
+    def test_reject_char_keys(self):
+        from pypaimon.schema.data_types import AtomicType, DataField, MapType
+        from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+
+        with self.assertRaisesRegex(ValueError, 'STRING keys'):
+            MapSharedShreddingWriter._validate_field(DataField(
+                0, 'metrics', MapType(True, AtomicType('CHAR(4)', False), AtomicType('BIGINT'))))
+
+    def test_streams_physical_batches(self):
+        from pypaimon.write.map_shared_shredding_writer import _MapFieldConverter
+
+        table = self._create_table('parquet', 256)
+        data = pa.Table.from_pydict({
+            'id': list(range(5000)), 'metrics': [[('a', 1)]] * 4999 + [[('late', 2)]],
+        }, schema=self.arrow_schema)
+        convert = _MapFieldConverter.convert
+        write_table = pq.ParquetWriter.write_table
+        pending = []
+        sizes = []
+
+        def convert_batch(converter, column):
+            self.assertFalse(pending, 'physical batches were retained before writing')
+            pending.append(len(column))
+            sizes.append(len(column))
+            return convert(converter, column)
+
+        def write_batch(writer, physical, *args, **kwargs):
+            self.assertEqual([physical.num_rows], pending)
+            pending.clear()
+            return write_table(writer, physical, *args, **kwargs)
+
+        with patch.object(_MapFieldConverter, 'convert', convert_batch), \
+                patch.object(pq.ParquetWriter, 'write_table', write_batch):
+            messages = self._write(table, data)
+        self.assertEqual(5000, sum(sizes))
+        self.assertLessEqual(max(sizes), 1024)
+        self.assertEqual(1, len(messages[0].new_files))
+        reader = table.new_read_builder().with_projection(["metrics['a']", "metrics['late']"])
+        result = reader.new_read().to_arrow(reader.new_scan().plan().splits())
+        self.assertEqual([1] * 4999 + [None], result.column('metrics_a').to_pylist())
+        self.assertEqual([None] * 4999 + [2], result.column('metrics_late').to_pylist())
+
+    def test_failed_stream_removes_partial_file(self):
+        from pypaimon.write.map_shared_shredding_writer import MapSharedShreddingWriter
+
+        table = self._create_table('parquet', 2)
+        converter = MapSharedShreddingWriter(table.fields, table.options, 'parquet', None)
+        data = pa.Table.from_pydict({
+            'id': list(range(2048)), 'metrics': [[('a', 1)]] * 2048,
+        }, schema=self.arrow_schema)
+        path = self.temp_dir + '/partial.parquet'
+        write_table = pq.ParquetWriter.write_table
+        calls = []
+
+        def fail_second_batch(writer, physical, *args, **kwargs):
+            calls.append(physical.num_rows)
+            if len(calls) == 2:
+                raise OSError('injected write failure')
+            return write_table(writer, physical, *args, **kwargs)
+
+        with patch.object(pq.ParquetWriter, 'write_table', fail_second_batch):
+            with self.assertRaisesRegex(OSError, 'injected write failure'):
+                converter.write_parquet(table.file_io, path, data, 'zstd', 1)
+        self.assertEqual(2, len(calls))
+        self.assertFalse(table.file_io.exists(path))
 
     def test_reject_postpone_with_fixed_output_bucket(self):
         from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter

@@ -703,15 +703,14 @@ class DedicatedFormatWriter(DataWriter):
         if data.num_rows == 0:
             return None
 
-        logical_data = data
-        data, shredding_stats = self._map_shared_shredding.convert(data)
+        shredding_stats = {}
 
         file_name = f"{CoreOptions.data_file_prefix(self.options)}{uuid.uuid4()}-0.{self.file_format}"
         file_path = self._generate_file_path(file_name)
 
         # Write file based on format
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            shredding_stats = self._write_parquet_data(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -731,7 +730,7 @@ class DedicatedFormatWriter(DataWriter):
         is_external_path = self.external_path_provider is not None
         external_path_str = file_path if is_external_path else None
 
-        meta = self._create_data_file_meta(file_name, file_path, logical_data, external_path_str)
+        meta = self._create_data_file_meta(file_name, file_path, data, external_path_str)
         self._map_shared_shredding.file_completed(shredding_stats)
         return meta
 

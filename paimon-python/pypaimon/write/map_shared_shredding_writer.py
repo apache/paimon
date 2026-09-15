@@ -18,6 +18,7 @@
 """Java-compatible shared-shredding MAP conversion for data files."""
 
 import math
+from array import array
 from collections import deque
 
 import pyarrow as pa
@@ -42,6 +43,7 @@ _OVERFLOW = "__overflow"
 _PHYSICAL_COLUMN_PREFIX = "__col_"
 _FIELD_ID_BASE = 2147483647 // 4
 _FIELD_ID_DEPTH_LIMIT = 1 << 10
+_CONVERSION_BYTES = 8 * 1024 * 1024
 
 
 class MapSharedShreddingWriter:
@@ -102,12 +104,13 @@ class MapSharedShreddingWriter:
     def is_active(self):
         return bool(self._fields)
 
-    def convert(self, data):
-        """Return physical data and completed-file statistics."""
-        columns = list(data.columns)
+    def write_parquet(self, file_io, path, data, compression, zstd_level):
+        """Plan key metadata, then write bounded physical batches without retaining them."""
+        import pyarrow.parquet as pq
+
         fields = list(data.schema)
         completed = {}
-        changed = False
+        converters = {}
         field_index = {field.name: index for index, field in enumerate(fields)}
 
         for name, logical_field in self._fields.items():
@@ -125,7 +128,11 @@ class MapSharedShreddingWriter:
                 input_field.type.item_type,
                 logical_field.type.value,
             )
-            chunks = [converter.convert(chunk) for chunk in columns[index].chunks]
+            # Parquet's Arrow schema metadata must be known before opening the
+            # writer. Scan only keys; reset placement for the actual write pass.
+            for chunk in data.column(index).chunks:
+                for start in range(0, len(chunk), 1024):
+                    converter.analyze(chunk.slice(start, 1024))
             metadata = dict(input_field.metadata or {})
             metadata.update(shared_shredding_metadata(
                 converter.name_to_id,
@@ -142,14 +149,33 @@ class MapSharedShreddingWriter:
                 nullable=input_field.nullable,
                 metadata=metadata,
             )
-            columns[index] = pa.chunked_array(
-                chunks, type=converter.physical_type)
             completed[name] = converter.max_row_width
-            changed = True
+            converters[index] = _MapFieldConverter(
+                num_columns, self._policies[name], input_field.type.item_type,
+                logical_field.type.value)
 
-        if not changed:
-            return data, completed
-        return pa.Table.from_arrays(columns, schema=pa.schema(fields)), completed
+        schema = pa.schema(fields, metadata=data.schema.metadata)
+        # Bound scratch space for slot mappings/indices as well as logical values.
+        slots = sum(c.num_columns for c in converters.values())
+        batch_rows = max(1, min(1024, _CONVERSION_BYTES // max(1, slots * 16)))
+        kwargs = {'compression': compression}
+        if compression.lower() == 'zstd':
+            kwargs['compression_level'] = zstd_level
+        try:
+            with file_io.new_output_stream(path) as stream:
+                with pq.ParquetWriter(stream, schema, **kwargs) as writer:
+                    for batch in data.to_batches(max_chunksize=batch_rows):
+                        for bounded in _bounded_batches(batch):
+                            columns = list(bounded.columns)
+                            for index, converter in converters.items():
+                                columns[index] = converter.convert(columns[index])
+                            physical = pa.Table.from_arrays(columns, schema=schema)
+                            writer.write_table(physical)
+                            del physical, columns
+        except Exception:
+            file_io.delete_quietly(path)
+            raise
+        return completed
 
     def file_completed(self, completed):
         for name, max_row_width in completed.items():
@@ -189,7 +215,7 @@ class MapSharedShreddingWriter:
         key_type = field.type.key
         if (not isinstance(key_type, AtomicType)
                 or not key_type.type.upper().startswith(
-                    ("STRING", "VARCHAR", "CHAR"))):
+                    ("STRING", "VARCHAR"))):
             raise ValueError(
                 "Shared-shredding column '{}' must use STRING keys.".format(
                     field.name))
@@ -235,38 +261,72 @@ class _MapFieldConverter:
             num_columns, item_type, logical_item_type)
 
     def convert(self, column):
-        rows = [None if value is None else self._convert_map(value)
-                for value in _to_python_values(column)]
-        return pa.array(rows, type=self.physical_type)
+        offsets, start, end = _normalized_offsets(column)
+        keys = column.keys.slice(start, end - start).to_pylist()
+        values = _to_python_values(column.items.slice(start, end - start))
+        nulls = column.is_null().to_pylist()
+        mappings = array('i')
+        mapping_offsets = [0]
+        slots = {}
+        overflows = []
+        for row, is_null in enumerate(nulls):
+            start, end = offsets[row:row + 2]
+            if is_null:
+                mapping_offsets.append(len(mappings))
+                overflows.append(None)
+                continue
+            field_ids, mapping, overflow = self._place(keys[start:end])
+            items = dict(zip(field_ids, values[start:end]))
+            mappings.extend(mapping)
+            mapping_offsets.append(len(mappings))
+            for column_id, field_id in enumerate(mapping):
+                if field_id >= 0:
+                    if column_id not in slots:
+                        slots[column_id] = [None] * len(column)
+                    slots[column_id][row] = items[field_id]
+            overflows.append([(field_id, items[field_id]) for field_id in overflow]
+                             if overflow else None)
+        children = [pa.ListArray.from_arrays(
+            pa.array(mapping_offsets, type=pa.int32()),
+            pa.array(mappings, type=pa.int32()))]
+        empty = None
+        for column_id in range(self.num_columns):
+            value_type = self.physical_type[column_id + 1].type
+            if column_id in slots:
+                children.append(pa.array(slots.pop(column_id), type=value_type))
+            else:
+                if empty is None:
+                    empty = pa.array([None] * len(column), type=value_type)
+                children.append(empty)
+        children.append(pa.array(overflows, type=self.physical_type[-1].type))
+        return pa.StructArray.from_arrays(
+            children, fields=list(self.physical_type),
+            mask=column.is_null() if column.null_count else None)
 
-    def _convert_map(self, value):
-        entries = list(value.items()) if isinstance(value, dict) else list(value)
+    def analyze(self, column):
+        offsets, start, end = _normalized_offsets(column)
+        keys = column.keys.slice(start, end - start).to_pylist()
+        for row, is_null in enumerate(column.is_null().to_pylist()):
+            if not is_null:
+                self._place(keys[offsets[row]:offsets[row + 1]])
+
+    def _place(self, keys):
         field_ids = []
-        values = {}
-        for key, item in entries:
+        for key in keys:
             if key is None:
                 raise ValueError("Shared-shredding MAP keys cannot be null")
             if not isinstance(key, str):
                 raise TypeError("Shared-shredding MAP keys must be strings")
             field_id = self.name_to_id.setdefault(key, len(self.name_to_id))
             field_ids.append(field_id)
-            values[field_id] = item
 
         mapping, overflow = self._allocate(field_ids)
-        row = {_FIELD_MAPPING: mapping}
         for column_id, field_id in enumerate(mapping):
-            row[_PHYSICAL_COLUMN_PREFIX + str(column_id)] = (
-                None if field_id < 0 else values[field_id])
             if field_id >= 0:
                 self.field_to_columns.setdefault(field_id, set()).add(column_id)
-        if overflow:
-            row[_OVERFLOW] = [(field_id, values[field_id])
-                              for field_id in overflow]
-            self.overflow_set.update(overflow)
-        else:
-            row[_OVERFLOW] = None
+        self.overflow_set.update(overflow)
         self.max_row_width = max(self.max_row_width, len(field_ids))
-        return row
+        return field_ids, mapping, overflow
 
     def _allocate(self, field_ids):
         if self.policy == "plain":
@@ -329,6 +389,17 @@ class _MapFieldConverter:
                 selected = column_id
                 selected_last_used = last_used
         return selected
+
+
+def _bounded_batches(batch):
+    # One oversized row is indivisible; bound the other logical batches before
+    # expanding values into Python objects. The caller's input buffer is unchanged.
+    if batch.nbytes > _CONVERSION_BYTES and batch.num_rows > 1:
+        middle = batch.num_rows // 2
+        yield from _bounded_batches(batch.slice(0, middle))
+        yield from _bounded_batches(batch.slice(middle))
+    else:
+        yield batch
 
 
 def _to_python_values(column):

@@ -270,9 +270,6 @@ class DataWriter(ABC):
         shared_shredding_stats = {}
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
-        if self._map_shared_shredding.is_active():
-            data, shared_shredding_stats = \
-                self._map_shared_shredding.convert(data)
 
         # One data file means up to three files on disk -- the data file, its row
         # sidecar and its changelog -- and none of them is committed until all of
@@ -282,7 +279,7 @@ class DataWriter(ABC):
         # already covers.
         try:
             if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-                self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+                shared_shredding_stats = self._write_parquet_data(file_path, data)
             elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
                 self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
             elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -387,6 +384,13 @@ class DataWriter(ABC):
         if changelog_meta is not None:
             self.committed_changelog_files.append(changelog_meta)
 
+    def _write_parquet_data(self, path, data):
+        if self._map_shared_shredding.is_active():
+            return self._map_shared_shredding.write_parquet(
+                self.file_io, path, data, self.compression, self.zstd_level)
+        self.file_io.write_parquet(path, data, compression=self.compression, zstd_level=self.zstd_level)
+        return {}
+
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
 
@@ -429,8 +433,7 @@ class DataWriter(ABC):
 
         try:
             if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
-                self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
-                                           zstd_level=self.zstd_level)
+                self._write_parquet_data(changelog_file_path, data)
             elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
                 self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
                                        zstd_level=self.zstd_level)
