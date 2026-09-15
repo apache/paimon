@@ -165,16 +165,6 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
-        if (filter != null) {
-            for (HybridSearchRoute route : routes) {
-                if (!route.isVector()) {
-                    throw new UnsupportedOperationException(
-                            "Hybrid search with full-text routes does not support non-partition "
-                                    + "filters because full-text indexes cannot apply row-id "
-                                    + "pre-filters before top-k ranking.");
-                }
-            }
-        }
     }
 
     @Override
@@ -376,6 +366,9 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
                         .withLimit(route.limit());
         if (partitionFilter != null) {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
+        }
+        if (filter != null) {
+            fullTextSearchBuilder.withFilter(filter);
         }
         return fullTextSearchBuilder;
     }

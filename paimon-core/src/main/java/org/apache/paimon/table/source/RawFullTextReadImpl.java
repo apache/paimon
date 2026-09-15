@@ -37,6 +37,8 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -57,6 +59,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
@@ -68,6 +71,7 @@ class RawFullTextReadImpl {
     private final FileStoreTable table;
     @Nullable private final Snapshot planSnapshot;
     @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Predicate filter;
     private final int limit;
     private final DataField textColumn;
     private final IndexSearch indexSearch;
@@ -79,9 +83,21 @@ class RawFullTextReadImpl {
             int limit,
             DataField textColumn,
             IndexSearch indexSearch) {
+        this(table, planSnapshot, partitionFilter, null, limit, textColumn, indexSearch);
+    }
+
+    RawFullTextReadImpl(
+            FileStoreTable table,
+            @Nullable Snapshot planSnapshot,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            int limit,
+            DataField textColumn,
+            IndexSearch indexSearch) {
         this.table = table;
         this.planSnapshot = planSnapshot;
         this.partitionFilter = partitionFilter;
+        this.filter = filter;
         this.limit = limit;
         this.textColumn = textColumn;
         this.indexSearch = indexSearch;
@@ -92,12 +108,35 @@ class RawFullTextReadImpl {
             List<Range> rawRowRanges,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             ExecutorService executor) {
+        return withRawSearch(indexedResult, rawRowRanges, null, splitsByColumn, executor);
+    }
+
+    /**
+     * Searches the raw row ranges and overrides the indexed result on them. {@code preFilter}
+     * bounds the rows to scan (rows outside it cannot satisfy the filter); the filter itself is
+     * still evaluated on every scanned row.
+     */
+    ScoredGlobalIndexResult withRawSearch(
+            ScoredGlobalIndexResult indexedResult,
+            List<Range> rawRowRanges,
+            @Nullable RoaringNavigableMap64 preFilter,
+            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
+            ExecutorService executor) {
         rawRowRanges = Range.sortAndMergeOverlap(rawRowRanges, true);
         if (rawRowRanges.isEmpty()) {
             return indexedResult;
         }
 
-        ScoredGlobalIndexResult rawResult = readRawSearch(rawRowRanges, splitsByColumn, executor);
+        List<Range> scanRowRanges =
+                preFilter == null
+                        ? rawRowRanges
+                        : Range.and(
+                                rawRowRanges,
+                                Range.sortAndMergeOverlap(preFilter.toRangeList(), true));
+        ScoredGlobalIndexResult rawResult =
+                scanRowRanges.isEmpty()
+                        ? ScoredGlobalIndexResult.createEmpty()
+                        : readRawSearch(scanRowRanges, splitsByColumn, executor);
         return overrideWithRawSearch(indexedResult, rawRowRanges, rawResult);
     }
 
@@ -105,15 +144,17 @@ class RawFullTextReadImpl {
             List<Range> rawRowRanges,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             ExecutorService executor) {
-        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
-        TableScan.Plan plan = rawReadBuilder(readType).withRowRanges(rawRowRanges).newScan().plan();
-        ReadBuilder readBuilder = rawReadBuilder(readType);
+        RowType readType = rawReadType();
+        TableScan.Plan plan =
+                rawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
+        ReadBuilder readBuilder = rawReadBuilder(readType, true);
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         Map<String, RawFullTextIndex> rawIndexes =
                 createRawFullTextIndexes(splitsByColumn, readType, rawRowRanges);
 
         try {
-            try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+            try (RecordReader<InternalRow> reader =
+                            readBuilder.newRead().executeFilter().createReader(plan);
                     CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
                 while (iterator.hasNext()) {
                     InternalRow row = iterator.next();
@@ -247,10 +288,29 @@ class RawFullTextReadImpl {
         throw new IllegalArgumentException("Unknown raw full-text index file: " + fileName);
     }
 
-    private ReadBuilder rawReadBuilder(RowType readType) {
+    /** The text column, the row id, and the filter columns so the predicate can be evaluated. */
+    private RowType rawReadType() {
+        RowType tableRowType = table.rowType();
+        List<String> readFields = new ArrayList<>();
+        readFields.add(textColumn.name());
+        if (filter != null) {
+            Set<String> filterFields = PredicateVisitor.collectFieldNames(filter);
+            for (String field : tableRowType.getFieldNames()) {
+                if (filterFields.contains(field) && !readFields.contains(field)) {
+                    readFields.add(field);
+                }
+            }
+        }
+        return SpecialFields.rowTypeWithRowId(tableRowType.project(readFields));
+    }
+
+    private ReadBuilder rawReadBuilder(RowType readType, boolean includeFilter) {
         ReadBuilder readBuilder = rawReadTable().newReadBuilder().withReadType(readType);
         if (partitionFilter != null) {
             readBuilder.withPartitionFilter(partitionFilter);
+        }
+        if (includeFilter && filter != null) {
+            readBuilder.withFilter(filter);
         }
         return readBuilder;
     }
