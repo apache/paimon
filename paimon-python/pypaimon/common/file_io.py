@@ -223,6 +223,7 @@ class FileIO(ABC):
     def _read_ranges_coalesced(self, ranges, parallelism, max_gap, max_span,
                                max_retained_amplification, return_views):
         from concurrent.futures import ThreadPoolExecutor
+
         # Threads write disjoint results[idx]; safe under the GIL (no list resize).
         results = [None] * len(ranges)
         coalescible, singletons = [], []
@@ -598,7 +599,8 @@ class FileIO(ABC):
         Returns a FileIO instance for accessing the file system identified by the given path.
         - LocalFileIO for local file system (file:// or no scheme)
         - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
-        - PyArrowFileIO for other remote file systems (oss://, s3://, gs://, ...),
+        - OssFileIO for OSS (oss://)
+        - PyArrowFileIO for other remote file systems (s3://, gs://, ...),
           and for HDFS when explicitly requested via hdfs.client.impl=pyarrow
         """
         import os as _os
@@ -650,6 +652,10 @@ class FileIO(ABC):
                     f"Unsupported hdfs.client.impl '{impl_value}' "
                     f"(from {impl_source}). Supported: 'native', 'pyarrow'."
                 )
+
+        if scheme == "oss":
+            from pypaimon.filesystem.oss_file_io import OssFileIO
+            return OssFileIO(path, opts)
 
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         return PyArrowFileIO(path, opts)
