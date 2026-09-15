@@ -59,6 +59,28 @@ public interface GlobalIndexReader
         return CompletableFuture.completedFuture(Optional.empty());
     }
 
+    /**
+     * Evaluate a bounded range. Flags specify whether each endpoint is included. Readers without a
+     * combined scan retain the supported bounds as candidate filters.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitRange(
+            FieldRef fieldRef, Object from, Object to, boolean fromInclusive, boolean toInclusive) {
+        CompletableFuture<Optional<GlobalIndexResult>> lower =
+                fromInclusive
+                        ? visitGreaterOrEqual(fieldRef, from)
+                        : visitGreaterThan(fieldRef, from);
+        CompletableFuture<Optional<GlobalIndexResult>> upper =
+                toInclusive ? visitLessOrEqual(fieldRef, to) : visitLessThan(fieldRef, to);
+        return lower.thenCombine(
+                upper,
+                (left, right) -> {
+                    if (!left.isPresent()) {
+                        return right;
+                    }
+                    return right.isPresent() ? Optional.of(left.get().and(right.get())) : left;
+                });
+    }
+
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
