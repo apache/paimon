@@ -173,6 +173,33 @@ class LeRobotValidationTest(unittest.TestCase):
         self.assertEqual(13, rows[1]["camera_a_decoded"])
         self.assertEqual(14, rows[1]["camera_b_decoded"])
 
+    def test_video_column_decode_parallelism_is_bounded(self):
+        worker_counts = []
+
+        def executor(*args, **kwargs):
+            worker_counts.append(kwargs["max_workers"])
+            return ThreadPoolExecutor(*args, **kwargs)
+
+        class Collator:
+
+            def __init__(self, index):
+                self.video_column = "camera_%d" % index
+                self.output_column = self.video_column
+
+            def __call__(self, rows):
+                return rows
+
+        rows = {
+            0: {"camera_%d" % index: index for index in range(9)},
+        }
+        with patch(
+                "pypaimon.multimodal.lerobot.dataset.ThreadPoolExecutor",
+                side_effect=executor):
+            _decode_video_rows(
+                [rows], [Collator(index) for index in range(9)])
+
+        self.assertEqual([8], worker_counts)
+
     @unittest.skipUnless(
         av is not None and importlib.util.find_spec("torch") is not None,
         "PyAV and Torch are required for video decoding",

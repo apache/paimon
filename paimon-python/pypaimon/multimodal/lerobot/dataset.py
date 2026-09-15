@@ -65,6 +65,7 @@ _TORCH_DTYPE_NAMES = {
 }
 
 _IMAGE_READ_ATTEMPTS = 3
+_MAX_VIDEO_DECODE_WORKERS = 8
 
 _CONTROL_FEATURES = frozenset({
     "index",
@@ -1565,7 +1566,9 @@ def _decode_video_rows(row_groups, collators):
     if len(tasks) == 1:
         decoded_groups = [tasks[0][0](tasks[0][2])]
     else:
-        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        with ThreadPoolExecutor(
+                max_workers=min(
+                    len(tasks), _MAX_VIDEO_DECODE_WORKERS)) as executor:
             decoded_groups = list(executor.map(
                 lambda task: task[0](task[2]), tasks))
 
