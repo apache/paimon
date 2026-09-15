@@ -1069,6 +1069,22 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     checkAnswer(df, Seq(Row(0, null), Row(1, 1)))
   }
 
+  test("Paimon Variant pushdown: decimal extracted as string is the same for every layout") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    // Mixed scales make an inferred shredding schema DECIMAL(18, 2) / DECIMAL(18, 1), so the
+    // typed_value keeps trailing zeros (1.50, 0.0) that the unshredded value strips.
+    sql("""INSERT INTO T VALUES
+          | (1, parse_json('{"price":1.50,"amount":0.00}')),
+          | (2, parse_json('{"price":0.05,"amount":2.5}'))
+          |""".stripMargin)
+
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(v, '$.price', 'string'), variant_get(v, '$.amount', 'string') FROM T ORDER BY id"),
+      Seq(Row(1, "1.5", "0"), Row(2, "0.05", "2.5"))
+    )
+  }
+
   test("Paimon Variant pushdown: nested variant column inside a struct") {
     assume(gteqSpark4_1)
     sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
