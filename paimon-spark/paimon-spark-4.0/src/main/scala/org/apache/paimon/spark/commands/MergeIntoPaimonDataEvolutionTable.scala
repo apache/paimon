@@ -592,7 +592,6 @@ case class MergeIntoPaimonDataEvolutionTable(
     val rawBlobFieldNames = rawBlobFields
       .map(_.name())
       .toSet
-
     def isRawBlobUpdateColumn(attr: AttributeReference): Boolean = {
       rawBlobFieldNames.exists(rawBlobFieldName => resolver(rawBlobFieldName, attr.name))
     }

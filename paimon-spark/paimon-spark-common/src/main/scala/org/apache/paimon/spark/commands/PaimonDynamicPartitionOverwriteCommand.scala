@@ -26,6 +26,7 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{createDataset, createNewDataFrame}
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
 import org.apache.spark.sql.catalyst.plans.logical.{Command, LogicalPlan, V2WriteCommand}
+import org.apache.spark.sql.connector.catalog.TableWritePrivilege
 import org.apache.spark.sql.execution.command.RunnableCommand
 
 import scala.collection.convert.ImplicitConversions._
@@ -59,6 +60,17 @@ case class PaimonDynamicPartitionOverwriteCommand(
 
   override protected def withNewChildInternal(
       newChild: LogicalPlan): PaimonDynamicPartitionOverwriteCommand = copy(query = newChild)
+
+  // Spark 4.2 mixes `WriteWithSchemaEvolution` into `V2WriteCommand`, which declares these two
+  // members. Declared without `override` so the same source compiles on Spark 3.5/4.0/4.1,
+  // where the trait — and therefore the members being overridden — does not exist.
+  // Dynamic partition overwrite never evolves the target schema.
+  def withSchemaEvolution: Boolean = false
+
+  // Dynamic partition overwrite replaces whole partitions, so it deletes as well as inserts —
+  // the same privilege set Spark's own `OverwritePartitionsDynamic` requests.
+  def writePrivileges: Set[TableWritePrivilege] =
+    Set(TableWritePrivilege.INSERT, TableWritePrivilege.DELETE)
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     WriteIntoPaimonTable(

@@ -50,8 +50,8 @@ types Spark can read as `BinaryType`; it does not imply a unique mapping in both
 | `TimestampNTZType (Spark 3.4+)` | `TimestampType` | true |
 | `DecimalType(precision, scale)` | `DecimalType(precision, scale)` | true |
 | `BinaryType` | `VarBinaryType`, `BinaryType` | true |
-| `GeometryType (Spark 4.1)` | `GeometryType` | true |
-| `GeographyType (Spark 4.1)` | `GeographyType` | true |
+| `GeometryType (Spark 4.1+)` | `GeometryType` | true |
+| `GeographyType (Spark 4.1+)` | `GeographyType` | true |
 | `VariantType (Spark 4.0+)` | `VariantType` | true |
 
 ## Timestamps
@@ -66,4 +66,4 @@ Spark 3.4 and later distinguish the two timestamp types.
 
 ## Geospatial Types
 
-Native `GeometryType` and `GeographyType` conversion is supported only in Spark 4.1 and only for CRSs recognized by Spark. Enable it explicitly in production with `--conf spark.sql.geospatial.enabled=true`; Spark enables it automatically only in its test environment. Spark 4.1 supports only the `spherical` geography edge algorithm, so Paimon geography types using `vincenty`, `thomas`, `andoyer`, or `karney` cannot be converted. Spark 3.x and Spark 4.0 reject Paimon geospatial columns instead of exposing them as `BinaryType`, which would lose the CRS or edge algorithm. Paimon does not support Spark geospatial types with mixed SRIDs.
+Native `GeometryType` and `GeographyType` conversion is supported only in Spark 4.1 and later, and only for CRSs recognized by Spark. Spark 4.1 keeps the types behind `--conf spark.sql.geospatial.enabled=true` outside its own test environment; Spark 4.2 enables them by default. Spark 4.1 and 4.2 define `spherical` as their only geography edge algorithm, so Paimon geography types using `vincenty`, `thomas`, `andoyer`, or `karney` cannot be converted. Spark 3.x and Spark 4.0 reject Paimon geospatial columns instead of exposing them as `BinaryType`, which would lose the CRS or edge algorithm. Paimon does not support Spark geospatial types with mixed SRIDs.
