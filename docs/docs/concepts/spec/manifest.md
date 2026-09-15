@@ -63,6 +63,227 @@ skip manifests before opening them.
 Each extra file belongs exclusively to one manifest. It is retained and cleaned up together with
 that manifest during snapshot, tag, or changelog deletion.
 
+### Manifest Sidecar
+
+`ManifestSidecar` provides a binary sidecar for selecting complete Avro manifest blocks
+using independent partition, row-ID and bucket coverage. A sidecar uses the
+`<manifest-file-name>.avro.sidecar` naming convention. Readers find it through an explicit
+`.avro.sidecar` reference in the manifest metadata's `_EXTRA_FILES`, without probing a
+derived file name. The Avro schemas and `_VERSION` identifiers remain unchanged.
+
+The utility includes construction, validation, block selection and optional caching. Table
+writers and scans do not yet invoke it automatically. Callers are responsible for publishing
+sidecar references, managing file ownership, applying entry filters and reconciling ADD/DELETE
+entries after block selection. `build` returns null without opening files when `Settings.write`
+is false. Otherwise it reads the completed physical manifest and returns sidecar bytes; it does
+not write or publish another file.
+
+`Settings` contains `write` and `read` switches for the calling writer and scan, and enables
+row-ID and bucket payload generation independently. Partition generation is always enabled,
+including the empty partition tuple for unpartitioned tables. Missing or invalid
+metadata makes only the affected block's dimension unavailable. There is no sidecar byte budget:
+construction keeps complete coverage and `read` consumes the entire file once it is opened.
+
+`read` returns null immediately when `Settings.read` is false, without inspecting metadata,
+accessing the cache or opening files. An absent sidecar reference or an `IOException` also
+returns null, allowing the caller to fall back to the manifest. If the thread is interrupted, the I/O failure is propagated as
+`UncheckedIOException`. Other exceptions and errors propagate unchanged. `select` validates
+supplied bytes directly and reports invalid containers with `IOException`.
+
+Version 1 uses the following layout. Container `int` and `long` fields are signed, fixed-width
+4-byte and 8-byte big-endian integers. Encoding IDs are unsigned bytes with separate namespaces.
+Payload counts and envelopes use the same fixed-width types; delta streams use the
+variable-length encoding described below.
+
+```text
+magic : 4 bytes                         // ASCII PMSC
+formatVersion : int                    // 1
+manifestLength : long
+manifestEntryCount : long               // ADD + DELETE
+avroHeaderLength : int
+avroHeader : bytes                      // original schema, codec and sync marker
+partitionCount : int
+partitionDictionary[]
+  partitionByteLength : int
+  partitionBytes : bytes                // existing manifest BinaryRow serialization
+blockCount : int
+blocks[]                               // original physical order
+  offset : long
+  length : long                         // complete encoded block, including sync marker
+  recordCount : long
+  partitionEncoding : byte
+  if partitionEncoding != 0:
+    partitionPayloadLength : int
+    partitionPayload : bytes
+  rowIdEncoding : byte
+  if rowIdEncoding != 0:
+    rowIdPayloadLength : int
+    rowIdPayload : bytes
+  bucketEncoding : byte
+  if bucketEncoding != 0:
+    bucketPayloadLength : int
+    bucketPayload : bytes
+checksum : 32 bytes                     // SHA-256 of all preceding bytes
+```
+
+The block ID is its position. Its first entry ordinal is the sum of preceding record counts
+and is not stored. Each complete partition tuple appears once in the dictionary, including
+all its fields and nulls. The scan's partition type interprets the existing serialized tuple.
+Partition predicates are evaluated once per dictionary entry.
+
+| Dimension | Encoding | Payload |
+| --- | --- | --- |
+| Any | `0` | Unavailable; only the encoding byte is present. |
+| Partition | `1` | Count and delta/varint-compressed sorted unique dictionary IDs. |
+| Row ID | `1` | Interval count, minimum, span, and delta/varint-compressed interior endpoints. |
+| Bucket | `1` | Count and delta/varint-compressed sorted unique packed bucket/count pairs. |
+| Any | Other nonzero ID | Skip the declared payload length; treat only this dimension as unavailable. |
+
+Only nonzero encodings are followed by a length and payload. Payload lengths exclude the
+encoding and length fields, but include the count and other fields within the payload.
+All three encoding-1 payloads have positive counts no greater than the block's record count.
+Encoding 0 represents unavailable coverage, rather than encoding 1 with a zero count.
+
+#### Delta Encoding
+
+Each payload starts with a fixed-width count (`int`); row-ID payloads also have fixed-width
+`min` and `span` fields (`long`). Only integers in the following delta stream use
+nonnegative unsigned LEB128 varints, occupying one to nine bytes for values from 0 through
+`Long.MAX_VALUE`. Seven value bits are stored per byte, least significant group first; the
+high bit indicates another byte follows.
+Encodings use the shortest representation. There is no ZigZag transformation or padding.
+
+A sorted sequence is delta-encoded from a specified base. Each value contributes one
+unsigned varint containing its difference from the preceding value. The first difference
+is relative to the base:
+
+```text
+deltas[] : varint
+value[0] = base + deltas[0]
+value[i] = value[i - 1] + deltas[i]
+```
+
+The shared `DeltaVarintCodec` utility writes each delta immediately and reads values on
+demand, using `VarLengthIntUtils` for varints. Counts and bounds are supplied by the caller.
+The reader checks overflow and value bounds and requires the buffer to end after all
+expected values have been consumed. It can stop early without materializing the sequence.
+
+#### Partition Payload
+
+When `partitionEncoding == 1`, the block stores IDs of all distinct partition tuples
+represented by its entries:
+
+```text
+partitionPayload
+  partitionIdCount : int               // N > 0
+  deltas[]                            // N dictionary IDs, base = 0
+```
+
+An ID is the zero-based position of a complete tuple in the sidecar's shared dictionary.
+IDs satisfy `0 <= id < partitionCount` and are strictly increasing. Tuple bytes appear only
+in the dictionary and are not repeated in each block. For IDs `[0, 1, 2, 3, 4]`, the deltas
+are `[0, 1, 1, 1, 1]`. The payload contains a four-byte count of 5 followed by these five
+varint bytes: 9 bytes, or 14 bytes including the encoding and length fields.
+
+With a partition filter, a block matches if any referenced tuple matches. A tuple containing
+a null partition value still has a dictionary ID. Unpartitioned tables record the empty
+tuple. If any entry's entire partition tuple is unavailable, the block uses encoding 0,
+so a dictionary miss cannot exclude that block. Later blocks can still use existing IDs.
+
+#### Row-ID Payload
+
+The writer merges overlapping and adjacent inclusive intervals contributed by entries.
+An entry contributes `[firstRowId, firstRowId + rowCount - 1]`. The resulting intervals are
+sorted and disjoint; they are never expanded into individual row IDs or coarsened to include gaps.
+
+```text
+rowIdPayload
+  rangeCount : int                     // N > 0
+  min : long                           // first interval's start
+  span : long                          // last interval's end minus min
+  deltas[]                            // 2 * (N - 1) interior endpoints, base = min
+```
+
+The maximum is `min + span`, which must not exceed `Long.MAX_VALUE`. Flatten the intervals
+as `[start0, end0, start1, end1, ...]`. The first start is supplied by `min`, and the last
+end by `min + span`; only the remaining `2 * (N - 1)` interior endpoints are delta/varint encoded.
+Pairing the reconstructed endpoints recovers the intervals. Each pair satisfies
+`0 <= start <= end <= Long.MAX_VALUE`; each following start must exceed the preceding end.
+
+For `[(10, 19), (30, 39)]`, the count is 2, minimum is 10, and span is 29. The interior
+endpoints `[19, 30]` have deltas `[9, 11]` from base 10, each encoded as one varint byte.
+The payload starts with a four-byte count of 2, an eight-byte minimum of 10, and an eight-byte
+span of 29, followed by the delta bytes `[9, 11]`: 22 bytes, or 27 bytes with framing.
+For a single interval, the 20-byte fixed-width prefix completely defines the interval and
+no deltas follow.
+
+The reader first tests the envelope without decoding any deltas. A query for row ID 25
+passes the example's envelope check but matches neither interval. Unknown or invalid row-ID
+metadata makes that block's row-ID payload unavailable; partition and bucket coverage remain usable.
+
+#### Bucket Payload
+
+When `bucketEncoding == 1`, the block stores distinct bucket/count pairs:
+
+```text
+bucketPayload
+  pairCount : int                      // N > 0
+  deltas[]                            // N packed pairs, base = 0
+
+packedPair = ((long) bucket << 32) | totalBuckets
+```
+
+Each pair satisfies `0 <= bucket < totalBuckets`. Packing places the bucket in the high
+32 bits and the recorded total bucket count in the low 32 bits. Packed values are nonnegative,
+sorted and unique, equivalent to sorting first by bucket and then by total bucket count.
+The decoder recovers `bucket = (int) (packedPair >>> 32)` and `totalBuckets = (int) packedPair`.
+The same bucket may occur with different totals after rescaling.
+
+For `[(1, 4), (1, 8), (3, 4)]`, the packed values are `[4294967300, 4294967304, 12884901892]`
+and deltas are `[4294967300, 4, 8589934588]`. The payload contains a four-byte count of 3
+and three varints occupying 5, 1 and 5 bytes: 15 bytes total, or 20 bytes with framing.
+
+Missing, invalid or negative/synthetic bucket metadata makes the block's bucket coverage
+unavailable. A caller can supply a predicate on `(bucket, totalBuckets)` which conservatively
+retains every potentially matching pair. Filters requiring an entry's partition belong at
+the entry-filtering stage; omit the bucket predicate if no safe check is available.
+
+#### Validation and Reading
+
+Readers validate the checksum, fixed container fields, payload lengths and count headers,
+and the complete physical block directory regardless of the query. Byte spans must cover
+the whole original manifest after its header; record counts must sum to the manifest entry
+count. Unknown nonzero encodings skip their declared bytes without interpreting a count.
+
+Compressed contents are decoded only for dimensions needed by the filters and only until
+that dimension matches. A row-ID envelope rejection skips all its deltas; a matching interval,
+partition ID or bucket pair skips remaining values. Invalid varints, value counts, overflows,
+out-of-range values or ordering encountered while decoding invalidate the container. Delta
+contents skipped by short-circuiting are not individually validated.
+
+For conjunctive filters a block is retained only if every dimension is unavailable or matches.
+Matching tests row ID, partition, then bucket coverage. Absent filters are skipped, and a
+rejection skips the remaining dimensions. Matches in different dimensions can come from
+different entries, so entry filtering and ADD/DELETE reconciliation remain necessary.
+
+The entire sidecar is read in chunks of at most 1 MiB, including payloads unused by a query.
+There is no size-based fallback or payload dropping. Payload lengths save decoding work,
+not sidecar storage I/O. Selected compressed Avro blocks are read by byte range with adjacent
+spans coalesced and individual read requests bounded to 4 MiB. Building a sidecar does not
+modify the original manifest.
+
+`read` and `openManifest` accept an optional caller-supplied `SegmentsCache<Object>`. Complete
+sidecar bytes are keyed by their explicit `Path`. Only successful reads and selections
+populate the cache; query-specific selections are not cached. Cache entry-size limits affect
+admission only: larger sidecars are still fully read, validated and used.
+
+Selected Avro blocks also share this cache. Each entry contains one complete compressed block,
+keyed by the manifest's full path, original offset and encoded length, separately from whole-file
+keys. Different selections reuse the same blocks. Only complete reads populate the cache;
+oversized blocks stream through the read buffer. Adjacent uncached blocks fitting the buffer
+are read together and cached individually. Fully cached selections do not open the manifest.
+The cache retains its configured memory budget, entry-size limit, expiration and eviction policy.
+
 ## Manifest
 
 Data manifests record **ADD** (`0`) and **DELETE** (`1`) entries. Readers reconcile these entries
