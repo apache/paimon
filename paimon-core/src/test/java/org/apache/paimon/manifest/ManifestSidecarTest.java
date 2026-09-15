@@ -990,13 +990,13 @@ class ManifestSidecarTest {
         byte[] header = header();
         ManifestSidecar.Builder builder = new ManifestSidecar.Builder(settings, header);
         long offset = header.length;
-        for (int length : new int[] {2 << 20, 2 << 20, 257}) {
+        for (int length : new int[] {2 << 20, 2 << 20, 2 << 20, 2 << 20, 1 << 20}) {
             builder.beginBlock(offset, length, 1);
             builder.add(20L, 1);
             builder.endBlock();
             offset += length;
         }
-        byte[] data = builder.serialize(offset, 3);
+        byte[] data = builder.serialize(offset, 5);
         byte[] manifest = Arrays.copyOf(header, (int) offset);
         Path path = new Path(temp.toString(), "manifest-large");
         for (boolean withCache : new boolean[] {false, true}) {
@@ -1006,18 +1006,21 @@ class ManifestSidecarTest {
             SegmentsCache<Object> cache =
                     withCache
                             ? new SegmentsCache<>(
-                                    1024, MemorySize.ofMebiBytes(8), 4 << 20, null, false)
+                                    1024, MemorySize.ofMebiBytes(16), 4 << 20, null, false)
                             : null;
             try (InputStream input =
                     ManifestSidecar.openManifest(
-                            io, path, select(data, meta("manifest-large", offset, 3), 20), cache)) {
+                            io, path, select(data, meta("manifest-large", offset, 5), 20), cache)) {
                 assertThat(IOUtils.readFully(input, false)).isEqualTo(manifest);
             }
-            assertThat(stream.readLengths).containsExactly(4 << 20, 257);
+            assertThat(stream.readLengths).containsExactly(4 << 20, 4 << 20, 1 << 20);
             if (withCache) {
                 assertThat(stream.seeks)
-                        .containsExactly((long) header.length, header.length + (4L << 20));
-                assertThat(cache.estimatedSize()).isEqualTo(3);
+                        .containsExactly(
+                                (long) header.length,
+                                header.length + (4L << 20),
+                                header.length + (8L << 20));
+                assertThat(cache.estimatedSize()).isEqualTo(5);
             } else {
                 assertThat(stream.seeks).containsExactly((long) header.length);
             }
