@@ -27,6 +27,7 @@ import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.RoaringBitmap32;
@@ -53,10 +54,34 @@ public class FileIndexEvaluator {
             DataFileMeta file,
             @Nullable DeletionVector dv)
             throws IOException {
+        return evaluate(
+                fileIO, dataSchema, dataFilter, topN, limit, null, dataFilePathFactory, file, dv);
+    }
+
+    public static FileIndexResult evaluate(
+            FileIO fileIO,
+            TableSchema dataSchema,
+            List<Predicate> dataFilter,
+            @Nullable TopN topN,
+            @Nullable Integer limit,
+            @Nullable RowRange rowRange,
+            DataFilePathFactory dataFilePathFactory,
+            DataFileMeta file,
+            @Nullable DeletionVector dv)
+            throws IOException {
         // File index selections use 32-bit positions. Fall back when they cannot safely represent
         // the file or its deletion vector.
         if (file.rowCount() > RoaringBitmap32.MAX_VALUE || dv instanceof Bitmap64DeletionVector) {
             return FileIndexResult.REMAIN;
+        }
+
+        // rowRange is only valid for a pure range read: no filter, no topN, no limit. The caller
+        // (RawFileSplitRead full-scan range path) already guarantees this, but defend against a
+        // future caller that violates it: fall back to the plain path and let RangeSkipReader
+        // handle
+        // the range over the effective output stream.
+        if (rowRange != null && isNullOrEmpty(dataFilter) && topN == null && limit == null) {
+            return evaluateRowRange(file, rowRange);
         }
 
         if (isNullOrEmpty(dataFilter) && topN == null) {
@@ -102,6 +127,13 @@ public class FileIndexEvaluator {
 
             return result;
         }
+    }
+
+    private static FileIndexResult evaluateRowRange(DataFileMeta file, RowRange rowRange) {
+        // No DV in the range-read path; pass null so createBaseSelection skips the andNot step.
+        BitmapIndexResult selection = createBaseSelection(file, null);
+        long end = Math.min(rowRange.endInclusive(), file.rowCount() - 1);
+        return selection.range(rowRange.startInclusive(), end);
     }
 
     private static BitmapIndexResult createBaseSelection(

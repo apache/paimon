@@ -47,6 +47,7 @@ import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -3805,5 +3806,110 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         return splits.stream()
                 .map(split -> new QueryAuthSplit(split, authResult))
                 .collect(Collectors.toList());
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // RowRange (effective-row slice) read via TableRead::createReader(Split, RowRange).
+    // A primary-key table cannot push a row range into the formats (the merge-tree reorders rows),
+    // so the range is enforced by a single outer RangeSkipReader over the merged output stream
+    // (MergeFileSplitRead.createReader).
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * Basic range slice: write 10 rows (pk a = 0..9, pt = 0), the merged output is sorted by pk
+     * (pt, a), so RowRange [2, 4] selects pk a = 2, 3, 4.
+     */
+    @Test
+    public void testPrimaryKeyRowRangeReturnsExactSlice() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(0, i, (long) i * 10));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        // merged output sorted by pk (pt=0, a): a = 0..9 ; RowRange [2, 4] -> a = 2,3,4
+        List<String> actual = readRowRange(table, RowRange.of(2L, 4L), null, false);
+        assertThat(actual).containsExactly("0|2|20", "0|3|30", "0|4|40");
+    }
+
+    /**
+     * Range slice over a merge read: the same primary key is updated across two commits, so reading
+     * must merge the versions (keep the latest) before slicing. RowRange covering the updated key
+     * returns the merged (latest) value, proving the RangeSkipReader runs over the *merged* output,
+     * not the raw files.
+     */
+    @Test
+    public void testPrimaryKeyRowRangeOverMergeRead() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // initial: pk a = 0..9, b = i*10
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(0, i, (long) i * 10));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+            // update pk a = 5 to b = 999 (a second version -> merge keeps the latest)
+            write.write(rowData(0, 5, 999L));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        // merged output: a = 0..9 with a=5 -> b=999 ; RowRange [3, 6] -> a = 3,4,5,6
+        List<String> actual = readRowRange(table, RowRange.of(3L, 6L), null, false);
+        assertThat(actual).containsExactly("0|3|30", "0|4|40", "0|5|999", "0|6|60");
+    }
+
+    /**
+     * A range read with executeFilter: rowRange slices the *filtered* merged output, so the
+     * RangeSkipReader wraps outside the filter (AbstractDataTableRead.outerWrap). Filter a >= 5
+     * keeps a = 5..9 (5 effective rows), RowRange [1, 2] over those -> a = 6, 7.
+     */
+    @Test
+    public void testPrimaryKeyRowRangeWithFilterWrapsOutsideFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(0, i, (long) i * 10));
+            }
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+
+        // field "a" is index 1 ; filtered stream: a = 5..9 ; RowRange [1, 2] -> a = 6, 7
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(1, 5);
+        List<String> actual = readRowRange(table, RowRange.of(1L, 2L), filter, true);
+        assertThat(actual).containsExactly("0|6|60", "0|7|70");
+    }
+
+    /**
+     * Reads the "pt|a|b" projection of a slice via {@code TableRead::createReader(Split,
+     * RowRange)}.
+     */
+    private List<String> readRowRange(
+            FileStoreTable table, RowRange rowRange, Predicate filter, boolean filterExecute)
+            throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 2});
+        if (filter != null) {
+            readBuilder = readBuilder.withFilter(filter);
+        }
+        TableRead read = readBuilder.newRead();
+        if (filterExecute) {
+            // executeFilter() makes the reader evaluate the filter itself, so rowRange wraps
+            // outside the filter (AbstractDataTableRead.outerWrap), not forwarded to the inner
+            // reader.
+            read = read.executeFilter();
+        }
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split, rowRange)) {
+                reader.forEachRemaining(row -> result.add(toString.apply(row)));
+            }
+        }
+        return result;
     }
 }

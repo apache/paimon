@@ -28,6 +28,7 @@ import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowRange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
@@ -143,6 +144,92 @@ public class FileIndexEvaluatorTest {
                         deletionVector);
 
         assertThat(result).isSameAs(FileIndexResult.SKIP);
+    }
+
+    @Test
+    public void testRowRangeStartsFromRangeStartNotZero() throws Exception {
+        // Request only the last five rows of a 100-row file. The pushed bitmap must start at 95,
+        // not 0, so parquet row-group skipping can avoid reading the leading row groups.
+        RowRange rowRange = RowRange.of(95, 99);
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        rowRange,
+                        null,
+                        fileWithRowCount(100),
+                        null);
+
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        RoaringBitmap32 bitmap = ((BitmapIndexResult) result).get();
+        assertThat(bitmap).isEqualTo(RoaringBitmap32.bitmapOfRange(95, 100));
+        assertThat(bitmap.first()).isEqualTo(95);
+    }
+
+    @Test
+    public void testRowRangeEndClampedToFileRowCount() throws Exception {
+        // endInclusive beyond the file is clamped to the last physical row index.
+        RowRange rowRange = RowRange.of(95, Long.MAX_VALUE);
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        rowRange,
+                        null,
+                        fileWithRowCount(100),
+                        null);
+
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        assertThat(((BitmapIndexResult) result).get())
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(95, 100));
+    }
+
+    @Test
+    public void testRowRangeBeyondFileSkips() throws Exception {
+        // start past the end of the file -> empty selection (no rows match).
+        RowRange rowRange = RowRange.of(100, 110);
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        rowRange,
+                        null,
+                        fileWithRowCount(100),
+                        null);
+
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        assertThat(result.remain()).isFalse();
+        assertThat(((BitmapIndexResult) result).get().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testFullRowRangeRemains() throws Exception {
+        // No filter/topN/limit and a FULL range -> REMAIN (no pruning needed).
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        fileWithRowCount(100),
+                        null);
+
+        assertThat(result).isSameAs(FileIndexResult.REMAIN);
     }
 
     private static TableSchema tableSchema() {
