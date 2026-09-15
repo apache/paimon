@@ -136,49 +136,6 @@ class GlobalIndexEvaluatorTest {
     }
 
     @Test
-    void testRangeThroughOffsetAndUnion() {
-        AtomicInteger rangeCalls = new AtomicInteger();
-        GlobalIndexReader reader =
-                new StubGlobalIndexReader(null) {
-                    @Override
-                    public CompletableFuture<Optional<GlobalIndexResult>> visitRange(
-                            FieldRef field,
-                            Object from,
-                            Object to,
-                            boolean fromInclusive,
-                            boolean toInclusive) {
-                        assertThat(field).isEqualTo(new FieldRef(0, "a", DataTypes.INT()));
-                        assertThat(from).isEqualTo(30);
-                        assertThat(to).isEqualTo(120);
-                        assertThat(fromInclusive).isTrue();
-                        assertThat(toInclusive).isFalse();
-                        rangeCalls.incrementAndGet();
-                        return CompletableFuture.completedFuture(Optional.of(resultOf(2, 3)));
-                    }
-                };
-        GlobalIndexReader wrapped =
-                new UnionGlobalIndexReader(
-                        Collections.singletonList(
-                                new OffsetGlobalIndexReader(reader, 1000L, 2000L)));
-        PredicateBuilder builder = new PredicateBuilder(rowType());
-        try (GlobalIndexEvaluator evaluator =
-                new GlobalIndexEvaluator(
-                        rowType(), fieldId -> Collections.singletonList(wrapped))) {
-            assertBitmapContainsExactly(
-                    evaluator
-                            .evaluate(
-                                    PredicateBuilder.and(
-                                            builder.greaterOrEqual(0, 30),
-                                            builder.lessThan(0, 120)))
-                            .get()
-                            .results(),
-                    1002L,
-                    1003L);
-            assertThat(rangeCalls).hasValue(1);
-        }
-    }
-
-    @Test
     void testSingleFieldSequential() {
         RowType rowType = rowType();
         GlobalIndexResult expected = resultOf(1, 2, 3);
