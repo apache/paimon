@@ -352,6 +352,10 @@ function validateCatalogOpenApi() {
 function validateManagementOpenApi() {
   const contract = validateCommon('rest-management-open-api.yaml');
   const operationIds = [
+    'upsertLabel',
+    'listLabels',
+    'getLabel',
+    'deleteLabel',
     'listPermissions',
     'grantPermission',
     'revokePermission',
@@ -360,6 +364,9 @@ function validateManagementOpenApi() {
     'dropTablePolicy',
   ];
   const resourcePaths = [
+    '/v1/{prefix}/labels',
+    '/v1/{prefix}/labels/{entityType}/{entityName}',
+    '/v1/{prefix}/labels/{entityType}/{entityName}/{key}',
     '/v1/{prefix}/permissions',
     '/v1/{prefix}/permissions/grant',
     '/v1/{prefix}/permissions/revoke',
@@ -384,6 +391,40 @@ function validateManagementOpenApi() {
     ),
   );
   operationIds.forEach(contract.requireOperation);
+  ['upsertLabel', 'listLabels', 'getLabel', 'deleteLabel'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '429', '500', '503']),
+  );
+  const labelFieldNames = ['entityType', 'entityName', 'key', 'value'];
+  contract.requireRequiredProperties('UpsertLabelRequest', labelFieldNames);
+  const labelFields = contract.requireProperties('UpsertLabelRequest', labelFieldNames);
+  contract.checkSpec(
+    labelFields.value.type === 'string' && !labelFields.value.minLength,
+    'Label values must support empty strings and reject null',
+  );
+  contract.checkSpec(
+    contract.schema('LabelEntityType').type === 'string' && !contract.schema('LabelEntityType').enum,
+    'Label entity types must remain extensible strings',
+  );
+  contract.requireSchemaReference('GetLabelResponse', 'allOf', 'UpsertLabelRequest');
+  contract.requireRequiredProperties('ListLabelsResponse', ['labels']);
+  const labelList = contract.requireProperties('ListLabelsResponse', ['labels', 'nextPageToken']);
+  contract.checkSpec(
+    labelList.labels.items.$ref === '#/components/schemas/GetLabelResponse',
+    'Label listings must return complete bindings',
+  );
+  const labelRoot = contract.spec.paths['/v1/{prefix}/labels'];
+  const labelEntity = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}'];
+  const labelKey = contract.spec.paths['/v1/{prefix}/labels/{entityType}/{entityName}/{key}'];
+  contract.checkSpec(
+    labelRoot.post.operationId === 'upsertLabel' &&
+      labelEntity.get.operationId === 'listLabels' &&
+      labelKey.get.operationId === 'getLabel' &&
+      labelKey.delete.operationId === 'deleteLabel' &&
+      !labelKey.post &&
+      !labelKey.patch &&
+      !labelKey.put,
+    'Labels must use one POST upsert entry point and GET/DELETE by identity',
+  );
   ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
     contract.requireResponses(operationId, [
       '200',

@@ -106,6 +106,25 @@ public class RESTApiExample {
 }
 ```
 
+## Entity labels
+
+The experimental label methods use a single endpoint family for all server-supported entity types.
+Names are canonical, server-defined strings within the configured prefix. For a server that uses
+`sales.orders` to identify a table:
+
+```java
+api.upsertLabel("TABLE", "sales.orders", "domain", "sales");
+String domain = api.getLabel("TABLE", "sales.orders", "domain").getValue();
+api.listLabels("TABLE", "sales.orders"); // Follows all pages.
+api.listLabelsPaged("TABLE", "sales.orders", 100, null); // Reads one page.
+api.deleteLabel("TABLE", "sales.orders", "domain");
+```
+
+Upsert creates or replaces one binding using POST. It requires the target entity to exist.
+Deleting an absent binding succeeds; deleting from a missing entity fails. Servers must implement
+these endpoints; the client does not fall back to table options or snapshot tags. See
+[the label wire contract](../concepts/rest/management-api#entity-labels).
+
 ## Authentication and table access
 
 See [bearer authentication](../concepts/rest/bear) or [DLF authentication](../concepts/rest/dlf)

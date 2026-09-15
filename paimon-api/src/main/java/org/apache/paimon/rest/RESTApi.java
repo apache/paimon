@@ -68,6 +68,7 @@ import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
+import org.apache.paimon.rest.requests.UpsertLabelRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.CommitTableResponse;
@@ -77,6 +78,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetLabelResponse;
 import org.apache.paimon.rest.responses.GetSchemaResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
@@ -90,6 +92,7 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
+import org.apache.paimon.rest.responses.ListLabelsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
@@ -876,6 +879,86 @@ public class RESTApi {
                 request,
                 AuthTableQueryResponse.class,
                 restAuthFunction);
+    }
+
+    /**
+     * Creates or replaces one label on an existing entity in the configured catalog prefix.
+     *
+     * <p>The server atomically upserts the binding identified by entity type, canonical entity
+     * name, and key. Only its value is replaced; other labels are unchanged. Repeating the same
+     * request leaves the same label value. Entity types and name resolution are server-defined;
+     * this client does not split, normalize, or resolve entity names.
+     *
+     * @param value label value; an empty string is allowed, null is not
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot label the entity
+     */
+    @Experimental
+    public void upsertLabel(String entityType, String entityName, String key, String value) {
+        client.post(
+                resourcePaths.labels(),
+                new UpsertLabelRequest(entityType, entityName, key, value),
+                restAuthFunction);
+    }
+
+    /**
+     * Gets one label attached directly to an entity.
+     *
+     * @throws NoSuchResourceException if the entity or label does not exist
+     * @throws ForbiddenException if the caller cannot read labels on the entity
+     */
+    @Experimental
+    public GetLabelResponse getLabel(String entityType, String entityName, String key) {
+        return client.get(
+                resourcePaths.label(entityType, entityName, key),
+                GetLabelResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists all labels attached directly to an entity, following catalog pagination. */
+    @Experimental
+    public List<GetLabelResponse> listLabels(String entityType, String entityName) {
+        String path = resourcePaths.labels(entityType, entityName);
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(path, queryParams, ListLabelsResponse.class, restAuthFunction));
+    }
+
+    /**
+     * Lists one page of labels attached directly to an entity.
+     *
+     * @param maxResults maximum page size, from 1 to 1000; null uses the server default
+     * @param pageToken opaque continuation token from the preceding response
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot read labels on the entity
+     */
+    @Experimental
+    public PagedList<GetLabelResponse> listLabelsPaged(
+            String entityType,
+            String entityName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        checkArgument(
+                maxResults == null || (maxResults >= 1 && maxResults <= 1000),
+                "maxResults must be between 1 and 1000");
+        ListLabelsResponse response =
+                client.get(
+                        resourcePaths.labels(entityType, entityName),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListLabelsResponse.class,
+                        restAuthFunction);
+        return new PagedList<>(response.getLabels(), response.getNextPageToken());
+    }
+
+    /**
+     * Deletes a label binding. Deleting an already absent binding succeeds.
+     *
+     * @throws NoSuchResourceException if the entity does not exist
+     * @throws ForbiddenException if the caller cannot label the entity
+     */
+    @Experimental
+    public void deleteLabel(String entityType, String entityName, String key) {
+        client.delete(resourcePaths.label(entityType, entityName, key), restAuthFunction);
     }
 
     /** Lists permissions on an exact resource in the configured REST catalog. */
