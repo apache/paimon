@@ -32,8 +32,12 @@ public class ScanMetrics {
     public static final String SCAN_DURATION = "scanDuration";
     public static final String LAST_SCANNED_SNAPSHOT_ID = "lastScannedSnapshotId";
     public static final String LAST_SCANNED_MANIFESTS = "lastScannedManifests";
+    public static final String LAST_SCAN_SKIPPED_MANIFESTS = "lastScanSkippedManifests";
     public static final String LAST_SCAN_SKIPPED_TABLE_FILES = "lastScanSkippedTableFiles";
     public static final String LAST_SCAN_RESULTED_TABLE_FILES = "lastScanResultedTableFiles";
+    public static final String LAST_SCAN_RESULTED_TABLE_FILES_SIZE =
+            "lastScanResultedTableFilesSize";
+    public static final String LAST_SCAN_RESULTED_RECORD_COUNT = "lastScanResultedRecordCount";
     public static final String MANIFEST_HIT_CACHE = "manifestHitCache";
     public static final String MANIFEST_MISSED_CACHE = "manifestMissedCache";
     public static final String DVMETA_HIT_CACHE = "dvMetaHitCache";
@@ -60,11 +64,20 @@ public class ScanMetrics {
                 LAST_SCANNED_MANIFESTS,
                 () -> latestScan == null ? 0L : latestScan.getScannedManifests());
         metricGroup.gauge(
+                LAST_SCAN_SKIPPED_MANIFESTS,
+                () -> latestScan == null ? 0L : latestScan.getSkippedManifests());
+        metricGroup.gauge(
                 LAST_SCAN_SKIPPED_TABLE_FILES,
                 () -> latestScan == null ? 0L : latestScan.getSkippedTableFiles());
         metricGroup.gauge(
                 LAST_SCAN_RESULTED_TABLE_FILES,
                 () -> latestScan == null ? 0L : latestScan.getResultedTableFiles());
+        metricGroup.gauge(
+                LAST_SCAN_RESULTED_TABLE_FILES_SIZE,
+                () -> latestScan == null ? 0L : latestScan.getResultedTableFilesSize());
+        metricGroup.gauge(
+                LAST_SCAN_RESULTED_RECORD_COUNT,
+                () -> latestScan == null ? 0L : latestScan.getResultedRecordCount());
         metricGroup.gauge(MANIFEST_HIT_CACHE, () -> cacheMetrics.getHitObject().get());
         metricGroup.gauge(MANIFEST_MISSED_CACHE, () -> cacheMetrics.getMissedObject().get());
         metricGroup.gauge(DVMETA_HIT_CACHE, () -> dvMetaCacheMetrics.getHitObject().get());

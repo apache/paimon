@@ -48,8 +48,11 @@ public class ScanMetricsTest {
                         ScanMetrics.SCAN_DURATION,
                         ScanMetrics.LAST_SCANNED_SNAPSHOT_ID,
                         ScanMetrics.LAST_SCANNED_MANIFESTS,
+                        ScanMetrics.LAST_SCAN_SKIPPED_MANIFESTS,
                         ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES,
                         ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES,
+                        ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES_SIZE,
+                        ScanMetrics.LAST_SCAN_RESULTED_RECORD_COUNT,
                         ScanMetrics.MANIFEST_HIT_CACHE,
                         ScanMetrics.MANIFEST_MISSED_CACHE,
                         ScanMetrics.DVMETA_HIT_CACHE,
@@ -71,20 +74,32 @@ public class ScanMetricsTest {
                 (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCANNED_SNAPSHOT_ID);
         Gauge<Long> lastScannedManifests =
                 (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCANNED_MANIFESTS);
+        Gauge<Long> lastScanSkippedManifests =
+                (Gauge<Long>) registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_SKIPPED_MANIFESTS);
         Gauge<Long> lastScanSkippedTableFiles =
                 (Gauge<Long>)
                         registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_SKIPPED_TABLE_FILES);
         Gauge<Long> lastScanResultedTableFiles =
                 (Gauge<Long>)
                         registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES);
+        Gauge<Long> lastScanResultedTableFilesSize =
+                (Gauge<Long>)
+                        registeredGenericMetrics.get(
+                                ScanMetrics.LAST_SCAN_RESULTED_TABLE_FILES_SIZE);
+        Gauge<Long> lastScanResultedRecordCount =
+                (Gauge<Long>)
+                        registeredGenericMetrics.get(ScanMetrics.LAST_SCAN_RESULTED_RECORD_COUNT);
 
         assertThat(lastScanDuration.getValue()).isEqualTo(0);
         assertThat(lastScannedSnapshotId.getValue()).isEqualTo(0);
         assertThat(scanDuration.getCount()).isEqualTo(0);
         assertThat(scanDuration.getStatistics().size()).isEqualTo(0);
         assertThat(lastScannedManifests.getValue()).isEqualTo(0);
+        assertThat(lastScanSkippedManifests.getValue()).isEqualTo(0);
         assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(0);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(0);
+        assertThat(lastScanResultedTableFilesSize.getValue()).isEqualTo(0);
+        assertThat(lastScanResultedRecordCount.getValue()).isEqualTo(0);
 
         // report once
         reportOnce(scanMetrics);
@@ -101,8 +116,11 @@ public class ScanMetricsTest {
         assertThat(scanDuration.getStatistics().getMax()).isEqualTo(200);
         assertThat(scanDuration.getStatistics().getStdDev()).isEqualTo(0);
         assertThat(lastScannedManifests.getValue()).isEqualTo(20);
+        assertThat(lastScanSkippedManifests.getValue()).isEqualTo(5);
         assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(25);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(10);
+        assertThat(lastScanResultedTableFilesSize.getValue()).isEqualTo(1024);
+        assertThat(lastScanResultedRecordCount.getValue()).isEqualTo(100);
 
         // report again
         reportAgain(scanMetrics);
@@ -119,17 +137,20 @@ public class ScanMetricsTest {
         assertThat(scanDuration.getStatistics().getMax()).isEqualTo(500);
         assertThat(scanDuration.getStatistics().getStdDev()).isCloseTo(212.132, offset(0.001));
         assertThat(lastScannedManifests.getValue()).isEqualTo(22);
+        assertThat(lastScanSkippedManifests.getValue()).isEqualTo(7);
         assertThat(lastScanSkippedTableFiles.getValue()).isEqualTo(30);
         assertThat(lastScanResultedTableFiles.getValue()).isEqualTo(8);
+        assertThat(lastScanResultedTableFilesSize.getValue()).isEqualTo(2048);
+        assertThat(lastScanResultedRecordCount.getValue()).isEqualTo(200);
     }
 
     private void reportOnce(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(200, 1L, 20, 25, 10);
+        ScanStats scanStats = new ScanStats(200, 1L, 20, 5, 25, 10, 1024, 100);
         scanMetrics.reportScan(scanStats);
     }
 
     private void reportAgain(ScanMetrics scanMetrics) {
-        ScanStats scanStats = new ScanStats(500, 2L, 22, 30, 8);
+        ScanStats scanStats = new ScanStats(500, 2L, 22, 7, 30, 8, 2048, 200);
         scanMetrics.reportScan(scanStats);
     }
 
