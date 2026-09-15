@@ -15,19 +15,28 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Unit tests for the OSS bucket-in-endpoint mode (PyArrow < 16) of PyArrowFileIO.
+"""Unit tests for PyArrow-backed S3-compatible storage.
 
-See ``PyArrowFileIO._legacy_oss_mode`` for why bucket-level operations
-must be guarded in this mode. No real OSS access is required.
+No real OSS access is required.
 """
 
+import multiprocessing
+import os
+import pickle
+import socketserver
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
+from urllib.parse import parse_qs, unquote, urlsplit
+from xml.sax.saxutils import escape
 
+import pyarrow
 import pyarrow.fs as pafs
+from packaging.version import parse
 
 from pypaimon.common.options import Options
-from pypaimon.common.options.config import OssOptions
+from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.filesystem.pyarrow_file_io import (
     LegacyOssDirectoryListingError,
     PyArrowFileIO,
@@ -37,8 +46,122 @@ from pypaimon.filesystem.pyarrow_file_io import (
 TABLE_PATH = "oss://test-bucket/db-uuid.db/tbl-uuid"
 
 
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+class _DeleteRequestHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _target(self):
+        path = unquote(urlsplit(self.path).path).lstrip("/")
+        bucket, _, key = path.partition("/")
+        return bucket, key
+
+    def _respond(self, status, body=b""):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_HEAD(self):
+        self.server.requests.append((self.command, self.path))
+        if not hasattr(self.server, "bucket_objects"):
+            return self._respond(501)
+        bucket, key = self._target()
+        exists = not key or key in self.server.bucket_objects.get(bucket, ())
+        self._respond(200 if exists else 404)
+
+    def do_GET(self):
+        self.server.requests.append((self.command, self.path))
+        query = parse_qs(urlsplit(self.path).query)
+        prefix = query.get("prefix", [""])[0]
+        delimiter = query.get("delimiter", [""])[0]
+        max_keys = int(query.get("max-keys", ["1000"])[0])
+        bucket, _ = self._target()
+        objects = (
+            self.server.bucket_objects.get(bucket, ())
+            if hasattr(self.server, "bucket_objects")
+            else self.server.objects
+        )
+        keys = sorted(
+            key for key in objects if key.startswith(prefix)
+        )
+        contents = []
+        common_prefixes = set()
+        for key in keys:
+            suffix = key[len(prefix):]
+            if delimiter and delimiter in suffix:
+                common_prefixes.add(
+                    prefix + suffix.split(delimiter, 1)[0] + delimiter)
+            else:
+                contents.append(key)
+        contents = contents[:max_keys]
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+            '<Name>{}</Name><Prefix>{}</Prefix><Delimiter>{}</Delimiter>'
+            '<KeyCount>{}</KeyCount><MaxKeys>{}</MaxKeys>'
+            '<IsTruncated>false</IsTruncated>{}{}</ListBucketResult>'.format(
+                escape(bucket), escape(prefix), escape(delimiter),
+                len(contents) + len(common_prefixes), max_keys,
+                "".join(
+                    "<Contents><Key>{}</Key>"
+                    "<LastModified>2026-01-01T00:00:00Z</LastModified>"
+                    "<Size>{}</Size><StorageClass>STANDARD</StorageClass>"
+                    "</Contents>".format(
+                        escape(key), 0 if key.endswith("/") else 1)
+                    for key in contents),
+                "".join(
+                    "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>".format(
+                        escape(child))
+                    for child in sorted(common_prefixes))))
+        if (not hasattr(self.server, "bucket_objects")
+                and keys == [self.server.prefix]
+                and not self.server.late_object_added):
+            self.server.objects.add(self.server.prefix + "late.parquet")
+            self.server.late_object_added = True
+        first = getattr(self.server, "prefix", "") + "first.parquet"
+        if (not hasattr(self.server, "bucket_objects")
+                and first in keys and not self.server.missing_object_removed):
+            self.server.objects.discard(first)
+            self.server.missing_object_removed = True
+        encoded = body.encode("utf-8")
+        self._respond(200, encoded)
+
+    def do_DELETE(self):
+        self.server.requests.append((self.command, self.path))
+        bucket, key = self._target()
+        if hasattr(self.server, "bucket_objects"):
+            self.server.bucket_objects.setdefault(bucket, set()).discard(key)
+        else:
+            self.server.objects.discard(key)
+        self._respond(204)
+
+    def _unexpected(self):
+        self.server.requests.append((self.command, self.path))
+        self.send_response(501)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_POST = _unexpected
+    do_PUT = _unexpected
+
+    def log_message(self, *args):
+        pass
+
+
 def _file_info(path, file_type):
     return pafs.FileInfo(path, file_type)
+
+
+def _set_listed_keys(file_io, *passes):
+    file_io._s3_delete_client.list_objects_v2.side_effect = [
+        {"Contents": [{"Key": key} for key in keys]}
+        for keys in passes
+    ] + [{"Contents": []}]
 
 
 def _probe_response(status_code, body):
@@ -47,8 +170,22 @@ def _probe_response(status_code, body):
     return response
 
 
+def _restore_s3_file_io(connection):
+    os.environ.pop("AWS_REQUEST_CHECKSUM_CALCULATION", None)
+    connection.send("ready")
+    payload = connection.recv_bytes()
+    with mock.patch("pyarrow.fs.S3FileSystem", return_value=object()) as s3:
+        restored = pickle.loads(payload)
+    connection.send((
+        os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION"),
+        s3.call_count,
+        restored.filesystem is s3.return_value,
+    ))
+    connection.close()
+
+
 class OssLegacyModeTest(unittest.TestCase):
-    """Behavior of PyArrowFileIO when OSS runs on PyArrow < 16."""
+    """Behavior of legacy PyArrow S3FileSystem access to OSS."""
 
     def _new_file_io(self, legacy):
         options = Options({
@@ -63,7 +200,8 @@ class OssLegacyModeTest(unittest.TestCase):
             file_io = PyArrowFileIO("oss://test-bucket/", options)
         # _legacy_oss_mode() keys off the bucket-in-endpoint flag (PyArrow < 16).
         file_io._oss_bucket_in_endpoint = legacy
-        file_io.filesystem = mock.Mock()
+        file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
+        file_io._s3_delete_client = mock.Mock()
         return file_io
 
     def test_legacy_mkdirs_skips_create_dir(self):
@@ -193,20 +331,147 @@ class OssLegacyModeTest(unittest.TestCase):
             file_io.mkdirs(TABLE_PATH)
         file_io.filesystem.create_dir.assert_not_called()
 
-    def test_modern_mkdirs_still_creates_dir(self):
+    def test_modern_mkdirs_creates_directory(self):
         file_io = self._new_file_io(legacy=False)
         file_io.filesystem.get_file_info.return_value = [
             _file_info("test-bucket/db-uuid.db/tbl-uuid", pafs.FileType.NotFound)]
 
         self.assertTrue(file_io.mkdirs(TABLE_PATH))
 
-        file_io.filesystem.create_dir.assert_called_once()
+        file_io.filesystem.create_dir.assert_called_once_with(
+            file_io.to_filesystem_path(TABLE_PATH), recursive=True)
+
+    def test_oss_initialization_disables_optional_checksum_trailers(self):
+        options = Options({
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-test.example.com",
+            OssOptions.OSS_REGION.key(): "cn-test",
+            OssOptions.OSS_IMPL.key(): "legacy",
+        })
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+            PyArrowFileIO("oss://test-bucket/", options)
+            self.assertEqual(
+                "WHEN_REQUIRED",
+                os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
+
+    def test_pyarrow_22_recursive_delete_uses_concurrent_individual_objects(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        data_dir = directory.rstrip("/") + "/data"
+        data_file = directory.rstrip("/") + "/data/data.parquet"
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info(directory, pafs.FileType.Directory)]
+        _set_listed_keys(
+            file_io, [data_dir.split("/", 1)[1] + "/", data_file.split("/", 1)[1]], [])
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        calls = file_io._s3_delete_client.delete_object.call_args_list
+        self.assertCountEqual([
+            mock.call(
+                Bucket="test-bucket",
+                Key="db-uuid.db/tbl-uuid/data/data.parquet"),
+            mock.call(
+                Bucket="test-bucket",
+                Key="db-uuid.db/tbl-uuid/data/"),
+        ], calls[:-1])
+        self.assertEqual(
+            mock.call(
+                Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/"),
+            calls[-1])
+        file_io.filesystem.delete_file.assert_not_called()
+        file_io.filesystem.delete_dir_contents.assert_not_called()
+        file_io.filesystem.delete_dir.assert_not_called()
+
+    def test_pyarrow_22_recursive_delete_rechecks_late_objects(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        first = directory.rstrip("/") + "/first.parquet"
+        late = directory.rstrip("/") + "/late.parquet"
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info(directory, pafs.FileType.Directory)]
+        _set_listed_keys(file_io, [first.split("/", 1)[1]], [late.split("/", 1)[1]], [])
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        self.assertEqual(
+            [
+                mock.call(
+                    Bucket="test-bucket",
+                    Key="db-uuid.db/tbl-uuid/first.parquet"),
+                mock.call(
+                    Bucket="test-bucket",
+                    Key="db-uuid.db/tbl-uuid/late.parquet"),
+                mock.call(
+                    Bucket="test-bucket",
+                    Key="db-uuid.db/tbl-uuid/"),
+            ],
+            file_io._s3_delete_client.delete_object.call_args_list,
+        )
+
+    def test_pre_pyarrow_22_recursive_delete_keeps_native_batch(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = False
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+        ]
+
+        self.assertTrue(file_io.delete(TABLE_PATH, recursive=True))
+
+        file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
+        file_io.filesystem.delete_dir.assert_called_once_with(directory)
+        file_io.filesystem.delete_file.assert_not_called()
+
+    def test_modern_non_recursive_delete_removes_empty_directory(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+            [],
+        ]
+
+        self.assertTrue(file_io.delete(TABLE_PATH))
+
+        file_io.filesystem.delete_file.assert_not_called()
+        file_io.filesystem.delete_dir.assert_not_called()
+        file_io._s3_delete_client.delete_object.assert_called_once_with(
+            Bucket="test-bucket", Key="db-uuid.db/tbl-uuid/")
+
+    def test_modern_non_recursive_delete_keeps_bucket_root(self):
+        file_io = self._new_file_io(legacy=False)
+        file_io._pyarrow_gte_22 = True
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info("/", pafs.FileType.Directory)],
+            [],
+        ]
+
+        self.assertTrue(file_io.delete("oss://test-bucket/"))
+
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
+    def test_modern_non_recursive_delete_rejects_non_empty_directory(self):
+        file_io = self._new_file_io(legacy=False)
+        directory = file_io.to_filesystem_path(TABLE_PATH)
+        data_file = directory.rstrip("/") + "/data.parquet"
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info(directory, pafs.FileType.Directory)],
+            [_file_info(data_file, pafs.FileType.File)],
+        ]
+
+        with self.assertRaisesRegex(OSError, "is not empty"):
+            file_io.delete(TABLE_PATH)
+
+        file_io.filesystem.delete_file.assert_not_called()
 
     def test_file_io_pickle_roundtrip_recreates_lock(self):
         """The probe lock must not break pickling (FileIO travels to Ray or
         multiprocessing workers); probe state is carried over."""
-        import pickle
-
         options = Options({
             OssOptions.OSS_ACCESS_KEY_ID.key(): "ak",
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): "sk",
@@ -226,6 +491,30 @@ class OssLegacyModeTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 restored._check_legacy_bucket_exists()
             get.assert_not_called()
+
+    def test_pickle_recreates_oss_client_with_worker_checksum_setting(self):
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=_restore_s3_file_io, args=(child,))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(15))
+            self.assertEqual("ready", parent.recv())
+
+            file_io = self._new_file_io(legacy=False)
+            file_io.filesystem = pafs.LocalFileSystem()
+            parent.send_bytes(pickle.dumps(file_io))
+
+            self.assertTrue(parent.poll(15))
+            self.assertEqual(("WHEN_REQUIRED", 1, True), parent.recv())
+        finally:
+            parent.close()
+            process.join(15)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        self.assertEqual(0, process.exitcode)
 
     def test_legacy_exists_true_for_plain_object(self):
         file_io = self._new_file_io(legacy=True)
@@ -249,6 +538,302 @@ class OssLegacyModeTest(unittest.TestCase):
 
         self.assertEqual(file_io.list_status(TABLE_PATH), [])
         file_io.filesystem.get_file_info.assert_called_once()
+
+
+class CustomS3EndpointTest(unittest.TestCase):
+    def _new_file_io(self, scheme="s3"):
+        options = Options({
+            S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+            S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+            S3Options.S3_ENDPOINT.key(): "http://minio:9000",
+            S3Options.S3_REGION.key(): "us-east-1",
+        })
+        with mock.patch.object(
+                PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()):
+            file_io = PyArrowFileIO(
+                "{}://test-bucket/warehouse".format(scheme), options)
+        file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
+        file_io._s3_delete_client = mock.Mock()
+        return file_io
+
+    def test_initialization_configures_all_s3_schemes(self):
+        options = Options({
+            S3Options.S3_ENDPOINT.key(): "http://minio:9000",
+        })
+        for scheme in ("s3", "s3a", "s3n"):
+            with self.subTest(scheme=scheme), \
+                    mock.patch.dict("os.environ", {}, clear=True), \
+                    mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+                PyArrowFileIO(
+                    "{}://test-bucket/warehouse".format(scheme), options)
+                self.assertEqual(
+                    "WHEN_REQUIRED",
+                    os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"])
+
+    def test_native_s3_does_not_change_checksum_setting(self):
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch("pyarrow.fs.S3FileSystem", return_value=mock.Mock()):
+            PyArrowFileIO("s3://test-bucket/warehouse", Options({}))
+            self.assertNotIn(
+                "AWS_REQUEST_CHECKSUM_CALCULATION", os.environ)
+
+    def test_pyarrow_22_recursive_delete_uses_individual_objects(self):
+        for scheme in ("s3", "s3a", "s3n"):
+            with self.subTest(scheme=scheme):
+                file_io = self._new_file_io(scheme)
+                file_io._pyarrow_gte_22 = True
+                path = "{}://test-bucket/table".format(scheme)
+                directory = file_io.to_filesystem_path(path)
+                data_file = directory + "/data.parquet"
+                file_io.filesystem.get_file_info.return_value = [
+                    _file_info(directory, pafs.FileType.Directory)]
+                _set_listed_keys(file_io, [data_file.split("/", 1)[1]], [])
+
+                self.assertTrue(file_io.delete(path, recursive=True))
+
+                file_io.filesystem.delete_file.assert_not_called()
+                file_io.filesystem.delete_dir_contents.assert_not_called()
+                file_io._s3_delete_client.delete_object.assert_has_calls([
+                    mock.call(Bucket="test-bucket", Key="table/data.parquet"),
+                    mock.call(Bucket="test-bucket", Key="table/"),
+                ])
+
+    def test_batch_delete_can_be_enabled_for_compatible_endpoint(self):
+        file_io = self._new_file_io()
+        file_io.properties.set(
+            S3Options.S3_DELETE_BATCH_ENABLED, "true")
+        file_io._pyarrow_gte_22 = True
+        directory = "test-bucket/table"
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info(directory, pafs.FileType.Directory),
+        ]
+        file_io.to_filesystem_path = mock.Mock(return_value=directory)
+
+        self.assertTrue(file_io.delete("s3://test-bucket/table", recursive=True))
+
+        file_io.filesystem.delete_dir_contents.assert_called_once_with(directory)
+        file_io.filesystem.delete_dir.assert_called_once_with(directory)
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
+    def test_recursive_delete_uses_bucket_from_target_uri(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+        _set_listed_keys(file_io, ["table/data.parquet"], [])
+
+        self.assertTrue(file_io.delete(
+            "s3://target-bucket/table", recursive=True))
+
+        self.assertEqual([
+            mock.call(Bucket="target-bucket", Key="table/data.parquet"),
+            mock.call(Bucket="target-bucket", Key="table/"),
+        ], file_io._s3_delete_client.delete_object.call_args_list)
+
+    def test_recursive_delete_uses_bucket_from_target_filesystem_path(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+        _set_listed_keys(file_io, ["table/data.parquet"], [])
+
+        self.assertTrue(file_io.delete(
+            "target-bucket/table", recursive=True))
+
+        self.assertEqual([
+            mock.call(Bucket="target-bucket", Key="table/data.parquet"),
+            mock.call(Bucket="target-bucket", Key="table/"),
+        ], file_io._s3_delete_client.delete_object.call_args_list)
+
+    def test_pre_pyarrow_22_cross_bucket_delete_keeps_native_path(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = False
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.return_value = [
+            _file_info("target-bucket/table", pafs.FileType.Directory)]
+
+        self.assertTrue(file_io.delete(
+            "s3://target-bucket/table", recursive=True))
+
+        file_io.filesystem.delete_dir_contents.assert_called_once_with(
+            "target-bucket/table")
+        file_io.filesystem.delete_dir.assert_called_once_with(
+            "target-bucket/table")
+        file_io._s3_delete_client.delete_object.assert_not_called()
+
+    def test_non_recursive_delete_uses_bucket_from_target_uri(self):
+        file_io = self._new_file_io()
+        file_io._pyarrow_gte_22 = True
+        file_io.to_filesystem_path = mock.Mock(
+            return_value="target-bucket/table")
+        file_io.filesystem.get_file_info.side_effect = [
+            [_file_info("target-bucket/table", pafs.FileType.Directory)],
+            [],
+        ]
+
+        self.assertTrue(file_io.delete("s3://target-bucket/table"))
+
+        file_io._s3_delete_client.delete_object.assert_called_once_with(
+            Bucket="target-bucket", Key="table/")
+
+    @unittest.skipUnless(
+        parse(pyarrow.__version__) >= parse("22.0.0"),
+        "requires PyArrow 22+ and boto3",
+    )
+    def test_delete_uses_cross_bucket_list_status_path(self):
+        server = _ThreadingHTTPServer(
+            ("127.0.0.1", 0), _DeleteRequestHandler)
+        server.requests = []
+        source_objects = {
+            "parent/child/", "parent/child/keep.parquet"}
+        server.bucket_objects = {
+            "source-bucket": set(source_objects),
+            "target-bucket": {
+                "parent/child/", "parent/child/delete.parquet"},
+        }
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            options = Options({
+                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+                S3Options.S3_ENDPOINT.key():
+                    "http://127.0.0.1:{}".format(server.server_port),
+                S3Options.S3_REGION.key(): "us-east-1",
+                "fs.s3.path.style.access": "true",
+            })
+            with mock.patch.dict(os.environ, {
+                    "NO_PROXY": "127.0.0.1,localhost",
+                    "no_proxy": "127.0.0.1,localhost",
+            }):
+                file_io = PyArrowFileIO(
+                    "s3://source-bucket/warehouse", options)
+                statuses = file_io.list_status(
+                    "s3://target-bucket/parent")
+                target = next(
+                    status for status in statuses
+                    if status.type == pafs.FileType.Directory)
+
+                self.assertEqual(
+                    "target-bucket/parent/child", target.path)
+                for path in (
+                        target.path,
+                        "s3://target-bucket/parent/child",
+                        "s3:/target-bucket/parent/child",
+                        "s3:target-bucket/parent/child"):
+                    for recursive in (False, True):
+                        with self.subTest(path=path, recursive=recursive):
+                            server.bucket_objects["target-bucket"] = {
+                                "parent/child/"}
+                            if recursive:
+                                server.bucket_objects["target-bucket"].add(
+                                    "parent/child/delete.parquet")
+                            self.assertTrue(file_io.exists(path))
+                            self.assertTrue(file_io.delete(path, recursive))
+                            self.assertEqual(
+                                set(), server.bucket_objects["target-bucket"])
+                            self.assertEqual(
+                                source_objects,
+                                server.bucket_objects["source-bucket"])
+                file_io._s3_delete_client.close()
+
+            self.assertEqual(
+                source_objects, server.bucket_objects["source-bucket"])
+            self.assertEqual(set(), server.bucket_objects["target-bucket"])
+            self.assertTrue(all(
+                urlsplit(path).path.startswith("/target-bucket/")
+                for method, path in server.requests
+                if method == "DELETE"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
+
+    @unittest.skipUnless(
+        parse(pyarrow.__version__) >= parse("22.0.0"),
+        "requires PyArrow 22+ and boto3",
+    )
+    def test_recursive_delete_uses_only_object_delete_requests_during_races(self):
+        server = _ThreadingHTTPServer(
+            ("127.0.0.1", 0), _DeleteRequestHandler)
+        server.requests = []
+        server.prefix = "ta/ble/"
+        decoy = "ta/ble-other/keep.parquet"
+        server.objects = {
+            server.prefix, server.prefix + "first.parquet", decoy}
+        server.late_object_added = False
+        server.missing_object_removed = False
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+        try:
+            options = Options({
+                S3Options.S3_ACCESS_KEY_ID.key(): "ak",
+                S3Options.S3_ACCESS_KEY_SECRET.key(): "sk",
+                S3Options.S3_ENDPOINT.key():
+                    "http://127.0.0.1:{}".format(server.server_port),
+                S3Options.S3_REGION.key(): "us-east-1",
+                "fs.s3.path.style.access": "true",
+            })
+            with mock.patch.object(
+                    PyArrowFileIO, "_initialize_s3_fs", return_value=mock.Mock()), \
+                    mock.patch.dict(os.environ, {
+                        "NO_PROXY": "127.0.0.1,localhost",
+                        "no_proxy": "127.0.0.1,localhost",
+                    }):
+                file_io = PyArrowFileIO(
+                    "s3://source-bucket/warehouse", options)
+                file_io.filesystem = mock.Mock(spec=pafs.S3FileSystem)
+                file_io.filesystem.get_file_info.return_value = [
+                    _file_info("/ta/ble", pafs.FileType.Directory)]
+
+                self.assertTrue(file_io.delete(
+                    "s3://target-bucket/ta//ble", recursive=True))
+                file_io._s3_delete_client.close()
+
+            self.assertTrue(server.late_object_added)
+            self.assertTrue(server.missing_object_removed)
+            self.assertEqual({decoy}, server.objects)
+            self.assertEqual(
+                {"GET", "DELETE"},
+                {method for method, _ in server.requests})
+            self.assertEqual([
+                "/target-bucket/ta/ble/first.parquet",
+                "/target-bucket/ta/ble/",
+                "/target-bucket/ta/ble/late.parquet",
+                "/target-bucket/ta/ble/",
+            ], [path for method, path in server.requests
+                if method == "DELETE"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
+
+    def test_pickle_recreates_client_with_worker_checksum_setting(self):
+        context = multiprocessing.get_context("spawn")
+        parent, child = context.Pipe()
+        process = context.Process(target=_restore_s3_file_io, args=(child,))
+        process.start()
+        child.close()
+        try:
+            self.assertTrue(parent.poll(15))
+            self.assertEqual("ready", parent.recv())
+
+            file_io = self._new_file_io()
+            file_io.filesystem = pafs.LocalFileSystem()
+            parent.send_bytes(pickle.dumps(file_io))
+
+            self.assertTrue(parent.poll(15))
+            self.assertEqual(("WHEN_REQUIRED", 1, True), parent.recv())
+        finally:
+            parent.close()
+            process.join(15)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+        self.assertEqual(0, process.exitcode)
 
 
 if __name__ == "__main__":

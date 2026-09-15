@@ -42,6 +42,9 @@ class S3Options:
         "S3 security token")
     S3_ENDPOINT = ConfigOptions.key("fs.s3.endpoint").string_type().no_default_value().with_description("S3 endpoint")
     S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
+    S3_DELETE_BATCH_ENABLED = ConfigOptions.key(
+        "fs.s3.delete.batch-enabled").boolean_type().default_value(False).with_description(
+            "Use native S3 batch deletion for custom endpoints")
 
 
 class GcsOptions:
